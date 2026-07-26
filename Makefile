@@ -6,9 +6,10 @@
 # =============================================================================
 
 BINARY := r-ed
+ALT_BINARY := rd
 SITE_DIR := website
 
-.PHONY: run build install build-linux test test-short coverage tidy clean help \
+.PHONY: run build install alt build-linux test test-short coverage tidy clean help \
         site-install site-dev site-build site-clean
 
 # help is the default target so `make` with no args prints what's available.
@@ -19,6 +20,7 @@ help:
 	@echo "  make run          Run the editor in the current directory."
 	@echo "  make build        Build the binary into ./bin/$(BINARY)."
 	@echo "  make install      Install ./bin/$(BINARY) into /usr/local/bin."
+	@echo "  make alt          Install ./bin/$(BINARY) into ~/bin as $(ALT_BINARY)."
 	@echo "  make build-linux  Cross-compile a static linux/amd64 binary."
 	@echo "  make test         Run the full test suite with -race."
 	@echo "  make test-short   Skip slow tests (-short) — quick iteration loop."
@@ -45,6 +47,12 @@ build:
 # install copies the binary into /usr/local/bin so you can launch it as `r-ed`.
 install: build
 	install -m 0755 bin/$(BINARY) /usr/local/bin/$(BINARY)
+
+# alt installs into ~/bin under the short name $(ALT_BINARY). Useful when
+# /usr/local/bin needs sudo, or to keep a personal build alongside a
+# brew-installed r-ed without shadowing it.
+alt: build
+	install -m 0755 bin/$(BINARY) ~/bin/$(ALT_BINARY)
 
 # build-linux cross-compiles a fully static linux/amd64 binary. Drop the
 # resulting bin/$(BINARY)-linux-amd64 onto a remote box and run it inside

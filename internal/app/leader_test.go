@@ -118,6 +118,21 @@ func TestHandleKey_LeaderToggleLineComment(t *testing.T) {
 	}
 }
 
+// TestHandleKey_LeaderPaletteAliases pins down that BOTH palette leaders
+// — Esc-a (actions) and Esc-k (the Cmd+K muscle-memory alias) — open the
+// command palette modal. Guards against one alias being dropped when the
+// table is reshuffled.
+func TestHandleKey_LeaderPaletteAliases(t *testing.T) {
+	for _, key := range []rune{'a', 'k'} {
+		a := newTestApp(t, t.TempDir())
+		a.handleKey(keyEv(tcell.KeyEsc, 0))
+		a.handleKey(keyEv(tcell.KeyRune, key))
+		if _, ok := a.modal.(*paletteModal); !ok {
+			t.Errorf("Esc-%c should open the command palette, modal is %T", key, a.modal)
+		}
+	}
+}
+
 // TestHandleKey_LeaderQuit sets a.quit via Esc-q. We test this directly
 // rather than through Run() so we don't have to drive the event loop —
 // the quit flag is what Run() polls each tick.

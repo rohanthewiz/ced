@@ -48,8 +48,11 @@ func leaderBindings() []leaderBinding {
 		{'f', (*App).openFind},
 		{'p', (*App).openFinder},
 		// 'a' for "actions" — the palette is the searchable twin of the
-		// ≡ action menu, so it borrows the menu's vocabulary.
+		// ≡ action menu, so it borrows the menu's vocabulary. 'k' is an
+		// alias for Cmd+K muscle memory (VS Code/Slack); the real Cmd+K
+		// never reaches a terminal app, so Esc-k is the closest stand-in.
 		{'a', (*App).openPalette},
+		{'k', (*App).openPalette},
 		// 'h' for "hunk" — jump between git-changed regions. Shifted
 		// variant walks backwards, mirroring find's Enter/Shift-Enter.
 		{'h', (*App).menuNextHunk},

@@ -350,7 +350,7 @@ func (a *App) menuLayout() (items []menuItemDef, dividers []int, modalHeight int
 	// sets the zone off from the (usually folded) section list below it.
 	items = append(items, menuItemDef{
 		label:    paletteMenuLabel,
-		shortcut: "esc a",
+		shortcut: "esc a / esc k",
 		relY:     y,
 		action:   (*App).menuCommandPalette,
 		enabled:  alwaysTrue,

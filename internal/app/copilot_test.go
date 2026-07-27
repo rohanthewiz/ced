@@ -542,3 +542,18 @@ func TestHandleCopilotStatus(t *testing.T) {
 		t.Fatal("a status notification must not clear auth state")
 	}
 }
+
+// TestCopilotServerArgsIncludeStdio pins the sidecar's invocation:
+// copilot-language-server exits immediately with a usage error unless
+// --stdio is passed, and that instant exit is indistinguishable from
+// "not installed" to the user. Dropping the flag regresses the whole
+// integration on the real binary while every fake-conn test stays
+// green — hence this pin.
+func TestCopilotServerArgsIncludeStdio(t *testing.T) {
+	for _, arg := range copilotServerArgs {
+		if arg == "--stdio" {
+			return
+		}
+	}
+	t.Fatalf("copilotServerArgs = %v, must include --stdio", copilotServerArgs)
+}

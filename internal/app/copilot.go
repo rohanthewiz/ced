@@ -67,6 +67,12 @@ import (
 // a build dependency.
 const copilotServerBinary = "copilot-language-server"
 
+// copilotServerArgs is the sidecar's LSP invocation. --stdio is
+// mandatory: without it the server prints a usage error and exits
+// immediately, which lands as an instant copilotExitEvent → dead
+// (indistinguishable from "not installed" to the user).
+var copilotServerArgs = []string{"--stdio"}
+
 // copilotSignInTimeout bounds the blocking device-flow confirmation.
 // GitHub's device codes are valid for ~15 minutes; matching that means
 // we never give up on a code the user could still redeem.
@@ -307,7 +313,7 @@ func (a *App) copilotEnsureStarted() {
 		onExit := func(error) {
 			_ = scr.PostEvent(&copilotExitEvent{when: time.Now()})
 		}
-		client, err := lsp.Start(root, copilotServerBinary, nil, onNotify, onExit)
+		client, err := lsp.Start(root, copilotServerBinary, copilotServerArgs, onNotify, onExit)
 		if err != nil {
 			_ = scr.PostEvent(&copilotExitEvent{when: time.Now()})
 			return

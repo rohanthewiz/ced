@@ -10,6 +10,8 @@ SpiceEdit avoids `Ctrl+` shortcuts on purpose. They fight tmux. They fight Zelli
 
 So `Esc` is the leader. Tap `Esc`, then within half a second tap a bound letter. A lone `Esc` with no follow-up is a no-op — your next keystroke reaches the editor as normal, so accidental Escs never swallow a real character.
 
+Repeatable actions chain: after `Esc z`, each further `z` inside the window undoes another step — `Esc z z z` is three undos, no fresh `Esc` needed. Undo/redo (`u` `r` `z` `Z`), hunk-walking (`h` `H`), history (`o` `O`), and panel resize (`=` `-`) all chain; anything else typed mid-chain is a plain keystroke, so quick typing after an undo can't misfire an unrelated action.
+
 ## The full table
 
 | Combo       | Action                |
@@ -26,6 +28,8 @@ So `Esc` is the leader. Tap `Esc`, then within half a second tap a bound letter.
 | `Esc t`     | Toggle sidebar        |
 | `Esc f`     | Find in file          |
 | `Esc p`     | Find file in project  |
+
+In terminals that forward the Cmd key via the kitty keyboard protocol (kitty, Ghostty, WezTerm, the cats mac app), the real `Cmd+Z` / `Cmd+Shift+Z` also undo and redo.
 
 ## Editor keys (no Esc needed)
 

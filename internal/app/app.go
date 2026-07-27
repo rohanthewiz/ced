@@ -559,6 +559,11 @@ type App struct {
 	menuOpen       bool
 	hoveredMenuRow int       // index into menuItems of the row under the mouse, or -1.
 	lastEscape     time.Time // timestamp of the previous Esc press, for double-tap detection.
+	// leaderChained is true when lastEscape was re-armed by a repeatable
+	// leader action rather than a real Esc press. In chain mode only
+	// repeatable bindings fire ("Esc z z z" undoes three times); any
+	// other key drops back to normal typing. See leaderBinding.repeat.
+	leaderChained bool
 	// menuScroll is how many content rows the action menu is scrolled
 	// when its layout is taller than the window (the menu outgrew short
 	// terminals at ~40 rows). 0 whenever everything fits; reset on every
@@ -1455,6 +1460,13 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// gesture that clears it without moving the cursor. Purely a
 		// side effect: the menu/leader behavior below runs regardless.
 		a.copilotClearGhost()
+		// A real Esc always re-opens the full leader table — chain mode
+		// (repeatable-only) is an artifact of the previous action. Note
+		// whether the window was chain-armed before clearing: a chained
+		// lastEscape must not read as the first tap of a double-Esc, or
+		// "Esc z, Esc r" (undo then redo) would open the menu instead.
+		wasChained := a.leaderChained
+		a.leaderChained = false
 		// Esc is the editor's only command key. Behavior:
 		//   • menu open  → close it
 		//   • menu shut  → open it on the SECOND Esc within doubleEscMs;
@@ -1484,7 +1496,7 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 			return
 		}
 		now := time.Now()
-		if !a.lastEscape.IsZero() && now.Sub(a.lastEscape) < doubleEscMs {
+		if !wasChained && !a.lastEscape.IsZero() && now.Sub(a.lastEscape) < doubleEscMs {
 			a.openMenu()
 			a.lastEscape = time.Time{}
 			return
@@ -1495,12 +1507,15 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// Esc-leader hotkey: if Esc was pressed within doubleEscMs and this
 	// key is bound in the leader table, fire the action and consume the
 	// keystroke. Unbound keys fall through to normal handling so a stray
-	// Esc doesn't swallow the next character the user types.
+	// Esc doesn't swallow the next character the user types. A repeatable
+	// action re-arms the window in chain mode ("Esc z z z" undoes three
+	// times — without this, the extra z's would type into the buffer);
+	// chain mode admits only repeatable bindings so quick typing after a
+	// leader can't misfire an unrelated action.
 	if !a.lastEscape.IsZero() && time.Since(a.lastEscape) < doubleEscMs {
 		if ev.Key() == tcell.KeyRune {
-			if action := leaderActionFor(ev.Rune()); action != nil {
-				a.lastEscape = time.Time{}
-				action(a)
+			if b := leaderBindingFor(ev.Rune()); b != nil && (!a.leaderChained || b.repeat) {
+				a.fireLeader(b)
 				return
 			}
 		}
@@ -1513,15 +1528,15 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// had before (a bound rune firing an action beats it inserting a
 	// literal character mid-code).
 	if ev.Key() == tcell.KeyRune && ev.Modifiers()&tcell.ModAlt != 0 {
-		if action := leaderActionFor(ev.Rune()); action != nil {
-			a.lastEscape = time.Time{}
-			action(a)
+		if b := leaderBindingFor(ev.Rune()); b != nil {
+			a.fireLeader(b)
 			return
 		}
 	}
 	// Any other key cancels a pending Esc so a stale half-tap doesn't
 	// surprise the user later.
 	a.lastEscape = time.Time{}
+	a.leaderChained = false
 
 	// Cmd+C / Cmd+V. Terminals speaking the kitty keyboard protocol
 	// (kitty, Ghostty, WezTerm, iTerm2 with CSI-u) deliver the Cmd/Super
@@ -1555,6 +1570,20 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 			return
 		case 'v':
 			a.cmdPaste()
+			return
+		// Cmd+Z / Cmd+Shift+Z — the native undo gesture, for hosts
+		// that forward Cmd chords (the cats mac app, kitty-protocol
+		// terminals). The shifted rune may arrive as 'Z' or as 'z'
+		// with ModShift depending on the emitter, so accept both.
+		case 'z':
+			if ev.Modifiers()&tcell.ModShift != 0 {
+				a.menuRedo()
+			} else {
+				a.menuUndo()
+			}
+			return
+		case 'Z':
+			a.menuRedo()
 			return
 		}
 	}

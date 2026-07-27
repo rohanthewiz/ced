@@ -113,6 +113,108 @@ func TestHandleKey_LeaderUndoRedoAliases(t *testing.T) {
 	}
 }
 
+// TestHandleKey_LeaderUndoChainRepeats pins down leader chaining: after
+// a repeatable leader fires, further repeatable runes inside the window
+// keep firing without a fresh Esc. The regression this guards: "Esc z z"
+// with an exhausted undo stack used to type a literal 'z' into the
+// buffer, because only the first z was consumed by the leader.
+func TestHandleKey_LeaderUndoChainRepeats(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte(""), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	a.handleKey(keyEv(tcell.KeyRune, 'a'))
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'z')) // undo — buffer back to ""
+	a.handleKey(keyEv(tcell.KeyRune, 'z')) // chained: stack empty, must NOT insert
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "" {
+		t.Fatalf("chained Esc-z z with empty stack should be consumed, got %q", got)
+	}
+	a.handleKey(keyEv(tcell.KeyRune, 'Z')) // chained redo — no fresh Esc needed
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "a" {
+		t.Fatalf("chained Z should redo the insert, got %q", got)
+	}
+}
+
+// TestHandleKey_LeaderChainAdmitsOnlyRepeatable verifies chain mode is
+// narrower than a real Esc: a non-repeatable binding rune typed right
+// after a chained action must insert literally instead of firing (so
+// quick typing after an undo can't trigger, say, a save via 's').
+func TestHandleKey_LeaderChainAdmitsOnlyRepeatable(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte(""), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	a.handleKey(keyEv(tcell.KeyRune, 'a'))
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'z')) // undo — arms chain mode
+	a.handleKey(keyEv(tcell.KeyRune, 's')) // not repeatable — plain keystroke
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "s" {
+		t.Fatalf("'s' after a chained undo should insert literally, got %q", got)
+	}
+}
+
+// TestHandleKey_EscAfterChainReopensFullTable makes sure a real Esc
+// clears chain mode: Esc pressed mid-chain must re-arm the FULL leader
+// table, so a non-repeatable binding like Esc-t still fires.
+func TestHandleKey_EscAfterChainReopensFullTable(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte(""), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	a.handleKey(keyEv(tcell.KeyRune, 'a'))
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'z')) // undo — arms chain mode
+	before := a.sidebarShown
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 't'))
+	if a.sidebarShown == before {
+		t.Fatal("Esc-t after a chained undo should still toggle the sidebar")
+	}
+}
+
+// TestHandleKey_CmdZUndoRedo covers the Cmd+Z / Cmd+Shift+Z path used by
+// hosts that forward Cmd chords via the kitty keyboard protocol (the
+// cats mac app, kitty/Ghostty/WezTerm). tcell reports Cmd as ModMeta.
+func TestHandleKey_CmdZUndoRedo(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte(""), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	a.handleKey(keyEv(tcell.KeyRune, 'a'))
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModMeta))
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "" {
+		t.Fatalf("Cmd+Z should undo the insert, got %q", got)
+	}
+	// Shifted redo may arrive as 'Z' or as 'z'+ModShift depending on the
+	// emitter — exercise both encodings.
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'Z', tcell.ModMeta|tcell.ModShift))
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "a" {
+		t.Fatalf("Cmd+Shift+Z (rune Z) should redo the insert, got %q", got)
+	}
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModMeta))
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModMeta|tcell.ModShift))
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "a" {
+		t.Fatalf("Cmd+Shift+Z (rune z + shift) should redo the insert, got %q", got)
+	}
+}
+
 // TestHandleKey_LeaderToggleSidebar flips sidebarShown via Esc-t. The
 // toggle is the simplest leader action with no preconditions, so it's
 // the most stable smoke test that the dispatch wiring is intact.

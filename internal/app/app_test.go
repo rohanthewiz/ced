@@ -216,10 +216,10 @@ func TestMenuButtonRect(t *testing.T) {
 // to (0,0) when the window is too small to fit it.
 func TestMenuModalRect_Centered(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	// The menu (69 rows fully expanded) outgrew the 40-row default sim
+	// The menu (70 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 69
+	a.height = 70
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -1318,9 +1318,9 @@ func TestHandleKey_AltRuneFiresLeader(t *testing.T) {
 		t.Fatalf("leader rune must not be inserted into the buffer, got %q", got)
 	}
 
-	// 'z' is unbound: the rune should reach the buffer like any other key.
-	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'z', tcell.ModAlt))
-	if got := a.activeTabPtr().Buffer.String(); got != "z" {
+	// 'y' is unbound: the rune should reach the buffer like any other key.
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'y', tcell.ModAlt))
+	if got := a.activeTabPtr().Buffer.String(); got != "y" {
 		t.Fatalf("unbound Alt rune should fall through to typing, got %q", got)
 	}
 }
@@ -1815,8 +1815,8 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 // TestMenuLayout_NoCustomActions pins down the baseline geometry with
 // every section expanded: the pinned top zone contributes two rows (the
 // command palette + the expand/collapse-all toggle), ten collapsible
-// groups each contribute a header row (10) plus their 51 action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 63 total. The
+// groups each contribute a header row (10) plus their 52 action rows, and
+// Quit renders headerless behind a divider (its 1 row) — 64 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1824,16 +1824,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 69 {
-		t.Errorf("modalHeight = %d, want 69", h)
+	if h != 70 {
+		t.Errorf("modalHeight = %d, want 70", h)
 	}
-	if got := len(items); got != 63 {
-		t.Errorf("row count = %d, want 63 (2 top-zone + 51 group actions + 10 headers)", got)
+	if got := len(items); got != 64 {
+		t.Errorf("row count = %d, want 64 (2 top-zone + 52 group actions + 10 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (66) — headers separate the
+	// one setting off the headerless Quit group (67) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 66}
+	wantDiv := []int{2, 5, 67}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2089,11 +2089,14 @@ func TestDrawMenu_HeaderChevronReflectsFold(t *testing.T) {
 // promoted position: the menu outgrows short windows and scrolls, so the
 // terminal rows must sit high enough to be visible with zero scroll even
 // on a 24-row terminal (visible band is relY 3..mh-2). Guards against a
-// reorder quietly burying Show terminal again.
+// reorder quietly burying Show terminal again. The chat toggle is no
+// longer pinned here — it moved to the Copilot group (owner preference,
+// all Copilot surfaces in one block); with the collapse-by-default menu
+// its section header keeps it one click away.
 func TestMenuLayout_TerminalRowsAboveTheFold(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	items, _, _ := a.menuLayout()
-	for _, want := range []string{"Show terminal", "Dock terminal left (tree right)", "Show Copilot chat"} {
+	for _, want := range []string{"Show terminal", "Dock terminal left (tree right)"} {
 		found := false
 		for _, item := range items {
 			if item.labelFor == nil || item.labelFor(a) != want {
@@ -2158,8 +2161,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 72 { // 69 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 72", h)
+	if h != 73 { // 70 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 73", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -2613,7 +2616,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 69
+	a.height = 70
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

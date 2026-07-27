@@ -40,6 +40,11 @@ func leaderBindings() []leaderBinding {
 		{'s', (*App).menuSave},
 		{'u', (*App).menuUndo},
 		{'r', (*App).menuRedo},
+		// 'z' is the Cmd+Z muscle-memory alias for undo (same spirit as
+		// 'k' for the palette); the shifted variant redoes, mirroring
+		// the h/H and o/O pair convention.
+		{'z', (*App).menuUndo},
+		{'Z', (*App).menuRedo},
 		{'w', (*App).menuClose},
 		{'q', (*App).menuQuit},
 		{'n', (*App).menuNewFile},

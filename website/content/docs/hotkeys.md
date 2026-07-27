@@ -18,6 +18,8 @@ So `Esc` is the leader. Tap `Esc`, then within half a second tap a bound letter.
 | `Esc s`     | Save                  |
 | `Esc u`     | Undo                  |
 | `Esc r`     | Redo                  |
+| `Esc z`     | Undo (Cmd+Z habit)    |
+| `Esc Z`     | Redo                  |
 | `Esc w`     | Close tab             |
 | `Esc q`     | Quit                  |
 | `Esc n`     | New file              |

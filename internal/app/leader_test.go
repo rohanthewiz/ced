@@ -31,8 +31,8 @@ func TestLeaderActionFor_AllBindingsResolve(t *testing.T) {
 // leaderActionFor reports a miss with nil so handleKey can distinguish
 // "leader fired" from "key was unbound — fall through".
 func TestLeaderActionFor_UnboundReturnsNil(t *testing.T) {
-	if leaderActionFor('z') != nil {
-		t.Fatal("'z' should not be a leader binding (no editor action mapped)")
+	if leaderActionFor('y') != nil {
+		t.Fatal("'y' should not be a leader binding (no editor action mapped)")
 	}
 }
 
@@ -83,6 +83,33 @@ func TestHandleKey_LeaderUndoRedo(t *testing.T) {
 	a.handleKey(keyEv(tcell.KeyRune, 'r'))
 	if a.activeTabPtr().Buffer.Lines[0] != "a" {
 		t.Fatalf("Esc-r should have redone the insert, got %q", a.activeTabPtr().Buffer.Lines[0])
+	}
+}
+
+// TestHandleKey_LeaderUndoRedoAliases round-trips the same edit through
+// Esc-z and Esc-Z — the Cmd+Z muscle-memory aliases for undo/redo. A
+// separate test from the u/r pair so dropping either alias fails loudly
+// on its own, same as the palette-aliases test.
+func TestHandleKey_LeaderUndoRedoAliases(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte(""), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	a.handleKey(keyEv(tcell.KeyRune, 'a'))
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'z'))
+	if a.activeTabPtr().Buffer.Lines[0] != "" {
+		t.Fatalf("Esc-z should have undone the insert, got %q", a.activeTabPtr().Buffer.Lines[0])
+	}
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'Z'))
+	if a.activeTabPtr().Buffer.Lines[0] != "a" {
+		t.Fatalf("Esc-Z should have redone the insert, got %q", a.activeTabPtr().Buffer.Lines[0])
 	}
 }
 
@@ -160,9 +187,9 @@ func TestHandleKey_LeaderUnboundFallsThrough(t *testing.T) {
 	a.openFile(target)
 
 	a.handleKey(keyEv(tcell.KeyEsc, 0))
-	a.handleKey(keyEv(tcell.KeyRune, 'z'))
+	a.handleKey(keyEv(tcell.KeyRune, 'y'))
 
-	if got := a.activeTabPtr().Buffer.Lines[0]; got != "z" {
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "y" {
 		t.Fatalf("unbound key after Esc should reach the editor, got %q", got)
 	}
 }

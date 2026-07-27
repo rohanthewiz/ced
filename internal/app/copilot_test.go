@@ -557,3 +557,14 @@ func TestCopilotServerArgsIncludeStdio(t *testing.T) {
 	}
 	t.Fatalf("copilotServerArgs = %v, must include --stdio", copilotServerArgs)
 }
+
+// TestCopilotInitTimeoutOutlivesKeychainPrompt pins the handshake
+// budget: the server's cold start can block on a macOS Keychain
+// password prompt, so the initialize call must get far more than the
+// 5s lsp.Call default — a short budget closes a healthy server while
+// the user is still typing and caches a dead verdict.
+func TestCopilotInitTimeoutOutlivesKeychainPrompt(t *testing.T) {
+	if copilotInitTimeout < time.Minute {
+		t.Fatalf("copilotInitTimeout = %v, must give a human time to answer a Keychain prompt", copilotInitTimeout)
+	}
+}

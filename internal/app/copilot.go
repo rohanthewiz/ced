@@ -78,6 +78,15 @@ var copilotServerArgs = []string{"--stdio"}
 // we never give up on a code the user could still redeem.
 const copilotSignInTimeout = 15 * time.Minute
 
+// copilotInitTimeout bounds the initialize handshake (LSP and ACP —
+// same binary, same cold start). The server blocks startup on
+// credential-store resolution, which on macOS can mean a Keychain
+// password prompt the user has to answer; the 5s Call default times
+// out while that dialog is still on screen, closing a healthy server
+// and caching a dead verdict. Two minutes covers a human typing a
+// password without leaving a wedged server around forever.
+const copilotInitTimeout = 2 * time.Minute
+
 // copilotFallbackVerifyURL is where device codes are redeemed when the
 // server's response omits verificationUri (older builds did).
 const copilotFallbackVerifyURL = "https://github.com/login/device"
@@ -355,7 +364,10 @@ func copilotInitialize(c *lsp.Client, root string) (copilotAuthStatus, error) {
 			"editorPluginInfo": map[string]any{"name": "r-ed-copilot", "version": version.Version},
 		},
 	}
-	if err := c.Call("initialize", params, nil); err != nil {
+	// Keychain resolution can stall the server's first response for as
+	// long as the user stares at the password prompt — see
+	// copilotInitTimeout.
+	if err := c.CallWithTimeout("initialize", params, nil, copilotInitTimeout); err != nil {
 		return st, err
 	}
 	if err := c.Notify("initialized", map[string]any{}); err != nil {

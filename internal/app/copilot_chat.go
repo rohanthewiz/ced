@@ -290,7 +290,9 @@ func chatInitialize(c *lsp.Client, root string) (string, error) {
 			"fs": map[string]any{"readTextFile": false, "writeTextFile": false},
 		},
 	}
-	if err := c.Call("initialize", initParams, nil); err != nil {
+	// Same keychain-stall budget as the LSP sidecar handshake: the
+	// agent's cold start can block on a macOS Keychain prompt.
+	if err := c.CallWithTimeout("initialize", initParams, nil, copilotInitTimeout); err != nil {
 		return "", err
 	}
 	var sess struct {

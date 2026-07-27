@@ -23,7 +23,7 @@ clipboard, and getting back to work.
 
 ## Why does this exist?
 
-Vim and friends are wonderful if you've spent years memorizing them. Most
+Vim and friendsq are wonderful if you've spent years memorizing them. Most
 terminal editors assume you have. r-ed doesn't.
 
 The goals, in order:

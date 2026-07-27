@@ -15,13 +15,20 @@
 package app
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
+	"github.com/rohanthewiz/r-ed/internal/lsp"
 )
 
 // wireChat installs a live fake chat connection, bypassing the async
@@ -515,4 +522,346 @@ func typeChatText(a *App, s string) {
 // enterKey builds the Enter keystroke used by the send tests.
 func enterKey() *tcell.EventKey {
 	return tcell.NewEventKey(tcell.KeyEnter, 0, 0)
+}
+
+// chatTestModels seeds a small roster for the model-selection tests.
+func chatTestModels() []chatModel {
+	return []chatModel{
+		{id: "auto", name: "Auto"},
+		{id: "claude-sonnet-4.6", name: "Claude Sonnet 4.6", usage: "1x"},
+		{id: "gpt-5.5", name: "GPT-5.5", usage: "7.5x"},
+	}
+}
+
+// TestChatModelLabel pins the ≡ row's two states: the resolved model
+// name while a session knows it, a neutral opener otherwise — the
+// label must never show a raw wire id.
+func TestChatModelLabel(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	if got := a.chatModelLabel(); got != "Chat model…" {
+		t.Errorf("no-session label = %q", got)
+	}
+	a.chat.models = chatTestModels()
+	a.chat.modelID = "claude-sonnet-4.6"
+	if got := a.chatModelLabel(); got != "Chat model: Claude Sonnet 4.6" {
+		t.Errorf("resolved label = %q", got)
+	}
+	// An id missing from the roster falls back to the opener rather
+	// than showing a stale or empty name.
+	a.chat.modelID = "gone"
+	if got := a.chatModelLabel(); got != "Chat model…" {
+		t.Errorf("unknown-id label = %q", got)
+	}
+}
+
+// TestMenuChatModel_ExplainsUnavailability pins the always-clickable
+// contract: disabled and dead states flash WHY instead of silently
+// doing nothing.
+func TestMenuChatModel_ExplainsUnavailability(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+
+	a.copilot.enabled = false
+	a.menuChatModel()
+	if !strings.Contains(a.statusMsg, "Copilot is disabled") {
+		t.Errorf("disabled flash = %q", a.statusMsg)
+	}
+
+	a.copilot.enabled = true
+	a.chat.dead = true
+	a.menuChatModel()
+	if !strings.Contains(a.statusMsg, "unavailable") {
+		t.Errorf("dead flash = %q", a.statusMsg)
+	}
+}
+
+// TestMenuChatModel_QueuesWhileStarting pins the queued-intent path:
+// a click before the agent is up must not vanish — it arms
+// modelPickWanted so handleChatReady opens the picker.
+func TestMenuChatModel_QueuesWhileStarting(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+	a.chat.starting = true // async start in flight — ensureStarted no-ops
+
+	a.menuChatModel()
+	if !a.chat.modelPickWanted {
+		t.Fatal("click while starting should queue the picker")
+	}
+	if !strings.Contains(a.statusMsg, "starting") {
+		t.Errorf("queue flash = %q", a.statusMsg)
+	}
+}
+
+// TestHandleChatReady_StoresModelsAndOpensQueuedPicker pins the ready
+// handler's model leg: the roster and current id land on chat state,
+// and a queued picker request opens the picker exactly once.
+func TestHandleChatReady_StoresModelsAndOpensQueuedPicker(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+	a.chat.modelPickWanted = true
+
+	fake := &fakeCopilotConn{}
+	a.handleChatReady(&chatReadyEvent{when: time.Now(), client: fake,
+		sessionID: "sess-1", models: chatTestModels(), modelID: "auto"})
+
+	if len(a.chat.models) != 3 || a.chat.modelID != "auto" {
+		t.Fatalf("model state not installed: %v / %q", a.chat.models, a.chat.modelID)
+	}
+	if a.chat.modelPickWanted {
+		t.Error("modelPickWanted should be consumed")
+	}
+	pm, ok := a.modal.(*paletteModal)
+	if !ok {
+		t.Fatalf("queued pick should open the picker, modal = %T", a.modal)
+	}
+	if !strings.Contains(pm.title, "Chat model") {
+		t.Errorf("picker title = %q", pm.title)
+	}
+}
+
+// TestOpenChatModelPicker_ExcludesCurrentAndShowsUsage pins the picker
+// rows: the current model is left out (menuGitSwitchBranch's no-op-row
+// rule) and each row carries the premium-request multiplier so a pick
+// is an informed spend.
+func TestOpenChatModelPicker_ExcludesCurrentAndShowsUsage(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	wireChat(a)
+	a.chat.models = chatTestModels()
+	a.chat.modelID = "auto"
+
+	a.openChatModelPicker()
+	pm, ok := a.modal.(*paletteModal)
+	if !ok {
+		t.Fatalf("modal = %T, want picker", a.modal)
+	}
+	labels := make([]string, 0, len(pm.items))
+	for _, it := range pm.items {
+		labels = append(labels, it.label)
+	}
+	joined := strings.Join(labels, "|")
+	if strings.Contains(joined, "Auto") {
+		t.Errorf("current model should be excluded, rows = %q", joined)
+	}
+	if !strings.Contains(joined, "GPT-5.5  (7.5x)") {
+		t.Errorf("usage multiplier missing, rows = %q", joined)
+	}
+	if !strings.Contains(pm.title, "current: Auto") {
+		t.Errorf("title should name the current model, got %q", pm.title)
+	}
+}
+
+// TestChatSetModel_SendsSetModel pins the async wire leg: the picked
+// model goes out as session/set_model with the live session's id.
+func TestChatSetModel_SendsSetModel(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	fake := wireChat(a)
+
+	a.chatSetModel(chatModel{id: "gpt-5.5", name: "GPT-5.5"})
+	waitForCopilot(t, "session/set_model call", func() bool { return fake.called("session/set_model") })
+
+	fake.mu.Lock()
+	raw := fake.params["session/set_model"]
+	fake.mu.Unlock()
+	if len(raw) != 1 {
+		t.Fatalf("set_model sent %d times", len(raw))
+	}
+	var p struct {
+		SessionID string `json:"sessionId"`
+		ModelID   string `json:"modelId"`
+	}
+	if err := json.Unmarshal(raw[0], &p); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if p.SessionID != "sess-1" || p.ModelID != "gpt-5.5" {
+		t.Errorf("wire params = %+v", p)
+	}
+}
+
+// TestHandleChatModelSet covers both endings: success records the new
+// model, notes it in the transcript, and persists the preference;
+// failure only flashes — the session keeps its previous model.
+func TestHandleChatModelSet(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a := newTestApp(t, t.TempDir())
+	wireChat(a)
+	a.chat.models = chatTestModels()
+	a.chat.modelID = "auto"
+
+	a.handleChatModelSet(&chatModelSetEvent{when: time.Now(),
+		model: chatModel{id: "gpt-5.5", name: "GPT-5.5"}})
+	if a.chat.modelID != "gpt-5.5" || a.chat.modelPref != "gpt-5.5" {
+		t.Fatalf("state after set: id %q pref %q", a.chat.modelID, a.chat.modelPref)
+	}
+	if len(a.chat.msgs) == 0 || !strings.Contains(a.chat.msgs[len(a.chat.msgs)-1].text, "GPT-5.5") {
+		t.Error("transcript should note the switch")
+	}
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "r-ed", "config.json"))
+	if err != nil {
+		t.Fatalf("config not written: %v", err)
+	}
+	if !strings.Contains(string(data), `"chatmodel": "gpt-5.5"`) {
+		t.Errorf("persisted config = %s", data)
+	}
+
+	msgsBefore := len(a.chat.msgs)
+	a.handleChatModelSet(&chatModelSetEvent{when: time.Now(),
+		model: chatModel{id: "auto", name: "Auto"}, err: errors.New("nope")})
+	if a.chat.modelID != "gpt-5.5" {
+		t.Error("failed set must not change the model")
+	}
+	if len(a.chat.msgs) != msgsBefore {
+		t.Error("failed set should not write the transcript")
+	}
+	if !strings.Contains(a.statusMsg, "failed") {
+		t.Errorf("failure flash = %q", a.statusMsg)
+	}
+}
+
+// TestChatDisconnect_ClearsModelStateKeepsPref pins the reset scope:
+// roster and session model die with the connection, but the persisted
+// preference survives so the next handshake re-applies it.
+func TestChatDisconnect_ClearsModelStateKeepsPref(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	wireChat(a)
+	a.chat.models = chatTestModels()
+	a.chat.modelID = "gpt-5.5"
+	a.chat.modelPref = "gpt-5.5"
+	a.chat.modelPickWanted = true
+
+	a.chatDisconnect()
+	if a.chat.models != nil || a.chat.modelID != "" || a.chat.modelPickWanted {
+		t.Error("attached-only model state should be cleared")
+	}
+	if a.chat.modelPref != "gpt-5.5" {
+		t.Error("modelPref must survive a disconnect")
+	}
+}
+
+// fakeACPAgent speaks just enough ndjson ACP over pipes to satisfy
+// chatInitialize: initialize, session/new (with a fixed roster), and
+// session/set_model (recorded; optionally failed). It exists so the
+// pref-apply branch is tested against real framing, not the fake conn.
+type fakeACPAgent struct {
+	mu      sync.Mutex
+	setIDs  []string
+	failSet bool
+}
+
+// serve runs the agent's read loop until the client side closes.
+func (f *fakeACPAgent) serve(r io.Reader, w io.Writer) {
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		var req struct {
+			ID     int64           `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if json.Unmarshal(sc.Bytes(), &req) != nil {
+			continue
+		}
+		var result any
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": 1}
+		case "session/new":
+			result = map[string]any{
+				"sessionId": "sess-acp",
+				"models": map[string]any{
+					"availableModels": []map[string]any{
+						{"modelId": "auto", "name": "Auto"},
+						{"modelId": "gpt-5.5", "name": "GPT-5.5",
+							"_meta": map[string]any{"copilotUsage": "7.5x"}},
+					},
+					"currentModelId": "auto",
+				},
+			}
+		case "session/set_model":
+			var p struct {
+				ModelID string `json:"modelId"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			f.mu.Lock()
+			f.setIDs = append(f.setIDs, p.ModelID)
+			fail := f.failSet
+			f.mu.Unlock()
+			if fail {
+				resp, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID,
+					"error": map[string]any{"code": -32000, "message": "nope"}})
+				_, _ = w.Write(append(resp, '\n'))
+				continue
+			}
+			result = map[string]any{}
+		default:
+			continue
+		}
+		resp, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+		_, _ = w.Write(append(resp, '\n'))
+	}
+}
+
+// startFakeACPAgent wires a fakeACPAgent to a real ndjson lsp.Client.
+func startFakeACPAgent(t *testing.T, agent *fakeACPAgent) *lsp.Client {
+	t.Helper()
+	agentR, cliW := io.Pipe()
+	cliR, agentW := io.Pipe()
+	go agent.serve(agentR, agentW)
+	c := lsp.NewClientACP(cliR, cliW, func(string, json.RawMessage) {},
+		func(string, json.RawMessage) (any, error) { return nil, errors.New("unexpected") },
+		func(error) {})
+	t.Cleanup(c.Close)
+	return c
+}
+
+// TestChatInitialize_ModelRoster pins the handshake's model handling
+// against real ndjson framing: the roster and current id are decoded,
+// a saved preference present in the roster is applied via
+// session/set_model, and a stale preference is silently skipped.
+func TestChatInitialize_ModelRoster(t *testing.T) {
+	// No preference: roster decoded, agent default kept, no set call.
+	agent := &fakeACPAgent{}
+	sess, err := chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "")
+	if err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	if sess.id != "sess-acp" || sess.modelID != "auto" || len(sess.models) != 2 {
+		t.Fatalf("session = %+v", sess)
+	}
+	if sess.models[1].usage != "7.5x" {
+		t.Errorf("usage multiplier lost: %+v", sess.models[1])
+	}
+	if len(agent.setIDs) != 0 {
+		t.Errorf("no-pref handshake sent set_model %v", agent.setIDs)
+	}
+
+	// Saved preference in the roster: applied, session reports it.
+	agent = &fakeACPAgent{}
+	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "gpt-5.5")
+	if err != nil {
+		t.Fatalf("pref handshake: %v", err)
+	}
+	if sess.modelID != "gpt-5.5" || len(agent.setIDs) != 1 || agent.setIDs[0] != "gpt-5.5" {
+		t.Errorf("pref not applied: modelID %q, set calls %v", sess.modelID, agent.setIDs)
+	}
+
+	// Stale preference (not in roster): no call, default kept.
+	agent = &fakeACPAgent{}
+	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "retired-model")
+	if err != nil {
+		t.Fatalf("stale-pref handshake: %v", err)
+	}
+	if sess.modelID != "auto" || len(agent.setIDs) != 0 {
+		t.Errorf("stale pref should be skipped: modelID %q, set calls %v", sess.modelID, agent.setIDs)
+	}
+
+	// set_model failure: swallowed, agent default kept — a broken pref
+	// must never break the handshake.
+	agent = &fakeACPAgent{failSet: true}
+	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "gpt-5.5")
+	if err != nil {
+		t.Fatalf("failing-set handshake: %v", err)
+	}
+	if sess.modelID != "auto" {
+		t.Errorf("failed set should keep the default, got %q", sess.modelID)
+	}
 }

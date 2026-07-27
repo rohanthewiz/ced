@@ -20,8 +20,9 @@
 //     all run off-loop and post chat*Events; only the main loop touches
 //     App.chat. No auto-restart after a crash — toggling Copilot
 //     off/on is the deliberate retry path.
-//   - Menu-first: the show/hide toggle lives in the ≡ View group
-//     (above the fold, next to the terminal rows).
+//   - Menu-first: the show/hide toggle and the model picker live in
+//     the ≡ Copilot group (owner preference — all Copilot surfaces in
+//     one place).
 //
 // Layout: the panel docks as a full-height strip on the LEFT edge and
 // the file tree flips to the RIGHT — the owner's explicit preference,
@@ -55,6 +56,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/r-ed/internal/lsp"
+	"github.com/rohanthewiz/r-ed/internal/userconfig"
 )
 
 const (
@@ -109,6 +111,17 @@ type chatRow struct {
 	code bool
 }
 
+// chatModel is one entry of the agent's model roster: the wire id
+// session/set_model wants, the display name for picker rows, and the
+// premium-request multiplier GitHub attaches in _meta ("1x", "7.5x").
+// The multiplier is kept because a model pick is a spend decision —
+// hiding it would invite expensive surprises.
+type chatModel struct {
+	id    string
+	name  string
+	usage string
+}
+
 // chatState is everything the chat integration remembers, owned by App
 // and mutated only on the main loop.
 type chatState struct {
@@ -139,6 +152,18 @@ type chatState struct {
 	// without it the very first Enter would vanish into "not ready yet".
 	queuedPrompt string
 
+	// models is the agent's roster from session/new and modelID the
+	// session's current pick — both only meaningful while attached
+	// (cleared by chatDisconnect). modelPickWanted queues a picker
+	// open requested mid-handshake, the queuedPrompt pattern again.
+	// modelPref is the user's persisted choice (config "chatmodel"),
+	// applied during the handshake; it survives disconnects so a
+	// restart re-applies it.
+	models          []chatModel
+	modelID         string
+	modelPickWanted bool
+	modelPref       string
+
 	msgs   []chatMsg
 	scroll int // first visible wrapped row
 
@@ -153,11 +178,15 @@ type chatState struct {
 // -----------------------------------------------------------------------------
 
 // chatReadyEvent is posted once the async spawn + ACP handshake +
-// session/new completes; it carries the live connection and session.
+// session/new completes; it carries the live connection, session, and
+// the model roster the agent reported (with any persisted preference
+// already applied — modelID is the session's actual current model).
 type chatReadyEvent struct {
 	when      time.Time
 	client    copilotConn
 	sessionID string
+	models    []chatModel
+	modelID   string
 }
 
 // When satisfies the tcell.Event interface.
@@ -207,6 +236,17 @@ type chatPermissionEvent struct {
 // When satisfies the tcell.Event interface.
 func (e *chatPermissionEvent) When() time.Time { return e.when }
 
+// chatModelSetEvent lands one session/set_model call's completion —
+// the picker's async leg, same bridge pattern as every chat call.
+type chatModelSetEvent struct {
+	when  time.Time
+	model chatModel
+	err   error
+}
+
+// When satisfies the tcell.Event interface.
+func (e *chatModelSetEvent) When() time.Time { return e.when }
+
 // -----------------------------------------------------------------------------
 // Lifecycle
 // -----------------------------------------------------------------------------
@@ -231,6 +271,7 @@ func (a *App) chatEnsureStarted() {
 	a.chat.starting = true
 	scr := a.screen
 	root := a.rootDir
+	pref := a.chat.modelPref
 	go func() {
 		// Both callbacks run on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
@@ -265,7 +306,7 @@ func (a *App) chatEnsureStarted() {
 			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), err: err})
 			return
 		}
-		sessionID, err := chatInitialize(client, root)
+		sess, err := chatInitialize(client, root, pref)
 		if err != nil {
 			client.Close()
 			// A failed handshake may leave the process alive with no
@@ -274,16 +315,29 @@ func (a *App) chatEnsureStarted() {
 			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), err: err})
 			return
 		}
-		_ = scr.PostEvent(&chatReadyEvent{when: time.Now(), client: client, sessionID: sessionID})
+		_ = scr.PostEvent(&chatReadyEvent{when: time.Now(), client: client,
+			sessionID: sess.id, models: sess.models, modelID: sess.modelID})
 	}()
 }
 
+// chatSession is what a completed handshake yields: the ACP session id
+// plus the model roster and current pick reported by session/new.
+type chatSession struct {
+	id      string
+	models  []chatModel
+	modelID string
+}
+
 // chatInitialize runs the ACP handshake and opens the session; returns
-// the session id. Runs on the start goroutine, never the main loop.
-// The fs capabilities are declared FALSE on purpose — phase 3 is chat
-// only, and not offering the capability is the protocol-honest way to
-// keep the agent out of the user's files (see the header comment).
-func chatInitialize(c *lsp.Client, root string) (string, error) {
+// the session plus the agent's model roster. Runs on the start
+// goroutine, never the main loop. The fs capabilities are declared
+// FALSE on purpose — phase 3 is chat only, and not offering the
+// capability is the protocol-honest way to keep the agent out of the
+// user's files (see the header comment). A non-empty prefModel is
+// applied via session/set_model; an id the roster no longer offers (or
+// a failed set) keeps the agent's default silently — a stale saved
+// preference must never break the handshake.
+func chatInitialize(c *lsp.Client, root, prefModel string) (chatSession, error) {
 	initParams := map[string]any{
 		"protocolVersion": 1,
 		"clientCapabilities": map[string]any{
@@ -293,10 +347,20 @@ func chatInitialize(c *lsp.Client, root string) (string, error) {
 	// Same keychain-stall budget as the LSP sidecar handshake: the
 	// agent's cold start can block on a macOS Keychain prompt.
 	if err := c.CallWithTimeout("initialize", initParams, nil, copilotInitTimeout); err != nil {
-		return "", err
+		return chatSession{}, err
 	}
 	var sess struct {
 		SessionID string `json:"sessionId"`
+		Models    struct {
+			Available []struct {
+				ModelID string `json:"modelId"`
+				Name    string `json:"name"`
+				Meta    struct {
+					Usage string `json:"copilotUsage"`
+				} `json:"_meta"`
+			} `json:"availableModels"`
+			CurrentModelID string `json:"currentModelId"`
+		} `json:"models"`
 	}
 	// cwd must be absolute — root is absolutized by New, the same
 	// contract that keeps LSP rootUris well-formed.
@@ -304,12 +368,32 @@ func chatInitialize(c *lsp.Client, root string) (string, error) {
 		map[string]any{"cwd": root, "mcpServers": []any{}},
 		&sess, chatSessionTimeout)
 	if err != nil {
-		return "", err
+		return chatSession{}, err
 	}
 	if sess.SessionID == "" {
-		return "", fmt.Errorf("agent returned no session id")
+		return chatSession{}, fmt.Errorf("agent returned no session id")
 	}
-	return sess.SessionID, nil
+	out := chatSession{id: sess.SessionID, modelID: sess.Models.CurrentModelID}
+	for _, m := range sess.Models.Available {
+		if m.ModelID == "" {
+			continue
+		}
+		out.models = append(out.models, chatModel{id: m.ModelID, name: m.Name, usage: m.Meta.Usage})
+	}
+	if prefModel != "" && prefModel != out.modelID {
+		for _, m := range out.models {
+			if m.id != prefModel {
+				continue
+			}
+			if err := c.CallWithTimeout("session/set_model",
+				map[string]any{"sessionId": out.id, "modelId": prefModel},
+				nil, chatSessionTimeout); err == nil {
+				out.modelID = prefModel
+			}
+			break
+		}
+	}
+	return out, nil
 }
 
 // handleChatReady installs the live connection and flushes a prompt
@@ -323,9 +407,15 @@ func (a *App) handleChatReady(e *chatReadyEvent) {
 	a.chat.client = e.client
 	a.chat.starting = false
 	a.chat.sessionID = e.sessionID
+	a.chat.models = e.models
+	a.chat.modelID = e.modelID
 	if q := a.chat.queuedPrompt; q != "" {
 		a.chat.queuedPrompt = ""
 		a.chatSendPrompt(q)
+	}
+	if a.chat.modelPickWanted {
+		a.chat.modelPickWanted = false
+		a.openChatModelPicker()
 	}
 }
 
@@ -371,6 +461,11 @@ func (a *App) chatDisconnect() {
 	a.chat.turnActive = false
 	a.chat.cancelSent = false
 	a.chat.queuedPrompt = ""
+	a.chat.models = nil
+	a.chat.modelID = ""
+	a.chat.modelPickWanted = false
+	// modelPref deliberately survives — it's the persisted preference,
+	// re-applied by the next handshake.
 }
 
 // chatAutoRejectPermission builds the response for a
@@ -789,6 +884,122 @@ func (a *App) menuToggleChat() {
 	// chat right back). A bottom-docked terminal coexists.
 	if a.termDockLeft && a.term.open {
 		a.term.open = false
+	}
+}
+
+// chatModelLabel names the ≡ Copilot row for the model picker: the
+// current model when a session knows it, a neutral opener otherwise.
+func (a *App) chatModelLabel() string {
+	if name := a.chatCurrentModelName(); name != "" {
+		return "Chat model: " + name
+	}
+	return "Chat model…"
+}
+
+// chatCurrentModelName resolves the session's current model id to its
+// display name, "" when no session is up or the id isn't in the roster.
+func (a *App) chatCurrentModelName() string {
+	for _, m := range a.chat.models {
+		if m.id == a.chat.modelID {
+			return m.name
+		}
+	}
+	return ""
+}
+
+// menuChatModel is the ≡ row's dispatch: open the model picker, or
+// explain why it can't (the menuCopilotAuth rule — always clickable,
+// never a silent dead end). Picking a model doesn't require the panel
+// to be open, but it does need a session — a click before the agent is
+// up queues the picker behind the async start, the queuedPrompt
+// pattern, so the first click never just vanishes.
+func (a *App) menuChatModel() {
+	a.closeMenu()
+	switch {
+	case !a.copilot.enabled:
+		a.flash("Copilot is disabled — use ≡ → Enable Copilot first")
+	case a.chat.dead:
+		a.flash("Copilot chat unavailable — install copilot-language-server on PATH, then toggle Copilot off/on")
+	case a.chatReady():
+		a.openChatModelPicker()
+	default:
+		a.chat.modelPickWanted = true
+		a.chatEnsureStarted()
+		if a.chat.dead {
+			// ensureStarted's LookPath just failed — correct the story.
+			a.chat.modelPickWanted = false
+			a.flash("Copilot chat unavailable — install copilot-language-server on PATH")
+		} else {
+			a.flash("Copilot chat is starting — the model list will open shortly")
+		}
+	}
+}
+
+// openChatModelPicker shows the roster as a fuzzy picker. The current
+// model is excluded — offering a no-op row only clutters the list
+// (menuGitSwitchBranch's rule); it's named in the title instead. Each
+// row carries the premium-request multiplier so a pick is an informed
+// spend.
+func (a *App) openChatModelPicker() {
+	items := make([]paletteItem, 0, len(a.chat.models))
+	for _, m := range a.chat.models {
+		if m.id == a.chat.modelID {
+			continue
+		}
+		m := m // capture per-iteration for the closure
+		label := m.name
+		if m.usage != "" {
+			label += "  (" + m.usage + ")"
+		}
+		items = append(items, paletteItem{
+			label: label,
+			run:   func(app *App) { app.chatSetModel(m) },
+		})
+	}
+	if len(items) == 0 {
+		a.flash("Copilot chat offered no other models")
+		return
+	}
+	title := "Chat model"
+	if name := a.chatCurrentModelName(); name != "" {
+		title += " (current: " + name + ")"
+	}
+	a.openPicker(title, items)
+}
+
+// chatSetModel fires the async session/set_model call for a picked
+// roster entry; the outcome lands as a chatModelSetEvent.
+func (a *App) chatSetModel(m chatModel) {
+	if !a.chatReady() {
+		a.flash("Copilot chat is not connected")
+		return
+	}
+	client := a.chat.client
+	sid := a.chat.sessionID
+	scr := a.screen
+	go func() {
+		err := client.CallWithTimeout("session/set_model",
+			map[string]any{"sessionId": sid, "modelId": m.id},
+			nil, chatSessionTimeout)
+		_ = scr.PostEvent(&chatModelSetEvent{when: time.Now(), model: m, err: err})
+	}()
+}
+
+// handleChatModelSet lands the set_model outcome: on success record
+// the session's new model, note it in the transcript, and persist the
+// choice so the next session starts there. Failure only flashes — the
+// session keeps its previous model, so there's nothing to roll back.
+func (a *App) handleChatModelSet(e *chatModelSetEvent) {
+	if e.err != nil {
+		a.flash("Copilot chat: switching model failed: " + e.err.Error())
+		return
+	}
+	a.chat.modelID = e.model.id
+	a.chat.modelPref = e.model.id
+	a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: "Chat model: " + e.model.name})
+	a.flash("Chat model: " + e.model.name)
+	if err := userconfig.SaveChatModel(userconfig.DefaultPath(), e.model.id); err != nil {
+		a.flash("chatmodel: " + err.Error())
 	}
 }
 

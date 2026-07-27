@@ -584,3 +584,39 @@ func TestSaveSuggestions_RoundTripsAndPreserves(t *testing.T) {
 		t.Fatal("unknown key was dropped by the save round-trip")
 	}
 }
+
+// TestChatModel_LoadAndSave pins the chatmodel key: absent means ""
+// (agent default), any non-blank id loads trimmed and un-validated
+// (the roster is server-defined), and SaveChatModel round-trips
+// alongside hand-set keys like every other SaveX.
+func TestChatModel_LoadAndSave(t *testing.T) {
+	if got := Defaults().ChatModel; got != "" {
+		t.Fatalf("default ChatModel = %q, want empty", got)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"chatmodel\": \"  claude-sonnet-4.6  \",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ChatModel != "claude-sonnet-4.6" {
+		t.Fatalf("ChatModel = %q, want trimmed id", cfg.ChatModel)
+	}
+	if err := SaveChatModel(path, "gpt-5.5"); err != nil {
+		t.Fatalf("SaveChatModel: %v", err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.ChatModel != "gpt-5.5" {
+		t.Fatalf("round trip: ChatModel = %q", cfg.ChatModel)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}

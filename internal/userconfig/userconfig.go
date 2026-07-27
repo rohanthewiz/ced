@@ -32,6 +32,10 @@
 //	                        // completions while typing (needs copilot on)
 //	{"suggestions": "off"}  // sidecar may run (sign-in, chat later) but
 //	                        // never paints ghost text
+//	{"chatmodel": "<id>"}   // preferred Copilot chat model id (e.g.
+//	                        // "claude-sonnet-4.6"); "" or absent keeps
+//	                        // the agent's own default. Ids are
+//	                        // server-defined, so no validation here.
 //
 // The loader is best-effort the same way customactions is: missing
 // file → defaults, malformed file → error returned for the app to
@@ -105,6 +109,14 @@ type Config struct {
 	// out of just the ghost text — the most intrusive part. Defaults to
 	// on; moot while Copilot is off. Persisted by the ≡ toggle.
 	Suggestions bool
+
+	// ChatModel is the preferred Copilot chat model id, applied via
+	// ACP session/set_model after each session opens. Empty (the
+	// default) keeps the agent's own default. Deliberately not
+	// validated against a fixed list — the roster is server-defined
+	// and changes without an r-ed release; a stale id is silently
+	// ignored at apply time instead. Persisted by the ≡ model picker.
+	ChatModel string
 }
 
 // Defaults returns a Config populated with the values used when no
@@ -127,6 +139,7 @@ type fileFormat struct {
 	ExecMarks   string `json:"execmarks,omitempty"`
 	Copilot     string `json:"copilot,omitempty"`
 	Suggestions string `json:"suggestions,omitempty"`
+	ChatModel   string `json:"chatmodel,omitempty"`
 }
 
 // configFilePath resolves the r-ed config directory
@@ -283,6 +296,10 @@ func Load(path string) (Config, error) {
 			path, ff.Suggestions,
 		)
 	}
+
+	// Any non-blank value is accepted as-is — see Config.ChatModel for
+	// why there's no allowlist to check against.
+	cfg.ChatModel = strings.TrimSpace(ff.ChatModel)
 	return cfg, nil
 }
 
@@ -331,6 +348,12 @@ func SaveSuggestions(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "suggestions", val)
+}
+
+// SaveChatModel persists the preferred Copilot chat model id into the
+// config file at path. See saveKey for the round-trip guarantees.
+func SaveChatModel(path, id string) error {
+	return saveKey(path, "chatmodel", id)
 }
 
 // saveKey writes one preference into the config file at path,

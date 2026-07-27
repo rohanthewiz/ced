@@ -295,6 +295,16 @@ House rules:
   `session/cancel` (once per turn). A prompt typed mid-handshake is
   queued (`queuedPrompt`, the signInWanted pattern) — the first Enter
   must never vanish.
+- **Model selection**: `session/new` returns the model roster
+  (`availableModels` + `currentModelId`); the ≡ Copilot "Chat model"
+  row opens it as a fuzzy picker (openPicker, current model excluded,
+  premium multiplier shown) and picks go out as `session/set_model`.
+  The choice persists as `"chatmodel"` in config.json and is re-applied
+  during every handshake; a stale saved id is silently skipped — it
+  must never break the handshake. Roster/current live on `App.chat`
+  and die with the connection; `modelPref` survives. All Copilot menu
+  rows (auth, chat toggle, model, suggestions, kill switch) live in
+  the ≡ Copilot group — owner preference, one block.
 - **Chat only, by scope**: the handshake declares no fs capabilities
   and `session/request_permission` is auto-declined with the agent's
   own reject option (`chatAutoRejectPermission`, pure — it runs on
@@ -472,8 +482,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 51 group actions + 10 headers (63), height 69, dividers
-`[2, 5, 66]`.
+2 top-zone rows + 52 group actions + 10 headers (64), height 70, dividers
+`[2, 5, 67]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.

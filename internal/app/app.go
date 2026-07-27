@@ -213,10 +213,6 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuToggleExecMarks, enabled: alwaysTrue, labelFor: (*App).execMarksToggleLabel},
 			{shortcut: "esc `", action: (*App).menuToggleTerminal, enabled: alwaysTrue, labelFor: (*App).termToggleLabel},
 			{action: (*App).menuToggleTermDock, enabled: alwaysTrue, labelFor: (*App).termDockToggleLabel},
-			// Copilot chat lives with the view toggles, not the Copilot
-			// group: it's a show/hide-a-panel action, and burying it
-			// below the fold would hide phase 3's whole surface.
-			{action: (*App).menuToggleChat, enabled: alwaysTrue, labelFor: (*App).chatToggleLabel},
 		}},
 		{title: "History", collapsible: true, items: []menuItemDef{
 			{label: "Undo", shortcut: "esc u", action: (*App).menuUndo, enabled: (*App).hasUndo},
@@ -259,6 +255,11 @@ func builtinMenuGroups() []menuGroup {
 		// in is the first thing a new user reaches for. See copilot.go.
 		{title: "Copilot", collapsible: true, items: []menuItemDef{
 			{action: (*App).menuCopilotAuth, enabled: alwaysTrue, labelFor: (*App).copilotAuthLabel},
+			// The chat toggle moved here from the View group (owner
+			// preference): every Copilot surface — auth, chat, model,
+			// ghost text, the kill switch — reads as one block.
+			{action: (*App).menuToggleChat, enabled: alwaysTrue, labelFor: (*App).chatToggleLabel},
+			{action: (*App).menuChatModel, enabled: alwaysTrue, labelFor: (*App).chatModelLabel},
 			{action: (*App).menuToggleSuggestions, enabled: alwaysTrue, labelFor: (*App).suggestionsToggleLabel},
 			{action: (*App).menuToggleCopilot, enabled: alwaysTrue, labelFor: (*App).copilotToggleLabel},
 		}},
@@ -805,6 +806,7 @@ func (a *App) loadUserConfig() {
 	a.termDockLeft = cfg.TermDock == userconfig.TermDockLeft
 	a.copilot.enabled = cfg.Copilot
 	a.copilot.suggest = cfg.Suggestions
+	a.chat.modelPref = cfg.ChatModel
 }
 
 // refreshGitStatus re-runs `git status --porcelain` against the project
@@ -990,6 +992,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleChatTurnDone(e)
 	case *chatPermissionEvent:
 		a.handleChatPermission(e)
+	case *chatModelSetEvent:
+		a.handleChatModelSet(e)
 	}
 	// After every dispatch, let the LSP layer notice buffer edits and
 	// (re-)arm its didChange debounce. Runs unconditionally because

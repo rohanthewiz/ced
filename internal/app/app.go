@@ -264,6 +264,10 @@ func builtinMenuGroups() []menuGroup {
 			// ghost text, the kill switch — reads as one block.
 			{action: (*App).menuToggleChat, enabled: alwaysTrue, labelFor: (*App).chatToggleLabel},
 			{action: (*App).menuChatModel, enabled: alwaysTrue, labelFor: (*App).chatModelLabel},
+			// Keyboard twin of the transcript's trailing ⧉ button, for
+			// the same reason the git panel has one: the panel is
+			// mouse-driven, but macOS Terminal can swallow clicks.
+			{label: "Copy chat transcript", action: (*App).menuChatCopyAll, enabled: (*App).hasChatTranscript},
 			{action: (*App).menuToggleSuggestions, enabled: alwaysTrue, labelFor: (*App).suggestionsToggleLabel},
 			{action: (*App).menuToggleCopilot, enabled: alwaysTrue, labelFor: (*App).copilotToggleLabel},
 		}},
@@ -1468,6 +1472,10 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// gesture that clears it without moving the cursor. Purely a
 		// side effect: the menu/leader behavior below runs regardless.
 		a.copilotClearGhost()
+		// Same deal for a chat transcript highlight: Esc is the
+		// universal "drop that" gesture, and a stale highlight sitting
+		// in the panel has no other way out.
+		a.chatClearSelection()
 		// A real Esc always re-opens the full leader table — chain mode
 		// (repeatable-only) is an artifact of the previous action. Note
 		// whether the window was chain-armed before clearing: a chained
@@ -1558,8 +1566,14 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// text clipboard into it — same convenience-layer contract as
 		// the terminal branch below.
 		if a.chat.open && a.chat.focused {
-			if ev.Rune() == 'v' {
+			switch ev.Rune() {
+			case 'v':
 				a.chatPasteClip()
+			case 'c':
+				// Cmd+C lifts the transcript selection — the panel
+				// captures the mouse, so this is the only copy gesture
+				// the terminal can't do for us.
+				a.chatCopySelection()
 			}
 			return
 		}
@@ -1848,6 +1862,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
+	// Chat transcript drag-select: the panel captures the mouse, so the
+	// terminal's own selection never reaches it — this is the editor's
+	// replacement, same shape as the editor pane's drag.
+	if leftDown && a.dragMode == "chatsel" {
+		a.chatPanelDrag(x, y)
+		return
+	}
+
 	// Git panel resize drag: the header rule follows the mouse row.
 	if leftDown && a.dragMode == "gitpanel" {
 		a.dragGitPanelTo(y)
@@ -1890,7 +1912,7 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// The chat strip spans y==0 like a left-docked terminal, so its
 		// hit-test also runs before the tab-bar row case.
 		case a.chatPanelContains(x, y):
-			a.chatPanelPress(x, y)
+			a.dragMode = a.chatPanelPress(x, y)
 		// A left-docked terminal strip spans y==0, so its hit-test must
 		// run before the tab-bar row case; a bottom-docked strip never
 		// includes y==0, so the early check is harmless in that layout.

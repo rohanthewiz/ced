@@ -918,3 +918,215 @@ func TestChatInitialize_ModelRoster(t *testing.T) {
 		t.Errorf("failed set should keep the default, got %q", sess.modelID)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Selection + copy
+// -----------------------------------------------------------------------------
+
+// seedChatCopyApp opens a panel with a two-message transcript so the
+// selection/copy tests all point at the same derived rows.
+func seedChatCopyApp(t *testing.T) *App {
+	t.Helper()
+	a := newTestApp(t, t.TempDir())
+	wireChat(a)
+	a.chat.open = true
+	a.chat.msgs = []chatMsg{
+		{role: chatRoleUser, text: "hello"},
+		{role: chatRoleAgent, text: "world"},
+	}
+	return a
+}
+
+// TestChatRows_CopyAffordances pins the derived copy rows: every agent
+// response trails one ⧉ row carrying its own message index, the user's
+// prompt gets none (it's their own text), and the transcript ends with
+// the copy-conversation row.
+func TestChatRows_CopyAffordances(t *testing.T) {
+	a := seedChatCopyApp(t)
+	rows := a.chatRows(40)
+
+	var copyMsgIdx []int
+	copyAll := 0
+	for _, r := range rows {
+		switch r.action {
+		case chatRowCopyMsg:
+			copyMsgIdx = append(copyMsgIdx, r.msgIdx)
+		case chatRowCopyAll:
+			copyAll++
+		}
+	}
+	if len(copyMsgIdx) != 1 || copyMsgIdx[0] != 1 {
+		t.Errorf("per-response copy rows = %v, want exactly [1] (the agent message)", copyMsgIdx)
+	}
+	if copyAll != 1 {
+		t.Errorf("copy-conversation rows = %d, want 1", copyAll)
+	}
+	if last := rows[len(rows)-1]; last.action != chatRowCopyAll {
+		t.Errorf("last row = %+v, want the copy-conversation row", last)
+	}
+
+	// An empty transcript has nothing to copy, so it grows no buttons.
+	a.chat.msgs = nil
+	if got := a.chatRows(40); len(got) != 0 {
+		t.Errorf("empty transcript rows = %v, want none", got)
+	}
+}
+
+// TestChatSelection_DragThenCmdC drives the whole gesture through the
+// real entry points: a press in the transcript starts the "chatsel"
+// drag, motion extends it, and Cmd+C lifts the highlighted text onto
+// both clipboards and clears the highlight.
+func TestChatSelection_DragThenCmdC(t *testing.T) {
+	a := seedChatCopyApp(t)
+	a.chat.focused = true
+	px, py, _, _ := a.chatPanelRect()
+
+	// Row 0 is "❯ hello": select columns 2..5 → "hel".
+	if mode := a.chatPanelPress(px+1+2, py+1); mode != "chatsel" {
+		t.Fatalf("press drag mode = %q, want chatsel", mode)
+	}
+	a.chatPanelDrag(px+1+5, py+1)
+	if got := a.chatSelectionText(); got != "hel" {
+		t.Fatalf("selection = %q, want %q", got, "hel")
+	}
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModMeta))
+	if a.clipBuf != "hel" || a.clipKind != clipText {
+		t.Errorf("clipboard = %q (kind %v), want %q text", a.clipBuf, a.clipKind, "hel")
+	}
+	if a.chat.selActive {
+		t.Error("copy should consume the highlight")
+	}
+}
+
+// TestChatSelection_MultiRowSkipsButtons pins the two rules a
+// cross-message drag has to obey: rows join with newlines, and the ⧉
+// affordance rows in between contribute nothing — a pasted selection
+// must never contain a button label.
+func TestChatSelection_MultiRowSkipsButtons(t *testing.T) {
+	a := seedChatCopyApp(t)
+	rows := a.chatRows(a.chatRowWidth())
+	last := len(rows) - 1
+
+	a.chat.selActive = true
+	a.chat.selAnchor = chatPos{row: 0, col: 0}
+	a.chat.selHead = chatPos{row: last, col: 99}
+
+	got := a.chatSelectionText()
+	if strings.Contains(got, "copy") {
+		t.Errorf("selection %q leaked a ⧉ button label", got)
+	}
+	if !strings.Contains(got, "❯ hello") || !strings.Contains(got, "world") {
+		t.Errorf("selection = %q, want both messages", got)
+	}
+}
+
+// TestChatSelection_EscClears pins Esc as the highlight's way out —
+// there is no other gesture that drops it without copying.
+func TestChatSelection_EscClears(t *testing.T) {
+	a := seedChatCopyApp(t)
+	a.chat.focused = true
+	px, py, _, _ := a.chatPanelRect()
+	a.chatPanelPress(px+1, py+1)
+	a.chatPanelDrag(px+1+4, py+1)
+	if !a.chatHasSelectionForTest() {
+		t.Fatal("drag should select")
+	}
+	a.handleKey(tcell.NewEventKey(tcell.KeyEsc, 0, 0))
+	if a.chat.selActive {
+		t.Error("Esc should clear the transcript selection")
+	}
+}
+
+// chatHasSelectionForTest reports a live non-empty selection.
+func (a *App) chatHasSelectionForTest() bool {
+	_, _, ok := a.chatSelRange()
+	return ok
+}
+
+// TestChatActionPress_CopiesResponse pins the per-response ⧉ button:
+// clicking it copies the LOGICAL message (original line breaks), not
+// the wrapped rows on screen, and the press never starts a selection.
+func TestChatActionPress_CopiesResponse(t *testing.T) {
+	a := seedChatCopyApp(t)
+	a.chat.msgs[1].text = "line one\nline two"
+	px, py, _, _ := a.chatPanelRect()
+	w := a.chatRowWidth()
+	rows := a.chatRows(w)
+
+	idx := -1
+	for i, r := range rows {
+		if r.action == chatRowCopyMsg {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		t.Fatal("no per-response copy row")
+	}
+	btn := chatActionRect(rows[idx], px+1, py+1+idx, w)
+	if mode := a.chatPanelPress(btn.x+1, btn.y); mode != "" {
+		t.Errorf("⧉ press drag mode = %q, want none", mode)
+	}
+	if a.clipBuf != "line one\nline two" {
+		t.Errorf("clipboard = %q, want the whole message verbatim", a.clipBuf)
+	}
+	if a.chat.selActive {
+		t.Error("⧉ press should not start a selection")
+	}
+}
+
+// TestChatActionPress_CopiesConversation pins the trailing button and
+// its ≡ twin: both put the labelled whole transcript on the clipboard.
+func TestChatActionPress_CopiesConversation(t *testing.T) {
+	a := seedChatCopyApp(t)
+	px, py, _, _ := a.chatPanelRect()
+	w := a.chatRowWidth()
+	rows := a.chatRows(w)
+	idx := len(rows) - 1
+
+	btn := chatActionRect(rows[idx], px+1, py+1+idx, w)
+	a.chatPanelPress(btn.x+1, btn.y)
+	want := "You:\nhello\n\nCopilot:\nworld"
+	if a.clipBuf != want {
+		t.Errorf("clipboard = %q, want %q", a.clipBuf, want)
+	}
+
+	a.clipBuf = ""
+	a.menuChatCopyAll()
+	if a.clipBuf != want {
+		t.Errorf("≡ twin clipboard = %q, want %q", a.clipBuf, want)
+	}
+	if !a.hasChatTranscript() {
+		t.Error("hasChatTranscript should be true with messages")
+	}
+	a.chat.msgs = nil
+	if a.hasChatTranscript() {
+		t.Error("hasChatTranscript should be false with an empty transcript")
+	}
+}
+
+// TestChatDrawSelectionHighlight verifies the highlight actually
+// reaches the screen: the selected cells carry the theme's selection
+// background, the ones beside them don't.
+func TestChatDrawSelectionHighlight(t *testing.T) {
+	a := seedChatCopyApp(t)
+	px, py, _, _ := a.chatPanelRect()
+	a.chat.selActive = true
+	a.chat.selAnchor = chatPos{row: 0, col: 2}
+	a.chat.selHead = chatPos{row: 0, col: 5}
+	a.drawChatPanel()
+	a.screen.Show()
+
+	scr := a.screen.(tcell.SimulationScreen)
+	cells, cw, _ := scr.GetContents()
+	bgAt := func(x, y int) tcell.Color {
+		_, bg, _ := cells[y*cw+x].Style.Decompose()
+		return bg
+	}
+	if got := bgAt(px+1+3, py+1); got != a.theme.Selection {
+		t.Errorf("selected cell bg = %v, want %v", got, a.theme.Selection)
+	}
+	if got := bgAt(px+1+1, py+1); got == a.theme.Selection {
+		t.Error("cell before the selection should not be highlighted")
+	}
+}

@@ -102,13 +102,44 @@ type chatMsg struct {
 	text string
 }
 
+// chatRowAction marks the derived rows that are affordances rather
+// than transcript text: the per-response and whole-conversation copy
+// buttons. The zero value is "ordinary text row", so every existing
+// chatRow literal keeps meaning what it meant.
+type chatRowAction int
+
+const (
+	chatRowNone    chatRowAction = iota // ordinary transcript text
+	chatRowCopyMsg                      // ⧉ for the message at msgIdx
+	chatRowCopyAll                      // ⧉ for the whole conversation
+)
+
 // chatRow is one wrapped display row plus the styling facts the paint
-// loop needs: the source role and whether the row sits inside a
-// fenced code block.
+// loop needs: the source role, whether the row sits inside a fenced
+// code block, and (for the ⧉ affordances) which message it copies.
 type chatRow struct {
-	text string
-	role chatMsgRole
-	code bool
+	text   string
+	role   chatMsgRole
+	code   bool
+	action chatRowAction
+	msgIdx int // index into chat.msgs; only meaningful for chatRowCopyMsg
+}
+
+// chatPos addresses a character in the DERIVED row space (wrapped row
+// index + rune column), not the transcript's logical text. Selection
+// lives here because that's what the user actually points at, and it
+// survives scrolling for free — row indices count from the top of the
+// transcript, not the viewport.
+type chatPos struct {
+	row, col int
+}
+
+// before reports whether p sorts ahead of q in reading order.
+func (p chatPos) before(q chatPos) bool {
+	if p.row != q.row {
+		return p.row < q.row
+	}
+	return p.col < q.col
 }
 
 // chatModel is one entry of the agent's model roster: the wire id
@@ -166,6 +197,15 @@ type chatState struct {
 
 	msgs   []chatMsg
 	scroll int // first visible wrapped row
+
+	// Transcript selection, in derived-row coordinates. selActive is set
+	// by a press in the transcript body and stays set (so the highlight
+	// persists after the mouse comes up) until the next press, Esc, or a
+	// copy that consumes it. anchor is where the drag started, head
+	// where it is now — either may sort first.
+	selActive bool
+	selAnchor chatPos
+	selHead   chatPos
 
 	input     textField
 	history   []string
@@ -658,6 +698,9 @@ func (a *App) chatAppendMsg(m chatMsg) {
 	a.chat.msgs = append(a.chat.msgs, m)
 	if over := len(a.chat.msgs) - chatTranscriptMax; over > 0 {
 		a.chat.msgs = a.chat.msgs[over:]
+		// Trimming renumbers every derived row, so a selection anchored
+		// in the old numbering would silently point at other text.
+		a.chatClearSelection()
 	}
 	if atBottom {
 		a.chat.scroll = a.chatMaxScroll()
@@ -679,11 +722,23 @@ func (a *App) chatAppendAgentText(text string) {
 	}
 }
 
+// chatCopyMsgLabel / chatCopyAllLabel are the ⧉ affordances' text —
+// the double-rectangle glyph plus a word, right-aligned on their own
+// derived row. A whole row (rather than a cell squeezed beside prose)
+// keeps hit-testing to "which row did they click", the same trick the
+// transcript already uses for everything else.
+const (
+	chatCopyMsgLabel = "⧉ copy "
+	chatCopyAllLabel = "⧉ copy conversation "
+)
+
 // chatRows derives the display rows for the current transcript at
 // width w: messages word-wrapped, separated by blank rows, with fenced
 // code blocks hard-wrapped (indentation is meaning there) and flagged
-// for the code style. Recomputed on demand — the transcript is small
-// (chatTranscriptMax) and deriving keeps resize/re-wrap free.
+// for the code style. Each agent response is trailed by its own ⧉ copy
+// row, and the whole transcript by a copy-conversation row. Recomputed
+// on demand — the transcript is small (chatTranscriptMax) and deriving
+// keeps resize/re-wrap free.
 func (a *App) chatRows(w int) []chatRow {
 	if w < 1 {
 		w = 1
@@ -725,8 +780,40 @@ func (a *App) chatRows(w int) []chatRow {
 				rows = append(rows, chatRow{text: seg, role: m.role})
 			}
 		}
+		// Per-response copy affordance. Only agent prose gets one: the
+		// user's own prompts are already in their head, and tool/info
+		// notes are editor chatter, not content worth lifting out.
+		if m.role == chatRoleAgent && strings.TrimSpace(m.text) != "" {
+			rows = append(rows, chatRow{role: m.role, action: chatRowCopyMsg, msgIdx: i})
+		}
+	}
+	if len(a.chat.msgs) > 0 {
+		rows = append(rows, chatRow{}, chatRow{action: chatRowCopyAll})
 	}
 	return rows
+}
+
+// chatRowLabel is an action row's display text, "" for ordinary rows.
+func chatRowLabel(row chatRow) string {
+	switch row.action {
+	case chatRowCopyMsg:
+		return chatCopyMsgLabel
+	case chatRowCopyAll:
+		return chatCopyAllLabel
+	}
+	return ""
+}
+
+// chatActionRect places an action row's button flush with the panel's
+// right edge — the single geometry source draw and hit-testing share
+// (the btnRect rule). A row too narrow for the label yields a zero-width
+// rect, which contains() can never match.
+func chatActionRect(row chatRow, x, ry, w int) btnRect {
+	lw := runeLen(chatRowLabel(row))
+	if lw == 0 || lw > w {
+		return btnRect{x: x, y: ry}
+	}
+	return btnRect{x: x + w - lw, y: ry, w: lw}
 }
 
 // wrapChatText greedy-word-wraps one logical line to width w. An empty
@@ -767,6 +854,208 @@ func wrapChatText(s string, w int) []string {
 		out = append(out, line)
 	}
 	return out
+}
+
+// -----------------------------------------------------------------------------
+// Selection + copy
+// -----------------------------------------------------------------------------
+//
+// The panel captures the mouse, so the terminal's own drag-to-select
+// never reaches the transcript — the editor has to provide selection
+// itself, exactly as it does for the code pane. Selection lives in
+// derived-row coordinates (see chatPos): what the user drags across is
+// wrapped rows, and anchoring there means scrolling doesn't shift the
+// highlight while re-wrapping simply re-derives it.
+
+// chatRowWidth is the transcript's text width — the panel minus its
+// one-column gutters. The single source for every rows() call that has
+// to agree with what's on screen.
+func (a *App) chatRowWidth() int {
+	_, _, pw, _ := a.chatPanelRect()
+	if w := pw - 2; w > 0 {
+		return w
+	}
+	return 1
+}
+
+// chatClearSelection drops any transcript highlight. Called by Esc, by
+// the next press, and after a copy consumes it.
+func (a *App) chatClearSelection() {
+	a.chat.selActive = false
+	a.chat.selAnchor = chatPos{}
+	a.chat.selHead = chatPos{}
+}
+
+// chatSelRange normalizes the anchor/head pair into reading order,
+// reporting false when there is no selection or it is empty (a plain
+// click, which arms an anchor but selects nothing).
+func (a *App) chatSelRange() (start, end chatPos, ok bool) {
+	if !a.chat.selActive {
+		return chatPos{}, chatPos{}, false
+	}
+	start, end = a.chat.selAnchor, a.chat.selHead
+	if end.before(start) {
+		start, end = end, start
+	}
+	if start == end {
+		return start, end, false
+	}
+	return start, end, true
+}
+
+// chatRowSelSpan returns the [from, to) rune columns of row that fall
+// inside the selection, or (0, 0) when none do. Rune length is passed
+// in because the caller already has the row's runes in hand.
+func (a *App) chatRowSelSpan(row, runeCount int) (from, to int) {
+	start, end, ok := a.chatSelRange()
+	if !ok || row < start.row || row > end.row {
+		return 0, 0
+	}
+	from, to = 0, runeCount
+	if row == start.row {
+		from = min(start.col, runeCount)
+	}
+	if row == end.row {
+		to = min(end.col, runeCount)
+	}
+	if from > to {
+		from = to
+	}
+	return from, to
+}
+
+// chatPosAt maps a screen cell to a transcript position, clamped into
+// the derived rows so a drag that leaves the panel still lands
+// somewhere sane (the editorDrag contract).
+func (a *App) chatPosAt(x, y int) chatPos {
+	px, py, _, _ := a.chatPanelRect()
+	rows := a.chatRows(a.chatRowWidth())
+	if len(rows) == 0 {
+		return chatPos{}
+	}
+	row := a.chat.scroll + (y - py - 1)
+	if row < 0 {
+		row = 0
+	}
+	if last := len(rows) - 1; row > last {
+		row = last
+	}
+	n := runeLen(rows[row].text)
+	col := x - (px + 1)
+	if col < 0 {
+		col = 0
+	}
+	if col > n {
+		col = n
+	}
+	return chatPos{row: row, col: col}
+}
+
+// chatSelectionText renders the highlighted rows back to text. Action
+// rows are skipped — a selection dragged past a ⧉ affordance must not
+// paste the button's label. Rows join with newlines, so a wrapped
+// paragraph copies as the wrapped lines the user actually saw; that's
+// the honest reading of a row-space selection.
+func (a *App) chatSelectionText() string {
+	start, end, ok := a.chatSelRange()
+	if !ok {
+		return ""
+	}
+	rows := a.chatRows(a.chatRowWidth())
+	var parts []string
+	for r := start.row; r <= end.row && r < len(rows); r++ {
+		if rows[r].action != chatRowNone {
+			continue
+		}
+		runes := []rune(rows[r].text)
+		from, to := a.chatRowSelSpan(r, len(runes))
+		parts = append(parts, string(runes[from:to]))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// chatTranscriptText renders the whole conversation as plain text for
+// the copy-conversation button. Roles become "You:" / "Copilot:"
+// labels — the ❯ gutter and glyph prefixes are screen furniture, and
+// what lands in the clipboard usually ends up in an issue or a commit
+// message, where named speakers read better.
+func (a *App) chatTranscriptText() string {
+	var parts []string
+	for _, m := range a.chat.msgs {
+		switch m.role {
+		case chatRoleUser:
+			parts = append(parts, "You:\n"+m.text)
+		case chatRoleAgent:
+			parts = append(parts, "Copilot:\n"+m.text)
+		default:
+			parts = append(parts, m.text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// chatCopy pushes text onto both clipboards — the editor's internal
+// buffer (so Paste works without a cooperating terminal) and the host's
+// via OSC 52 — and flashes what happened. Routed through
+// copilotCopyCode, the stubbable var the sign-in flow already uses, so
+// no test writes the dev machine's clipboard.
+func (a *App) chatCopy(text, what string) {
+	if text == "" {
+		return
+	}
+	a.clipBuf = text
+	a.clipKind = clipText
+	if err := copilotCopyCode(text); err != nil {
+		a.flash(what + " copied (system clipboard unavailable)")
+		return
+	}
+	a.flash(what + " copied")
+}
+
+// chatCopySelection is Cmd+C while the chat has focus: lift the
+// highlighted text, then drop the highlight — the copy consumed it,
+// and a lingering highlight over text you've already taken reads as
+// stale. With nothing selected it says what to do instead of failing
+// silently.
+func (a *App) chatCopySelection() {
+	text := a.chatSelectionText()
+	if text == "" {
+		a.flash("Drag to select chat text first — or click ⧉ to copy a response")
+		return
+	}
+	a.chatCopy(text, "Selection")
+	a.chatClearSelection()
+}
+
+// chatCopyMessage copies one transcript message whole — the ⧉ button
+// beside a response. Copies the logical message, NOT the wrapped rows:
+// a response lifted for pasting elsewhere should carry its original
+// line breaks, not the strip's.
+func (a *App) chatCopyMessage(idx int) {
+	if idx < 0 || idx >= len(a.chat.msgs) {
+		return
+	}
+	a.chatCopy(a.chat.msgs[idx].text, "Response")
+}
+
+// chatCopyTranscript copies the whole conversation.
+func (a *App) chatCopyTranscript() {
+	if len(a.chat.msgs) == 0 {
+		a.flash("Nothing in the chat to copy yet")
+		return
+	}
+	a.chatCopy(a.chatTranscriptText(), "Conversation")
+}
+
+// hasChatTranscript gates the ≡ row: something to copy exists.
+func (a *App) hasChatTranscript() bool { return len(a.chat.msgs) > 0 }
+
+// menuChatCopyAll is the keyboard twin of the transcript's trailing ⧉
+// button — the git-panel-actions rule: a mouse-driven panel still needs
+// a menu path, because macOS Terminal can swallow clicks.
+func (a *App) menuChatCopyAll() {
+	a.closeMenu()
+	a.chatCopyTranscript()
 }
 
 // -----------------------------------------------------------------------------
@@ -1149,25 +1438,76 @@ func (a *App) handleChatKey(ev *tcell.EventKey) {
 	}
 }
 
-// chatPanelPress routes an initial left press inside the panel. Body
-// clicks focus the input; a click on the input row also repositions
-// the caret.
-func (a *App) chatPanelPress(x, y int) {
+// chatPanelPress routes an initial left press inside the panel and
+// names the drag mode it starts ("" for none, "chatsel" for a
+// transcript drag-select — the gitPanelPress convention). Body clicks
+// focus the input; a click on the input row also repositions the
+// caret; a click on a ⧉ affordance copies instead of selecting.
+func (a *App) chatPanelPress(x, y int) string {
 	if a.chatCloseRect().contains(x, y) {
 		a.chat.open = false
 		a.chat.focused = false
-		return
+		return ""
 	}
 	if a.chat.turnActive && a.chatStopRect().contains(x, y) {
 		a.chatInterrupt()
-		return
+		return ""
 	}
 	a.chat.focused = true
 	a.term.focused = false
 	iy, start, end := a.chatInputSpan()
 	if y == iy {
 		a.chat.input.clickAt(start, end, x)
+		return ""
 	}
+	if a.chatActionPress(x, y) {
+		return ""
+	}
+	// Anywhere else in the transcript body starts a fresh selection.
+	// Empty until the drag moves, so a plain click just clears.
+	_, py, _, ph := a.chatPanelRect()
+	if y <= py || y >= py+ph-1 {
+		return ""
+	}
+	pos := a.chatPosAt(x, y)
+	a.chat.selActive = true
+	a.chat.selAnchor = pos
+	a.chat.selHead = pos
+	return "chatsel"
+}
+
+// chatActionPress fires the ⧉ button under (x, y) if one is there,
+// reporting whether it consumed the press. Rect math goes through
+// chatActionRect so the click target can't drift from the glyph.
+func (a *App) chatActionPress(x, y int) bool {
+	px, py, _, _ := a.chatPanelRect()
+	w := a.chatRowWidth()
+	rows := a.chatRows(w)
+	idx := a.chat.scroll + (y - py - 1)
+	if idx < 0 || idx >= len(rows) {
+		return false
+	}
+	row := rows[idx]
+	if row.action == chatRowNone || !chatActionRect(row, px+1, y, w).contains(x, y) {
+		return false
+	}
+	switch row.action {
+	case chatRowCopyMsg:
+		a.chatCopyMessage(row.msgIdx)
+	case chatRowCopyAll:
+		a.chatCopyTranscript()
+	}
+	return true
+}
+
+// chatPanelDrag extends the transcript selection to the mouse. Called
+// from the "chatsel" drag continuation, so it also runs for events
+// outside the panel — chatPosAt clamps them.
+func (a *App) chatPanelDrag(x, y int) {
+	if !a.chat.selActive {
+		return
+	}
+	a.chat.selHead = a.chatPosAt(x, y)
 }
 
 // chatPasteClip inserts the text clipboard into the input line — the
@@ -1241,7 +1581,7 @@ func (a *App) drawChatPanel() {
 		if idx < 0 || idx >= len(rows) {
 			continue
 		}
-		a.drawChatRow(rows[idx], px+1, ry, pw-2)
+		a.drawChatRow(rows[idx], px+1, ry, pw-2, idx)
 	}
 
 	// Input row: prompt gutter + editable field.
@@ -1300,12 +1640,25 @@ func (a *App) chatHeaderStatus() string {
 
 // drawChatRow paints one wrapped transcript row in its role's style:
 // user prompts in accent, code rows set off on the sidebar background,
-// tool notes muted, editor info muted italic.
-func (a *App) drawChatRow(row chatRow, x, ry, w int) {
-	if w <= 0 || row.text == "" {
+// tool notes muted, editor info muted italic. Action rows paint their
+// ⧉ affordance right-aligned instead. idx is the row's index in the
+// derived row space — what the selection highlight is keyed on.
+func (a *App) drawChatRow(row chatRow, x, ry, w int, idx int) {
+	if w <= 0 {
 		return
 	}
 	th := a.theme
+	if row.action != chatRowNone {
+		btn := chatActionRect(row, x, ry, w)
+		if btn.w > 0 {
+			drawAt(a.screen, btn.x, btn.y, chatRowLabel(row),
+				tcell.StyleDefault.Background(th.BG).Foreground(th.Subtle))
+		}
+		return
+	}
+	if row.text == "" {
+		return
+	}
 	st := tcell.StyleDefault.Background(th.BG).Foreground(th.Text)
 	switch {
 	case row.code:
@@ -1322,6 +1675,19 @@ func (a *App) drawChatRow(row chatRow, x, ry, w int) {
 		text = string([]rune(text)[:w-1]) + "…"
 	}
 	drawAt(a.screen, x, ry, text, st)
+	// Selection last, so the highlight wins over every role style —
+	// same precedence the editor's decoration merge gives it. Spans are
+	// measured against the FULL row (chatRowSelSpan's runeCount), then
+	// clipped to what actually fits.
+	from, to := a.chatRowSelSpan(idx, runeLen(row.text))
+	if from == to {
+		return
+	}
+	runes := []rune(text)
+	selSt := st.Background(th.Selection).Foreground(th.Text)
+	for c := from; c < to && c < len(runes); c++ {
+		a.screen.SetContent(x+c, ry, runes[c], nil, selSt)
+	}
 }
 
 // drawChatSplitter paints the strip's resize handle on its

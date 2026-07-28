@@ -317,6 +317,23 @@ House rules:
   single-line `textField` (Enter sends, Up/Down history, Cmd+V pastes
   with newlines flattened); a multi-line composer is a known
   follow-up, not an accident.
+- **Selection + copy live in the panel, not the terminal.** The app
+  captures the mouse, so the terminal's own drag-to-select can never
+  reach the transcript — the editor provides it. Selection is a
+  `chatPos` pair in DERIVED-row space (wrapped row index + rune col),
+  which is what the user actually drags across and what scrolling
+  leaves alone; press starts the `"chatsel"` drag mode, Cmd+C lifts it
+  (`chatCopySelection`), Esc drops it, and a transcript trim clears it
+  (row numbers shift). Copy affordances are derived ROWS too
+  (`chatRowAction`), never cells squeezed beside prose: one `⧉ copy`
+  row after each agent response and one `⧉ copy conversation` row at
+  the end, so hit-testing stays "which row was clicked" and geometry
+  goes through the single `chatActionRect` (btnRect rule). A ⧉ button
+  copies the LOGICAL message (original line breaks); a drag-selection
+  copies the wrapped rows the user saw, minus any action-row labels.
+  All chat copies route through `copilotCopyCode`, the stubbable var
+  tests already neuter. The ≡ Copilot "Copy chat transcript" row is the
+  keyboard twin of the trailing button.
 - Tests inject `fakeCopilotConn` (the chat layer shares the sidecar's
   conn interface on purpose); newTestApp sets `a.chat.dead = true` so
   nothing ever spawns the real binary.
@@ -512,8 +529,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 52 group actions + 10 headers (64), height 70, dividers
-`[2, 5, 67]`.
+2 top-zone rows + 54 group actions + 10 headers (66), height 72, dividers
+`[2, 5, 69]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.

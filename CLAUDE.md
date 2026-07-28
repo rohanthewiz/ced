@@ -321,6 +321,36 @@ House rules:
   conn interface on purpose); newTestApp sets `a.chat.dead = true` so
   nothing ever spawns the real binary.
 
+### Git panel checkboxes + Actions (app/gitpanel.go + gitpanelactions.go)
+The panel's checkbox is a **multi-selection tick, not a stage toggle**.
+It used to stage/unstage on click, which capped the panel at exactly one
+verb; the tick now feeds the header's `Actions ▾` button, and staging is
+one row in that list beside unstage, discard, delete, open, copy path,
+commit, and the two select-all/clear helpers. House rules:
+
+- **Don't put staging back on the checkbox.** Stage state is carried by
+  the porcelain XY code column, drawn VERBATIM (`" M"` unstaged, `"M "`
+  staged, `"MM"` both — exactly `git status -s`) with the index char
+  bolded. Trimming that code collapses staged and unstaged into one
+  glyph and the panel loses its only staged indicator.
+- **The picker, not a dropdown**: `Actions ▾` opens `openPicker`, per
+  the modal house rule that every choose-one-from-a-list UI reuses the
+  palette. Rows are omitted when they'd no-op (no Unstage with an empty
+  index) rather than dimmed.
+- **Targets fall back to the highlighted row** when nothing is ticked
+  (`gitPanelTargets`), so the first click on Actions is already useful.
+  Ticks are keyed by absolute path and **pruned on every refresh** — a
+  tick for a file that left the change list would silently widen the
+  next bulk action.
+- The header rule is still the height-drag handle, so `gitPanelPress`
+  carves out `gitPanelActionsRect` and `gitPanelCloseRect` before
+  starting a drag. Both rects are the single source draw and hit-test
+  share (the btnRect rule).
+- Writes go through `runGitCmd` (one fork for the whole set, failures in
+  the info modal); Discard and Delete confirm first. The ≡ Git group's
+  "Git panel actions" row is the keyboard twin of the button — the panel
+  is mouse-driven, but macOS Terminal can swallow clicks.
+
 ### Navigation history (app/nav.go)
 Browser-style Go back / Go forward across files (≡ menu, Esc-o / Esc-O,
 Alt+Left / Alt+Right). Recording happens CENTRALLY: openFile records the

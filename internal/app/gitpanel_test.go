@@ -280,11 +280,44 @@ func TestDrawGitPanel_Smoke(t *testing.T) {
 	a.draw()
 	a.screen.Show()
 	content := screenText(a)
-	// "[ ]" is the unstaged checkbox for the " M" row.
-	for _, want := range []string{"Git changes", "[ ]", "main.go", "+new line", "-old line", "✕"} {
+	// "[ ]" is the unticked selection box for the untouched row.
+	for _, want := range []string{"Actions ▾", "Git changes", "[ ]", "main.go", "+new line", "-old line", "✕"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("drawn panel missing %q:\n%s", want, content)
 		}
+	}
+	if strings.Contains(content, "selected") {
+		t.Fatalf("no ticks, yet the header shows a count:\n%s", content)
+	}
+}
+
+// TestDrawGitPanelHeader_ShowsTickCount pins the header's feedback loop:
+// once a box is ticked the count appears beside the ✕, so the user can
+// see what Actions ▾ is about to operate on. The row itself flips to the
+// ticked glyph.
+func TestDrawGitPanelHeader_ShowsTickCount(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanel.open = true
+	a.gitPanel.files = []gitPanelFile{
+		{Path: "/p/main.go", Rel: "main.go", Code: " M"},
+		{Path: "/p/other.go", Rel: "other.go", Code: "M "},
+	}
+	a.gitPanelSelectAll()
+
+	a.draw()
+	a.screen.Show()
+	content := screenText(a)
+	if !strings.Contains(content, "2 selected") {
+		t.Fatalf("header missing the tick count:\n%s", content)
+	}
+	if !strings.Contains(content, "[x]") {
+		t.Fatalf("ticked row missing the [x] glyph:\n%s", content)
+	}
+	// The porcelain code is drawn verbatim so " M" (unstaged) and "M "
+	// (staged) stay distinguishable — that column is now the panel's
+	// only staged indicator.
+	if !strings.Contains(content, "[x]  M ") {
+		t.Fatalf("unstaged row lost its leading-space code:\n%s", content)
 	}
 }
 
@@ -479,22 +512,41 @@ func TestResizeGitPanel_ClampsAndOverridesAuto(t *testing.T) {
 func TestHandleMouse_GitPanelHeaderDrag(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.gitPanel.open = true
-	px, py, _, _ := a.gitPanelRect()
+	// One entry so the Actions picker has rows to show — an empty panel
+	// flashes instead of opening, which isn't what this test is about.
+	a.gitPanel.files = []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
+	_, py, _, _ := a.gitPanelRect()
 
-	a.handleMouse(tcell.NewEventMouse(px+5, py, tcell.Button1, 0))
+	// Bare rule, clear of both header buttons.
+	grab := a.gitPanelActionsRect()
+	gx := grab.x + grab.w + 1
+	a.handleMouse(tcell.NewEventMouse(gx, py, tcell.Button1, 0))
 	if a.dragMode != "gitpanel" {
 		t.Fatalf("dragMode = %q, want gitpanel", a.dragMode)
 	}
-	a.handleMouse(tcell.NewEventMouse(px+5, py-3, tcell.Button1, 0))
+	a.handleMouse(tcell.NewEventMouse(gx, py-3, tcell.Button1, 0))
 	if got := a.gitPanelHeight(); got != a.height-1-(py-3) {
 		t.Fatalf("dragged height = %d, want %d", got, a.height-1-(py-3))
 	}
-	a.handleMouse(tcell.NewEventMouse(px+5, py-3, tcell.ButtonNone, 0))
+	a.handleMouse(tcell.NewEventMouse(gx, py-3, tcell.ButtonNone, 0))
 	if a.dragMode != "" {
 		t.Fatalf("dragMode after release = %q, want cleared", a.dragMode)
 	}
 
-	// The ✕ is exempt from the grab handle — pressing it collapses.
+	// Actions ▾ is exempt from the grab handle — pressing it opens the
+	// picker rather than seizing the rule. Re-read the rect: the drag
+	// above moved the header row.
+	grab = a.gitPanelActionsRect()
+	a.handleMouse(tcell.NewEventMouse(grab.x+1, grab.y, tcell.Button1, 0))
+	if a.dragMode != "" {
+		t.Fatalf("Actions press started drag %q", a.dragMode)
+	}
+	if _, ok := a.modal.(*paletteModal); !ok {
+		t.Fatalf("Actions press opened %T, want the action picker", a.modal)
+	}
+	a.closeModal()
+
+	// The ✕ is exempt too — pressing it collapses.
 	btn := a.gitPanelCloseRect()
 	a.handleMouse(tcell.NewEventMouse(btn.x+1, btn.y, tcell.Button1, 0))
 	if a.gitPanel.open || a.dragMode != "" {
@@ -665,63 +717,77 @@ func TestGitPanelStageState(t *testing.T) {
 	}
 }
 
-// TestGitPanelCheckbox pins the three glyphs — draw and hit-test both
+// TestGitPanelCheckbox pins the two glyphs — draw and hit-test both
 // assume the box is exactly three cells wide.
 func TestGitPanelCheckbox(t *testing.T) {
-	for state, want := range map[gitStageState]string{
-		stageNone: "[ ]", stagePartial: "[~]", stageFull: "[x]",
-	} {
-		if got := gitPanelCheckbox(state); got != want {
-			t.Errorf("checkbox(%d) = %q, want %q", state, got, want)
-		}
+	if got := gitPanelCheckbox(true); got != "[x]" {
+		t.Errorf("checkbox(true) = %q, want [x]", got)
+	}
+	if got := gitPanelCheckbox(false); got != "[ ]" {
+		t.Errorf("checkbox(false) = %q, want [ ]", got)
 	}
 }
 
-// TestGitPanelCheckboxClick_StagesAndUnstages is the checkbox e2e:
-// ticking an unstaged file's box runs git add through the async
-// pipeline and the done-event refresh flips the row to [x]; ticking
-// again unstages without touching the work-tree edit. The selection
-// must not move — ticking boxes is not browsing.
-func TestGitPanelCheckboxClick_StagesAndUnstages(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not on PATH")
-	}
-	repo, file := panelRepo(t)
-	writeFileT(t, file, "one\nCHANGED\n")
-
-	a := newTestApp(t, repo)
-	a.refreshGitStatus()
-	a.menuToggleGitPanel()
-	if len(a.gitPanel.files) != 1 || gitPanelStageState(a.gitPanel.files[0].Code) != stageNone {
-		t.Fatalf("panel files = %+v, want one unstaged entry", a.gitPanel.files)
+// TestGitPanelCheckboxClick_TogglesSelection pins the checkbox's new
+// job: a click in the gutter ticks and unticks the row's multi-select
+// entry without running any git command and without moving the
+// highlight — ticking boxes is not browsing, and it is not staging.
+func TestGitPanelCheckboxClick_TogglesSelection(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanel.open = true
+	a.gitPanel.files = []gitPanelFile{
+		{Path: "/p/a.go", Rel: "a.go", Code: " M"},
+		{Path: "/p/b.go", Rel: "b.go", Code: "M "},
 	}
 
 	px, py, _, _ := a.gitPanelRect()
-	a.gitPanelClick(px+1, py+1) // first row's checkbox gutter
-	pumpAppEvents(t, a, func() bool {
-		return len(a.gitPanel.files) == 1 &&
-			gitPanelStageState(a.gitPanel.files[0].Code) == stageFull
-	})
-	if staged := gitOut(t, repo, "diff", "--cached", "--name-only"); staged != "f.txt" {
-		t.Fatalf("staged files = %q, want f.txt", staged)
-	}
-
-	a.gitPanelClick(px+1, py+1) // same box, now [x] → unstage
-	pumpAppEvents(t, a, func() bool {
-		return len(a.gitPanel.files) == 1 &&
-			gitPanelStageState(a.gitPanel.files[0].Code) == stageNone
-	})
-	if staged := gitOut(t, repo, "diff", "--cached", "--name-only"); staged != "" {
-		t.Fatalf("staged files after unstage = %q, want none", staged)
-	}
-	content, err := os.ReadFile(file)
-	if err != nil {
-		t.Fatalf("read back: %v", err)
-	}
-	if string(content) != "one\nCHANGED\n" {
-		t.Fatalf("work-tree content = %q — unstage must not revert the edit", content)
+	a.gitPanelClick(px+1, py+2) // second row's checkbox gutter
+	if !a.gitPanelIsChecked("/p/b.go") || a.gitPanelCheckedCount() != 1 {
+		t.Fatalf("after tick: checked = %v", a.gitPanel.checked)
 	}
 	if a.gitPanel.selected != 0 {
-		t.Fatalf("selected = %d, checkbox clicks must not move selection", a.gitPanel.selected)
+		t.Fatalf("selected = %d, checkbox clicks must not move the highlight", a.gitPanel.selected)
+	}
+
+	a.gitPanelClick(px+1, py+2) // same box again
+	if a.gitPanelCheckedCount() != 0 {
+		t.Fatalf("after untick: checked = %v", a.gitPanel.checked)
+	}
+}
+
+// TestGitPanelPruneChecked pins the staleness rule: a tick whose file
+// left the change list (committed, discarded) is dropped on refresh, so
+// it can't ride along invisibly in the next bulk action.
+func TestGitPanelPruneChecked(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanel.open = true
+	a.gitPanel.files = []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
+	a.gitPanelToggleChecked("/p/a.go")
+	a.gitPanelToggleChecked("/p/gone.go")
+
+	a.gitPanelPruneChecked()
+	if !a.gitPanelIsChecked("/p/a.go") {
+		t.Error("a live tick must survive pruning")
+	}
+	if a.gitPanelIsChecked("/p/gone.go") {
+		t.Error("a tick for a file no longer listed must be pruned")
+	}
+}
+
+// TestGitPanelSelectAllAndClear pins the two bulk-selection verbs the
+// Actions picker exposes.
+func TestGitPanelSelectAllAndClear(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanel.files = []gitPanelFile{
+		{Path: "/p/a.go", Rel: "a.go", Code: " M"},
+		{Path: "/p/b.go", Rel: "b.go", Code: "??"},
+	}
+	a.gitPanelSelectAll()
+	if a.gitPanelCheckedCount() != 2 {
+		t.Fatalf("select all → %d checked, want 2", a.gitPanelCheckedCount())
+	}
+	a.gitPanelClearChecked()
+	if a.gitPanelCheckedCount() != 0 {
+		t.Fatalf("clear → %d checked, want 0", a.gitPanelCheckedCount())
 	}
 }

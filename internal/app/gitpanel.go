@@ -14,11 +14,12 @@
 //
 // It is NOT a modal: the editor keeps the keyboard, the panel is
 // mouse-driven (click a file to see its diff, tick its checkbox to
-// stage / unstage it, double-click a diff line to jump the editor
-// there, drag the header rule to resize, wheel to scroll, ✕ or Esc-g
-// to collapse), following the find bar's "strip
-// that owns part of the layout" precedent rather than the single-slot
-// overlay system. Esc-= / Esc-- resize from the keyboard.
+// add it to the multi-selection, hit "Actions ▾" in the header to run
+// something over that selection, double-click a diff line to jump the
+// editor there, drag the header rule to resize, wheel to scroll, ✕ or
+// Esc-g to collapse), following the find bar's "strip that owns part
+// of the layout" precedent rather than the single-slot overlay
+// system. Esc-= / Esc-- resize from the keyboard.
 //
 // House patterns in play:
 //   - Best-effort git: list/diff failures render an empty panel, never
@@ -55,10 +56,10 @@ const (
 	gitPanelMinListW = 24
 	gitPanelMaxListW = 40
 
-	// gitPanelCheckboxW is the width of the stage-checkbox gutter at the
+	// gitPanelCheckboxW is the width of the select-checkbox gutter at the
 	// left of each file row — " [x] " — and therefore also the click
-	// target: presses at x < px+gitPanelCheckboxW toggle staging, presses
-	// beyond it select the row. One constant so draw and hit-test agree.
+	// target: presses at x < px+gitPanelCheckboxW tick the box, presses
+	// beyond it highlight the row. One constant so draw and hit-test agree.
 	gitPanelCheckboxW = 5
 
 	// gitPanelMinEditorRows is how much editor a user-driven resize
@@ -81,17 +82,18 @@ const gitPanelUntrackedHeader = "new file (untracked)"
 // gitPanelFile is one changed entry in the panel's file list: the
 // absolute path (diff commands and selection identity), the
 // project-relative label the list renders, and the two-char porcelain
-// XY code that picks the row's color, checkbox state, and the
-// untracked fallback.
+// XY code that picks the row's color, its staged emphasis, which action
+// rows apply, and the untracked diff fallback.
 type gitPanelFile struct {
 	Path string
 	Rel  string
 	Code string
 }
 
-// gitStageState classifies a porcelain XY code for the panel's stage
-// checkbox: nothing staged, everything staged, or a mix (index and work
-// tree both carry changes — e.g. "MM" after editing a staged file).
+// gitStageState classifies a porcelain XY code: nothing staged,
+// everything staged, or a mix (index and work tree both carry changes —
+// e.g. "MM" after editing a staged file). It drives the list row's
+// staged emphasis and gates the Stage / Unstage action rows.
 type gitStageState int
 
 const (
@@ -118,18 +120,17 @@ func gitPanelStageState(code string) gitStageState {
 	return stageFull
 }
 
-// gitPanelCheckbox is the three-cell glyph drawn for each stage state.
-// [~] for partial follows the tri-state checkbox convention — it reads
-// as "some of this file is staged", and clicking it stages the rest.
-func gitPanelCheckbox(s gitStageState) string {
-	switch s {
-	case stageFull:
+// gitPanelCheckbox is the three-cell glyph drawn at the left of each
+// file row. It marks SELECTION, not stage state: what's ticked is what
+// the header's Actions button operates on. Staging moved out of the box
+// and into those actions because one gesture can't carry a dozen verbs
+// — the porcelain XY code beside the box still shows what's staged,
+// exactly as `git status -s` prints it.
+func gitPanelCheckbox(checked bool) string {
+	if checked {
 		return "[x]"
-	case stagePartial:
-		return "[~]"
-	default:
-		return "[ ]"
 	}
+	return "[ ]"
 }
 
 // gitPanelState is the panel's whole state, mutated only on the main
@@ -144,9 +145,17 @@ type gitPanelState struct {
 	// listWidth is the user-chosen file-list column count from a
 	// list/diff divider drag; 0 means "auto" (a third of the panel).
 	// The horizontal twin of height, same session-only lifetime.
-	listWidth  int
-	files      []gitPanelFile
+	listWidth int
+	files     []gitPanelFile
+	// selected is the highlighted row — what the diff pane shows, and
+	// the fallback target when nothing is ticked. checked is the
+	// multi-selection the Actions button acts on, keyed by absolute path
+	// so it survives the list being rebuilt (a refresh reorders and
+	// re-slices files; paths are stable). Entries whose file dropped out
+	// of the change list are pruned on refresh — a stale tick would
+	// silently widen the next action's blast radius.
 	selected   int
+	checked    map[string]bool
 	listScroll int
 	// diffPath is the path diffLines belong to. It lags selection while
 	// a fetch is in flight and is what makes stale async results
@@ -226,6 +235,7 @@ func (a *App) refreshGitPanelFiles() {
 			break
 		}
 	}
+	a.gitPanelPruneChecked()
 	a.gitPanelClampScrolls()
 	a.gitPanelEnsureSelectedVisible()
 	if f, ok := a.gitPanelSelectedFile(); ok {
@@ -248,6 +258,73 @@ func (a *App) gitPanelSelectedFile() (gitPanelFile, bool) {
 		return gitPanelFile{}, false
 	}
 	return a.gitPanel.files[s], true
+}
+
+// -----------------------------------------------------------------------------
+// Multi-selection — the tick set the Actions button operates on
+// -----------------------------------------------------------------------------
+
+// gitPanelIsChecked reports whether path carries a tick. Reading a nil
+// map is legal in Go, so the zero-value panel needs no initialisation.
+func (a *App) gitPanelIsChecked(path string) bool {
+	return a.gitPanel.checked[path]
+}
+
+// gitPanelToggleChecked flips one file's tick, lazily creating the set.
+// Unticking deletes the key rather than storing false so len() is the
+// selection count and pruning stays a straight membership test.
+func (a *App) gitPanelToggleChecked(path string) {
+	if a.gitPanel.checked[path] {
+		delete(a.gitPanel.checked, path)
+		return
+	}
+	if a.gitPanel.checked == nil {
+		a.gitPanel.checked = make(map[string]bool)
+	}
+	a.gitPanel.checked[path] = true
+}
+
+// gitPanelCheckedCount is the tick count shown in the header and used to
+// decide whether actions target the selection or the highlighted row.
+func (a *App) gitPanelCheckedCount() int {
+	return len(a.gitPanel.checked)
+}
+
+// gitPanelSelectAll ticks every listed file; gitPanelClearChecked drops
+// the whole set. Both are Actions rows — bulk work starts with "all of
+// them" far more often than with twenty individual clicks.
+func (a *App) gitPanelSelectAll() {
+	if len(a.gitPanel.files) == 0 {
+		return
+	}
+	a.gitPanel.checked = make(map[string]bool, len(a.gitPanel.files))
+	for _, f := range a.gitPanel.files {
+		a.gitPanel.checked[f.Path] = true
+	}
+}
+
+// gitPanelClearChecked empties the selection; see gitPanelSelectAll.
+func (a *App) gitPanelClearChecked() {
+	a.gitPanel.checked = nil
+}
+
+// gitPanelPruneChecked drops ticks for files that no longer appear in
+// the change list — committed, discarded, or reverted since the tick
+// went on. Without it a path could sit invisibly in the set and get
+// swept into a later bulk action the user never saw it in.
+func (a *App) gitPanelPruneChecked() {
+	if len(a.gitPanel.checked) == 0 {
+		return
+	}
+	live := make(map[string]bool, len(a.gitPanel.files))
+	for _, f := range a.gitPanel.files {
+		live[f.Path] = true
+	}
+	for p := range a.gitPanel.checked {
+		if !live[p] {
+			delete(a.gitPanel.checked, p)
+		}
+	}
 }
 
 // loadGitStatusFiles returns the changed entries under rootDir in
@@ -546,6 +623,22 @@ func (a *App) gitPanelCloseRect() btnRect {
 	return btnRect{x: px + pw - 4, y: py, w: 3}
 }
 
+// gitPanelActionsLabel is the header button's text. Its rune width is
+// the click target's width too, so draw and hit-test share one source.
+// The ▾ says "this opens a list" — the actions themselves live in the
+// fuzzy picker, per the house rule that every choose-one-from-a-list UI
+// reuses the palette rather than growing a bespoke dropdown.
+const gitPanelActionsLabel = " Actions ▾ "
+
+// gitPanelActionsRect returns the Actions button's rectangle, pinned to
+// the left of the header row where the title used to start — the header
+// is also the height-drag handle, so gitPanelPress has to carve this
+// span out before it starts a drag.
+func (a *App) gitPanelActionsRect() btnRect {
+	px, py, _, _ := a.gitPanelRect()
+	return btnRect{x: px + 1, y: py, w: runeLen(gitPanelActionsLabel)}
+}
+
 // gitPanelContains reports whether (x, y) falls inside the open panel.
 // Callers check gitPanel.open first; kept separate so the mouse router
 // reads as a plain geometry question.
@@ -601,13 +694,20 @@ func (a *App) gitPanelEnsureSelectedVisible() {
 // gitPanelPress routes an initial left press inside the panel and
 // reports the drag it started, if any, as a dragMode string the caller
 // hands straight to a.dragMode ("" for none). The header rule outside
-// the ✕ is the height handle ("gitpanel"); the list/diff divider column
-// on any body row is the width handle ("gitlistdiv"); the ✕ collapses;
-// everything else is a plain click.
+// the two buttons is the height handle ("gitpanel"); the list/diff
+// divider column on any body row is the width handle ("gitlistdiv");
+// Actions ▾ opens the action picker, the ✕ collapses; everything else
+// is a plain click.
 func (a *App) gitPanelPress(x, y int) (dragMode string) {
 	_, py, _, _ := a.gitPanelRect()
-	if y == py && !a.gitPanelCloseRect().contains(x, y) {
-		return "gitpanel"
+	if y == py {
+		if a.gitPanelActionsRect().contains(x, y) {
+			a.openGitPanelActions()
+			return ""
+		}
+		if !a.gitPanelCloseRect().contains(x, y) {
+			return "gitpanel"
+		}
 	}
 	if y > py && x == a.gitPanelDividerX() {
 		return "gitlistdiv"
@@ -647,9 +747,9 @@ func (a *App) gitPanelClick(x, y int) {
 		return
 	}
 	if x < px+gitPanelCheckboxW {
-		// Checkbox gutter: toggle staging without moving the selection —
+		// Checkbox gutter: tick the file without moving the highlight —
 		// ticking boxes down the list shouldn't churn the diff pane.
-		a.gitPanelToggleStage(a.gitPanel.files[idx])
+		a.gitPanelToggleChecked(a.gitPanel.files[idx].Path)
 		return
 	}
 	if idx == a.gitPanel.selected {
@@ -657,21 +757,6 @@ func (a *App) gitPanelClick(x, y int) {
 	}
 	a.gitPanel.selected = idx
 	a.requestGitPanelDiff(a.gitPanel.files[idx])
-}
-
-// gitPanelToggleStage flips one file's staged-ness: fully staged files
-// are unstaged, everything else (unstaged or partial) is staged — so a
-// partially-staged file first completes its staging, and the next click
-// clears it. The commands run through the shared async helpers; the
-// checkbox redraws when the done-event's refresh lands, not
-// optimistically — the porcelain snapshot stays the single source of
-// truth.
-func (a *App) gitPanelToggleStage(f gitPanelFile) {
-	if gitPanelStageState(f.Code) == stageFull {
-		a.unstageFilePath(f.Path)
-		return
-	}
-	a.stageFilePath(f.Path)
 }
 
 // gitPanelJumpToDiffRow opens the selected file and moves the cursor
@@ -794,10 +879,30 @@ func (a *App) drawGitPanel() {
 		divSt = tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Accent)
 	}
 
-	// Header: a horizontal rule carrying the title, the change count,
-	// and the ✕ — it doubles as the visual border against the editor.
+	// Header: a horizontal rule carrying the Actions button, the title,
+	// the tick count, and the ✕ — it doubles as the visual border against
+	// the editor. Only the two buttons are mandatory; on a narrow panel
+	// the title and the count drop out rather than overlapping, since a
+	// control you can't click is worse than a label you can't read.
 	for cx := px; cx < px+pw; cx++ {
 		a.screen.SetContent(cx, py, '─', nil, ruleSt)
+	}
+	closeBtn := a.gitPanelCloseRect()
+	drawAt(a.screen, closeBtn.x, closeBtn.y, " ✕ ", titleSt)
+	actions := a.gitPanelActionsRect()
+	drawAt(a.screen, actions.x, actions.y, gitPanelActionsLabel,
+		tcell.StyleDefault.Background(th.Selection).Foreground(th.Accent).Bold(true))
+
+	// The tick count sits immediately left of the ✕ so it reads as the
+	// set the Actions button will operate on.
+	rightEdge := closeBtn.x
+	if n := a.gitPanelCheckedCount(); n > 0 {
+		count := " " + itoa(n) + " selected "
+		if cx := closeBtn.x - runeLen(count); cx > actions.x+actions.w {
+			drawAt(a.screen, cx, py, count,
+				tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Accent))
+			rightEdge = cx
+		}
 	}
 	title := " Git changes · " + itoa(len(a.gitPanel.files)) + " "
 	if len(a.gitPanel.files) == 1 {
@@ -805,9 +910,9 @@ func (a *App) drawGitPanel() {
 	} else {
 		title += "files "
 	}
-	drawAt(a.screen, px+1, py, title, titleSt)
-	closeBtn := a.gitPanelCloseRect()
-	drawAt(a.screen, closeBtn.x, closeBtn.y, " ✕ ", titleSt)
+	if tx := actions.x + actions.w; tx+runeLen(title) <= rightEdge {
+		drawAt(a.screen, tx, py, title, titleSt)
+	}
 
 	// Body rows.
 	for row := 0; row < ph-1; row++ {
@@ -855,14 +960,22 @@ func (a *App) drawGitPanelListRow(row, px, ry, listW int) {
 			a.screen.SetContent(cx, ry, ' ', nil, st)
 		}
 	}
-	code := strings.TrimSpace(f.Code)
+	// The porcelain XY code is drawn VERBATIM — spaces and all, exactly
+	// as `git status -s` prints it ("M " staged, " M" unstaged, "MM"
+	// both). Trimming it would collapse the staged and unstaged cases
+	// into the same glyph, and since the tick now means selection this
+	// column is the only place stage state is legible.
+	code := f.Code
 	if len(code) > 2 {
 		code = code[:2]
 	}
+	for len(code) < 2 {
+		code += " "
+	}
 	// Row shape: " [x] M  path" — the checkbox gutter (gitPanelCheckboxW
 	// cells) first so every box lines up in a tickable column, then the
-	// porcelain code, then the path.
-	text := " " + gitPanelCheckbox(gitPanelStageState(f.Code)) + " " + code
+	// code, then the path.
+	text := " " + gitPanelCheckbox(a.gitPanelIsChecked(f.Path)) + " " + code
 	for len(text) < gitPanelCheckboxW+3 {
 		text += " "
 	}
@@ -871,6 +984,13 @@ func (a *App) drawGitPanelListRow(row, px, ry, listW int) {
 		text = string([]rune(text)[:listW-2]) + "…"
 	}
 	drawAt(a.screen, px, ry, text, st)
+	// Give the index (X) column weight when it carries a staged change —
+	// " M" vs "M " is a one-column difference that's easy to miss, and
+	// it's now the panel's whole staged indicator. The code always
+	// starts at exactly gitPanelCheckboxW, right after the gutter.
+	if gitPanelStageState(f.Code) != stageNone && gitPanelCheckboxW < listW {
+		drawAt(a.screen, px+gitPanelCheckboxW, ry, code[:1], st.Bold(true))
+	}
 }
 
 // drawGitPanelDiffRow paints one diff line with unified-diff coloring,

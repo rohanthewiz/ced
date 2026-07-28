@@ -243,6 +243,10 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Switch branch", action: (*App).menuGitSwitchBranch, enabled: (*App).hasGitRepo},
 			{label: "Recent branches", action: (*App).menuGitRecentBranches, enabled: (*App).hasGitRepo},
 			{shortcut: "esc g", action: (*App).menuToggleGitPanel, enabled: (*App).hasGitRepo, labelFor: (*App).gitPanelToggleLabel},
+			// The keyboard twin of the panel's "Actions ▾" header button:
+			// the panel is mouse-driven by design, but macOS Terminal can
+			// swallow clicks, so its verbs must be menu-reachable too.
+			{label: "Git panel actions", action: (*App).menuGitPanelActions, enabled: (*App).hasGitPanelOpen},
 		}},
 		// Code intelligence (LSP-backed; rows dim when no server)
 		{title: "Code", collapsible: true, items: []menuItemDef{

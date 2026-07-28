@@ -510,6 +510,59 @@ func TestDrawChatPanel_Smoke(t *testing.T) {
 	if !strings.Contains(header.String(), "Copilot chat") {
 		t.Errorf("header row = %q, want the panel title", header.String())
 	}
+
+	// Once a session names its model, the header carries it.
+	a.chat.models = chatTestModels()
+	a.chat.modelID = "gpt-5.5"
+	a.draw()
+	scr.Show()
+	cells, w, _ = scr.GetContents()
+	header.Reset()
+	for x := 0; x < a.chatStripW(); x++ {
+		c := cells[0*w+x]
+		if len(c.Runes) > 0 {
+			header.WriteRune(c.Runes[0])
+		}
+	}
+	if !strings.Contains(header.String(), "Copilot - GPT-5.5") {
+		t.Errorf("header row = %q, want the current model named", header.String())
+	}
+}
+
+// TestChatHeaderTitle pins the header's two states: the current model
+// once the session reports one, the neutral title otherwise (including
+// when the id isn't in the roster — never a raw wire id).
+func TestChatHeaderTitle(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	if got := a.chatHeaderTitle(); got != " Copilot chat " {
+		t.Errorf("no-session title = %q", got)
+	}
+	a.chat.models = chatTestModels()
+	a.chat.modelID = "claude-sonnet-4.6"
+	if got := a.chatHeaderTitle(); got != " Copilot - Claude Sonnet 4.6 " {
+		t.Errorf("resolved title = %q", got)
+	}
+	a.chat.modelID = "gone"
+	if got := a.chatHeaderTitle(); got != " Copilot chat " {
+		t.Errorf("unknown-id title = %q", got)
+	}
+}
+
+// TestChatFitHeader pins the clip: text that fits is untouched, an
+// overlong title is ellipsized to exactly the budget, and a budget too
+// small to say anything yields "" rather than spilling under the
+// ⏹/✕ buttons.
+func TestChatFitHeader(t *testing.T) {
+	if got := chatFitHeader(" Copilot ", 20); got != " Copilot " {
+		t.Errorf("fitting text = %q", got)
+	}
+	got := chatFitHeader(" Copilot - Claude Sonnet 4.6 ", 12)
+	if runeLen(got) != 12 || !strings.HasSuffix(got, "…") {
+		t.Errorf("clipped title = %q (len %d)", got, runeLen(got))
+	}
+	if got := chatFitHeader(" Copilot ", 1); got != "" {
+		t.Errorf("no-room title = %q, want empty", got)
+	}
 }
 
 // typeChatText feeds runes through the composer's real key handler.

@@ -1211,12 +1211,18 @@ func (a *App) drawChatPanel() {
 	for cx := px; cx < px+pw; cx++ {
 		a.screen.SetContent(cx, py, '─', nil, headerSt)
 	}
-	title := " Copilot chat "
+	closeBtn := a.chatCloseRect()
+	// The header text may not run under the buttons on a narrow panel.
+	avail := closeBtn.x - (px + 1)
+	if a.chat.turnActive {
+		avail = a.chatStopRect().x - (px + 1)
+	}
+	title := chatFitHeader(a.chatHeaderTitle(), avail)
 	drawAt(a.screen, px+1, py, title, titleSt)
 	if status := a.chatHeaderStatus(); status != "" {
-		drawAt(a.screen, px+1+runeLen(title), py, "· "+status+" ", statusSt)
+		status = chatFitHeader("· "+status+" ", avail-runeLen(title))
+		drawAt(a.screen, px+1+runeLen(title), py, status, statusSt)
 	}
-	closeBtn := a.chatCloseRect()
 	drawAt(a.screen, closeBtn.x, closeBtn.y, " ✕ ", titleSt)
 	if a.chat.turnActive {
 		stopBtn := a.chatStopRect()
@@ -1250,6 +1256,32 @@ func (a *App) drawChatPanel() {
 	drawAt(a.screen, px+1, iy, a.chatPrompt(), promptSt)
 	inputSt := tcell.StyleDefault.Background(th.BG).Foreground(th.Text)
 	a.chat.input.draw(a.screen, iy, start, end, inputSt, a.chat.focused)
+}
+
+// chatHeaderTitle names the panel: "Copilot - <model>" once a session
+// has told us which model answers, plain "Copilot chat" until then —
+// the model is the one thing about a chat panel you can't infer from
+// looking at it, and the ≡ row that switches it is two clicks away.
+func (a *App) chatHeaderTitle() string {
+	if name := a.chatCurrentModelName(); name != "" {
+		return " Copilot - " + name + " "
+	}
+	return " Copilot chat "
+}
+
+// chatFitHeader clips a header segment to the columns left before the
+// ⏹/✕ buttons, marking the cut with an ellipsis. A width that can't
+// hold even that yields "" — better a missing segment than one running
+// under a button.
+func chatFitHeader(s string, width int) string {
+	if width >= runeLen(s) {
+		return s
+	}
+	if width < 2 {
+		return ""
+	}
+	r := []rune(s)
+	return string(r[:width-1]) + "…"
 }
 
 // chatHeaderStatus is the header's one-word state summary — empty in

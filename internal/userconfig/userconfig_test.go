@@ -691,3 +691,40 @@ func TestChatModel_LoadAndSave(t *testing.T) {
 		t.Fatal("unknown key was dropped by the save round-trip")
 	}
 }
+
+// TestChatAgent_LoadAndSave pins the chatagent key: absent means ""
+// (default backend), any non-blank id loads trimmed and lowercased but
+// un-validated (the registry is app-layer knowledge, and an id from a
+// newer or older ced must not break config loading), and SaveChatAgent
+// round-trips alongside hand-set keys like every other SaveX.
+func TestChatAgent_LoadAndSave(t *testing.T) {
+	if got := Defaults().ChatAgent; got != "" {
+		t.Fatalf("default ChatAgent = %q, want empty", got)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"chatagent\": \"  Claude  \",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ChatAgent != "claude" {
+		t.Fatalf("ChatAgent = %q, want trimmed lowercased id", cfg.ChatAgent)
+	}
+	if err := SaveChatAgent(path, "copilot"); err != nil {
+		t.Fatalf("SaveChatAgent: %v", err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.ChatAgent != "copilot" {
+		t.Fatalf("round trip: ChatAgent = %q", cfg.ChatAgent)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}

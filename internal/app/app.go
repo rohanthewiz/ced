@@ -264,6 +264,11 @@ func builtinMenuGroups() []menuGroup {
 			// preference): every Copilot surface — auth, chat, model,
 			// ghost text, the kill switch — reads as one block.
 			{action: (*App).menuToggleChat, enabled: alwaysTrue, labelFor: (*App).chatToggleLabel},
+			// The backend picker (chatagent.go): the chat panel is a
+			// generic ACP client, and this row switches which agent
+			// binary answers it. Re-picking the current agent is the
+			// crash-retry path for non-Copilot backends.
+			{action: (*App).menuChatAgent, enabled: alwaysTrue, labelFor: (*App).chatAgentLabel},
 			{action: (*App).menuChatModel, enabled: alwaysTrue, labelFor: (*App).chatModelLabel},
 			// Context attachments. The panel's chips carry ✕ buttons, but
 			// ATTACHING has no mouse surface of its own — these rows are
@@ -823,6 +828,10 @@ func (a *App) loadUserConfig() {
 	a.copilot.enabled = cfg.Copilot
 	a.copilot.suggest = cfg.Suggestions
 	a.chat.modelPref = cfg.ChatModel
+	// Resolve the persisted backend id through the registry — an
+	// unknown id (newer/older ced) falls back to the default silently,
+	// the same stale-preference rule as chatmodel.
+	a.chat.agent = chatAgentByID(cfg.ChatAgent)
 	a.chat.autoContext = cfg.ChatContext
 }
 

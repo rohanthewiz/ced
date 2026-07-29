@@ -63,6 +63,7 @@ internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition
 internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
 internal/app/copilot_ghost.go Copilot phase 2: doc sync + inline completions (ghost text)
 internal/app/copilot_chat.go  Copilot phase 3: ACP chat panel (left strip, streaming turns)
+internal/app/chatagent.go     Chat backend registry + ≡ picker (Copilot / Claude Code / Gemini)
 internal/app/copilot_chat_context.go  Chat context: file / selection attachments
 internal/lsp/acp.go           ACP framing (ndjson) + onRequest hook over the same Client
 internal/editor/ghost.go      GhostText display form + the render-row splice overlay
@@ -287,13 +288,37 @@ House rules:
   package.
 - **Same contracts as the sidecar**: silent degradation (no binary →
   dead), events-only (`chat*Event`s; only the main loop touches
-  `App.chat`), no auto-restart (≡ Copilot off/on is the retry path,
-  which clears BOTH dead verdicts). No new config key — `"copilot"`
-  gates chat too; disabling it tears down and closes the panel. Auth
-  is phase 1's device flow (the agent reads the same credential
-  store); a failed handshake writes WHY into the transcript plus a
-  sign-in hint — unlike the sidecar, the open panel must never fail
-  silently.
+  `App.chat`), no auto-restart (re-picking the agent under ≡ Chat
+  agent is the retry path; for the Copilot backend the ≡ Copilot
+  off/on toggle also works and clears BOTH dead verdicts). The
+  `"copilot"` key gates only the Copilot backend (see the agent
+  registry below); when Copilot is the active backend, disabling it
+  tears down and closes the panel. Copilot's auth is phase 1's device
+  flow (the agent reads the same credential store); a failed
+  handshake writes WHY into the transcript plus a per-agent auth hint
+  — unlike the sidecar, the open panel must never fail silently.
+- **Switchable backend (app/chatagent.go)**: the panel is a generic
+  ACP client and Copilot is just the default entry in a small agent
+  registry (`chatAgents`: Copilot, Claude Code via `claude-code-acp`,
+  Gemini via `gemini --experimental-acp`). ONE panel, switchable
+  backend — never a second panel; the left edge is single-occupancy.
+  The ≡ "Chat agent" row opens the registry as a picker; unlike the
+  model picker it KEEPS the current agent, annotated "(current —
+  restart)", because re-picking is the deliberate crash-retry gesture
+  (it clears the dead verdict) and non-Copilot backends have no other
+  one. The choice persists as `"chatagent"` in config.json; an
+  unknown saved id resolves to the default silently (the stale-
+  chatmodel rule). All reads go through `App.chatAgent()`, which maps
+  the zero value to Copilot so hand-built test Apps behave unchanged.
+  Every teardown bumps `chatState.connSeq`, and ready/exit/turn-done
+  events carry the generation they were launched under — handlers
+  drop mismatches, or a switch mid-handshake installs the OLD agent's
+  client and the old process's exit marks the fresh agent dead. Tests
+  stub `chatLookPath` (newTestApp pins it to "never found") so agent
+  switching can never spawn a dev machine's real binaries. Everything
+  downstream of the spawn — turns, streaming, the model roster picker,
+  context attachments (embedded or fenced-text fallback) — is already
+  agent-agnostic; keep it that way.
 - **Docked LEFT, tree flips RIGHT** (owner preference). Every layout
   helper pivots on `treeOnRight()` (`termDockLeft || chat.open`) and
   `leftBlockW()` — don't reintroduce per-feature geometry branches.
@@ -594,8 +619,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 54 group actions + 10 headers (66), height 72, dividers
-`[2, 5, 69]`.
+2 top-zone rows + 59 group actions + 10 headers (71), height 77, dividers
+`[2, 5, 74]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.

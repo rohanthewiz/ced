@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -75,6 +76,13 @@ func newTestApp(t *testing.T, root string) *App {
 	// never spawn a real copilot-language-server --acp. Chat tests
 	// inject a fake copilotConn and set their own enabled/dead state.
 	a.chat.dead = true
+	// Belt and braces on top of chat.dead: agent switching clears the
+	// dead verdict by design (it's the retry gesture), so pin binary
+	// resolution to "never found" too — chatEnsureStarted then re-marks
+	// dead instead of spawning whatever agent the dev machine has.
+	prevChatLook := chatLookPath
+	chatLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	t.Cleanup(func() { chatLookPath = prevChatLook })
 	// Neuter the sign-in flow's host side-effects so no test can write
 	// the dev machine's clipboard or launch a real browser. Copilot
 	// tests that assert on these swap in their own recorders.
@@ -1816,8 +1824,8 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 // TestMenuLayout_NoCustomActions pins down the baseline geometry with
 // every section expanded: the pinned top zone contributes two rows (the
 // command palette + the expand/collapse-all toggle), ten collapsible
-// groups each contribute a header row (10) plus their 58 action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 70 total. The
+// groups each contribute a header row (10) plus their 59 action rows, and
+// Quit renders headerless behind a divider (its 1 row) — 71 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1825,16 +1833,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 76 {
-		t.Errorf("modalHeight = %d, want 76", h)
+	if h != 77 {
+		t.Errorf("modalHeight = %d, want 77", h)
 	}
-	if got := len(items); got != 70 {
-		t.Errorf("row count = %d, want 70 (2 top-zone + 58 group actions + 10 headers)", got)
+	if got := len(items); got != 71 {
+		t.Errorf("row count = %d, want 71 (2 top-zone + 59 group actions + 10 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (73) — headers separate the
+	// one setting off the headerless Quit group (74) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 73}
+	wantDiv := []int{2, 5, 74}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2162,8 +2170,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 79 { // 76 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 79", h)
+	if h != 80 { // 77 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 80", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

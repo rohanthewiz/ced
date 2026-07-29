@@ -37,6 +37,11 @@
 //	                        // "claude-sonnet-4.6"); "" or absent keeps
 //	                        // the agent's own default. Ids are
 //	                        // server-defined, so no validation here.
+//	{"chatagent": "<id>"}   // preferred chat backend ("copilot",
+//	                        // "claude", …); "" or absent means the
+//	                        // default (Copilot). The registry lives in
+//	                        // the app layer, so no validation here —
+//	                        // an unknown id falls back at resolve time.
 //
 // The loader is best-effort the same way customactions is: missing
 // file → defaults, malformed file → error returned for the app to
@@ -119,6 +124,15 @@ type Config struct {
 	// ignored at apply time instead. Persisted by the ≡ model picker.
 	ChatModel string
 
+	// ChatAgent is the preferred chat backend's registry id ("copilot",
+	// "claude", …). Empty (the default) means the default backend.
+	// Deliberately not validated here — the agent registry is app-layer
+	// knowledge, and an id from a newer or older ced must not break
+	// config loading; the app falls back to its default for unknown ids,
+	// the same stale-preference rule as ChatModel. Persisted by the ≡
+	// agent picker.
+	ChatAgent string
+
 	// ChatContext controls whether every chat prompt automatically
 	// carries the active tab (or just its selection, when there is
 	// one) as attached context. Defaults to on — "what about this
@@ -150,6 +164,7 @@ type fileFormat struct {
 	Copilot     string `json:"copilot,omitempty"`
 	Suggestions string `json:"suggestions,omitempty"`
 	ChatModel   string `json:"chatmodel,omitempty"`
+	ChatAgent   string `json:"chatagent,omitempty"`
 	ChatContext string `json:"chatcontext,omitempty"`
 }
 
@@ -322,9 +337,10 @@ func Load(path string) (Config, error) {
 		)
 	}
 
-	// Any non-blank value is accepted as-is — see Config.ChatModel for
-	// why there's no allowlist to check against.
+	// Any non-blank value is accepted as-is — see Config.ChatModel and
+	// Config.ChatAgent for why there's no allowlist to check against.
 	cfg.ChatModel = strings.TrimSpace(ff.ChatModel)
+	cfg.ChatAgent = strings.ToLower(strings.TrimSpace(ff.ChatAgent))
 	return cfg, nil
 }
 
@@ -379,6 +395,12 @@ func SaveSuggestions(path string, on bool) error {
 // config file at path. See saveKey for the round-trip guarantees.
 func SaveChatModel(path, id string) error {
 	return saveKey(path, "chatmodel", id)
+}
+
+// SaveChatAgent persists the preferred chat backend's registry id into
+// the config file at path. See saveKey for the round-trip guarantees.
+func SaveChatAgent(path, id string) error {
+	return saveKey(path, "chatagent", id)
 }
 
 // SaveChatContext persists the auto-attach-current-file preference into

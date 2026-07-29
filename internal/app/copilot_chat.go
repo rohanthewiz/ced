@@ -6,20 +6,27 @@
 // =============================================================================
 
 // copilot_chat.go is phase 3 of the GitHub Copilot integration: a chat
-// panel backed by the Agent Client Protocol (ACP). It runs the SAME
-// copilot-language-server binary as phases 1–2, but as a second process
-// in --acp mode over internal/lsp's client with ndjson framing (see
-// lsp/acp.go) — chat and completions are separate protocols by GitHub's
-// design, so they get separate processes but share every house rule:
+// panel backed by the Agent Client Protocol (ACP). By default it runs
+// the SAME copilot-language-server binary as phases 1–2, but as a
+// second process in --acp mode over internal/lsp's client with ndjson
+// framing (see lsp/acp.go) — chat and completions are separate
+// protocols by GitHub's design. The backend is switchable: ACP is an
+// open protocol, and chatagent.go's registry lets other agents (Claude
+// Code, Gemini) answer the same panel. Separate processes, one set of
+// house rules:
 //
 //   - Silent degradation: no binary → dead, no nagging; the "copilot"
-//     config key is the shared opt-out. Auth is phase 1's device flow —
-//     the ACP agent reads the same stored credentials, so there is no
-//     second sign-in here.
+//     config key is the opt-out for the Copilot backend specifically
+//     (other backends' opt-in is their binary on PATH — chatagent.go).
+//     Copilot's auth is phase 1's device flow — the ACP agent reads the
+//     same stored credentials, so there is no second sign-in here.
 //   - Events only: spawn/handshake, prompt turns, and streamed updates
 //     all run off-loop and post chat*Events; only the main loop touches
-//     App.chat. No auto-restart after a crash — toggling Copilot
-//     off/on is the deliberate retry path.
+//     App.chat. No auto-restart after a crash — re-picking the agent
+//     under ≡ Chat agent (or, for Copilot, toggling it off/on) is the
+//     deliberate retry path. Events carry chatState.connSeq so a
+//     deliberately torn-down connection's stragglers can't corrupt the
+//     next one's state.
 //   - Menu-first: the show/hide toggle and the model picker live in
 //     the ≡ Copilot group (owner preference — all Copilot surfaces in
 //     one place).
@@ -49,7 +56,6 @@ package app
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -159,6 +165,13 @@ type chatState struct {
 	open    bool
 	focused bool // keyboard routes to the input line while true
 
+	// agent is the active ACP backend (see chatagent.go). Read through
+	// App.chatAgent(), which maps the zero value onto the default
+	// (Copilot) entry; written only by chatSetAgent and New's config
+	// seed. Survives chatDisconnect the same way modelPref does — it's
+	// a preference, not connection state.
+	agent chatAgentDef
+
 	// width is the user-chosen strip width from a splitter drag, 0 for
 	// "auto" (a third of the screen). Session-only, like the terminal
 	// strip's width.
@@ -167,6 +180,15 @@ type chatState struct {
 	client   copilotConn // same generic call surface as the sidecar
 	starting bool        // async spawn + handshake in flight
 	dead     bool        // unavailable: no binary, crashed, failed start
+
+	// connSeq is the connection generation. chatDisconnect bumps it, and
+	// every event a start or turn goroutine posts carries the generation
+	// it was launched under — a mismatch means the event belongs to a
+	// connection that was deliberately torn down (agent switch, disable)
+	// and must be dropped. Without this, a ready event racing a switch
+	// installs the OLD agent's client under the new agent's name, and
+	// the old process's exit event marks the fresh agent dead.
+	connSeq int
 
 	// sessionID is the ACP conversation this panel feeds. One session
 	// per connection — history lives server-side for the turn context
@@ -233,6 +255,7 @@ type chatState struct {
 // already applied — modelID is the session's actual current model).
 type chatReadyEvent struct {
 	when      time.Time
+	seq       int // connection generation this start belongs to
 	client    copilotConn
 	sessionID string
 	models    []chatModel
@@ -249,6 +272,7 @@ func (e *chatReadyEvent) When() time.Time { return e.when }
 // because the panel is open and staring silence at the user.
 type chatExitEvent struct {
 	when time.Time
+	seq  int // connection generation; stale exits are dropped
 	err  error
 }
 
@@ -269,6 +293,7 @@ func (e *chatUpdateEvent) When() time.Time { return e.when }
 // chatTurnDoneEvent lands one session/prompt call's completion.
 type chatTurnDoneEvent struct {
 	when       time.Time
+	seq        int // connection generation; stale completions are dropped
 	stopReason string
 	err        error
 }
@@ -307,15 +332,17 @@ func (a *App) chatReady() bool {
 	return a.chat.client != nil && !a.chat.dead && a.chat.sessionID != ""
 }
 
-// chatEnsureStarted kicks off the async ACP agent start: spawn
-// copilot-language-server --acp, run the ACP initialize handshake, and
-// open a session. Missing binary marks the integration dead without a
-// word — the shared silent-degradation contract. Idempotent.
+// chatEnsureStarted kicks off the async ACP agent start: spawn the
+// active backend's binary (chatagent.go), run the ACP initialize
+// handshake, and open a session. Missing binary marks the integration
+// dead without a word — the shared silent-degradation contract.
+// Idempotent.
 func (a *App) chatEnsureStarted() {
-	if !a.copilot.enabled || a.chat.client != nil || a.chat.starting || a.chat.dead || a.screen == nil {
+	if !a.chatAgentEnabled() || a.chat.client != nil || a.chat.starting || a.chat.dead || a.screen == nil {
 		return
 	}
-	if _, err := exec.LookPath(copilotServerBinary); err != nil {
+	def := a.chatAgent()
+	if _, err := chatLookPath(def.binary); err != nil {
 		a.chat.dead = true
 		return
 	}
@@ -323,6 +350,7 @@ func (a *App) chatEnsureStarted() {
 	scr := a.screen
 	root := a.rootDir
 	pref := a.chat.modelPref
+	seq := a.chat.connSeq
 	go func() {
 		// Both callbacks run on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
@@ -350,11 +378,11 @@ func (a *App) chatEnsureStarted() {
 			return nil, fmt.Errorf("ced does not handle %s", method)
 		}
 		onExit := func(error) {
-			_ = scr.PostEvent(&chatExitEvent{when: time.Now()})
+			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), seq: seq})
 		}
-		client, err := lsp.StartACP(root, copilotServerBinary, []string{"--acp"}, onNotify, onRequest, onExit)
+		client, err := lsp.StartACP(root, def.binary, def.args, onNotify, onRequest, onExit)
 		if err != nil {
-			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), err: err})
+			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), seq: seq, err: err})
 			return
 		}
 		sess, err := chatInitialize(client, root, pref)
@@ -363,10 +391,10 @@ func (a *App) chatEnsureStarted() {
 			// A failed handshake may leave the process alive with no
 			// read-loop exit — post explicitly to settle the state
 			// machine, same as the sidecar start path.
-			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), err: err})
+			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), seq: seq, err: err})
 			return
 		}
-		_ = scr.PostEvent(&chatReadyEvent{when: time.Now(), client: client,
+		_ = scr.PostEvent(&chatReadyEvent{when: time.Now(), seq: seq, client: client,
 			sessionID: sess.id, models: sess.models, modelID: sess.modelID,
 			embedded: sess.embedded})
 	}()
@@ -469,8 +497,10 @@ func chatInitialize(c *lsp.Client, root, prefModel string) (chatSession, error) 
 // handleChatReady installs the live connection and flushes a prompt
 // the user submitted while the handshake was in flight.
 func (a *App) handleChatReady(e *chatReadyEvent) {
-	if a.chat.dead || !a.copilot.enabled {
-		// Died or was disabled between the ready post and now.
+	if e.seq != a.chat.connSeq || a.chat.dead || !a.chatAgentEnabled() {
+		// Stale generation (the connection was deliberately torn down
+		// mid-handshake — e.g. an agent switch), or the integration
+		// died / was disabled between the ready post and now.
 		e.client.Close()
 		return
 	}
@@ -494,21 +524,27 @@ func (a *App) handleChatReady(e *chatReadyEvent) {
 // shared no-flap, no-auto-restart policy. Unlike the completion
 // sidecar it also writes the reason into the transcript: the panel is
 // an open surface the user is looking at, and unexplained silence
-// there reads as breakage, not degradation.
+// there reads as breakage, not degradation. A stale generation is
+// dropped outright — that exit was a deliberate teardown (agent
+// switch, disable), already narrated by whoever performed it.
 func (a *App) handleChatExit(e *chatExitEvent) {
+	if e.seq != a.chat.connSeq {
+		return
+	}
+	name := a.chatAgent().name
 	a.chatDisconnect()
 	a.chat.dead = true
 	if e.err != nil {
-		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: "Copilot chat failed: " + e.err.Error()})
-		if !a.copilot.signedIn {
-			// The most common handshake failure is simply "not signed
-			// in" — point at the phase-1 flow instead of leaving the
-			// raw protocol error as the only clue.
-			a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: "Sign in first: ≡ → Copilot → Sign in to GitHub"})
+		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: name + " chat failed: " + e.err.Error()})
+		if hint := a.chatAuthHint(); hint != "" {
+			// The most common handshake failure is simply "not
+			// authenticated" — point at the agent's auth flow instead of
+			// leaving the raw protocol error as the only clue.
+			a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: hint})
 		}
 		return
 	}
-	a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: "Copilot chat stopped — toggle Copilot off/on to restart"})
+	a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: name + " chat stopped — " + chatAgentRetryHint + " to restart"})
 }
 
 // chatShutdown tears the agent down without marking it dead — used by
@@ -523,6 +559,9 @@ func (a *App) chatShutdown() {
 // survives on purpose — same as terminal scrollback across a session
 // end: the conversation's value doesn't die with the process.
 func (a *App) chatDisconnect() {
+	// Invalidate every event still in flight from this connection's
+	// goroutines (ready, exit, turn-done) — see connSeq's field docs.
+	a.chat.connSeq++
 	if a.chat.client != nil {
 		a.chat.client.Close()
 	}
@@ -596,7 +635,7 @@ func (a *App) chatSend() {
 		return
 	}
 	if a.chat.turnActive {
-		a.flash("Copilot is answering — ⏹ to stop it first")
+		a.flash(a.chatAgent().name + " is answering — ⏹ to stop it first")
 		return
 	}
 	a.chat.input = newTextField("")
@@ -615,9 +654,9 @@ func (a *App) chatSend() {
 		} else {
 			a.chat.queuedPrompt = text
 		}
-		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: "starting Copilot chat — your message will send shortly"})
+		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: "starting " + a.chatAgent().name + " chat — your message will send shortly"})
 	default:
-		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: "Copilot chat is not running — toggle Copilot off/on to restart"})
+		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: a.chatAgent().name + " chat is not running — " + chatAgentRetryHint + " to restart"})
 	}
 }
 
@@ -646,6 +685,7 @@ func (a *App) chatSendPrompt(text string) {
 	client := a.chat.client
 	scr := a.screen
 	sid := a.chat.sessionID
+	seq := a.chat.connSeq
 	params := map[string]any{
 		"sessionId": sid,
 		"prompt":    blocks,
@@ -655,7 +695,7 @@ func (a *App) chatSendPrompt(text string) {
 			StopReason string `json:"stopReason"`
 		}
 		err := client.CallWithTimeout("session/prompt", params, &res, chatTurnTimeout)
-		_ = scr.PostEvent(&chatTurnDoneEvent{when: time.Now(), stopReason: res.StopReason, err: err})
+		_ = scr.PostEvent(&chatTurnDoneEvent{when: time.Now(), seq: seq, stopReason: res.StopReason, err: err})
 	}()
 }
 
@@ -704,12 +744,17 @@ func chatContentText(raw json.RawMessage) string {
 
 // handleChatTurnDone finishes one prompt turn. Errors and cancels get
 // a transcript line; a clean end needs none — the answer already IS
-// the feedback.
+// the feedback. A stale generation is dropped: that turn belonged to a
+// connection the user already tore down, and its "connection closed"
+// error would only muddy the fresh agent's transcript.
 func (a *App) handleChatTurnDone(e *chatTurnDoneEvent) {
+	if e.seq != a.chat.connSeq {
+		return
+	}
 	a.chat.turnActive = false
 	a.chat.cancelSent = false
 	if e.err != nil {
-		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: "Copilot chat: " + e.err.Error()})
+		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: a.chatAgent().name + " chat: " + e.err.Error()})
 		return
 	}
 	if e.stopReason == "cancelled" {
@@ -729,7 +774,7 @@ func (a *App) chatInterrupt() {
 	}
 	a.chat.cancelSent = true
 	_ = a.chat.client.Notify("session/cancel", map[string]any{"sessionId": a.chat.sessionID})
-	a.flash("stopping Copilot's answer")
+	a.flash("stopping " + a.chatAgent().name + "'s answer")
 }
 
 // -----------------------------------------------------------------------------
@@ -1022,18 +1067,22 @@ func (a *App) chatSelectionText() string {
 }
 
 // chatTranscriptText renders the whole conversation as plain text for
-// the copy-conversation button. Roles become "You:" / "Copilot:"
+// the copy-conversation button. Roles become "You:" / agent-name
 // labels — the ❯ gutter and glyph prefixes are screen furniture, and
 // what lands in the clipboard usually ends up in an issue or a commit
-// message, where named speakers read better.
+// message, where named speakers read better. Messages are labelled
+// with the CURRENT agent's name even if an earlier backend produced
+// them; the "Chat agent:" info lines the switch leaves behind keep the
+// provenance readable without per-message bookkeeping.
 func (a *App) chatTranscriptText() string {
+	name := a.chatAgent().name
 	var parts []string
 	for _, m := range a.chat.msgs {
 		switch m.role {
 		case chatRoleUser:
 			parts = append(parts, "You:\n"+m.text)
 		case chatRoleAgent:
-			parts = append(parts, "Copilot:\n"+m.text)
+			parts = append(parts, name+":\n"+m.text)
 		default:
 			parts = append(parts, m.text)
 		}
@@ -1184,12 +1233,14 @@ func (a *App) chatHistoryMove(delta int) {
 // Menu row + left-edge occupancy
 // -----------------------------------------------------------------------------
 
-// chatToggleLabel names the ≡ View row for its current direction.
+// chatToggleLabel names the ≡ View row for its current direction,
+// carrying the active backend's name so the row reads true whichever
+// agent answers.
 func (a *App) chatToggleLabel() string {
 	if a.chat.open {
-		return "Hide Copilot chat"
+		return "Hide " + a.chatAgent().name + " chat"
 	}
-	return "Show Copilot chat"
+	return "Show " + a.chatAgent().name + " chat"
 }
 
 // menuToggleChat shows or hides the chat panel. Opening explains
@@ -1212,13 +1263,14 @@ func (a *App) menuToggleChat() {
 // can't see would leave the user with no way to know it worked.
 // Idempotent: an already-open panel just takes focus back.
 func (a *App) chatOpenPanel() {
-	if !a.copilot.enabled {
+	if !a.chatAgentEnabled() {
 		a.flash("Copilot is disabled — use ≡ → Enable Copilot first")
 		return
 	}
 	a.chatEnsureStarted()
 	if a.chat.dead {
-		a.flash("Copilot chat unavailable — install copilot-language-server on PATH, then toggle Copilot off/on")
+		def := a.chatAgent()
+		a.flash(def.name + " chat unavailable — install " + def.binary + " on PATH, then " + chatAgentRetryHint)
 		return
 	}
 	a.chat.open = true
@@ -1260,11 +1312,12 @@ func (a *App) chatCurrentModelName() string {
 // pattern, so the first click never just vanishes.
 func (a *App) menuChatModel() {
 	a.closeMenu()
+	def := a.chatAgent()
 	switch {
-	case !a.copilot.enabled:
+	case !a.chatAgentEnabled():
 		a.flash("Copilot is disabled — use ≡ → Enable Copilot first")
 	case a.chat.dead:
-		a.flash("Copilot chat unavailable — install copilot-language-server on PATH, then toggle Copilot off/on")
+		a.flash(def.name + " chat unavailable — install " + def.binary + " on PATH, then " + chatAgentRetryHint)
 	case a.chatReady():
 		a.openChatModelPicker()
 	default:
@@ -1273,9 +1326,9 @@ func (a *App) menuChatModel() {
 		if a.chat.dead {
 			// ensureStarted's LookPath just failed — correct the story.
 			a.chat.modelPickWanted = false
-			a.flash("Copilot chat unavailable — install copilot-language-server on PATH")
+			a.flash(def.name + " chat unavailable — install " + def.binary + " on PATH")
 		} else {
-			a.flash("Copilot chat is starting — the model list will open shortly")
+			a.flash(def.name + " chat is starting — the model list will open shortly")
 		}
 	}
 }
@@ -1302,7 +1355,7 @@ func (a *App) openChatModelPicker() {
 		})
 	}
 	if len(items) == 0 {
-		a.flash("Copilot chat offered no other models")
+		a.flash(a.chatAgent().name + " chat offered no other models")
 		return
 	}
 	title := "Chat model"
@@ -1316,7 +1369,7 @@ func (a *App) openChatModelPicker() {
 // roster entry; the outcome lands as a chatModelSetEvent.
 func (a *App) chatSetModel(m chatModel) {
 	if !a.chatReady() {
-		a.flash("Copilot chat is not connected")
+		a.flash(a.chatAgent().name + " chat is not connected")
 		return
 	}
 	client := a.chat.client
@@ -1336,7 +1389,7 @@ func (a *App) chatSetModel(m chatModel) {
 // session keeps its previous model, so there's nothing to roll back.
 func (a *App) handleChatModelSet(e *chatModelSetEvent) {
 	if e.err != nil {
-		a.flash("Copilot chat: switching model failed: " + e.err.Error())
+		a.flash(a.chatAgent().name + " chat: switching model failed: " + e.err.Error())
 		return
 	}
 	a.chat.modelID = e.model.id
@@ -1663,15 +1716,16 @@ func (a *App) drawChatPanel() {
 	a.chat.input.draw(a.screen, iy, start, end, inputSt, a.chat.focused)
 }
 
-// chatHeaderTitle names the panel: "Copilot - <model>" once a session
-// has told us which model answers, plain "Copilot chat" until then —
+// chatHeaderTitle names the panel: "<agent> - <model>" once a session
+// has told us which model answers, plain "<agent> chat" until then —
 // the model is the one thing about a chat panel you can't infer from
 // looking at it, and the ≡ row that switches it is two clicks away.
 func (a *App) chatHeaderTitle() string {
+	agent := a.chatAgent().name
 	if name := a.chatCurrentModelName(); name != "" {
-		return " Copilot - " + name + " "
+		return " " + agent + " - " + name + " "
 	}
-	return " Copilot chat "
+	return " " + agent + " chat "
 }
 
 // chatFitHeader clips a header segment to the columns left before the

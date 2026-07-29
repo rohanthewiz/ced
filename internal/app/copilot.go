@@ -648,12 +648,17 @@ func (a *App) copilotToggleLabel() string {
 func (a *App) menuToggleCopilot() {
 	a.closeMenu()
 	a.copilot.enabled = !a.copilot.enabled
+	copilotIsChatBackend := a.chatAgent().id == chatAgentCopilotID
 	if a.copilot.enabled {
 		a.copilot.dead = false
-		// The chat agent shares the retry path: re-enabling clears its
-		// dead verdict too, so the next panel open attempts a fresh
-		// start instead of inheriting a stale "unavailable".
-		a.chat.dead = false
+		// The Copilot chat backend shares the retry path: re-enabling
+		// clears its dead verdict too, so the next panel open attempts a
+		// fresh start instead of inheriting a stale "unavailable". A
+		// non-Copilot backend keeps its own verdict — this toggle says
+		// nothing about its binary.
+		if copilotIsChatBackend {
+			a.chat.dead = false
+		}
 		a.copilotEnsureStarted()
 		if a.copilot.dead {
 			a.flash("Copilot enabled — but copilot-language-server is not on PATH")
@@ -662,12 +667,16 @@ func (a *App) menuToggleCopilot() {
 		}
 	} else {
 		a.copilotShutdown()
-		// Disabling Copilot disables ALL of it — the chat agent goes
-		// down with the completion sidecar, and the panel closes so a
-		// dead surface isn't left on screen.
-		a.chatShutdown()
-		a.chat.open = false
-		a.chat.focused = false
+		// Disabling Copilot disables ALL of Copilot — when it is also
+		// the chat backend, the agent goes down with the completion
+		// sidecar and the panel closes so a dead surface isn't left on
+		// screen. A different chat backend is none of this toggle's
+		// business (chatagent.go's gating rule) and stays up.
+		if copilotIsChatBackend {
+			a.chatShutdown()
+			a.chat.open = false
+			a.chat.focused = false
+		}
 		a.flash("Copilot disabled")
 	}
 	if err := userconfig.SaveCopilot(userconfig.DefaultPath(), a.copilot.enabled); err != nil {

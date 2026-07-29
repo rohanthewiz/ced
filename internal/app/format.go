@@ -12,7 +12,7 @@ package app
 // bridge into the editor's event loop and modals. The flow on every
 // successful save:
 //
-//  1. Load <root>/.r-ed/format.json. Entry for this extension →
+//  1. Load <root>/.ced/format.json. Entry for this extension →
 //     check the trust store: Allowed → run; Denied → done; Unknown
 //     → open the trust prompt and re-enter the run on Allow.
 //  2. No project entry + the file is Go → run the built-in
@@ -39,7 +39,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/rohanthewiz/r-ed/internal/format"
+	"github.com/rohanthewiz/ced/internal/format"
 )
 
 // formatDoneEvent is posted by runFormatter when the goroutine
@@ -161,7 +161,7 @@ func (a *App) runWithTrust(idx int, cfg *format.Config, argv []string, quiet boo
 
 // maybeOfferInstall checks whether the user has a global default
 // formatter for this file's extension and, if so, prompts them to
-// install it into the project's .r-ed/format.json. Skips
+// install it into the project's .ced/format.json. Skips
 // silently when:
 //
 //   - no global defaults file exists (the common case for users
@@ -251,7 +251,7 @@ func (a *App) openFormatTrustPrompt(idx int, cfg *format.Config, argv []string) 
 
 // openFormatInstallPrompt asks whether to install the user's global
 // default formatter for this extension into the project's
-// .r-ed/format.json. Yes merges the entry, auto-trusts the
+// .ced/format.json. Yes merges the entry, auto-trusts the
 // resulting config (the user's consent here implies trust — same
 // reasoning as "you wrote the file yourself"), and runs the
 // formatter on the freshly-saved file. No persists a per-extension
@@ -297,7 +297,7 @@ func (a *App) openFormatInstallPrompt(idx int, ext string, argvTemplate []string
 		app.persistTrust(root, hash, true)
 		app.persistInstallDecline(root, ext, false)
 		// Re-sync tree / git / finder immediately so the new
-		// .r-ed/format.json appears in the sidebar (and the finder
+		// .ced/format.json appears in the sidebar (and the finder
 		// index) without waiting for the 10-second tick. Previously
 		// this path refreshed only tree + git and quietly left the
 		// finder stale — exactly the forget-one bug workspaceChanged

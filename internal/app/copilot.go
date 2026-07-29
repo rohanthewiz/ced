@@ -8,7 +8,7 @@
 // copilot.go is phase 1 of the GitHub Copilot integration: sidecar
 // lifecycle and device-flow authentication. It runs the official
 // copilot-language-server binary (a native executable GitHub ships for
-// every platform r-ed targets) over the same JSON-RPC transport gopls
+// every platform ced targets) over the same JSON-RPC transport gopls
 // uses — internal/lsp's Client is protocol-generic, so no new
 // dependency and no second framing layer.
 //
@@ -53,16 +53,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rohanthewiz/r-ed/internal/clipboard"
-	"github.com/rohanthewiz/r-ed/internal/editor"
-	"github.com/rohanthewiz/r-ed/internal/lsp"
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
-	"github.com/rohanthewiz/r-ed/internal/version"
+	"github.com/rohanthewiz/ced/internal/clipboard"
+	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/lsp"
+	"github.com/rohanthewiz/ced/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/version"
 )
 
 // copilotServerBinary is the sidecar this integration runs. GitHub
 // distributes it as prebuilt native binaries (no Node runtime), which
-// is what keeps this compatible with r-ed's single-static-binary
+// is what keeps this compatible with ced's single-static-binary
 // philosophy: like gopls, it's an external tool we find on PATH, never
 // a build dependency.
 const copilotServerBinary = "copilot-language-server"
@@ -360,8 +360,8 @@ func copilotInitialize(c *lsp.Client, root string) (copilotAuthStatus, error) {
 			{"uri": lsp.PathToURI(root), "name": filepath.Base(root)},
 		},
 		"initializationOptions": map[string]any{
-			"editorInfo":       map[string]any{"name": "r-ed", "version": version.Version},
-			"editorPluginInfo": map[string]any{"name": "r-ed-copilot", "version": version.Version},
+			"editorInfo":       map[string]any{"name": "ced", "version": version.Version},
+			"editorPluginInfo": map[string]any{"name": "ced-copilot", "version": version.Version},
 		},
 	}
 	// Keychain resolution can stall the server's first response for as

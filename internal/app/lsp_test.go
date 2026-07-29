@@ -19,9 +19,9 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/editor"
-	"github.com/rohanthewiz/r-ed/internal/lsp"
-	"github.com/rohanthewiz/r-ed/internal/theme"
+	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/lsp"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // fakeLSPConn records every notification the app sends and returns

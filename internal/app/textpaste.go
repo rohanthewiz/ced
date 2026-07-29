@@ -35,7 +35,7 @@ package app
 
 import (
 	"github.com/gdamore/tcell/v2"
-	"github.com/rohanthewiz/r-ed/internal/editor"
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // handlePaste processes a bracketed-paste boundary event. A start marker

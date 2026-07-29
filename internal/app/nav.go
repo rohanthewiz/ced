@@ -29,7 +29,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rohanthewiz/r-ed/internal/editor"
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // navStackMax caps each navigation stack. Fifty jumps of history is

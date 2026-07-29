@@ -20,8 +20,8 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/icons"
-	"github.com/rohanthewiz/r-ed/internal/theme"
+	"github.com/rohanthewiz/ced/internal/icons"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // Node is a single entry in the file tree. Directories also carry their

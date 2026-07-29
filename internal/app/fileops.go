@@ -30,8 +30,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rohanthewiz/r-ed/internal/clipboard"
-	"github.com/rohanthewiz/r-ed/internal/filetree"
+	"github.com/rohanthewiz/ced/internal/clipboard"
+	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
 // -----------------------------------------------------------------------------

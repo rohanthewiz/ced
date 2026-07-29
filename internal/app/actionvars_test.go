@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rohanthewiz/r-ed/internal/customactions"
+	"github.com/rohanthewiz/ced/internal/customactions"
 )
 
 // TestCaptureActionVars_NoFileOpen pins the no-file-open case: the

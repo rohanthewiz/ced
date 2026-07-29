@@ -5,14 +5,14 @@
   Copyright: 2026 Cloudmanic, LLC. All rights reserved.
 -->
 
-# CLAUDE.md — r-ed
+# CLAUDE.md — ced
 
 Project-specific guidance for Claude Code. Read this first; it captures
 conventions and design decisions that aren't obvious from the code alone.
 
 ## What this project is
 
-r-ed is an opinionated, **mouse-first** terminal code editor aimed at
+ced ("Cats Editor") is an opinionated, **mouse-first** terminal code editor aimed at
 SSH-into-tmux workflows. It looks and behaves like a tiny VS Code: file
 tree on the left, tabs across the top, syntax-highlighted editor in the
 middle, status bar at the bottom. It ships as a single static Go binary
@@ -43,8 +43,8 @@ features, make sure they're reachable from the main menu first.
 
 ## Module / repo
 
-- Module: `github.com/rohanthewiz/r-ed`
-- Binary name: `r-ed` (one word, lowercase — Makefile, goreleaser,
+- Module: `github.com/rohanthewiz/ced`
+- Binary name: `ced` (one word, lowercase — Makefile, goreleaser,
   brew formula all assume this)
 - Brew tap: this same repo, `Formula/` directory (no separate tap repo)
 
@@ -73,7 +73,7 @@ internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PT
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/r-ed/config.json loader/writer (icons, autosave, termdock, execmarks)
+internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks)
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
 internal/theme/theme.go       Tokyo Night palette + syntax color mapping
 internal/version/version.go   const Version = "x.y.z" — single line, CI bumps it
@@ -344,7 +344,7 @@ What the chat panel is allowed to know about your code. Context is
 **pushed, never fetched**: the handshake still declares
 `fs.readTextFile: false` and still auto-declines every permission
 request, so the agent cannot read a path we merely name. ACP's prompt is
-a ContentBlock ARRAY, and r-ed ships the bytes itself as embedded
+a ContentBlock ARRAY, and ced ships the bytes itself as embedded
 `resource` blocks — which is why this feature needed no loosening of the
 phase-3 scope guard, and why a `resource_link` block would be a lie
 here. House rules:
@@ -497,9 +497,9 @@ scope by design. House rules:
   Each completed command calls `refreshTreeNow()` — shell commands
   create files.
 - grsh's `cd` chdirs the whole editor process (grsh's deliberate
-  design) — keep r-ed's own file operations absolute-path based.
+  design) — keep ced's own file operations absolute-path based.
 - **rc file, the grsh analog of ~/.zshrc**: `ensureTermSession` sources
-  `~/.config/r-ed/rc.grsh` (`userconfig.RcPath`) into each fresh session
+  `~/.config/ced/rc.grsh` (`userconfig.RcPath`) into each fresh session
   via `sourceTermRc`, so a user's aliases/functions load before the first
   prompt. It embeds grsh, NOT zsh — it never reads any zsh startup file,
   which is the whole reason this file exists, and it must be grsh syntax.
@@ -587,7 +587,7 @@ let the editor shrink below that.
 
 ```sh
 make run          # go run . in current dir
-make build        # build to ./bin/r-ed
+make build        # build to ./bin/ced
 make build-linux  # cross-compile linux/amd64
 make install      # go install to $GOPATH/bin
 make tidy         # go mod tidy
@@ -611,15 +611,18 @@ release on the very first push.
    auto-bumped, committed back to `release` with `[skip ci]`, and pushed.
 3. Tags `v<x.y.z>`.
 4. GoReleaser cross-compiles, attaches archives to a GitHub Release,
-   and writes `Formula/r-ed.rb` back into this repo (using the
+   and writes `Formula/ced.rb` back into this repo (using the
    default `GITHUB_TOKEN` — no PAT). The formula commit also carries
    `[skip ci]` to break the loop.
-5. Dispatches `pages.yml` on the `release` ref so the marketing site's
-   version badge matches the just-released binary.
+
+There is no site deploy step. The inherited SpiceEdit marketing site
+(`website/`, spice-edit.com) went dormant with the ced rebrand — its
+`pages.yml` workflow, the `CNAME` domain binding, and the Makefile
+`site-*` targets are all gone. Recover them from git history if a ced
+site ever gets built.
 
 `main` is left untouched by a release run — merge `release` back into
-main yourself to bring its `version.go` current (that merge also
-redeploys the site via pages.yml's `version.go` path filter).
+main yourself to bring its `version.go` current.
 
 If you're touching the workflow or `.goreleaser.yml`, make sure both
 auto-commits keep their `[skip ci]` markers — without them the workflow
@@ -629,7 +632,7 @@ loops forever.
 
 - `Ctrl+` editor shortcuts (they fight tmux/terminals — that's the
   whole reason the action menu exists).
-- A config file / dotfile / plugin system. r-ed is opinionated.
+- A config file / dotfile / plugin system. ced is opinionated.
 - CGO dependencies. The whole point is one static binary.
 - Tree-sitter. We use Chroma intentionally — pure Go, no setup.
 - A separate `homebrew-tap` repo. The formula lives here under

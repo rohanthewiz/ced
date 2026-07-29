@@ -38,8 +38,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/rohanthewiz/r-ed/internal/editor"
-	"github.com/rohanthewiz/r-ed/internal/theme"
+	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 const (
@@ -140,7 +140,7 @@ type gitPanelState struct {
 	open bool
 	// height is the user-chosen row count from a header drag or the
 	// resize leaders; 0 means "auto" (a third of the screen). Session-
-	// only, like sidebarWidth — r-ed deliberately has no layout config.
+	// only, like sidebarWidth — ced deliberately has no layout config.
 	height int
 	// listWidth is the user-chosen file-list column count from a
 	// list/diff divider drag; 0 means "auto" (a third of the panel).

@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // TestMenuToggleExecMarks_PersistsAndPreservesConfig drives the menu
@@ -22,7 +22,7 @@ import (
 func TestMenuToggleExecMarks_PersistsAndPreservesConfig(t *testing.T) {
 	cfgDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfgDir)
-	cfgPath := filepath.Join(cfgDir, "r-ed", "config.json")
+	cfgPath := filepath.Join(cfgDir, "ced", "config.json")
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestExecMarksToggleLabel(t *testing.T) {
 func TestLoadUserConfig_AppliesExecMarks(t *testing.T) {
 	cfgDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfgDir)
-	cfgPath := filepath.Join(cfgDir, "r-ed", "config.json")
+	cfgPath := filepath.Join(cfgDir, "ced", "config.json")
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

@@ -22,7 +22,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/editor"
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // seedChatFile writes a fixture into the app's project root and opens
@@ -480,7 +480,7 @@ func TestChatAttachPress_RemovesAndOwnsItsRows(t *testing.T) {
 	if a.chat.autoContext {
 		t.Fatal("the auto chip's ✕ should turn auto-context off")
 	}
-	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "r-ed", "config.json"))
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ced", "config.json"))
 	if err != nil || !strings.Contains(string(data), `"chatcontext": "off"`) {
 		t.Fatalf("preference not persisted: %v %s", err, data)
 	}
@@ -522,7 +522,7 @@ func TestChatContextToggle(t *testing.T) {
 	if got := a.chatContextToggleLabel(); got != "Enable auto-attach current file" {
 		t.Errorf("off label = %q", got)
 	}
-	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "r-ed", "config.json"))
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ced", "config.json"))
 	if err != nil || !strings.Contains(string(data), `"chatcontext": "off"`) {
 		t.Fatalf("preference not persisted: %v %s", err, data)
 	}

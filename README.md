@@ -5,14 +5,14 @@
   Copyright: 2026 Cloudmanic, LLC. All rights reserved.
 -->
 
-# r-ed
+# ced — Cats Editor
 
 > An opinionated, **mouse-first** terminal code editor for SSH workflows.
 
-r-ed is a single-binary code editor that runs inside your terminal but
-behaves like a tiny VS Code: a file tree on the left, tabs across the top,
-syntax highlighting in the middle, a status bar at the bottom — and it's
-all driven by the **mouse**, not arcane keystrokes.
+ced (short for **Cats Editor**) is a single-binary code editor that runs
+inside your terminal but behaves like a tiny VS Code: a file tree on the
+left, tabs across the top, syntax highlighting in the middle, a status bar
+at the bottom — and it's all driven by the **mouse**, not arcane keystrokes.
 
 It's built for the workflow most "modern" terminal editors ignore: SSHing
 into a remote box from inside `tmux` / `zellij`, opening a project, clicking
@@ -23,8 +23,8 @@ clipboard, and getting back to work.
 
 ## Why does this exist?
 
-Vim and friendsq are wonderful if you've spent years memorizing them. Most
-terminal editors assume you have. r-ed doesn't.
+Vim and friends are wonderful if you've spent years memorizing them. Most
+terminal editors assume you have. ced doesn't.
 
 The goals, in order:
 
@@ -63,7 +63,7 @@ The goals, in order:
   menu, or drag the splitter to resize it.
 - **Clipboard over SSH** — OSC 52, including a `tmux` passthrough so
   copy works from inside a tmux session on a remote host.
-- **Format on save** — opt-in per-project via `.r-ed/format.json`
+- **Format on save** — opt-in per-project via `.ced/format.json`
   with a first-run trust prompt so cloning a repo never silently
   executes its commands. See [Format on save](#format-on-save).
 - **GitHub Copilot, optional** — inline ghost-text completions plus a
@@ -85,8 +85,8 @@ Tap it by URL (no `homebrew-*` repo naming convention required), then
 install:
 
 ```sh
-brew tap rohanthewiz/r-ed https://github.com/rohanthewiz/r-ed
-brew install rohanthewiz/r-ed/r-ed
+brew tap rohanthewiz/ced https://github.com/rohanthewiz/ced
+brew install rohanthewiz/ced/ced
 ```
 
 ### Updating
@@ -95,28 +95,28 @@ When a new release ships, refresh the tap and upgrade:
 
 ```sh
 brew update
-brew upgrade rohanthewiz/r-ed/r-ed
+brew upgrade rohanthewiz/ced/ced
 ```
 
 ### Uninstalling
 
 ```sh
-brew uninstall rohanthewiz/r-ed/r-ed
-brew untap rohanthewiz/r-ed
+brew uninstall rohanthewiz/ced/ced
+brew untap rohanthewiz/ced
 ```
 
 ### Linux (one-line install script)
 
-The simplest way to drop r-ed onto a Linux box (or any macOS that
+The simplest way to drop ced onto a Linux box (or any macOS that
 isn't using Homebrew) is the install script:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/rohanthewiz/r-ed/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/rohanthewiz/ced/main/install.sh | sh
 ```
 
 It detects your OS / arch, downloads the matching archive from the
-latest [GitHub Release](https://github.com/rohanthewiz/r-ed/releases),
-and drops the `r-ed` binary into `~/.local/bin` (or `/usr/local/bin`
+latest [GitHub Release](https://github.com/rohanthewiz/ced/releases),
+and drops the `ced` binary into `~/.local/bin` (or `/usr/local/bin`
 when `~/.local/bin` isn't writable). **Re-run the same command to
 upgrade** — it always fetches the latest tagged release.
 
@@ -124,11 +124,11 @@ Override behaviour with environment variables:
 
 ```sh
 # Pin to a specific release.
-curl -fsSL https://raw.githubusercontent.com/rohanthewiz/r-ed/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/rohanthewiz/ced/main/install.sh \
   | VERSION=v0.0.18 sh
 
 # Install to a custom directory.
-curl -fsSL https://raw.githubusercontent.com/rohanthewiz/r-ed/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/rohanthewiz/ced/main/install.sh \
   | INSTALL_DIR=/opt/bin sh
 ```
 
@@ -139,27 +139,27 @@ plus one of `curl` or `wget`.
 ### Other platforms (manual binary install)
 
 Pre-built binaries for Linux, macOS, and Windows (amd64 + arm64) are
-attached to every [GitHub Release](https://github.com/rohanthewiz/r-ed/releases).
+attached to every [GitHub Release](https://github.com/rohanthewiz/ced/releases).
 Download the archive for your OS/arch, extract it, and drop the
-`r-ed` binary somewhere on your `$PATH`.
+`ced` binary somewhere on your `$PATH`.
 
 ### From source
 
 ```sh
-git clone https://github.com/rohanthewiz/r-ed.git
-cd r-ed
+git clone https://github.com/rohanthewiz/ced.git
+cd ced
 make install        # builds and installs to $GOPATH/bin
 ```
 
 ## Usage
 
 ```sh
-r-ed              # opens the current directory
-r-ed ~/code/app   # opens a specific project root
-r-ed main.go      # opens a file (project root = its parent dir)
-r-ed new-file.go  # creates the file on first save (vim-style)
-r-ed --version    # print version and exit
-r-ed --help       # print short usage
+ced              # opens the current directory
+ced ~/code/app   # opens a specific project root
+ced main.go      # opens a file (project root = its parent dir)
+ced new-file.go  # creates the file on first save (vim-style)
+ced --version    # print version and exit
+ced --help       # print short usage
 ```
 
 Then:
@@ -178,7 +178,7 @@ Then:
 
 ### Hotkeys
 
-r-ed deliberately avoids `Ctrl+`-style shortcuts (they fight `tmux`,
+ced deliberately avoids `Ctrl+`-style shortcuts (they fight `tmux`,
 `zellij`, and the terminal itself — `Ctrl+S` is XOFF flow control on a
 real terminal). Instead, **`Esc` is the leader key**: tap `Esc`, then
 within half a second tap one of the letters below.
@@ -261,8 +261,8 @@ fuzzy file finder over every non-ignored file in the project:
 
 > 📺 [Custom actions walkthrough on YouTube](https://www.youtube.com/watch?v=vDWZWEmIiZ8)
 
-r-ed can read user-defined shell-out actions from
-`~/.config/r-ed/actions.json` and prepend them to the action menu.
+ced can read user-defined shell-out actions from
+`~/.config/ced/actions.json` and prepend them to the action menu.
 Each action runs against the **currently open file** when you click it.
 
 The use case this was built for: you SSH from your laptop into a remote
@@ -273,7 +273,7 @@ file back over a second SSH connection.
 
 ### File location
 
-`~/.config/r-ed/actions.json` (or `$XDG_CONFIG_HOME/r-ed/actions.json`
+`~/.config/ced/actions.json` (or `$XDG_CONFIG_HOME/ced/actions.json`
 when set). The file is optional — without it, the menu just shows the
 built-in actions.
 
@@ -303,7 +303,7 @@ Each entry needs:
   - `FILENAME` — basename of the same file
 
 > **`$HOME` and `~` gotcha for two-hop SSH:** the command runs in a
-> shell on the *r-ed host* (the remote box you SSH'd into). So
+> shell on the *ced host* (the remote box you SSH'd into). So
 > `$HOME` and `~` outside of `ssh "..."` quotes expand to *that* box's
 > home directory, not your laptop's. To run something on your laptop,
 > wrap the remote command in quotes: `ssh rager "open ~/Downloads/$FILENAME"` —
@@ -318,8 +318,8 @@ finishes.
 ### Debugging — every run is logged
 
 Every custom-action invocation appends a record to
-`~/.local/state/r-ed/actions.log` (or
-`$XDG_STATE_HOME/r-ed/actions.log` when set). One entry per run,
+`~/.local/state/ced/actions.log` (or
+`$XDG_STATE_HOME/ced/actions.log` when set). One entry per run,
 human-readable, with the exact command, the env vars that were
 exported, the duration, and the combined stdout / stderr:
 
@@ -341,7 +341,7 @@ exported, the duration, and the combined stdout / stderr:
   --- end ---
 ```
 
-`tail -f ~/.local/state/r-ed/actions.log` while you click around
+`tail -f ~/.local/state/ced/actions.log` while you click around
 to watch entries roll in. There's no rotation — the file is one-line
 per run plus a few lines of output, so it grows slowly. Delete it
 whenever you want to start fresh.
@@ -368,7 +368,7 @@ laptop. The simplest way to set that up:
    ```
 
 4. Test it by hand from the remote: `ssh rager echo hi`. Once that
-   works, r-ed can drive it the same way.
+   works, ced can drive it the same way.
 
 If your laptop sits behind NAT, point `HostName` at a Tailscale /
 WireGuard / Cloudflare-tunnel address — anywhere the remote can reach
@@ -388,7 +388,7 @@ line, you can put it in `actions.json`:
 
 ## Format on save
 
-r-ed can run a formatter on every save — `gofmt`, `php-cs-fixer`,
+ced can run a formatter on every save — `gofmt`, `php-cs-fixer`,
 `prettier`, anything you like — but the feature is **off by default**
 and only kicks in for projects that opt in by checking in a config
 file. Quick edits to a stranger's repo will never silently rewrite
@@ -396,7 +396,7 @@ their files.
 
 ### Setup
 
-Create `.r-ed/format.json` in your project root:
+Create `.ced/format.json` in your project root:
 
 ```json
 {
@@ -419,18 +419,18 @@ Create `.r-ed/format.json` in your project root:
 
 ### First save: trust prompt
 
-The first time r-ed would run a formatter from a new (or edited)
-`.r-ed/format.json`, you get a Yes / No prompt:
+The first time ced would run a formatter from a new (or edited)
+`.ced/format.json`, you get a Yes / No prompt:
 
 > **Trust this project's formatter?**
-> Allow .r-ed/format.json to run formatters on save?
+> Allow .ced/format.json to run formatters on save?
 
-Pick **Yes** once and r-ed will run the configured formatters
+Pick **Yes** once and ced will run the configured formatters
 silently from then on. Pick **No** and it will never run them in this
 project — until the config file changes, at which point you'll be
 prompted again. The remembered answer (and the SHA-256 hash of the
 config it applies to) lives in
-`~/.config/r-ed/format-trust.json`.
+`~/.config/ced/format-trust.json`.
 
 The hash is the security trick: a teammate can't push a "v2" of the
 config that runs `rm -rf` — your editor will re-prompt the next time
@@ -440,11 +440,11 @@ you save, because the file has changed since you trusted it.
 
 1. Save writes the file to disk first. A broken formatter never
    blocks the save.
-2. r-ed looks up the file's extension in `format.json`. No
+2. ced looks up the file's extension in `format.json`. No
    match → done.
 3. The configured command runs in a goroutine. Slow formatters don't
    freeze the UI; you can keep typing.
-4. When the formatter finishes, r-ed reloads the buffer — but
+4. When the formatter finishes, ced reloads the buffer — but
    only if you haven't typed anything since saving. If you did, your
    in-flight edits win and a status flash tells you the on-disk file
    was reformatted.
@@ -455,18 +455,18 @@ you save, because the file has changed since you trusted it.
 
 Two reasonable patterns:
 
-- **Commit `.r-ed/format.json`** so everyone on the team gets
+- **Commit `.ced/format.json`** so everyone on the team gets
   the same format-on-save behavior automatically.
-- **Add `.r-ed/` to `.gitignore`** if developers prefer their
+- **Add `.ced/` to `.gitignore`** if developers prefer their
   own setups — each person's local copy can configure whatever
   formatters they like.
 
-Both work. r-ed doesn't care which you pick.
+Both work. ced doesn't care which you pick.
 
 ### Personal defaults — the install prompt
 
 You can list your favorite formatters once globally in
-`~/.config/r-ed/format-defaults.json` (same shape as the
+`~/.config/ced/format-defaults.json` (same shape as the
 project file):
 
 ```json
@@ -482,14 +482,14 @@ project file):
 These never run on their own. Instead, when you save a file in a
 project where:
 
-1. The project's `.r-ed/format.json` is missing or has no
+1. The project's `.ced/format.json` is missing or has no
    entry for that file's extension, **and**
 2. Your global defaults *do* have an entry for that extension,
 
-…r-ed asks once: **"Add `gofmt` for `.go` to `.r-ed/format.json`?"**
+…ced asks once: **"Add `gofmt` for `.go` to `.ced/format.json`?"**
 
 - **Yes** — merges the entry into the project's config (creating
-  `.r-ed/format.json` if it didn't exist), auto-trusts the
+  `.ced/format.json` if it didn't exist), auto-trusts the
   resulting file, and runs the formatter on the save you just made.
 - **No / Esc** — remembered per-extension in the trust file. You
   won't be re-asked about that file type in this project until you
@@ -500,12 +500,12 @@ them while still making it one click to opt a project in.
 
 ## AI features (GitHub Copilot)
 
-r-ed integrates GitHub Copilot two ways — **inline ghost-text
+ced integrates GitHub Copilot two ways — **inline ghost-text
 completions** while you type, and a **chat panel** — both driven by
 GitHub's official [`copilot-language-server`](https://github.com/github/copilot-language-server-release).
 The integration follows the same philosophy as everything else here:
 
-- **Installing the binary is the opt-in.** r-ed never bundles it,
+- **Installing the binary is the opt-in.** ced never bundles it,
   downloads it, or nags you about it. No binary on `$PATH` → no
   Copilot anywhere in the UI, and the editor works exactly as before.
 - **You need a Copilot subscription** on the GitHub account you sign
@@ -525,12 +525,12 @@ npm install -g @github/copilot-language-server
 ```
 
 Verify with `copilot-language-server --version`. If you installed it
-while r-ed was already running, toggle **≡ → Copilot → Enable/Disable
+while ced was already running, toggle **≡ → Copilot → Enable/Disable
 Copilot** off and on — that's the deliberate "try again" gesture.
 
 ### 2. Sign in (once per machine)
 
-Open **≡ → Copilot → Sign in to GitHub**. r-ed runs GitHub's device
+Open **≡ → Copilot → Sign in to GitHub**. ced runs GitHub's device
 flow:
 
 1. A dialog shows a short device code and the URL
@@ -588,7 +588,7 @@ the right while it's open):
 ### Turning it off
 
 Two persisted switches, both in the `≡ → Copilot` menu and in
-`~/.config/r-ed/config.json`:
+`~/.config/ced/config.json`:
 
 ```json
 {
@@ -611,7 +611,7 @@ install the binary and sign in.
 │   ├── filetree/             # Lazy directory tree with identity-preserving refresh
 │   ├── lsp/                  # JSON-RPC client (gopls, Copilot sidecar + ACP chat)
 │   ├── clipboard/            # OSC 52 clipboard with tmux passthrough
-│   ├── customactions/        # Loader for ~/.config/r-ed/actions.json
+│   ├── customactions/        # Loader for ~/.config/ced/actions.json
 │   ├── format/               # Format-on-save config + trust store
 │   ├── finder/               # Project file index + fuzzy matcher
 │   ├── theme/                # Tokyo Night-inspired palette
@@ -626,7 +626,7 @@ install the binary and sign in.
 
 ```sh
 make run          # build and run against the current directory
-make build        # build to ./bin/r-ed
+make build        # build to ./bin/ced
 make build-linux  # cross-compile a linux/amd64 binary
 make test         # full suite with -race (same as CI)
 make test-short   # quick iteration loop (-short, no race)
@@ -651,7 +651,7 @@ Releases are fully automated. Every push to `main`:
 3. Tags `v<x.y.z>` and pushes the tag.
 4. [GoReleaser](https://goreleaser.com/) cross-compiles for
    linux/darwin/windows × amd64/arm64, attaches archives to a GitHub
-   Release, and pushes an updated formula into `Formula/r-ed.rb`
+   Release, and pushes an updated formula into `Formula/ced.rb`
    on this same repo.
 
 No PAT, no separate tap repo — the default workflow `GITHUB_TOKEN` is

@@ -42,7 +42,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/filetree"
+	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
 // clipboardKind identifies which internal clipboard was armed most

@@ -28,7 +28,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/lsp"
+	"github.com/rohanthewiz/ced/internal/lsp"
 )
 
 // wireChat installs a live fake chat connection, bypassing the async
@@ -749,7 +749,7 @@ func TestHandleChatModelSet(t *testing.T) {
 	if len(a.chat.msgs) == 0 || !strings.Contains(a.chat.msgs[len(a.chat.msgs)-1].text, "GPT-5.5") {
 		t.Error("transcript should note the switch")
 	}
-	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "r-ed", "config.json"))
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ced", "config.json"))
 	if err != nil {
 		t.Fatalf("config not written: %v", err)
 	}

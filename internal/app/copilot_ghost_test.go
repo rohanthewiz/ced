@@ -23,7 +23,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/editor"
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // newGhostTestApp builds a Copilot-connected app with ghost text fully
@@ -330,7 +330,7 @@ func TestMenuToggleSuggestions(t *testing.T) {
 	if a.copilot.suggest || tab.Ghost != nil {
 		t.Fatal("toggle off did not disable suggestions and clear the ghost")
 	}
-	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "r-ed", "config.json"))
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ced", "config.json"))
 	if err != nil || !strings.Contains(string(data), `"suggestions": "off"`) {
 		t.Fatalf("preference not persisted: %v %s", err, data)
 	}

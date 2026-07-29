@@ -305,7 +305,7 @@ func TestNotifyWireFormat(t *testing.T) {
 // integration tests. The lspServerBinary override env var lets local
 // runs point at a scratch install.
 func TestGoplsEndToEnd(t *testing.T) {
-	bin := os.Getenv("R_ED_TEST_GOPLS")
+	bin := os.Getenv("CED_TEST_GOPLS")
 	if bin == "" {
 		bin = "gopls"
 	}

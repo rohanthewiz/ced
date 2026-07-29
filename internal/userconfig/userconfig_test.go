@@ -155,7 +155,7 @@ func TestLoadForwardCompat(t *testing.T) {
 func TestDefaultPathHonoursXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test")
 	got := DefaultPath()
-	want := filepath.Join("/tmp/xdg-test", "r-ed", "config.json")
+	want := filepath.Join("/tmp/xdg-test", "ced", "config.json")
 	if got != want {
 		t.Fatalf("DefaultPath() = %q, want %q", got, want)
 	}
@@ -168,7 +168,7 @@ func TestDefaultPathFallsBackToHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "/tmp/home-test")
 	got := DefaultPath()
-	want := filepath.Join("/tmp/home-test", ".config", "r-ed", "config.json")
+	want := filepath.Join("/tmp/home-test", ".config", "ced", "config.json")
 	if got != want {
 		t.Fatalf("DefaultPath() = %q, want %q", got, want)
 	}
@@ -180,7 +180,7 @@ func TestDefaultPathFallsBackToHome(t *testing.T) {
 func TestRcPathHonoursXDG(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test")
 	got := RcPath()
-	want := filepath.Join("/tmp/xdg-test", "r-ed", "rc.grsh")
+	want := filepath.Join("/tmp/xdg-test", "ced", "rc.grsh")
 	if got != want {
 		t.Fatalf("RcPath() = %q, want %q", got, want)
 	}
@@ -190,13 +190,13 @@ func TestRcPathHonoursXDG(t *testing.T) {
 	}
 }
 
-// TestRcPathFallsBackToHome verifies the ~/.config/r-ed/rc.grsh fallback
+// TestRcPathFallsBackToHome verifies the ~/.config/ced/rc.grsh fallback
 // when XDG_CONFIG_HOME isn't set.
 func TestRcPathFallsBackToHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "/tmp/home-test")
 	got := RcPath()
-	want := filepath.Join("/tmp/home-test", ".config", "r-ed", "rc.grsh")
+	want := filepath.Join("/tmp/home-test", ".config", "ced", "rc.grsh")
 	if got != want {
 		t.Fatalf("RcPath() = %q, want %q", got, want)
 	}
@@ -269,7 +269,7 @@ func TestSaveAutoSave_CreatesFile(t *testing.T) {
 // TestSaveAutoSave_PreservesUnknownKeys is the forward-compat
 // contract: the read-modify-write must round-trip keys this version
 // of the binary doesn't know about, so toggling auto-save from an
-// old r-ed can't strip settings written by a newer one.
+// old ced can't strip settings written by a newer one.
 func TestSaveAutoSave_PreservesUnknownKeys(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
 	seed := `{"icons":"on","future_setting":{"nested":true}}`

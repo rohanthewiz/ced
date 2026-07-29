@@ -412,7 +412,7 @@ func TestMenuToggleCopilot_DisableShutsDownAndPersists(t *testing.T) {
 	if a.copilot.dead {
 		t.Fatal("a deliberate disable must not be recorded as dead")
 	}
-	data, err := os.ReadFile(filepath.Join(cfgDir, "r-ed", "config.json"))
+	data, err := os.ReadFile(filepath.Join(cfgDir, "ced", "config.json"))
 	if err != nil {
 		t.Fatalf("config not written: %v", err)
 	}

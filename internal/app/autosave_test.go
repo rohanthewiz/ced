@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // autoSaveFixture builds an enabled-auto-save app with one open tab
@@ -183,7 +183,7 @@ func TestHandleAutoSave_RunsQuietFormat(t *testing.T) {
 func TestMenuToggleAutoSave_PersistsAndPreservesConfig(t *testing.T) {
 	cfgDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfgDir)
-	cfgPath := filepath.Join(cfgDir, "r-ed", "config.json")
+	cfgPath := filepath.Join(cfgDir, "ced", "config.json")
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

@@ -39,7 +39,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/filetree"
+	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
 // zipDoneEvent is posted by the zip goroutine when the archive is

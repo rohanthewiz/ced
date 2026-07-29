@@ -177,7 +177,7 @@ func TestACPOnRequestAnswers(t *testing.T) {
 // on forever).
 func TestACPOnRequestError(t *testing.T) {
 	onRequest := func(method string, params json.RawMessage) (any, error) {
-		return nil, fmt.Errorf("r-ed does not handle %s", method)
+		return nil, fmt.Errorf("ced does not handle %s", method)
 	}
 	_, agt, done := pipeClientACP(t, nil, onRequest, nil)
 	defer done()

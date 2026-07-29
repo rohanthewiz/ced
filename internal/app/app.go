@@ -27,15 +27,15 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/clipboard"
-	"github.com/rohanthewiz/r-ed/internal/customactions"
-	"github.com/rohanthewiz/r-ed/internal/editor"
-	"github.com/rohanthewiz/r-ed/internal/filetree"
-	"github.com/rohanthewiz/r-ed/internal/finder"
-	"github.com/rohanthewiz/r-ed/internal/icons"
-	"github.com/rohanthewiz/r-ed/internal/theme"
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
-	"github.com/rohanthewiz/r-ed/internal/version"
+	"github.com/rohanthewiz/ced/internal/clipboard"
+	"github.com/rohanthewiz/ced/internal/customactions"
+	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/filetree"
+	"github.com/rohanthewiz/ced/internal/finder"
+	"github.com/rohanthewiz/ced/internal/icons"
+	"github.com/rohanthewiz/ced/internal/theme"
+	"github.com/rohanthewiz/ced/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/version"
 )
 
 // Layout, behavior, and feel constants. Constants instead of config —
@@ -186,7 +186,7 @@ type menuGroup struct {
 
 // builtinMenuGroups returns the editor's built-in action groups in
 // display order. Custom actions loaded from
-// ~/.config/r-ed/actions.json get spliced in as their own group in
+// ~/.config/ced/actions.json get spliced in as their own group in
 // menuLayout — they're not included here so toggling them on or off
 // doesn't require touching this table.
 //
@@ -326,7 +326,7 @@ func (a *App) visibleMenuGroups() []menuGroup {
 	for i := range a.customActions {
 		i := i // capture
 		// Custom actions are user-defined shell — we don't try to guess
-		// from the command string whether it needs $FILE. "Upgrade r-ed"
+		// from the command string whether it needs $FILE. "Upgrade ced"
 		// obviously doesn't; "Open on computer" obviously does. Both
 		// should be runnable from the menu; if a $FILE-dependent command
 		// is invoked with no tab open it'll fail with a real error and
@@ -696,7 +696,7 @@ type App struct {
 	nav navState
 
 	// customActions is the list of user-configured shell-out actions
-	// loaded from ~/.config/r-ed/actions.json at startup. When
+	// loaded from ~/.config/ced/actions.json at startup. When
 	// non-empty they prepend a new group to the action menu — see
 	// menuLayout. nil / empty when the user hasn't configured any.
 	customActions []customactions.Action
@@ -802,7 +802,7 @@ func (a *App) loadCustomActions() {
 	a.customActions = actions
 }
 
-// loadUserConfig reads ~/.config/r-ed/config.json (if any),
+// loadUserConfig reads ~/.config/ced/config.json (if any),
 // resolves the Nerd Fonts auto/on/off mode to a concrete bool via
 // icons.Resolve, and stamps the result onto the file tree so the
 // next render starts drawing glyphs (or doesn't). A malformed
@@ -2306,7 +2306,7 @@ func (a *App) flash(msg string) {
 
 // OpenFile opens the file at path in a new tab — or switches to it if
 // it is already open. Exported so main.go can seed the editor with the
-// file the user named on the command line ("r-ed foo.go"). Thin
+// file the user named on the command line ("ced foo.go"). Thin
 // wrapper around openFile so internal callers keep using the lowercase
 // name and the public surface stays small.
 func (a *App) OpenFile(path string) { a.openFile(path) }
@@ -2318,7 +2318,7 @@ func (a *App) OpenFile(path string) { a.openFile(path) }
 func (a *App) openFile(path string) {
 	// Tabs are keyed by absolute path everywhere downstream — the
 	// LSP diagnostics map, the diff cache, the open-tab dedupe — so
-	// normalize a relative path (a CLI arg like "r-ed foo.go") here,
+	// normalize a relative path (a CLI arg like "ced foo.go") here,
 	// at the single entry point, rather than teaching every consumer
 	// to cope. New() already anchored rootDir, so tree-driven opens
 	// arrive absolute and this is a no-op for them.

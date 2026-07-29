@@ -31,7 +31,7 @@
 //     "I know, overwrite it" path. Same for DiskGone tabs — auto-save
 //     silently resurrecting a file someone just deleted is surprising.
 //   - The toggle lives in the ≡ menu (house rule: every action is
-//     reachable there) and persists to ~/.config/r-ed/config.json so
+//     reachable there) and persists to ~/.config/ced/config.json so
 //     it survives restarts.
 package app
 
@@ -41,8 +41,8 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/editor"
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // autoSaveDelay is how long the user must be idle (no buffer

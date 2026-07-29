@@ -20,7 +20,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/filetree"
+	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
 // TestCloseAllModals_ClearsEverything proves the helper dismisses every

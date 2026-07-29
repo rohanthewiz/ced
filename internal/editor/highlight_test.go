@@ -19,7 +19,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/theme"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // TestHighlight_GoSourceShapesGrid verifies that highlighting a snippet of

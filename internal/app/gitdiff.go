@@ -30,8 +30,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/rohanthewiz/r-ed/internal/editor"
-	"github.com/rohanthewiz/r-ed/internal/theme"
+	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // diffKind classifies one hunk of working-tree change.

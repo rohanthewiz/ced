@@ -39,7 +39,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/rohanthewiz/r-ed/internal/clipboard"
+	"github.com/rohanthewiz/ced/internal/clipboard"
 )
 
 // -----------------------------------------------------------------------------

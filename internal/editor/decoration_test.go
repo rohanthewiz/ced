@@ -12,7 +12,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/theme"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // TestStyleDelta_Apply pins the partial-override contract: colors land

@@ -6,7 +6,7 @@
 // =============================================================================
 
 // Package userconfig loads the editor's small user-level config from
-// ~/.config/r-ed/config.json. It's separate from customactions on
+// ~/.config/ced/config.json. It's separate from customactions on
 // purpose: actions.json is a list of shell-out menu entries, config.json
 // is editor preferences. Keeping them apart means a malformed actions
 // file can't break editor settings and vice-versa.
@@ -100,7 +100,7 @@ type Config struct {
 	// binary is only ever spawned when the user has installed it —
 	// presence on PATH is itself the opt-in; this key is the opt-out
 	// for people who have the binary for other editors but don't want
-	// r-ed touching it. Persisted by the ≡ toggle, same as AutoSave.
+	// ced touching it. Persisted by the ≡ toggle, same as AutoSave.
 	Copilot bool
 
 	// Suggestions controls whether Copilot ghost-text inline completions
@@ -114,7 +114,7 @@ type Config struct {
 	// ACP session/set_model after each session opens. Empty (the
 	// default) keeps the agent's own default. Deliberately not
 	// validated against a fixed list — the roster is server-defined
-	// and changes without an r-ed release; a stale id is silently
+	// and changes without an ced release; a stale id is silently
 	// ignored at apply time instead. Persisted by the ≡ model picker.
 	ChatModel string
 
@@ -152,36 +152,36 @@ type fileFormat struct {
 	ChatContext string `json:"chatcontext,omitempty"`
 }
 
-// configFilePath resolves the r-ed config directory
-// ($XDG_CONFIG_HOME/r-ed, else ~/.config/r-ed) and joins name onto it.
+// configFilePath resolves the ced config directory
+// ($XDG_CONFIG_HOME/ced, else ~/.config/ced) and joins name onto it.
 // Returns "" when neither XDG_CONFIG_HOME nor a home directory resolves,
 // which callers treat as "no config location — use defaults / skip".
 // DefaultPath and RcPath both go through here so the two files can never
 // drift into different directories.
 func configFilePath(name string) string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "r-ed", name)
+		return filepath.Join(xdg, "ced", name)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
 	}
-	return filepath.Join(home, ".config", "r-ed", name)
+	return filepath.Join(home, ".config", "ced", name)
 }
 
 // DefaultPath returns the canonical config-file location:
-// $XDG_CONFIG_HOME/r-ed/config.json, falling back to
-// ~/.config/r-ed/config.json. Returns "" when neither resolves
+// $XDG_CONFIG_HOME/ced/config.json, falling back to
+// ~/.config/ced/config.json. Returns "" when neither resolves
 // — callers should treat that as "use defaults".
 func DefaultPath() string { return configFilePath("config.json") }
 
 // RcPath returns the canonical grsh rc-file location:
-// $XDG_CONFIG_HOME/r-ed/rc.grsh, falling back to ~/.config/r-ed/rc.grsh
+// $XDG_CONFIG_HOME/ced/rc.grsh, falling back to ~/.config/ced/rc.grsh
 // (or "" when no config location resolves).
 //
 // This is the grsh analog of ~/.zshrc: the embedded terminal panel
 // sources it once, when the grsh session is created, so a user's aliases
-// and functions are available in every r-ed shell. It MUST be grsh
+// and functions are available in every ced shell. It MUST be grsh
 // syntax, not zsh — the terminal embeds grsh (its own shell language),
 // so it never reads ~/.zshrc or any zsh startup file, and this file is
 // exactly the gap that fills.
@@ -394,7 +394,7 @@ func SaveChatContext(path string, on bool) error {
 // preserving every other key the user may have set by hand (icons
 // today, anything we add tomorrow). The read-modify-write goes
 // through a raw map — not fileFormat — so keys this binary doesn't
-// know about survive a round-trip with a newer or older r-ed.
+// know about survive a round-trip with a newer or older ced.
 // Writes atomically (temp + rename), same as the format-config
 // installer, so a crash mid-write can't corrupt the config.
 func saveKey(path, key, val string) error {

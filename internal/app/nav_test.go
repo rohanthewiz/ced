@@ -14,7 +14,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/editor"
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // seedNavFiles writes n small fixture files and returns their absolute

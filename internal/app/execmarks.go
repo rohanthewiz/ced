@@ -13,7 +13,7 @@
 // the same pattern the auto-save and terminal-dock toggles follow.
 package app
 
-import "github.com/rohanthewiz/r-ed/internal/userconfig"
+import "github.com/rohanthewiz/ced/internal/userconfig"
 
 // menuToggleExecMarks flips the executable '*' marker on/off from the ≡
 // menu and persists the choice to the user config so it sticks across

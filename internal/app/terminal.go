@@ -11,7 +11,7 @@
 // not a PTY: grsh is compiled in and streams plain text, so the panel
 // works identically over SSH+tmux and never fights tcell for the tty.
 // Full-screen child programs (vim, htop) are out of scope by design —
-// r-ed users already live in a terminal and can split a pane for those.
+// ced users already live in a terminal and can split a pane for those.
 //
 // House patterns in play:
 //   - NOT a modal: the panel owns part of the layout like the git panel,
@@ -45,7 +45,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/grsh"
 
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 const (
@@ -113,7 +113,7 @@ var termExitCode = grsh.ExitCode
 // ~/.zshrc that ensureTermSession sources into a fresh session. A
 // package var (like newTermEvaluator) so tests can point it at a temp
 // file, or disable it, without ever touching the real
-// ~/.config/r-ed/rc.grsh on the dev machine.
+// ~/.config/ced/rc.grsh on the dev machine.
 var termRcPath = userconfig.RcPath
 
 // termLineKind selects the style a scrollback line renders with.
@@ -346,7 +346,7 @@ func (a *App) ensureTermSession() {
 	a.sourceTermRc()
 }
 
-// sourceTermRc runs the user's grsh rc file (~/.config/r-ed/rc.grsh —
+// sourceTermRc runs the user's grsh rc file (~/.config/ced/rc.grsh —
 // the grsh analog of ~/.zshrc) into the freshly-created session, so the
 // aliases and functions defined there are live before the first prompt.
 // It exists because the panel embeds grsh, not zsh: a plain grsh session

@@ -35,7 +35,7 @@ package editor
 import (
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/theme"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // StyleDelta is a partial style override. Colors apply only when their

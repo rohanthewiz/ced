@@ -25,7 +25,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/grsh"
 
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // fakeTermEval satisfies termEvaluator with recordable, controllable

@@ -21,7 +21,7 @@ package app
 import (
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/customactions"
+	"github.com/rohanthewiz/ced/internal/customactions"
 )
 
 // Layout constants for the form modal. The width matches the prompt

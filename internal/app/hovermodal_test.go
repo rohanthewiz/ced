@@ -15,7 +15,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/editor"
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // hoverTestApp opens a tall Go file so cursor-anchoring tests can park

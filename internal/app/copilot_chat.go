@@ -55,8 +55,8 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/lsp"
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/lsp"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 const (
@@ -347,7 +347,7 @@ func (a *App) chatEnsureStarted() {
 			// fs/* can't arrive (the handshake declares no fs
 			// capabilities); anything else unknown gets an honest
 			// method-not-found so the agent can fall back to prose.
-			return nil, fmt.Errorf("r-ed does not handle %s", method)
+			return nil, fmt.Errorf("ced does not handle %s", method)
 		}
 		onExit := func(error) {
 			_ = scr.PostEvent(&chatExitEvent{when: time.Now()})

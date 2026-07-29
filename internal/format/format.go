@@ -8,7 +8,7 @@
 // Package format loads the per-project formatter configuration that
 // drives format-on-save. The config lives at
 //
-//	<projectRoot>/.r-ed/format.json
+//	<projectRoot>/.ced/format.json
 //
 // and looks like:
 //
@@ -42,11 +42,11 @@ import (
 	"strings"
 )
 
-// ConfigDir is the directory inside a project that holds r-ed's
+// ConfigDir is the directory inside a project that holds ced's
 // project-local config. We deliberately use a folder (not a single
 // dotfile) so we can grow other per-project files later without
 // adding more top-level entries to people's repos.
-const ConfigDir = ".r-ed"
+const ConfigDir = ".ced"
 
 // ConfigFile is the formatter-config filename inside ConfigDir.
 const ConfigFile = "format.json"
@@ -85,7 +85,7 @@ func ConfigPath(rootDir string) string {
 	return filepath.Join(rootDir, ConfigDir, ConfigFile)
 }
 
-// Load reads and parses the format config at <rootDir>/.r-ed/format.json.
+// Load reads and parses the format config at <rootDir>/.ced/format.json.
 // Returns (nil, nil) when the file does not exist — that's the
 // "no formatting configured" signal, not an error. Returns an error
 // only for IO problems and malformed JSON, which the caller should

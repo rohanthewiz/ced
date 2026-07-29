@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/rohanthewiz/r-ed/internal/customactions"
-	"github.com/rohanthewiz/r-ed/internal/finder"
+	"github.com/rohanthewiz/ced/internal/customactions"
+	"github.com/rohanthewiz/ced/internal/finder"
 )
 
 // paletteOf returns the active modal as a *paletteModal, or nil when

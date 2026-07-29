@@ -5,7 +5,7 @@
 # Copyright: 2026 Cloudmanic, LLC. All rights reserved.
 # =============================================================================
 #
-# Release pipeline for r-ed. Triggers on every push to the `release`
+# Release pipeline for ced. Triggers on every push to the `release`
 # branch (cut it from main when you want to ship):
 #
 #   1. Determines the next version. If the pushed commit hand-edited
@@ -35,13 +35,10 @@ on:
   workflow_dispatch:
 
 # Pushing the version-bump commit + tag back to `release` needs write
-# access to the repo's contents. The `actions: write` scope lets the
-# final step kick off the Pages workflow via workflow_dispatch — the
-# version-bump commit carries [skip ci] so pages.yml's auto-deploy on
-# internal/version/version.go won't fire on its own.
+# access to the repo's contents. Nothing else is dispatched from here —
+# the marketing-site deploy went away with the ced rebrand.
 permissions:
   contents: write
-  actions: write
 
 # Serialise releases — no two version-bumps racing each other.
 concurrency:
@@ -134,16 +131,3 @@ jobs:
           # Same-repo brew formula push uses the default workflow token —
           # no separate tap repo or PAT needed.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Kick the Pages deploy explicitly against the release ref. The
-      # version bump and brew formula commits both carry [skip ci]
-      # (otherwise this workflow would loop on its own pushes), and the
-      # bump lands on `release` (not main), so pages.yml's path-filtered
-      # auto-deploy never fires for it. Dispatching on --ref release
-      # rebuilds the site from the exact released commit, so its version
-      # badge matches what users just installed without waiting for a
-      # release → main merge.
-      - name: Trigger Pages redeploy
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run pages.yml --ref release

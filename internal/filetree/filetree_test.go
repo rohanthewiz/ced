@@ -21,8 +21,8 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/icons"
-	"github.com/rohanthewiz/r-ed/internal/theme"
+	"github.com/rohanthewiz/ced/internal/icons"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // mkTree is a tiny helper that builds a small directory layout under t.TempDir

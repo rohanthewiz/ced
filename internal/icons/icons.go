@@ -39,7 +39,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // Resolve maps a user's IconsMode preference to a concrete on/off

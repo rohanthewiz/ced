@@ -13,7 +13,7 @@
 // fs.readTextFile FALSE and auto-declines every session/request_permission
 // (see copilot_chat.go's scope guard), so the agent genuinely cannot read
 // a path we merely point at. ACP's prompt is a ContentBlock ARRAY, and
-// the block type that carries bytes is the embedded `resource` — so r-ed
+// the block type that carries bytes is the embedded `resource` — so ced
 // ships the text itself and the scope guard stays exactly as tight as it
 // was. A `resource_link` block would be a lie here; don't add one.
 //
@@ -57,9 +57,9 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/editor"
-	"github.com/rohanthewiz/r-ed/internal/lsp"
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/lsp"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 const (

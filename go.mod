@@ -1,4 +1,4 @@
-module github.com/rohanthewiz/r-ed
+module github.com/rohanthewiz/ced
 
 go 1.26.1
 

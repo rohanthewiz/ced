@@ -47,9 +47,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rohanthewiz/r-ed/internal/editor"
-	"github.com/rohanthewiz/r-ed/internal/lsp"
-	"github.com/rohanthewiz/r-ed/internal/userconfig"
+	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/lsp"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // copilotCompletionDebounce is how long after the last edit the inline
@@ -380,7 +380,7 @@ func (a *App) copilotRequestCompletion(t *editor.Tab) {
 		"position": lspPosFor(t, pos),
 		// triggerKind 2 = automatic (as-you-type) in the server's
 		// dialect of the inline-completion protocol; 1 is an explicit
-		// user invocation, which r-ed doesn't have a gesture for yet.
+		// user invocation, which ced doesn't have a gesture for yet.
 		"context":           map[string]any{"triggerKind": 2},
 		"formattingOptions": map[string]any{"tabSize": tabSize, "insertSpaces": insertSpaces},
 	}

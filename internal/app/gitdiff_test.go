@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/rohanthewiz/r-ed/internal/editor"
-	"github.com/rohanthewiz/r-ed/internal/theme"
+	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // TestParseHunkHeader_Forms pins the header scanner against every

@@ -5,7 +5,8 @@
 // Copyright: 2026 Cloudmanic, LLC. All rights reserved.
 // =============================================================================
 
-// Command r-ed is an opinionated, mouse-first terminal code editor.
+// Command ced (Cats Editor) is an opinionated, mouse-first terminal code
+// editor.
 // It is designed for the SSH-into-a-box workflow: a single static binary,
 // drop it on the remote host, run it inside tmux/zellij, and you get a
 // VS-Code-shaped UI (file tree, tabs, syntax highlighting, status bar) you
@@ -17,8 +18,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/rohanthewiz/r-ed/internal/app"
-	"github.com/rohanthewiz/r-ed/internal/version"
+	"github.com/rohanthewiz/ced/internal/app"
+	"github.com/rohanthewiz/ced/internal/version"
 )
 
 // cliAction is the high-level decision the arg parser hands back: edit
@@ -48,7 +49,7 @@ type cliResult struct {
 //   - a flag (--version / -v / --help / -h) → print-and-exit action
 //   - a directory path → use as the editor's root
 //   - a file path → root at the file's parent dir, open the file in a tab
-//   - a missing path → assume "r-ed foo.go" means "create foo.go" —
+//   - a missing path → assume "ced foo.go" means "create foo.go" —
 //     same intuition as `vim foo.go` on a non-existent file.
 //
 // Pure function; no IO beyond os.Stat. Returns a result the caller acts
@@ -97,17 +98,17 @@ func resolveArgs(args []string) cliResult {
 // the editor is itself the help — once running, the ≡ menu lists every
 // action.
 func printHelp() {
-	fmt.Println(`r-ed — opinionated mouse-first terminal code editor.
+	fmt.Println(`ced (Cats Editor) — opinionated mouse-first terminal code editor.
 
 Usage:
-  r-ed                     Open the current directory.
-  r-ed <directory>         Open a project directory.
-  r-ed <file>              Open a file (its parent becomes the project root).
-  r-ed --version           Print the version and exit.
-  r-ed --help              Print this help and exit.
+  ced                     Open the current directory.
+  ced <directory>         Open a project directory.
+  ced <file>              Open a file (its parent becomes the project root).
+  ced --version           Print the version and exit.
+  ced --help              Print this help and exit.
 
 Once running, click ≡ (top-left), right-click anywhere, or double-tap Esc
-for the action menu. See https://github.com/rohanthewiz/r-ed for
+for the action menu. See https://github.com/rohanthewiz/ced for
 hotkeys and the full feature list.`)
 }
 
@@ -118,13 +119,13 @@ hotkeys and the full feature list.`)
 func main() {
 	res := resolveArgs(os.Args[1:])
 	if res.Err != nil {
-		fmt.Fprintln(os.Stderr, "r-ed:", res.Err)
+		fmt.Fprintln(os.Stderr, "ced:", res.Err)
 		os.Exit(1)
 	}
 
 	switch res.Action {
 	case actionVersion:
-		fmt.Println("r-ed", version.Version)
+		fmt.Println("ced", version.Version)
 		return
 	case actionHelp:
 		printHelp()
@@ -133,7 +134,7 @@ func main() {
 
 	a, err := app.New(res.RootDir)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "r-ed: failed to start:", err)
+		fmt.Fprintln(os.Stderr, "ced: failed to start:", err)
 		os.Exit(1)
 	}
 	defer a.Close()
@@ -143,7 +144,7 @@ func main() {
 	}
 
 	if err := a.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "r-ed:", err)
+		fmt.Fprintln(os.Stderr, "ced:", err)
 		os.Exit(1)
 	}
 }

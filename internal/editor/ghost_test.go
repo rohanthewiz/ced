@@ -17,7 +17,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
-	"github.com/rohanthewiz/r-ed/internal/theme"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // ghostTestTab builds an in-memory tab (no file) with content and the

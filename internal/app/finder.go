@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/rohanthewiz/r-ed/internal/finder"
+	"github.com/rohanthewiz/ced/internal/finder"
 )
 
 const (

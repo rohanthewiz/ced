@@ -274,6 +274,10 @@ func builtinMenuGroups() []menuGroup {
 			// ATTACHING has no mouse surface of its own — these rows are
 			// it (copilot_chat_context.go).
 			{action: (*App).menuToggleChatContext, enabled: alwaysTrue, labelFor: (*App).chatContextToggleLabel},
+			// The write half of the same trust question the context
+			// toggle asks about reads (copilot_chat_perm.go): off is
+			// read-only chat, enforced whatever a permission prompt says.
+			{action: (*App).menuToggleChatWrite, enabled: alwaysTrue, labelFor: (*App).chatWriteToggleLabel},
 			{action: (*App).menuChatAttachCurrent, enabled: (*App).hasFileTab, labelFor: (*App).chatAttachActionLabel},
 			{label: "Attach file to chat…", action: (*App).menuChatAttachFile, enabled: (*App).hasFinder},
 			{action: (*App).menuChatClearAttachments, enabled: (*App).hasChatAttachments, labelFor: (*App).chatClearAttachLabel},
@@ -833,6 +837,7 @@ func (a *App) loadUserConfig() {
 	// the same stale-preference rule as chatmodel.
 	a.chat.agent = chatAgentByID(cfg.ChatAgent)
 	a.chat.autoContext = cfg.ChatContext
+	a.chat.writeEnabled = cfg.ChatWrite
 }
 
 // refreshGitStatus re-runs `git status --porcelain` against the project

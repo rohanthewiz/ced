@@ -728,3 +728,62 @@ func TestChatAgent_LoadAndSave(t *testing.T) {
 		t.Fatal("unknown key was dropped by the save round-trip")
 	}
 }
+
+// TestChatWrite_LoadAndSave pins the chatwrite key end to end: it
+// defaults ON (the shipped posture — every change still asks permission
+// first), the recognised values load case-insensitively, an omitted
+// field keeps the default, a typo errors rather than silently choosing a
+// trust level for the user, and SaveChatWrite round-trips beside
+// hand-set keys.
+func TestChatWrite_LoadAndSave(t *testing.T) {
+	if !Defaults().ChatWrite {
+		t.Fatal("Defaults().ChatWrite = false, want true")
+	}
+	cases := map[string]bool{
+		`{"chatwrite":"on"}`:    true,
+		`{"chatwrite":"off"}`:   false,
+		`{"chatwrite":" OFF "}`: false,
+		`{}`:                    true,
+	}
+	for body, want := range cases {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", body, err)
+		}
+		if cfg.ChatWrite != want {
+			t.Errorf("Load(%s).ChatWrite = %v, want %v", body, cfg.ChatWrite, want)
+		}
+	}
+
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"chatwrite":"sometimes"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("invalid chatwrite value should error")
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"icons\": \"on\",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveChatWrite(path, false); err != nil {
+		t.Fatalf("SaveChatWrite: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.ChatWrite || cfg.Icons != IconsOn {
+		t.Fatalf("round trip lost values: chatwrite=%v icons=%q", cfg.ChatWrite, cfg.Icons)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}

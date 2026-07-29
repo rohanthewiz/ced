@@ -83,6 +83,10 @@ func newTestApp(t *testing.T, root string) *App {
 	prevChatLook := chatLookPath
 	chatLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	t.Cleanup(func() { chatLookPath = prevChatLook })
+	// Match the shipped default (config "chatwrite" is on): the App is
+	// built by hand here, so the zero value would silently put every
+	// test in read-only chat mode. Read-only tests flip it back off.
+	a.chat.writeEnabled = true
 	// Neuter the sign-in flow's host side-effects so no test can write
 	// the dev machine's clipboard or launch a real browser. Copilot
 	// tests that assert on these swap in their own recorders.
@@ -1824,8 +1828,8 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 // TestMenuLayout_NoCustomActions pins down the baseline geometry with
 // every section expanded: the pinned top zone contributes two rows (the
 // command palette + the expand/collapse-all toggle), ten collapsible
-// groups each contribute a header row (10) plus their 59 action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 71 total. The
+// groups each contribute a header row (10) plus their 60 action rows, and
+// Quit renders headerless behind a divider (its 1 row) — 72 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1833,16 +1837,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 77 {
-		t.Errorf("modalHeight = %d, want 77", h)
+	if h != 78 {
+		t.Errorf("modalHeight = %d, want 78", h)
 	}
-	if got := len(items); got != 71 {
-		t.Errorf("row count = %d, want 71 (2 top-zone + 59 group actions + 10 headers)", got)
+	if got := len(items); got != 72 {
+		t.Errorf("row count = %d, want 72 (2 top-zone + 60 group actions + 10 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (74) — headers separate the
+	// one setting off the headerless Quit group (75) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 74}
+	wantDiv := []int{2, 5, 75}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2170,8 +2174,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 80 { // 77 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 80", h)
+	if h != 81 { // 78 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 81", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

@@ -76,7 +76,7 @@ internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PT
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks)
+internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, chat*)
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
 internal/theme/theme.go       Tokyo Night palette + syntax color mapping
 internal/version/version.go   const Version = "x.y.z" — single line, CI bumps it
@@ -402,6 +402,19 @@ from chat-only into a full ACP client. House rules:
   (`chatPermAfterEvent`) resurfaces the head when the slot frees.
   Decisions are echoed into the transcript ("✓ allowed" /
   "⊘ rejected") — the agent's next answer references them.
+- **Read-only chat is the coarse switch above the prompts** (config
+  `"chatwrite"`, default on, `SaveChatWrite`, ≡ Copilot group toggle).
+  Off means three enforcement points, not one: the handshake declares
+  `fs.writeTextFile: false` (`chatInitialize` takes `allowWrite` — an
+  agent that knows it can't write plans differently), `handleChatFSRequest`
+  refuses writes with a readable error, and `handleChatPermRequest`
+  auto-rejects any request whose tool kind is in `chatMutatingKinds`
+  (edit/delete/move/execute — a shell command is a write with extra
+  steps) instead of prompting. UNRECOGNISED and unlabelled kinds still
+  prompt: auto-rejecting everything an agent forgot to label would make
+  the mode useless rather than safe, and ced's own write path is
+  refused regardless. The capability is a handshake artifact, so
+  `setChatWrite` says in the transcript when a re-allow needs a restart.
 - **fs is root-confined and buffer-fresh.** Reads serve the open tab's
   BUFFER (unsaved edits — the attachment rationale) before disk;
   writes land on disk, then run `refreshTreeNow()` so the normal
@@ -652,8 +665,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 59 group actions + 10 headers (71), height 77, dividers
-`[2, 5, 74]`.
+2 top-zone rows + 60 group actions + 10 headers (72), height 78, dividers
+`[2, 5, 75]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.

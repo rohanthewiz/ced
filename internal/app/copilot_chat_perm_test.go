@@ -428,3 +428,176 @@ func TestHandleChatFSRequest_StaleSessionRefused(t *testing.T) {
 		t.Fatal("stale session should be refused")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Read-only chat (the "chatwrite" switch)
+// -----------------------------------------------------------------------------
+
+// TestChatWriteBlocked pins which tool calls read-only mode refuses
+// without asking. Mutating kinds are blocked; kinds that only look, and
+// kinds the agent never labelled, still reach the user — auto-rejecting
+// an unlabelled call would make the mode useless rather than safe.
+func TestChatWriteBlocked(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	req := &chatPermRequest{}
+
+	// Writes allowed (the shipped default): nothing is pre-empted.
+	for _, kind := range []string{"edit", "delete", "move", "execute", "read", ""} {
+		req.kind = kind
+		if a.chatWriteBlocked(req) {
+			t.Errorf("kind %q blocked while writes are allowed", kind)
+		}
+	}
+
+	a.chat.writeEnabled = false
+	for _, kind := range []string{"edit", "delete", "move", "execute"} {
+		req.kind = kind
+		if !a.chatWriteBlocked(req) {
+			t.Errorf("kind %q should be blocked in read-only chat", kind)
+		}
+	}
+	for _, kind := range []string{"read", "search", "fetch", "think", "other", ""} {
+		req.kind = kind
+		if a.chatWriteBlocked(req) {
+			t.Errorf("kind %q should still ask the user", kind)
+		}
+	}
+}
+
+// TestChatParsePermission_Kind pins that the tool kind survives the wire
+// decode and is normalised — it is the only signal read-only mode has
+// about whether saying yes would change something.
+func TestChatParsePermission_Kind(t *testing.T) {
+	_, req := chatParsePermission(json.RawMessage(`{
+		"sessionId": "s-1",
+		"toolCall": {"title": "Edit main.go", "kind": " Edit "},
+		"options": [{"optionId": "no", "kind": "reject_once"}]}`))
+	if req.kind != "edit" {
+		t.Errorf("kind = %q, want the trimmed lowercase form", req.kind)
+	}
+}
+
+// TestHandleChatPermRequest_ReadOnlyAutoRejects pins the gate: a
+// mutating request in read-only mode is answered with the agent's own
+// reject option immediately — never queued, never shown — and the
+// transcript says why, because a silent refusal reads as the agent
+// stalling.
+func TestHandleChatPermRequest_ReadOnlyAutoRejects(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	wireChat(a)
+	a.chat.writeEnabled = false
+
+	e := permEvent("Edit main.go",
+		chatPermOption{id: "ok", name: "Allow", kind: "allow_once"},
+		chatPermOption{id: "no", name: "Reject", kind: "reject_once"})
+	e.req.kind = "edit"
+	a.handleChatPermRequest(e)
+
+	if len(a.chat.permQueue) != 0 || a.modal != nil {
+		t.Fatalf("blocked request surfaced: queue=%d modal=%v", len(a.chat.permQueue), a.modal)
+	}
+	select {
+	case res := <-e.req.reply:
+		if got := permOutcomeJSON(t, res); !strings.Contains(got, `"optionId":"no"`) {
+			t.Errorf("reply = %s, want the agent's reject option", got)
+		}
+	default:
+		t.Fatal("blocked request never answered — its goroutine would block to timeout")
+	}
+	last := a.chat.msgs[len(a.chat.msgs)-1]
+	if !strings.Contains(last.text, "read-only") || !strings.Contains(last.text, "Edit main.go") {
+		t.Errorf("transcript note = %q, want the titled read-only refusal", last.text)
+	}
+}
+
+// TestHandleChatPermRequest_ReadOnlyStillPromptsReads pins the other
+// half: read-only mode is not "reject everything". A read still gets the
+// normal picker.
+func TestHandleChatPermRequest_ReadOnlyStillPromptsReads(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	wireChat(a)
+	a.chat.writeEnabled = false
+
+	e := permEvent("Read main.go", chatPermOption{id: "ok", name: "Allow", kind: "allow_once"})
+	e.req.kind = "read"
+	a.handleChatPermRequest(e)
+	if len(a.chat.permQueue) != 1 || a.modal == nil {
+		t.Fatalf("read request should still prompt: queue=%d modal=%v", len(a.chat.permQueue), a.modal)
+	}
+}
+
+// TestHandleChatFSRequest_ReadOnlyRefusesWrite pins the fs half of the
+// switch: ced's own write path is refused with a readable reason and
+// nothing reaches the disk, while reads keep working — the whole point
+// of a read-only chat.
+func TestHandleChatFSRequest_ReadOnlyRefusesWrite(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	wireChat(a)
+	a.chat.writeEnabled = false
+
+	target := filepath.Join(a.rootDir, "new.txt")
+	e := fsEvent(true, target)
+	e.content = "written by the agent"
+	a.handleChatFSRequest(e)
+
+	r := <-e.reply
+	if r.err == nil || !strings.Contains(r.err.Error(), "read-only") {
+		t.Fatalf("err = %v, want the read-only refusal", r.err)
+	}
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Error("write landed on disk in read-only chat mode")
+	}
+
+	// Reads are unaffected.
+	existing := filepath.Join(a.rootDir, "seen.txt")
+	if err := os.WriteFile(existing, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	re := fsEvent(false, existing)
+	a.handleChatFSRequest(re)
+	if rr := <-re.reply; rr.err != nil {
+		t.Errorf("read refused in read-only mode: %v", rr.err)
+	}
+}
+
+// TestSetChatWrite pins the toggle: the flag flips, the decision is
+// persisted, and the transcript records it — the panel must never change
+// what it will allow without saying so.
+func TestSetChatWrite(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a := newTestApp(t, t.TempDir())
+
+	a.setChatWrite(false)
+	if a.chat.writeEnabled {
+		t.Fatal("setChatWrite(false) left writes enabled")
+	}
+	if len(a.chat.msgs) == 0 || !strings.Contains(a.chat.msgs[len(a.chat.msgs)-1].text, "Read-only") {
+		t.Errorf("transcript = %+v, want the read-only note", a.chat.msgs)
+	}
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ced", "config.json"))
+	if err != nil {
+		t.Fatalf("config not written: %v", err)
+	}
+	if !strings.Contains(string(data), `"chatwrite": "off"`) {
+		t.Errorf("config = %s, want chatwrite off", data)
+	}
+
+	// A no-op set must not spam the transcript.
+	before := len(a.chat.msgs)
+	a.setChatWrite(false)
+	if len(a.chat.msgs) != before {
+		t.Error("re-setting the same value appended a note")
+	}
+}
+
+// TestChatWriteToggleLabel pins the flip-in-place menu label.
+func TestChatWriteToggleLabel(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	if got := a.chatWriteToggleLabel(); got != "Block agent file changes (read-only chat)" {
+		t.Errorf("allowed label = %q", got)
+	}
+	a.chat.writeEnabled = false
+	if got := a.chatWriteToggleLabel(); got != "Allow agent file changes" {
+		t.Errorf("blocked label = %q", got)
+	}
+}

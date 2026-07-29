@@ -32,6 +32,15 @@
 // the main-loop handlers touch App — the same events-only contract as
 // every other chat surface.
 //
+// Read-only chat (config "chatwrite", ≡ toggle, default on) is the
+// coarse switch above all of that: with it off, ced declares no write
+// capability at the handshake, refuses fs/write_text_file outright, and
+// auto-rejects any permission request the agent labelled as a mutation
+// (chatMutatingKinds) instead of prompting. The per-request prompt is
+// the primary guard — this is the posture for when you want to ask
+// questions with no possibility of an edit landing regardless of how a
+// prompt gets answered.
+//
 // Confinement: every fs path is resolved against the project root and
 // anything outside it is refused with an error the agent can read. The
 // check is lexical (Clean + Rel), the same trust level as the rest of
@@ -67,6 +76,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // chatFSTimeout bounds how long a serve goroutine waits for the main
@@ -86,9 +97,12 @@ type chatPermOption struct {
 // chatPermRequest is one pending session/request_permission: what the
 // agent wants to do, the choices it offered, and the channel the
 // blocked serve goroutine is waiting on. answered is main-loop-only
-// state guaranteeing exactly one reply ever goes out.
+// state guaranteeing exactly one reply ever goes out. kind is the tool
+// call's ACP kind ("read", "edit", "execute", …) — the only signal we
+// get about whether saying yes would change something.
 type chatPermRequest struct {
 	title    string
+	kind     string
 	options  []chatPermOption
 	reply    chan any // buffered(1): a send never blocks the main loop
 	answered bool
@@ -145,6 +159,7 @@ func chatParsePermission(params json.RawMessage) (sessionID string, req *chatPer
 		SessionID string `json:"sessionId"`
 		ToolCall  struct {
 			Title string `json:"title"`
+			Kind  string `json:"kind"`
 		} `json:"toolCall"`
 		Options []struct {
 			OptionID string `json:"optionId"`
@@ -153,7 +168,9 @@ func chatParsePermission(params json.RawMessage) (sessionID string, req *chatPer
 		} `json:"options"`
 	}
 	_ = json.Unmarshal(params, &p)
-	req = &chatPermRequest{title: p.ToolCall.Title, reply: make(chan any, 1)}
+	req = &chatPermRequest{title: p.ToolCall.Title,
+		kind:  strings.ToLower(strings.TrimSpace(p.ToolCall.Kind)),
+		reply: make(chan any, 1)}
 	for _, o := range p.Options {
 		if o.OptionID == "" {
 			continue // an unanswerable option is worse than none
@@ -238,6 +255,78 @@ func chatPermRejectResult(options []chatPermOption) any {
 }
 
 // -----------------------------------------------------------------------------
+// Read-only chat — the "the agent may not change anything" switch
+// -----------------------------------------------------------------------------
+
+// chatMutatingKinds is the set of ACP tool-call kinds that can change
+// something on disk. "execute" is in the list because a shell command is
+// a write with extra steps — a read-only mode that let one through would
+// be a read-only mode in name only. Kinds that only look ("read",
+// "search", "fetch", "think") and kinds we don't recognise are NOT here:
+// an unrecognised kind still gets the normal prompt, because
+// auto-rejecting everything an agent forgot to label would make the mode
+// useless rather than safe. ced's own write path is refused outright
+// regardless, which is the guarantee this mode actually rests on.
+var chatMutatingKinds = map[string]bool{
+	"edit": true, "delete": true, "move": true, "execute": true,
+}
+
+// chatWriteEnabled reports whether the agent may change files. Reading
+// through a method (not the field) keeps the policy in one place for the
+// three enforcement points: the declared capability, the fs write
+// handler, and the permission gate.
+func (a *App) chatWriteEnabled() bool { return a.chat.writeEnabled }
+
+// chatWriteBlocked reports whether this permission request must be
+// refused without asking: a mutating tool call while the panel is in
+// read-only mode. Prompting for something the user has already said no
+// to is a question with one honest answer — better to answer it and say
+// why in the transcript.
+func (a *App) chatWriteBlocked(req *chatPermRequest) bool {
+	return !a.chatWriteEnabled() && chatMutatingKinds[req.kind]
+}
+
+// chatWriteToggleLabel names the ≡ row for its current direction, the
+// auto-save toggle's flip-in-place style.
+func (a *App) chatWriteToggleLabel() string {
+	if a.chat.writeEnabled {
+		return "Block agent file changes (read-only chat)"
+	}
+	return "Allow agent file changes"
+}
+
+// menuToggleChatWrite flips read-only chat from the ≡ menu.
+func (a *App) menuToggleChatWrite() {
+	a.closeMenu()
+	a.setChatWrite(!a.chat.writeEnabled)
+}
+
+// setChatWrite applies and persists the agent-may-write preference. The
+// enforcement paths read the flag live, so switching to read-only takes
+// hold on the very next request — including one already queued. The
+// DECLARED capability is a handshake artifact, though, so an attached
+// agent keeps whatever it was told at connect time; the transcript note
+// says so rather than letting the user assume a restart happened.
+func (a *App) setChatWrite(on bool) {
+	if a.chat.writeEnabled == on {
+		return
+	}
+	a.chat.writeEnabled = on
+	note := "Read-only chat: " + a.chatAgent().name + " may not change files"
+	if on {
+		note = a.chatAgent().name + " may change files (each change asks first)"
+	}
+	if a.chatReady() {
+		note += " — restart the agent to update what it was told it can do"
+	}
+	a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: note})
+	a.flash(note)
+	if err := userconfig.SaveChatWrite(userconfig.DefaultPath(), on); err != nil {
+		a.flash("chatwrite: " + err.Error())
+	}
+}
+
+// -----------------------------------------------------------------------------
 // Permission UI — main loop only
 // -----------------------------------------------------------------------------
 
@@ -254,6 +343,19 @@ func (a *App) handleChatPermRequest(e *chatPermRequestEvent) {
 		// Nothing to offer the user — answer cancelled rather than
 		// showing an empty picker with no legal outcome.
 		e.req.reply <- chatPermCancelResult()
+		return
+	}
+	if a.chatWriteBlocked(e.req) {
+		// Read-only chat: refuse without asking, but say so in the
+		// transcript — a silent refusal reads as the agent stalling.
+		title := e.req.title
+		if title == "" {
+			title = "a tool call"
+		}
+		e.req.reply <- chatPermRejectResult(e.req.options)
+		e.req.answered = true
+		a.chatAppendMsg(chatMsg{role: chatRoleTool,
+			text: "⊘ rejected (read-only chat): " + title})
 		return
 	}
 	a.chat.permQueue = append(a.chat.permQueue, e.req)
@@ -388,6 +490,14 @@ func (a *App) chatPermAfterEvent() {
 func (a *App) handleChatFSRequest(e *chatFSRequestEvent) {
 	if e.seq != a.chat.connSeq || (e.sessionID != "" && e.sessionID != a.chat.sessionID) {
 		e.reply <- chatFSResult{err: fmt.Errorf("session is gone")}
+		return
+	}
+	if e.write && !a.chatWriteEnabled() {
+		// Refused even though the handshake declared no write
+		// capability: capabilities are advisory, and an agent that asks
+		// anyway deserves a reason it can read and relay.
+		e.reply <- chatFSResult{err: fmt.Errorf(
+			"ced is in read-only chat mode — file changes are disabled")}
 		return
 	}
 	path, err := a.chatFSResolve(e.path)

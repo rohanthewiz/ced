@@ -67,11 +67,12 @@ The goals, in order:
 - **Format on save** — opt-in per-project via `.ced/format.json`
   with a first-run trust prompt so cloning a repo never silently
   executes its commands. See [Format on save](#format-on-save).
-- **GitHub Copilot, optional** — inline ghost-text completions plus a
-  chat panel, powered by GitHub's official `copilot-language-server`.
-  Installing that binary is the whole opt-in; without it the editor
-  simply doesn't mention Copilot. See
-  [AI features](#ai-features-github-copilot).
+- **AI, optional** — inline ghost-text completions from GitHub Copilot,
+  plus a chat panel that talks to Copilot, Claude Code, or Gemini over
+  ACP: your code as context, and file edits you approve one at a time.
+  Installing an agent's binary is the whole opt-in; without one the
+  editor never mentions AI. See
+  [AI features](#ai-features-chat-agents--copilot-completions).
 - **Single binary, no CGO** — cross-compiled for macOS and Linux on
   amd64 and arm64. POSIX only: the embedded terminal panel needs
   job-control syscalls Windows doesn't provide.
@@ -500,59 +501,99 @@ project where:
 This keeps your personal preferences out of repos that don't want
 them while still making it one click to opt a project in.
 
-## AI features (GitHub Copilot)
+## AI features (chat agents + Copilot completions)
 
-ced integrates GitHub Copilot two ways — **inline ghost-text
-completions** while you type, and a **chat panel** — both driven by
-GitHub's official [`copilot-language-server`](https://github.com/github/copilot-language-server-release).
-The integration follows the same philosophy as everything else here:
+ced has two independent AI surfaces:
 
-- **Installing the binary is the opt-in.** ced never bundles it,
-  downloads it, or nags you about it. No binary on `$PATH` → no
-  Copilot anywhere in the UI, and the editor works exactly as before.
-- **You need a Copilot subscription** on the GitHub account you sign
-  in with (the free tier works too).
+| Surface | What it is | Provided by |
+| --- | --- | --- |
+| **Inline suggestions** | Dimmed ghost text at your caret, `Tab` to accept | GitHub Copilot only |
+| **Chat panel** | Full-height strip on the left: streaming answers, your code as context, and — with your approval — edits to your files | Any agent that speaks [ACP](https://agentclientprotocol.com) — Copilot, Claude Code, or Gemini |
 
-### 1. Install `copilot-language-server`
+Both follow the same philosophy as everything else here:
 
-Any of these, as long as the binary ends up on your `$PATH`:
+- **Installing the agent's binary is the opt-in.** ced never bundles
+  one, downloads one, or nags you about it. Nothing on `$PATH` → the
+  editor works exactly as before.
+- **Silent degradation.** A missing binary, a crash, or a failed
+  handshake never blocks the editor. The chat panel is the one
+  exception to the silence: once it's open on screen, failures are
+  written into the transcript, because a panel that answers nothing
+  and explains nothing is worse than no panel.
 
-```sh
-# npm (easiest if you have Node)
-npm install -g @github/copilot-language-server
+### 1. Install an agent binary
 
-# or: download a native binary (no Node needed) from
-#     https://github.com/github/copilot-language-server-release/releases
-#     extract it, chmod +x, and drop it in ~/.local/bin (or anywhere on $PATH)
-```
+| Agent | Binary on `$PATH` | Typical install |
+| --- | --- | --- |
+| **Copilot** (default) | `copilot-language-server` | `npm install -g @github/copilot-language-server` |
+| **Claude Code** | `claude-code-acp` | `npm install -g @zed-industries/claude-code-acp` |
+| **Gemini** | `gemini` | `npm install -g @google/gemini-cli` |
 
-Verify with `copilot-language-server --version`. If you installed it
-while ced was already running, toggle **≡ → Copilot → Enable/Disable
-Copilot** off and on — that's the deliberate "try again" gesture.
+Copilot also ships a native binary if you'd rather not have Node —
+grab it from the
+[copilot-language-server releases](https://github.com/github/copilot-language-server-release/releases),
+`chmod +x` it, and drop it in `~/.local/bin` (or anywhere on `$PATH`).
+Using Copilot requires a Copilot subscription on the GitHub account
+you sign in with (the free tier works).
 
-### 2. Sign in (once per machine)
+Verify with `copilot-language-server --version` (or `claude-code-acp
+--version`, `gemini --version`). If you installed the binary while ced
+was already running, see the restart gestures in step 2 — ced
+deliberately doesn't re-probe on its own.
 
-Open **≡ → Copilot → Sign in to GitHub**. ced runs GitHub's device
-flow:
+### 2. Pick your chat backend
 
-1. A dialog shows a short device code and the URL
-   `github.com/login/device`.
-2. Pick **Yes** — the code is copied to your clipboard and your
-   browser opens the URL. (Over SSH the browser can't open on the
-   remote box, of course — just visit the URL on your laptop; the
-   code stays visible in the status bar the whole time.)
-3. Paste the code in the browser and approve. When GitHub finishes,
-   the status bar shows `Copilot ✓` and the menu row flips to
-   **Sign out**.
+**≡ → Copilot → Chat agent: …** opens the list. Your pick persists as
+`"chatagent"` in `~/.config/ced/config.json`.
 
-Credentials are stored by `copilot-language-server` itself and shared
-with Copilot in other editors, so this is once per machine — not per
-project, not per session.
+> The ≡ menu opens with every section folded, so this is a click on the
+> **Copilot** header first, then the row. Every AI setting lives in that
+> one group.
 
-### 3. Inline suggestions (ghost text)
+Re-picking the agent you're already on — it's listed as
+*"(current — restart)"* — is the deliberate **retry gesture**: it tears
+the connection down, clears the "this agent is unavailable" verdict, and
+starts fresh. That's how you recover from a crashed agent, and how you
+pick up a binary you installed mid-session. For Copilot specifically,
+toggling **≡ → Copilot → Disable/Enable Copilot** does the same thing.
 
-On by default once you're signed in. Type, pause for a beat, and a
-dimmed suggestion appears at your cursor:
+Switching backends keeps your transcript and any pending attachments —
+an info line marks where one agent's answers end and the next one's
+begin.
+
+### 3. Authenticate
+
+Each agent authenticates its own way, entirely outside ced:
+
+- **Copilot** — **≡ → Copilot → Sign in to GitHub** runs GitHub's
+  device flow:
+  1. A dialog shows a short device code and the URL
+     `github.com/login/device`.
+  2. Pick **Yes** — the code is copied to your clipboard and your
+     browser opens the URL. (Over SSH the browser can't open on the
+     remote box, of course — just visit the URL on your laptop; the
+     code stays visible in the status bar the whole time.)
+  3. Paste the code in the browser and approve. When GitHub finishes,
+     the status bar shows `Copilot ✓` and the menu row flips to
+     **Sign out**.
+
+  Credentials are stored by `copilot-language-server` itself and shared
+  with Copilot in other editors, so this is once per machine — not per
+  project, not per session. The chat panel reads the same credentials.
+- **Claude Code** — run `claude` in a terminal and sign in, or export
+  `ANTHROPIC_API_KEY`.
+- **Gemini** — run `gemini` in a terminal and sign in.
+
+If a handshake fails, the panel writes the protocol error into the
+transcript followed by that agent's auth hint — auth is the
+overwhelmingly likely cause.
+
+### 4. Inline suggestions (ghost text) — Copilot only
+
+Ghost text comes from Copilot's completions sidecar, which is a
+separate process from the chat panel. It's on by default once you're
+signed in, regardless of which chat backend you picked. Type, pause for
+a beat, and a dimmed suggestion appears at your cursor:
 
 - **`Tab` accepts** the suggestion (with nothing showing, `Tab` is
   plain indentation as always).
@@ -563,44 +604,119 @@ dimmed suggestion appears at your cursor:
   step).
 - Suggestions work in any text file, not just Go.
 
-Don't want ghost text but still want sign-in/chat? **≡ → Copilot →
+Don't want ghost text but still want sign-in and chat? **≡ → Copilot →
 Disable inline suggestions** turns off just this feature, persisted
 across restarts.
 
-### 4. Chat panel
+### 5. Chat panel
 
-Open **≡ → View → Show Copilot chat**. The panel docks as a
-full-height strip on the **left** edge (the file tree slides over to
-the right while it's open):
+Open it with **≡ → Copilot → Show … chat** (the row names your current
+agent). The panel docks as a full-height strip on the **left** edge, and
+the file tree slides over to the right while it's open.
 
-- Type in the composer at the bottom, `Enter` sends. Answers stream
-  in live; `↑` / `↓` recall previous prompts.
-- **⏹ stops** an answer mid-stream; **✕** (or the menu toggle) hides
-  the panel — the conversation survives hide/show.
+- Type in the composer at the bottom; **`Enter` sends**. Answers stream
+  in live. `↑` / `↓` recall previous prompts, `Cmd+V` pastes.
+- **⏹ stops** an answer mid-turn; **✕** (or the menu toggle) hides the
+  panel — the conversation survives hide/show.
+- **Model picker**: **≡ → Copilot → Chat model: …** lists the models
+  the agent offers, with premium multipliers where it reports them.
+  Your pick persists as `"chatmodel"` and is re-applied on every
+  reconnect.
+- **Copy anything**: click **⧉ copy** under a response to lift that
+  answer, **⧉ copy conversation** at the end for the whole transcript
+  (also at **≡ → Copilot → Copy chat transcript**), or drag across the
+  text and hit `Cmd+C`. `Esc` drops a selection.
 - Drag the panel's right-edge splitter to resize; scroll wheel and
-  `PgUp`/`PgDn` move through the transcript.
+  `PgUp` / `PgDn` move through the transcript.
 - The chat panel and a **left-docked terminal** share the left edge:
   opening one tucks the other away (a bottom-docked terminal coexists
   fine).
-- Chat is **read-only by design** in this version: the agent can
-  answer questions and write code *in the chat*, but requests to
-  touch your files are automatically declined (you'll see a
-  `⊘ declined` note in the transcript when that happens).
+
+### 6. Sending your code as context
+
+Attachments are **pushed with your prompt**, not fetched — the agent
+gets the bytes in the same turn, with no round trip and no permission
+prompt interrupting your question.
+
+- **Auto-attach is on by default.** Whatever tab is active rides along
+  with your prompt; if you have text selected, the **selection wins**
+  (a highlighted region is a narrower question). Toggle it at
+  **≡ → Copilot → Enable/Disable auto-attach current file**, persisted
+  as `"chatcontext"`.
+- **Attach more**: **Attach current file / selection to chat**, or
+  **Attach file to chat…** for the fuzzy file picker. Attaching opens
+  the panel — context you can't see is context you can't trust.
+- Attachments show as **`▤` chips** above the composer. Each chip's ✕
+  removes it; the ✕ on an auto-attached chip flips the toggle off.
+  **Clear attachments** drops them all.
+- Content comes from the **open buffer**, so unsaved edits are what the
+  agent sees. Payloads cap at 64 KB, cut on a line boundary, and the cut
+  is announced.
+- Attachments are **per-turn**: they're listed in a `▤` note in the
+  transcript and then cleared. ACP sessions keep history server-side, so
+  a sticky attachment would re-send the whole file on every prompt for
+  the rest of the session.
+
+### 7. Letting the agent read and write your files
+
+The chat panel is a full ACP client: agents can ask to read and edit
+your files, and **you approve each request**.
+
+- A request opens a picker with **the agent's own options** (allow once,
+  allow always, reject, …). Your decision is echoed into the transcript
+  as `✓ allowed` / `⊘ rejected`, so later answers that reference it make
+  sense.
+- Dismissing the picker (`Esc` or a click outside) counts as a
+  rejection. Requests that are still pending when you press ⏹, switch
+  agents, or close the panel are answered as cancelled.
+- Requests **queue politely** — a prompt never steals the modal slot
+  from a dialog or the open menu; it resurfaces when the slot frees.
+- **Reads serve your open buffer** (unsaved edits included) before
+  falling back to disk.
+- **Writes land on disk**, then the tree refreshes: a clean tab reloads
+  itself, a dirty tab warns you. Each write leaves a `✎ wrote <path>`
+  receipt in the transcript.
+- **Everything is confined to the project root.** A path outside it gets
+  an error the agent can read, not silence.
+
+**Read-only chat.** If you'd rather ask questions with no possibility of
+an edit landing, **≡ → Copilot → Block agent file changes (read-only
+chat)** switches the whole capability off (persisted as `"chatwrite"`).
+With it off ced tells the agent at connect time that it cannot write,
+refuses its own write path outright, and auto-rejects any tool call the
+agent labels as an edit, delete, move, or shell command — no prompt to
+mis-click, with a `⊘ rejected (read-only chat)` line in the transcript so
+you can see it happen. Reads and searches still ask normally. The
+per-request prompt is the primary guard; this is the belt-and-braces
+posture for reviewing an unfamiliar repo, or for letting an agent explain
+code you don't want it touching.
+
+Blocking takes effect immediately, including for a request already
+queued. Re-allowing writes mid-session only updates what the agent was
+*told* it can do after you restart it (**Chat agent → current —
+restart**) — the transcript says so when it matters.
 
 ### Turning it off
 
-Two persisted switches, both in the `≡ → Copilot` menu and in
+Every switch lives in the `≡ → Copilot` menu and persists to
 `~/.config/ced/config.json`:
 
 ```json
 {
-  "copilot": "off",      // never spawn the sidecar at all
-  "suggestions": "off"   // keep Copilot (sign-in, chat) but no ghost text
+  "copilot": "off",          // never spawn GitHub's binary at all
+  "suggestions": "off",      // keep Copilot sign-in and chat, but no ghost text
+  "chatcontext": "off",      // don't auto-attach the current file to prompts
+  "chatwrite": "off",        // read-only chat: the agent may not change files
+  "chatagent": "claude",     // which chat backend: "copilot", "claude", "gemini"
+  "chatmodel": "<model-id>"  // preferred model for the chat session
 }
 ```
 
-Both default to `"on"` — which costs nothing until you actually
-install the binary and sign in.
+The four toggles default to `"on"` — which costs nothing until you
+actually install a binary and sign in. Note that `"copilot": "off"` is a
+kill switch for **GitHub's binary only**: it stops the completions
+sidecar and the Copilot chat backend, but Claude Code and Gemini are
+gated purely by their binary being on `$PATH`.
 
 ## Project layout
 

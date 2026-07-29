@@ -47,10 +47,12 @@
 //	                   into the transcript while the call is in flight
 //
 // Scope: as of phase 4 the panel is a full ACP client, not chat-only.
-// The handshake declares fs read/write capabilities, and
+// The handshake declares fs read capability (and write capability when
+// the user allows it — chat.writeEnabled), and
 // session/request_permission surfaces as a real prompt instead of an
-// auto-decline — the permission UI, the client-side fs handlers, and
-// the root confinement all live in copilot_chat_perm.go.
+// auto-decline — the permission UI, the client-side fs handlers, the
+// read-only switch, and the root confinement all live in
+// copilot_chat_perm.go.
 
 package app
 
@@ -236,6 +238,16 @@ type chatState struct {
 	attach          []chatAttach
 	embeddedContext bool
 
+	// writeEnabled is the "the agent may change files" toggle (config
+	// "chatwrite", default on). Off is read-only chat: the handshake
+	// declares no write capability, fs writes are refused, and mutating
+	// tool calls are auto-rejected — see copilot_chat_perm.go. It is
+	// read at HANDSHAKE time for the capability, so toggling it while
+	// attached only takes full effect on the next connection; the
+	// enforcement paths check it live, which is what actually holds the
+	// line.
+	writeEnabled bool
+
 	msgs   []chatMsg
 	scroll int // first visible wrapped row
 
@@ -349,6 +361,7 @@ func (a *App) chatEnsureStarted() {
 	root := a.rootDir
 	pref := a.chat.modelPref
 	seq := a.chat.connSeq
+	allowWrite := a.chat.writeEnabled
 	go func() {
 		// Both callbacks run on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
@@ -389,7 +402,7 @@ func (a *App) chatEnsureStarted() {
 			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), seq: seq, err: err})
 			return
 		}
-		sess, err := chatInitialize(client, root, pref)
+		sess, err := chatInitialize(client, root, pref, allowWrite)
 		if err != nil {
 			client.Close()
 			// A failed handshake may leave the process alive with no
@@ -415,10 +428,13 @@ type chatSession struct {
 
 // chatInitialize runs the ACP handshake and opens the session; returns
 // the session plus the agent's model roster. Runs on the start
-// goroutine, never the main loop. The fs capabilities are declared TRUE
-// as of phase 4: reads are served from open-tab buffers (unsaved edits
-// included) and writes land on disk and reconcile — both root-confined
-// and permission-mediated; see copilot_chat_perm.go. A non-empty
+// goroutine, never the main loop. Read capability is declared TRUE as of
+// phase 4 (reads are served from open-tab buffers, unsaved edits
+// included), and write capability follows allowWrite — the user's
+// "chatwrite" preference. Declaring it false is the honest signal for
+// read-only chat: an agent that knows it cannot write plans differently
+// instead of proposing edits that would only be refused. Both paths stay
+// root-confined and permission-mediated; see copilot_chat_perm.go. A non-empty
 // prefModel is applied via session/set_model; an id the roster no
 // longer offers (or a failed set) keeps the agent's default silently —
 // a stale saved preference must never break the handshake.
@@ -428,11 +444,11 @@ type chatSession struct {
 // takes them, and fold into the prompt text when it doesn't (see
 // copilot_chat_context.go). An agent that reports nothing gets the
 // text-only treatment — the safe direction.
-func chatInitialize(c *lsp.Client, root, prefModel string) (chatSession, error) {
+func chatInitialize(c *lsp.Client, root, prefModel string, allowWrite bool) (chatSession, error) {
 	initParams := map[string]any{
 		"protocolVersion": 1,
 		"clientCapabilities": map[string]any{
-			"fs": map[string]any{"readTextFile": true, "writeTextFile": true},
+			"fs": map[string]any{"readTextFile": true, "writeTextFile": allowWrite},
 		},
 	}
 	var caps struct {

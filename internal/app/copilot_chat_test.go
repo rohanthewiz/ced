@@ -778,6 +778,11 @@ type fakeACPAgent struct {
 	// promptCapabilities.embeddedContext, the flag that decides whether
 	// context attachments ride as resource blocks.
 	embedded bool
+
+	// declaredWrite records the fs.writeTextFile capability the client
+	// declared at initialize — what read-only chat actually tells the
+	// agent about itself.
+	declaredWrite bool
 }
 
 // serve runs the agent's read loop until the client side closes.
@@ -795,6 +800,17 @@ func (f *fakeACPAgent) serve(r io.Reader, w io.Writer) {
 		var result any
 		switch req.Method {
 		case "initialize":
+			var ip struct {
+				ClientCapabilities struct {
+					FS struct {
+						WriteTextFile bool `json:"writeTextFile"`
+					} `json:"fs"`
+				} `json:"clientCapabilities"`
+			}
+			_ = json.Unmarshal(req.Params, &ip)
+			f.mu.Lock()
+			f.declaredWrite = ip.ClientCapabilities.FS.WriteTextFile
+			f.mu.Unlock()
 			result = map[string]any{"protocolVersion": 1}
 			if f.embedded {
 				result = map[string]any{
@@ -860,7 +876,7 @@ func startFakeACPAgent(t *testing.T, agent *fakeACPAgent) *lsp.Client {
 func TestChatInitialize_ModelRoster(t *testing.T) {
 	// No preference: roster decoded, agent default kept, no set call.
 	agent := &fakeACPAgent{}
-	sess, err := chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "")
+	sess, err := chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "", true)
 	if err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
@@ -876,7 +892,7 @@ func TestChatInitialize_ModelRoster(t *testing.T) {
 
 	// Saved preference in the roster: applied, session reports it.
 	agent = &fakeACPAgent{}
-	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "gpt-5.5")
+	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "gpt-5.5", true)
 	if err != nil {
 		t.Fatalf("pref handshake: %v", err)
 	}
@@ -886,7 +902,7 @@ func TestChatInitialize_ModelRoster(t *testing.T) {
 
 	// Stale preference (not in roster): no call, default kept.
 	agent = &fakeACPAgent{}
-	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "retired-model")
+	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "retired-model", true)
 	if err != nil {
 		t.Fatalf("stale-pref handshake: %v", err)
 	}
@@ -897,7 +913,7 @@ func TestChatInitialize_ModelRoster(t *testing.T) {
 	// set_model failure: swallowed, agent default kept — a broken pref
 	// must never break the handshake.
 	agent = &fakeACPAgent{failSet: true}
-	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "gpt-5.5")
+	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "gpt-5.5", true)
 	if err != nil {
 		t.Fatalf("failing-set handshake: %v", err)
 	}
@@ -912,7 +928,7 @@ func TestChatInitialize_ModelRoster(t *testing.T) {
 // says nothing gets the text-only fallback — the safe direction, since a
 // prompt the agent can't parse is worse than a verbose one.
 func TestChatInitialize_EmbeddedContextCapability(t *testing.T) {
-	sess, err := chatInitialize(startFakeACPAgent(t, &fakeACPAgent{embedded: true}), "/tmp/x", "")
+	sess, err := chatInitialize(startFakeACPAgent(t, &fakeACPAgent{embedded: true}), "/tmp/x", "", true)
 	if err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
@@ -920,7 +936,7 @@ func TestChatInitialize_EmbeddedContextCapability(t *testing.T) {
 		t.Error("advertised embeddedContext was not captured")
 	}
 
-	sess, err = chatInitialize(startFakeACPAgent(t, &fakeACPAgent{}), "/tmp/x", "")
+	sess, err = chatInitialize(startFakeACPAgent(t, &fakeACPAgent{}), "/tmp/x", "", true)
 	if err != nil {
 		t.Fatalf("silent-agent handshake: %v", err)
 	}
@@ -1171,5 +1187,34 @@ func TestChatDrawSelectionHighlight(t *testing.T) {
 	}
 	if got := bgAt(px+1+1, py+1); got == a.theme.Selection {
 		t.Error("cell before the selection should not be highlighted")
+	}
+}
+
+// TestChatInitialize_WriteCapability pins what read-only chat tells the
+// agent about itself: reads are always declared, writes follow the
+// user's preference. Declaring it honestly matters — an agent that knows
+// it cannot write plans differently instead of proposing edits that
+// would only be refused.
+func TestChatInitialize_WriteCapability(t *testing.T) {
+	allowed := &fakeACPAgent{}
+	if _, err := chatInitialize(startFakeACPAgent(t, allowed), "/tmp/x", "", true); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	allowed.mu.Lock()
+	got := allowed.declaredWrite
+	allowed.mu.Unlock()
+	if !got {
+		t.Error("writes allowed but the handshake declared no write capability")
+	}
+
+	blocked := &fakeACPAgent{}
+	if _, err := chatInitialize(startFakeACPAgent(t, blocked), "/tmp/x", "", false); err != nil {
+		t.Fatalf("read-only handshake: %v", err)
+	}
+	blocked.mu.Lock()
+	got = blocked.declaredWrite
+	blocked.mu.Unlock()
+	if got {
+		t.Error("read-only chat still declared fs.writeTextFile")
 	}
 }

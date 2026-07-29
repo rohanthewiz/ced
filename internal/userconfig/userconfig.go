@@ -42,6 +42,10 @@
 //	                        // default (Copilot). The registry lives in
 //	                        // the app layer, so no validation here —
 //	                        // an unknown id falls back at resolve time.
+//	{"chatwrite": "on"}     // default; the chat agent may change files
+//	                        // (each change still asks permission first)
+//	{"chatwrite": "off"}    // read-only chat: ced declares no write
+//	                        // capability and refuses every edit
 //
 // The loader is best-effort the same way customactions is: missing
 // file → defaults, malformed file → error returned for the app to
@@ -141,13 +145,24 @@ type Config struct {
 	// one knob with a per-turn token cost the user may want to control
 	// independently. Persisted by the ≡ toggle.
 	ChatContext bool
+
+	// ChatWrite controls whether the chat agent may change anything on
+	// disk: ced's own fs/write_text_file handler, and any tool call the
+	// agent labels as a mutation. Defaults to on — every change still
+	// asks permission first, which is the primary guard. Off is the
+	// belt-and-braces "read-only chat" posture for the times you want to
+	// ask questions with no possibility of an edit landing, however the
+	// prompt is answered. Separate from ChatContext because reading your
+	// code and rewriting it are different levels of trust. Persisted by
+	// the ≡ toggle.
+	ChatWrite bool
 }
 
 // Defaults returns a Config populated with the values used when no
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, ExecMarks: true, Copilot: true, Suggestions: true, ChatContext: true}
+	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, ExecMarks: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -166,6 +181,7 @@ type fileFormat struct {
 	ChatModel   string `json:"chatmodel,omitempty"`
 	ChatAgent   string `json:"chatagent,omitempty"`
 	ChatContext string `json:"chatcontext,omitempty"`
+	ChatWrite   string `json:"chatwrite,omitempty"`
 }
 
 // configFilePath resolves the ced config directory
@@ -337,6 +353,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(ff.ChatWrite)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.ChatWrite = true
+	case "off":
+		cfg.ChatWrite = false
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: chatwrite must be \"on\" or \"off\" (got %q)",
+			path, ff.ChatWrite,
+		)
+	}
+
 	// Any non-blank value is accepted as-is — see Config.ChatModel and
 	// Config.ChatAgent for why there's no allowlist to check against.
 	cfg.ChatModel = strings.TrimSpace(ff.ChatModel)
@@ -411,6 +441,16 @@ func SaveChatContext(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "chatcontext", val)
+}
+
+// SaveChatWrite persists the agent-may-change-files preference into the
+// config file at path. See saveKey for the round-trip guarantees.
+func SaveChatWrite(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "chatwrite", val)
 }
 
 // saveKey writes one preference into the config file at path,

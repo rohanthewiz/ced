@@ -1,8 +1,9 @@
 <!--
   File: CLAUDE.md
-  Author: Spicer Matthews <spicer@cloudmanic.com>
+  Author: Rohan Allison <rohanthewiz@gmail.com>
   Created: 2026-04-29
-  Copyright: 2026 Cloudmanic, LLC. All rights reserved.
+  Copyright: 2026 Rohan Allison. All rights reserved.
+  Portions copyright 2026 Cloudmanic, LLC. Original author: Spicer Matthews.
 -->
 
 # CLAUDE.md — ced
@@ -85,6 +86,17 @@ internal/version/version.go   const Version = "x.y.z" — single line, CI bumps 
 Every new source file gets the header block (file name, author, created
 date, copyright year). See existing files for the exact format. Keep
 copyright year matching the **current year** (2026 right now).
+
+**Attribution on inherited files.** This codebase is a fork of Cloudmanic's
+SpiceEdit. Files still carrying `Author: Spicer Matthews` are ones we
+haven't substantially rewritten — leave them as they are. When a file
+crosses into substantial rework (roughly: half its original lines churned,
+or 200+ lines changed), flip `Author:` to the current maintainer and add
+the `Portions copyright 2026 Cloudmanic, LLC. Original author: Spicer
+Matthews.` line under the copyright. Files created after the fork get a
+plain maintainer header with no Cloudmanic line. **`LICENSE` is never
+touched** — MIT notice retention is a condition of the license, and it's
+the file that actually discharges it.
 
 ### Comments
 - A short doc comment above every function (public **and** private)

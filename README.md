@@ -1,8 +1,9 @@
 <!--
   File: README.md
-  Author: Spicer Matthews <spicer@cloudmanic.com>
+  Author: Rohan Allison <rohanthewiz@gmail.com>
   Created: 2026-04-29
-  Copyright: 2026 Cloudmanic, LLC. All rights reserved.
+  Copyright: 2026 Rohan Allison. All rights reserved.
+  Portions copyright 2026 Cloudmanic, LLC. Original author: Spicer Matthews.
 -->
 
 # ced — Cats Editor

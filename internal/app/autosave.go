@@ -1,8 +1,8 @@
 // =============================================================================
 // File: internal/app/autosave.go
-// Author: Spicer Matthews <spicer@cloudmanic.com>
+// Author: Rohan Allison <rohanthewiz@gmail.com>
 // Created: 2026-07-09
-// Copyright: 2026 Cloudmanic, LLC. All rights reserved.
+// Copyright: 2026 Rohan Allison. All rights reserved.
 // =============================================================================
 
 // Auto-save: dirty buffers are written to disk after the user pauses

@@ -1,8 +1,8 @@
 // =============================================================================
 // File: internal/app/copypaste.go
-// Author: Spicer Matthews <spicer@cloudmanic.com>
+// Author: Rohan Allison <rohanthewiz@gmail.com>
 // Created: 2026-07-11
-// Copyright: 2026 Cloudmanic, LLC. All rights reserved.
+// Copyright: 2026 Rohan Allison. All rights reserved.
 // =============================================================================
 
 // Copy / paste for files and folders. Copy arms an internal "file

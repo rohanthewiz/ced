@@ -72,8 +72,9 @@ The goals, in order:
   Installing that binary is the whole opt-in; without it the editor
   simply doesn't mention Copilot. See
   [AI features](#ai-features-github-copilot).
-- **Single binary, no CGO** — cross-compiled for macOS, Linux, and
-  Windows on amd64 and arm64.
+- **Single binary, no CGO** — cross-compiled for macOS and Linux on
+  amd64 and arm64. POSIX only: the embedded terminal panel needs
+  job-control syscalls Windows doesn't provide.
 
 <img width="2504" height="1726" alt="CleanShot 2026-04-29 at 23 32 22@2x" src="https://github.com/user-attachments/assets/d0dca3da-5ba7-474d-852e-832acde90ca4" />
 
@@ -139,7 +140,7 @@ plus one of `curl` or `wget`.
 
 ### Other platforms (manual binary install)
 
-Pre-built binaries for Linux, macOS, and Windows (amd64 + arm64) are
+Pre-built binaries for Linux and macOS (amd64 + arm64) are
 attached to every [GitHub Release](https://github.com/rohanthewiz/ced/releases).
 Download the archive for your OS/arch, extract it, and drop the
 `ced` binary somewhere on your `$PATH`.
@@ -651,7 +652,7 @@ Releases are fully automated. Every push to `main`:
    back to `main` with `[skip ci]`.
 3. Tags `v<x.y.z>` and pushes the tag.
 4. [GoReleaser](https://goreleaser.com/) cross-compiles for
-   linux/darwin/windows × amd64/arm64, attaches archives to a GitHub
+   linux/darwin × amd64/arm64, attaches archives to a GitHub
    Release, and pushes an updated formula into `Formula/ced.rb`
    on this same repo.
 

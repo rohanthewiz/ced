@@ -585,6 +585,76 @@ func TestSaveSuggestions_RoundTripsAndPreserves(t *testing.T) {
 	}
 }
 
+// TestChatContext_Defaults pins the auto-attach default: on. A chat
+// panel inside an editor exists to answer questions about the file
+// you're looking at, so it has to see it without being asked.
+func TestChatContext_Defaults(t *testing.T) {
+	if !Defaults().ChatContext {
+		t.Fatal("Defaults().ChatContext = false, want true")
+	}
+}
+
+// TestLoadChatContextValues exercises the recognised chatcontext values
+// and the absent-field default, mirroring the suggestions table.
+func TestLoadChatContextValues(t *testing.T) {
+	cases := map[string]bool{
+		`{"chatcontext":"on"}`:    true,
+		`{"chatcontext":"off"}`:   false,
+		`{"chatcontext":" OFF "}`: false, // case/whitespace tolerant
+		`{}`:                      true,  // omitted field keeps the default
+	}
+	for body, want := range cases {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", body, err)
+		}
+		if cfg.ChatContext != want {
+			t.Errorf("Load(%s).ChatContext = %v, want %v", body, cfg.ChatContext, want)
+		}
+	}
+}
+
+// TestLoadChatContextInvalid mirrors the house rule for every key: a
+// typo'd value is an error the caller can flash, not a silent fallback.
+func TestLoadChatContextInvalid(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"chatcontext":"maybe"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("invalid chatcontext value should error")
+	}
+}
+
+// TestSaveChatContext_RoundTripsAndPreserves saves the preference into
+// a config that already has hand-set keys and verifies both survive —
+// the same unknown-key guarantee every SaveX makes.
+func TestSaveChatContext_RoundTripsAndPreserves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"icons\": \"on\",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveChatContext(path, false); err != nil {
+		t.Fatalf("SaveChatContext: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.ChatContext || cfg.Icons != IconsOn {
+		t.Fatalf("round trip lost values: chatcontext=%v icons=%q", cfg.ChatContext, cfg.Icons)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}
+
 // TestChatModel_LoadAndSave pins the chatmodel key: absent means ""
 // (agent default), any non-blank id loads trimmed and un-validated
 // (the roster is server-defined), and SaveChatModel round-trips

@@ -799,6 +799,11 @@ type fakeACPAgent struct {
 	mu      sync.Mutex
 	setIDs  []string
 	failSet bool
+
+	// embedded makes initialize advertise
+	// promptCapabilities.embeddedContext, the flag that decides whether
+	// context attachments ride as resource blocks.
+	embedded bool
 }
 
 // serve runs the agent's read loop until the client side closes.
@@ -817,6 +822,14 @@ func (f *fakeACPAgent) serve(r io.Reader, w io.Writer) {
 		switch req.Method {
 		case "initialize":
 			result = map[string]any{"protocolVersion": 1}
+			if f.embedded {
+				result = map[string]any{
+					"protocolVersion": 1,
+					"agentCapabilities": map[string]any{
+						"promptCapabilities": map[string]any{"embeddedContext": true},
+					},
+				}
+			}
 		case "session/new":
 			result = map[string]any{
 				"sessionId": "sess-acp",
@@ -916,6 +929,62 @@ func TestChatInitialize_ModelRoster(t *testing.T) {
 	}
 	if sess.modelID != "auto" {
 		t.Errorf("failed set should keep the default, got %q", sess.modelID)
+	}
+}
+
+// TestChatInitialize_EmbeddedContextCapability pins the capability
+// capture against real framing: an agent that advertises
+// promptCapabilities.embeddedContext gets resource blocks, and one that
+// says nothing gets the text-only fallback — the safe direction, since a
+// prompt the agent can't parse is worse than a verbose one.
+func TestChatInitialize_EmbeddedContextCapability(t *testing.T) {
+	sess, err := chatInitialize(startFakeACPAgent(t, &fakeACPAgent{embedded: true}), "/tmp/x", "")
+	if err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	if !sess.embedded {
+		t.Error("advertised embeddedContext was not captured")
+	}
+
+	sess, err = chatInitialize(startFakeACPAgent(t, &fakeACPAgent{}), "/tmp/x", "")
+	if err != nil {
+		t.Fatalf("silent-agent handshake: %v", err)
+	}
+	if sess.embedded {
+		t.Error("an agent that advertises nothing must not get resource blocks")
+	}
+}
+
+// TestChatReadyAndDisconnect_EmbeddedContext pins the flag's lifetime:
+// it arrives with the ready event and dies with the connection, because
+// it describes the AGENT, not the user's preferences.
+func TestChatReadyAndDisconnect_EmbeddedContext(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+
+	a.handleChatReady(&chatReadyEvent{when: time.Now(), client: &fakeCopilotConn{},
+		sessionID: "sess-9", embedded: true})
+	if !a.chat.embeddedContext {
+		t.Fatal("ready event did not install the capability")
+	}
+	a.chatDisconnect()
+	if a.chat.embeddedContext {
+		t.Error("capability must not outlive the connection")
+	}
+}
+
+// TestChatDisconnect_KeepsPendingAttachments pins the other half of that
+// rule: attachments are editor-side context for a message the user
+// hasn't sent yet, so a reconnect must not silently drop them.
+func TestChatDisconnect_KeepsPendingAttachments(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	wireChat(a)
+	a.chat.attach = []chatAttach{{path: filepath.Join(a.rootDir, "main.go")}}
+
+	a.chatDisconnect()
+	if len(a.chat.attach) != 1 {
+		t.Errorf("attachments lost on disconnect: %+v", a.chat.attach)
 	}
 }
 

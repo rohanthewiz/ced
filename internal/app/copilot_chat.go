@@ -195,6 +195,16 @@ type chatState struct {
 	modelPickWanted bool
 	modelPref       string
 
+	// autoContext is the "every turn carries the active file" toggle
+	// (config "chatcontext"); attach is the explicitly attached context
+	// for the NEXT turn only, consumed and cleared by chatSendPrompt.
+	// embeddedContext is the agent's advertised willingness to accept
+	// resource blocks — false means fold the same text into the prompt.
+	// See copilot_chat_context.go for the whole layer.
+	autoContext     bool
+	attach          []chatAttach
+	embeddedContext bool
+
 	msgs   []chatMsg
 	scroll int // first visible wrapped row
 
@@ -227,6 +237,7 @@ type chatReadyEvent struct {
 	sessionID string
 	models    []chatModel
 	modelID   string
+	embedded  bool // agent accepts embedded resource blocks in a prompt
 }
 
 // When satisfies the tcell.Event interface.
@@ -356,16 +367,18 @@ func (a *App) chatEnsureStarted() {
 			return
 		}
 		_ = scr.PostEvent(&chatReadyEvent{when: time.Now(), client: client,
-			sessionID: sess.id, models: sess.models, modelID: sess.modelID})
+			sessionID: sess.id, models: sess.models, modelID: sess.modelID,
+			embedded: sess.embedded})
 	}()
 }
 
 // chatSession is what a completed handshake yields: the ACP session id
 // plus the model roster and current pick reported by session/new.
 type chatSession struct {
-	id      string
-	models  []chatModel
-	modelID string
+	id       string
+	models   []chatModel
+	modelID  string
+	embedded bool // promptCapabilities.embeddedContext from initialize
 }
 
 // chatInitialize runs the ACP handshake and opens the session; returns
@@ -377,6 +390,12 @@ type chatSession struct {
 // applied via session/set_model; an id the roster no longer offers (or
 // a failed set) keeps the agent's default silently — a stale saved
 // preference must never break the handshake.
+//
+// The initialize RESULT is read for promptCapabilities.embeddedContext:
+// context attachments ride as embedded resource blocks when the agent
+// takes them, and fold into the prompt text when it doesn't (see
+// copilot_chat_context.go). An agent that reports nothing gets the
+// text-only treatment — the safe direction.
 func chatInitialize(c *lsp.Client, root, prefModel string) (chatSession, error) {
 	initParams := map[string]any{
 		"protocolVersion": 1,
@@ -384,9 +403,16 @@ func chatInitialize(c *lsp.Client, root, prefModel string) (chatSession, error) 
 			"fs": map[string]any{"readTextFile": false, "writeTextFile": false},
 		},
 	}
+	var caps struct {
+		AgentCapabilities struct {
+			PromptCapabilities struct {
+				EmbeddedContext bool `json:"embeddedContext"`
+			} `json:"promptCapabilities"`
+		} `json:"agentCapabilities"`
+	}
 	// Same keychain-stall budget as the LSP sidecar handshake: the
 	// agent's cold start can block on a macOS Keychain prompt.
-	if err := c.CallWithTimeout("initialize", initParams, nil, copilotInitTimeout); err != nil {
+	if err := c.CallWithTimeout("initialize", initParams, &caps, copilotInitTimeout); err != nil {
 		return chatSession{}, err
 	}
 	var sess struct {
@@ -413,7 +439,11 @@ func chatInitialize(c *lsp.Client, root, prefModel string) (chatSession, error) 
 	if sess.SessionID == "" {
 		return chatSession{}, fmt.Errorf("agent returned no session id")
 	}
-	out := chatSession{id: sess.SessionID, modelID: sess.Models.CurrentModelID}
+	out := chatSession{
+		id:       sess.SessionID,
+		modelID:  sess.Models.CurrentModelID,
+		embedded: caps.AgentCapabilities.PromptCapabilities.EmbeddedContext,
+	}
 	for _, m := range sess.Models.Available {
 		if m.ModelID == "" {
 			continue
@@ -449,6 +479,7 @@ func (a *App) handleChatReady(e *chatReadyEvent) {
 	a.chat.sessionID = e.sessionID
 	a.chat.models = e.models
 	a.chat.modelID = e.modelID
+	a.chat.embeddedContext = e.embedded
 	if q := a.chat.queuedPrompt; q != "" {
 		a.chat.queuedPrompt = ""
 		a.chatSendPrompt(q)
@@ -504,8 +535,11 @@ func (a *App) chatDisconnect() {
 	a.chat.models = nil
 	a.chat.modelID = ""
 	a.chat.modelPickWanted = false
+	a.chat.embeddedContext = false
 	// modelPref deliberately survives — it's the persisted preference,
-	// re-applied by the next handshake.
+	// re-applied by the next handshake. So do the pending attachments:
+	// they're editor-side context for a message the user hasn't sent
+	// yet, and a reconnect shouldn't quietly drop them.
 }
 
 // chatAutoRejectPermission builds the response for a
@@ -590,10 +624,23 @@ func (a *App) chatSend() {
 // chatSendPrompt fires the async session/prompt turn for text. The
 // call blocks server-side until the whole answer streamed, so it gets
 // the long-turn timeout, never the 5s default.
+//
+// This is the single dispatch point, so it is also where context
+// attachments are resolved, echoed, and consumed — the queued-prompt
+// path flushes through here too, and attaching a file must work the same
+// whether or not the handshake had finished when Enter was pressed.
 func (a *App) chatSendPrompt(text string) {
 	if !a.chatReady() {
 		return
 	}
+	blocks, notes := a.chatPromptBlocks(text)
+	if len(notes) > 0 {
+		// What the model was handed is part of the conversation: without
+		// this line an answer about "the file" has no visible referent.
+		a.chatAppendMsg(chatMsg{role: chatRoleTool, text: strings.Join(notes, "\n")})
+	}
+	// Per-turn by design — see copilot_chat_context.go's house rules.
+	a.chat.attach = nil
 	a.chat.turnActive = true
 	a.chat.cancelSent = false
 	client := a.chat.client
@@ -601,7 +648,7 @@ func (a *App) chatSendPrompt(text string) {
 	sid := a.chat.sessionID
 	params := map[string]any{
 		"sessionId": sid,
-		"prompt":    []map[string]any{{"type": "text", "text": text}},
+		"prompt":    blocks,
 	}
 	go func() {
 		var res struct {
@@ -1063,10 +1110,11 @@ func (a *App) menuChatCopyAll() {
 // -----------------------------------------------------------------------------
 
 // chatVisibleRows is how many transcript rows the panel shows — the
-// strip minus the header rule and the input row.
+// strip minus the header rule, the input row, and any attachment chips
+// (chatAttachRowsView already clamps itself to leave a row here).
 func (a *App) chatVisibleRows() int {
 	_, _, _, ph := a.chatPanelRect()
-	if v := ph - 2; v > 0 {
+	if v := ph - 2 - a.chatAttachRows(); v > 0 {
 		return v
 	}
 	return 1
@@ -1075,8 +1123,7 @@ func (a *App) chatVisibleRows() int {
 // chatContentRows counts the wrapped transcript rows at the current
 // panel width.
 func (a *App) chatContentRows() int {
-	_, _, pw, _ := a.chatPanelRect()
-	return len(a.chatRows(pw - 2))
+	return len(a.chatRows(a.chatRowWidth()))
 }
 
 // chatMaxScroll is the scroll offset that pins the newest row to the
@@ -1156,6 +1203,15 @@ func (a *App) menuToggleChat() {
 		a.chat.focused = false
 		return
 	}
+	a.chatOpenPanel()
+}
+
+// chatOpenPanel opens the chat strip and starts the agent, explaining
+// unavailability with a flash instead of failing quietly. Shared by the
+// ≡ toggle and by attaching context — attaching a file to a panel you
+// can't see would leave the user with no way to know it worked.
+// Idempotent: an already-open panel just takes focus back.
+func (a *App) chatOpenPanel() {
 	if !a.copilot.enabled {
 		a.flash("Copilot is disabled — use ≡ → Enable Copilot first")
 		return
@@ -1460,6 +1516,11 @@ func (a *App) chatPanelPress(x, y int) string {
 		a.chat.input.clickAt(start, end, x)
 		return ""
 	}
+	// The chip block owns its rows outright — a drag started on a chip
+	// must not select transcript prose behind it.
+	if a.chatAttachPress(x, y) {
+		return ""
+	}
 	if a.chatActionPress(x, y) {
 		return ""
 	}
@@ -1535,10 +1596,11 @@ func (a *App) chatPasteClip() {
 // -----------------------------------------------------------------------------
 
 // drawChatPanel paints the strip: header rule with title, status and
-// buttons; the wrapped transcript; and the prompt + input row. When
-// the panel has focus the hardware cursor moves to the input caret.
+// buttons; the wrapped transcript; the attachment chips; and the prompt
+// + input row. When the panel has focus the hardware cursor moves to the
+// input caret.
 func (a *App) drawChatPanel() {
-	px, py, pw, ph := a.chatPanelRect()
+	px, py, pw, _ := a.chatPanelRect()
 	th := a.theme
 
 	headerSt := tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Subtle)
@@ -1572,7 +1634,7 @@ func (a *App) drawChatPanel() {
 
 	// Transcript rows.
 	rows := a.chatRows(pw - 2)
-	for row := 0; row < ph-2; row++ {
+	for row, visible := 0, a.chatVisibleRows(); row < visible; row++ {
 		ry := py + 1 + row
 		for cx := px; cx < px+pw; cx++ {
 			a.screen.SetContent(cx, ry, ' ', nil, bodyBG)
@@ -1583,6 +1645,9 @@ func (a *App) drawChatPanel() {
 		}
 		a.drawChatRow(rows[idx], px+1, ry, pw-2, idx)
 	}
+
+	// Attachment chips, between the transcript and the composer.
+	a.drawChatAttachments()
 
 	// Input row: prompt gutter + editable field.
 	iy, start, end := a.chatInputSpan()

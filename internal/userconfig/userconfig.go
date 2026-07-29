@@ -117,13 +117,22 @@ type Config struct {
 	// and changes without an r-ed release; a stale id is silently
 	// ignored at apply time instead. Persisted by the ≡ model picker.
 	ChatModel string
+
+	// ChatContext controls whether every chat prompt automatically
+	// carries the active tab (or just its selection, when there is
+	// one) as attached context. Defaults to on — "what about this
+	// file?" is the question a chat panel inside an editor exists to
+	// answer. Separate from Copilot and Suggestions because it is the
+	// one knob with a per-turn token cost the user may want to control
+	// independently. Persisted by the ≡ toggle.
+	ChatContext bool
 }
 
 // Defaults returns a Config populated with the values used when no
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, ExecMarks: true, Copilot: true, Suggestions: true}
+	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, ExecMarks: true, Copilot: true, Suggestions: true, ChatContext: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -140,6 +149,7 @@ type fileFormat struct {
 	Copilot     string `json:"copilot,omitempty"`
 	Suggestions string `json:"suggestions,omitempty"`
 	ChatModel   string `json:"chatmodel,omitempty"`
+	ChatContext string `json:"chatcontext,omitempty"`
 }
 
 // configFilePath resolves the r-ed config directory
@@ -297,6 +307,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(ff.ChatContext)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.ChatContext = true
+	case "off":
+		cfg.ChatContext = false
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: chatcontext must be \"on\" or \"off\" (got %q)",
+			path, ff.ChatContext,
+		)
+	}
+
 	// Any non-blank value is accepted as-is — see Config.ChatModel for
 	// why there's no allowlist to check against.
 	cfg.ChatModel = strings.TrimSpace(ff.ChatModel)
@@ -354,6 +378,16 @@ func SaveSuggestions(path string, on bool) error {
 // config file at path. See saveKey for the round-trip guarantees.
 func SaveChatModel(path, id string) error {
 	return saveKey(path, "chatmodel", id)
+}
+
+// SaveChatContext persists the auto-attach-current-file preference into
+// the config file at path. See saveKey for the round-trip guarantees.
+func SaveChatContext(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "chatcontext", val)
 }
 
 // saveKey writes one preference into the config file at path,

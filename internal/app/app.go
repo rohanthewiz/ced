@@ -264,6 +264,13 @@ func builtinMenuGroups() []menuGroup {
 			// ghost text, the kill switch — reads as one block.
 			{action: (*App).menuToggleChat, enabled: alwaysTrue, labelFor: (*App).chatToggleLabel},
 			{action: (*App).menuChatModel, enabled: alwaysTrue, labelFor: (*App).chatModelLabel},
+			// Context attachments. The panel's chips carry ✕ buttons, but
+			// ATTACHING has no mouse surface of its own — these rows are
+			// it (copilot_chat_context.go).
+			{action: (*App).menuToggleChatContext, enabled: alwaysTrue, labelFor: (*App).chatContextToggleLabel},
+			{action: (*App).menuChatAttachCurrent, enabled: (*App).hasFileTab, labelFor: (*App).chatAttachActionLabel},
+			{label: "Attach file to chat…", action: (*App).menuChatAttachFile, enabled: (*App).hasFinder},
+			{action: (*App).menuChatClearAttachments, enabled: (*App).hasChatAttachments, labelFor: (*App).chatClearAttachLabel},
 			// Keyboard twin of the transcript's trailing ⧉ button, for
 			// the same reason the git panel has one: the panel is
 			// mouse-driven, but macOS Terminal can swallow clicks.
@@ -815,6 +822,7 @@ func (a *App) loadUserConfig() {
 	a.copilot.enabled = cfg.Copilot
 	a.copilot.suggest = cfg.Suggestions
 	a.chat.modelPref = cfg.ChatModel
+	a.chat.autoContext = cfg.ChatContext
 }
 
 // refreshGitStatus re-runs `git status --porcelain` against the project

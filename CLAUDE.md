@@ -62,6 +62,7 @@ internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition
 internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
 internal/app/copilot_ghost.go Copilot phase 2: doc sync + inline completions (ghost text)
 internal/app/copilot_chat.go  Copilot phase 3: ACP chat panel (left strip, streaming turns)
+internal/app/copilot_chat_context.go  Chat context: file / selection attachments
 internal/lsp/acp.go           ACP framing (ndjson) + onRequest hook over the same Client
 internal/editor/ghost.go      GhostText display form + the render-row splice overlay
 internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → autoSaveEvent)
@@ -337,6 +338,51 @@ House rules:
 - Tests inject `fakeCopilotConn` (the chat layer shares the sidecar's
   conn interface on purpose); newTestApp sets `a.chat.dead = true` so
   nothing ever spawns the real binary.
+
+### Chat context attachments (app/copilot_chat_context.go)
+What the chat panel is allowed to know about your code. Context is
+**pushed, never fetched**: the handshake still declares
+`fs.readTextFile: false` and still auto-declines every permission
+request, so the agent cannot read a path we merely name. ACP's prompt is
+a ContentBlock ARRAY, and r-ed ships the bytes itself as embedded
+`resource` blocks — which is why this feature needed no loosening of the
+phase-3 scope guard, and why a `resource_link` block would be a lie
+here. House rules:
+
+- **Per-turn, not sticky.** `chatSendPrompt` (the single dispatch point,
+  so the queued-prompt path gets this too) resolves the attachments,
+  echoes a `▤` note into the transcript, and clears the list. An ACP
+  session keeps history server-side, so a sticky attachment would
+  re-send the whole file on every prompt for the rest of the session —
+  paid for twice (tokens and the premium multiplier) with nothing on
+  screen to explain why.
+- **Auto-context is a TOGGLE, not an entry** (`"chatcontext"` config
+  key, default on, `SaveChatContext`). It's synthesized at send time
+  from the active tab — **selection beats file**, because a highlighted
+  region is a narrower question. The chip's ✕ flips the toggle (the
+  only thing removing a synthesized entry can mean) and persists it
+  through the same `setChatContext` the ≡ row uses, so the setting
+  can't mean different things depending on which surface changed it.
+- **Content comes from the open Tab's BUFFER**, falling back to disk.
+  You attach what you're looking at, including unsaved edits — sending
+  the stale on-disk copy of the file you just changed is the one failure
+  mode that would make the agent's answers quietly wrong.
+- **Attachments are visible and capped.** Chip rows sit between the
+  transcript and the composer (`chatAttachRowsView` is the one source
+  draw and hit-testing share, and it clamps itself so the transcript
+  keeps a row); `chatVisibleRows` subtracts them. Payloads cap at
+  `chatAttachMaxBytes`, cut on a line boundary, and the cut is announced
+  in the note. A failed attachment is announced too — a prompt the user
+  thinks carries a file must never go out pretending it did.
+- **`embeddedContext` gates the wire format.** Captured from
+  initialize's `agentCapabilities.promptCapabilities`; false folds the
+  same text into the prompt as a labelled fenced block. It describes the
+  AGENT, so it dies with the connection — pending attachments don't.
+- Markers stay single-width (`▤`, not 📎): `runeLen` counts runes, and a
+  double-width emoji would overrun the ✕ button.
+- The ≡ Copilot group carries the keyboard/menu twins (toggle, attach
+  current-or-selection, attach-file picker, clear). Attaching opens the
+  panel — context you can't see is context you can't trust.
 
 ### Git panel checkboxes + Actions (app/gitpanel.go + gitpanelactions.go)
 The panel's checkbox is a **multi-selection tick, not a stage toggle**.

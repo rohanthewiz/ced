@@ -192,6 +192,42 @@ func TestACPOnRequestError(t *testing.T) {
 	}
 }
 
+// TestACPOnRequestDoesNotBlockReadLoop pins the async-hook contract: a
+// handler that blocks (the permission prompt waiting on the user) must
+// not stall the read loop — streamed notifications keep arriving, and
+// the response still goes out once the handler returns.
+func TestACPOnRequestDoesNotBlockReadLoop(t *testing.T) {
+	release := make(chan struct{})
+	notified := make(chan string, 1)
+	onNotify := func(method string, params json.RawMessage) { notified <- method }
+	onRequest := func(method string, params json.RawMessage) (any, error) {
+		<-release // simulate a modal awaiting the user
+		return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, nil
+	}
+	_, agt, done := pipeClientACP(t, onNotify, onRequest, nil)
+	defer done()
+
+	agt.write(t, `{"jsonrpc":"2.0","id":3,"method":"session/request_permission","params":{}}`)
+	agt.write(t, `{"jsonrpc":"2.0","method":"session/update","params":{}}`)
+	select {
+	case m := <-notified:
+		if m != "session/update" {
+			t.Fatalf("notification = %q, want session/update", m)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("read loop stalled behind a blocked onRequest handler")
+	}
+
+	close(release)
+	resp := agt.read(t)
+	if resp.ID == nil || *resp.ID != 3 {
+		t.Fatalf("response id = %v, want 3", resp.ID)
+	}
+	if !strings.Contains(string(resp.Result), "cancelled") {
+		t.Errorf("result = %s, want the released handler's outcome", resp.Result)
+	}
+}
+
 // TestACPNotificationDispatch pins that agent notifications reach
 // onNotify with method and raw params — the session/update path.
 func TestACPNotificationDispatch(t *testing.T) {

@@ -87,12 +87,15 @@ type Client struct {
 
 	// onRequest, when set, answers server→client REQUESTS (id +
 	// method): its return value is marshalled into the response, or its
-	// error into a JSON-RPC error object. Called on the read-loop
-	// goroutine, so implementations must be self-contained — post
-	// events for anything that needs app state. Nil keeps the built-in
-	// LSP auto-responder (empty workspace/configuration, null for the
-	// rest); ACP sets it because its server requests (permission
-	// prompts, fs access) carry real semantics a null can't answer.
+	// error into a JSON-RPC error object. Each invocation runs on its
+	// OWN goroutine (never the read loop), so a handler may block while
+	// it waits for an answer — a permission prompt waits on the user —
+	// without stalling notification delivery. It still must not mutate
+	// app state directly; post events and wait on a reply channel. Nil
+	// keeps the built-in LSP auto-responder (empty
+	// workspace/configuration, null for the rest); ACP sets it because
+	// its server requests (permission prompts, fs access) carry real
+	// semantics a null can't answer.
 	onRequest func(method string, params json.RawMessage) (any, error)
 
 	// onExit fires once when the read loop ends (server exited, pipe
@@ -351,17 +354,26 @@ func (c *Client) read() (*message, error) {
 // creation, message requests — accepts a null result.
 func (c *Client) respondToServer(m *message) {
 	if c.onRequest != nil {
-		res, err := c.onRequest(m.Method, m.Params)
-		if err != nil {
-			// -32601 (method not found) is the honest default for a
-			// request this client declines to handle; the message says
-			// why.
-			_ = c.send(&message{JSONRPC: "2.0", ID: m.ID,
-				Error: &respError{Code: -32601, Message: err.Error()}})
-			return
-		}
-		raw, _ := json.Marshal(res)
-		_ = c.send(&message{JSONRPC: "2.0", ID: m.ID, Result: raw})
+		// Each hook invocation gets its own goroutine: ACP request
+		// handlers legitimately block for a long time (a permission
+		// prompt waits on the user's answer), and the read loop must
+		// keep draining streamed notifications and Call responses
+		// meanwhile. JSON-RPC correlates responses by id, so replying
+		// out of order is legal — and send is writeMu-serialised, so
+		// concurrent replies can't interleave bytes.
+		go func() {
+			res, err := c.onRequest(m.Method, m.Params)
+			if err != nil {
+				// -32601 (method not found) is the honest default for a
+				// request this client declines to handle; the message
+				// says why.
+				_ = c.send(&message{JSONRPC: "2.0", ID: m.ID,
+					Error: &respError{Code: -32601, Message: err.Error()}})
+				return
+			}
+			raw, _ := json.Marshal(res)
+			_ = c.send(&message{JSONRPC: "2.0", ID: m.ID, Result: raw})
+		}()
 		return
 	}
 	var result any

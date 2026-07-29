@@ -150,6 +150,13 @@ type paletteModal struct {
 	selected int
 	items    []paletteItem
 	matches  []paletteMatch
+
+	// cancel, when set, runs after the modal is dismissed WITHOUT
+	// running an item — Esc or a click outside. Pickers whose caller
+	// must always receive an answer (the chat permission prompt has an
+	// agent blocked on the reply) set it via openPickerWithCancel;
+	// ordinary pickers leave it nil and dismissal stays a plain no-op.
+	cancel func(*App)
 }
 
 // openPalette gathers items from every source and shows the palette.
@@ -173,9 +180,20 @@ func (a *App) openPalette() {
 // the palette modal reused as a generic fuzzy chooser. Items are taken
 // as-is; sources are not consulted.
 func (a *App) openPicker(title string, items []paletteItem) {
-	m := &paletteModal{title: title, items: items}
+	a.openPickerWithCancel(title, items, nil)
+}
+
+// openPickerWithCancel is openPicker for callers that must hear about a
+// dismissal: cancel runs when the picker is closed without a pick (Esc,
+// click outside). The chat permission prompt uses this — an agent is
+// blocked on the answer, so "no pick" still has to send one. Returns
+// the modal so the caller can recognise it later (e.g. to close it when
+// the underlying request dies).
+func (a *App) openPickerWithCancel(title string, items []paletteItem, cancel func(*App)) *paletteModal {
+	m := &paletteModal{title: title, items: items, cancel: cancel}
 	a.openModal(m)
 	m.refresh()
+	return m
 }
 
 // collectItems (re)gathers the inventory from every registered source.
@@ -231,6 +249,9 @@ func (m *paletteModal) handleKey(a *App, ev *tcell.EventKey) {
 	switch ev.Key() {
 	case tcell.KeyEsc:
 		a.closeModal()
+		if m.cancel != nil {
+			m.cancel(a)
+		}
 	case tcell.KeyEnter:
 		m.runSelected(a)
 	case tcell.KeyUp:
@@ -263,6 +284,9 @@ func (m *paletteModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	}
 	if x < mx || x >= mx+mw || y < my || y >= my+mh {
 		a.closeModal()
+		if m.cancel != nil {
+			m.cancel(a)
+		}
 		return
 	}
 	if row >= 0 && row < len(m.matches) {

@@ -1016,8 +1016,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleChatUpdate(e)
 	case *chatTurnDoneEvent:
 		a.handleChatTurnDone(e)
-	case *chatPermissionEvent:
-		a.handleChatPermission(e)
+	case *chatPermRequestEvent:
+		a.handleChatPermRequest(e)
+	case *chatFSRequestEvent:
+		a.handleChatFSRequest(e)
 	case *chatModelSetEvent:
 		a.handleChatModelSet(e)
 	}
@@ -1032,6 +1034,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// Same trick for auto-save: any event that mutated a buffer
 	// re-arms the idle countdown. See autosave.go.
 	a.autoSaveAfterEvent()
+	// And for chat permissions: a queued session/request_permission
+	// resurfaces as soon as the modal slot frees up. See
+	// copilot_chat_perm.go.
+	a.chatPermAfterEvent()
 }
 
 // workspaceChanged re-syncs every subsystem that mirrors on-disk

@@ -46,10 +46,11 @@
 //	              └──◄ session/update notifications stream agent_message_chunks
 //	                   into the transcript while the call is in flight
 //
-// Scope guard: this phase is CHAT ONLY. The handshake declares no fs
-// capabilities and session/request_permission is auto-declined (the
-// agent then answers in prose instead of editing files). A permission
-// UI is a later phase, not a TODO to sneak in here.
+// Scope: as of phase 4 the panel is a full ACP client, not chat-only.
+// The handshake declares fs read/write capabilities, and
+// session/request_permission surfaces as a real prompt instead of an
+// auto-decline — the permission UI, the client-side fs handlers, and
+// the root confinement all live in copilot_chat_perm.go.
 
 package app
 
@@ -217,6 +218,14 @@ type chatState struct {
 	modelPickWanted bool
 	modelPref       string
 
+	// permQueue is the pending session/request_permission requests in
+	// arrival order; the head is what the permission picker shows.
+	// permModal is that picker while it is up — tracked so teardown can
+	// recognise and close it. See copilot_chat_perm.go for the whole
+	// lifecycle.
+	permQueue []*chatPermRequest
+	permModal *paletteModal
+
 	// autoContext is the "every turn carries the active file" toggle
 	// (config "chatcontext"); attach is the explicitly attached context
 	// for the NEXT turn only, consumed and cleared by chatSendPrompt.
@@ -301,17 +310,6 @@ type chatTurnDoneEvent struct {
 // When satisfies the tcell.Event interface.
 func (e *chatTurnDoneEvent) When() time.Time { return e.when }
 
-// chatPermissionEvent reports an auto-declined permission request so
-// the transcript can say what the agent wasn't allowed to do. Display
-// only — the decline itself already happened on the read loop.
-type chatPermissionEvent struct {
-	when  time.Time
-	title string
-}
-
-// When satisfies the tcell.Event interface.
-func (e *chatPermissionEvent) When() time.Time { return e.when }
-
 // chatModelSetEvent lands one session/set_model call's completion —
 // the picker's async leg, same bridge pattern as every chat call.
 type chatModelSetEvent struct {
@@ -367,14 +365,20 @@ func (a *App) chatEnsureStarted() {
 			_ = scr.PostEvent(&chatUpdateEvent{when: time.Now(), sessionID: p.SessionID, update: p.Update})
 		}
 		onRequest := func(method string, params json.RawMessage) (any, error) {
-			if method == "session/request_permission" {
-				res, title := chatAutoRejectPermission(params)
-				_ = scr.PostEvent(&chatPermissionEvent{when: time.Now(), title: title})
-				return res, nil
+			// Each of these runs on its own per-request goroutine (the
+			// lsp.Client contract) and BLOCKS until the main loop
+			// answers — a permission prompt waits on the user. See
+			// copilot_chat_perm.go. Anything else unknown gets an
+			// honest method-not-found so the agent can fall back to
+			// prose.
+			switch method {
+			case "session/request_permission":
+				return chatServePermission(scr, seq, params)
+			case "fs/read_text_file":
+				return chatServeFS(scr, seq, false, params)
+			case "fs/write_text_file":
+				return chatServeFS(scr, seq, true, params)
 			}
-			// fs/* can't arrive (the handshake declares no fs
-			// capabilities); anything else unknown gets an honest
-			// method-not-found so the agent can fall back to prose.
 			return nil, fmt.Errorf("ced does not handle %s", method)
 		}
 		onExit := func(error) {
@@ -411,13 +415,13 @@ type chatSession struct {
 
 // chatInitialize runs the ACP handshake and opens the session; returns
 // the session plus the agent's model roster. Runs on the start
-// goroutine, never the main loop. The fs capabilities are declared
-// FALSE on purpose — phase 3 is chat only, and not offering the
-// capability is the protocol-honest way to keep the agent out of the
-// user's files (see the header comment). A non-empty prefModel is
-// applied via session/set_model; an id the roster no longer offers (or
-// a failed set) keeps the agent's default silently — a stale saved
-// preference must never break the handshake.
+// goroutine, never the main loop. The fs capabilities are declared TRUE
+// as of phase 4: reads are served from open-tab buffers (unsaved edits
+// included) and writes land on disk and reconcile — both root-confined
+// and permission-mediated; see copilot_chat_perm.go. A non-empty
+// prefModel is applied via session/set_model; an id the roster no
+// longer offers (or a failed set) keeps the agent's default silently —
+// a stale saved preference must never break the handshake.
 //
 // The initialize RESULT is read for promptCapabilities.embeddedContext:
 // context attachments ride as embedded resource blocks when the agent
@@ -428,7 +432,7 @@ func chatInitialize(c *lsp.Client, root, prefModel string) (chatSession, error) 
 	initParams := map[string]any{
 		"protocolVersion": 1,
 		"clientCapabilities": map[string]any{
-			"fs": map[string]any{"readTextFile": false, "writeTextFile": false},
+			"fs": map[string]any{"readTextFile": true, "writeTextFile": true},
 		},
 	}
 	var caps struct {
@@ -562,6 +566,10 @@ func (a *App) chatDisconnect() {
 	// Invalidate every event still in flight from this connection's
 	// goroutines (ready, exit, turn-done) — see connSeq's field docs.
 	a.chat.connSeq++
+	// Unblock any serve goroutine still waiting on a permission answer
+	// — the cancelled outcome is the spec's word for "the session died
+	// under this request".
+	a.chatFlushPermissions()
 	if a.chat.client != nil {
 		a.chat.client.Close()
 	}
@@ -579,46 +587,6 @@ func (a *App) chatDisconnect() {
 	// re-applied by the next handshake. So do the pending attachments:
 	// they're editor-side context for a message the user hasn't sent
 	// yet, and a reconnect shouldn't quietly drop them.
-}
-
-// chatAutoRejectPermission builds the response for a
-// session/request_permission request: pick the agent's own reject
-// option (once-scoped preferred, so a future permission UI starts from
-// a clean slate), or the cancelled outcome when no reject option
-// exists. Pure — it runs on the read loop, so it must not touch App.
-func chatAutoRejectPermission(params json.RawMessage) (result any, title string) {
-	var p struct {
-		ToolCall struct {
-			Title string `json:"title"`
-		} `json:"toolCall"`
-		Options []struct {
-			OptionID string `json:"optionId"`
-			Kind     string `json:"kind"`
-		} `json:"options"`
-	}
-	_ = json.Unmarshal(params, &p)
-	title = p.ToolCall.Title
-	for _, kind := range []string{"reject_once", "reject_always"} {
-		for _, o := range p.Options {
-			if o.Kind == kind {
-				return map[string]any{
-					"outcome": map[string]any{"outcome": "selected", "optionId": o.OptionID},
-				}, title
-			}
-		}
-	}
-	return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}, title
-}
-
-// handleChatPermission notes an auto-declined permission request in
-// the transcript so the agent's "I wasn't allowed to do that" answers
-// have visible context.
-func (a *App) handleChatPermission(e *chatPermissionEvent) {
-	title := e.title
-	if title == "" {
-		title = "a tool call"
-	}
-	a.chatAppendMsg(chatMsg{role: chatRoleTool, text: "⊘ declined: " + title})
 }
 
 // -----------------------------------------------------------------------------
@@ -753,6 +721,10 @@ func (a *App) handleChatTurnDone(e *chatTurnDoneEvent) {
 	}
 	a.chat.turnActive = false
 	a.chat.cancelSent = false
+	// A permission still pending when its turn ends can never be acted
+	// on — answer it cancelled (the spec's requirement for cancelled
+	// turns) instead of leaving a dead prompt on screen.
+	a.chatFlushPermissions()
 	if e.err != nil {
 		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: a.chatAgent().name + " chat: " + e.err.Error()})
 		return
@@ -774,6 +746,10 @@ func (a *App) chatInterrupt() {
 	}
 	a.chat.cancelSent = true
 	_ = a.chat.client.Notify("session/cancel", map[string]any{"sessionId": a.chat.sessionID})
+	// The spec: a cancelled turn's pending permission requests MUST be
+	// answered with the cancelled outcome — and a well-behaved agent
+	// may be unable to end the turn until they are.
+	a.chatFlushPermissions()
 	a.flash("stopping " + a.chatAgent().name + "'s answer")
 }
 

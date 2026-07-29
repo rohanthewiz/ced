@@ -392,32 +392,6 @@ func TestChatExit_SurfacesReason(t *testing.T) {
 	}
 }
 
-// TestChatAutoRejectPermission pins the phase-3 scope guard: the
-// agent's own reject_once option is chosen when present, and the
-// cancelled outcome is the fallback when it isn't.
-func TestChatAutoRejectPermission(t *testing.T) {
-	params := json.RawMessage(`{
-		"toolCall": {"title": "Edit main.go"},
-		"options": [
-			{"optionId": "ok", "kind": "allow_once"},
-			{"optionId": "no", "kind": "reject_once"}
-		]}`)
-	res, title := chatAutoRejectPermission(params)
-	if title != "Edit main.go" {
-		t.Errorf("title = %q", title)
-	}
-	b, _ := json.Marshal(res)
-	if !strings.Contains(string(b), `"optionId":"no"`) {
-		t.Errorf("outcome = %s, want the reject_once option", b)
-	}
-
-	res, _ = chatAutoRejectPermission(json.RawMessage(`{"options":[{"optionId":"ok","kind":"allow_once"}]}`))
-	b, _ = json.Marshal(res)
-	if !strings.Contains(string(b), `"cancelled"`) {
-		t.Errorf("no-reject fallback = %s, want cancelled", b)
-	}
-}
-
 // TestChatHistoryMove pins the readline behavior on the composer: Up
 // recalls the previous prompt, Down walks back to the stashed draft.
 func TestChatHistoryMove(t *testing.T) {

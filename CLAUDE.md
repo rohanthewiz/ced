@@ -65,6 +65,7 @@ internal/app/copilot_ghost.go Copilot phase 2: doc sync + inline completions (gh
 internal/app/copilot_chat.go  Copilot phase 3: ACP chat panel (left strip, streaming turns)
 internal/app/chatagent.go     Chat backend registry + ≡ picker (Copilot / Claude Code / Gemini)
 internal/app/copilot_chat_context.go  Chat context: file / selection attachments
+internal/app/copilot_chat_perm.go     Phase 4: permission prompts + agent fs read/write
 internal/lsp/acp.go           ACP framing (ndjson) + onRequest hook over the same Client
 internal/editor/ghost.go      GhostText display form + the render-row splice overlay
 internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → autoSaveEvent)
@@ -343,11 +344,12 @@ House rules:
   and die with the connection; `modelPref` survives. All Copilot menu
   rows (auth, chat toggle, model, suggestions, kill switch) live in
   the ≡ Copilot group — owner preference, one block.
-- **Chat only, by scope**: the handshake declares no fs capabilities
-  and `session/request_permission` is auto-declined with the agent's
-  own reject option (`chatAutoRejectPermission`, pure — it runs on
-  the read loop), noted in the transcript. A permission UI is a later
-  phase; don't bolt one on here.
+- **Permissions + fs are real as of phase 4** (copilot_chat_perm.go):
+  the handshake declares fs read/write capabilities, and
+  `session/request_permission` opens the agent's own options as a
+  picker (the openPicker house rule) instead of auto-declining. See
+  the phase-4 section below for the house rules; the retired
+  chat-only scope guard should not be reintroduced piecemeal.
 - **Transcript is the model, rows are derived**: `chatRows(width)`
   re-wraps `[]chatMsg` on demand (word wrap for prose, hard wrap for
   fenced code, ❯ gutter on user prompts), so resizes re-flow for
@@ -376,15 +378,46 @@ House rules:
   conn interface on purpose); newTestApp sets `a.chat.dead = true` so
   nothing ever spawns the real binary.
 
+### Chat permissions + agent fs (app/copilot_chat_perm.go) — phase 4
+The permission UI and the client-side filesystem that turned the panel
+from chat-only into a full ACP client. House rules:
+
+- **The transport contract is per-request goroutines.** `lsp.Client`
+  runs every `onRequest` hook on its OWN goroutine (never the read
+  loop) precisely so these handlers can BLOCK: `chatServe*` post an
+  event carrying a buffered reply channel, wait for the main loop's
+  answer, and hand it back. Only main-loop handlers touch `App` —
+  don't move logic into the serve side.
+- **Every permission request is answered exactly once** (the
+  `answered` flag): a pick answers with the pick, dismissal (Esc /
+  click outside — `openPickerWithCancel`, the palette's cancel hook)
+  answers with the agent's own reject option, and teardown / turn
+  cancellation answers with the cancelled outcome — the ACP-required
+  response for permissions pending when a turn dies
+  (`chatFlushPermissions`, called from disconnect, ⏹, and turn-done).
+  The serve goroutine's `chatTurnTimeout` is the walk-away backstop.
+- **Requests queue; the prompt is polite.** `chat.permQueue` holds
+  arrivals in order; `chatMaybeOpenPermission` never steals the modal
+  slot from an open modal or the menu, and the dispatch-tail hook
+  (`chatPermAfterEvent`) resurfaces the head when the slot frees.
+  Decisions are echoed into the transcript ("✓ allowed" /
+  "⊘ rejected") — the agent's next answer references them.
+- **fs is root-confined and buffer-fresh.** Reads serve the open tab's
+  BUFFER (unsaved edits — the attachment rationale) before disk;
+  writes land on disk, then run `refreshTreeNow()` so the normal
+  three-way reconciliation absorbs the edit (clean tab reloads, dirty
+  tab warns) and the transcript gets a `✎ wrote` receipt. Paths are
+  confined to rootDir lexically (`chatFSResolve`); outside paths get
+  an error the agent can read, not silence.
+
 ### Chat context attachments (app/copilot_chat_context.go)
 What the chat panel is allowed to know about your code. Context is
-**pushed, never fetched**: the handshake still declares
-`fs.readTextFile: false` and still auto-declines every permission
-request, so the agent cannot read a path we merely name. ACP's prompt is
-a ContentBlock ARRAY, and ced ships the bytes itself as embedded
-`resource` blocks — which is why this feature needed no loosening of the
-phase-3 scope guard, and why a `resource_link` block would be a lie
-here. House rules:
+**pushed, not fetched** — even now that phase 4 lets agents read files:
+an attachment must reach the model in THAT turn, with no fetch round
+trip and no permission prompt in the middle of the user's question, so
+ced ships the bytes itself as embedded `resource` blocks in ACP's
+ContentBlock array. A `resource_link` block still demotes "here is the
+context" to "you could go look"; don't add one. House rules:
 
 - **Per-turn, not sticky.** `chatSendPrompt` (the single dispatch point,
   so the queued-prompt path gets this too) resolves the attachments,

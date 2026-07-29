@@ -9,13 +9,16 @@
 // about: the file you're looking at, the lines you highlighted, and any
 // other project file you name.
 //
-// Why it has to be PUSHED, not fetched: the phase-3 handshake declares
-// fs.readTextFile FALSE and auto-declines every session/request_permission
-// (see copilot_chat.go's scope guard), so the agent genuinely cannot read
-// a path we merely point at. ACP's prompt is a ContentBlock ARRAY, and
-// the block type that carries bytes is the embedded `resource` — so ced
-// ships the text itself and the scope guard stays exactly as tight as it
-// was. A `resource_link` block would be a lie here; don't add one.
+// Why it stays PUSHED even though phase 4 gave agents fs/read_text_file:
+// an attachment is the user saying "this, exactly this, now" — shipping
+// the bytes in the prompt (ACP's ContentBlock array, embedded `resource`
+// blocks) guarantees the model reads that text in that turn, with no
+// dependency on the agent choosing to fetch, no extra request round
+// trips, and no permission prompt interrupting the question. Fetching
+// remains the agent's own initiative for files the user didn't attach
+// (root-confined, buffer-fresh — see copilot_chat_perm.go). A
+// `resource_link` block is still the wrong tool for an attachment: it
+// demotes "here is the context" to "you could go look".
 //
 // House rules for this layer:
 //

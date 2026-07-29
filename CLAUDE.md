@@ -508,6 +508,13 @@ scope by design. House rules:
 - Evals run on goroutines; only main-loop handlers mutate term state.
   Each completed command calls `refreshTreeNow()` — shell commands
   create files.
+- **POSIX only — this panel is why.** grsh reaches for job-control
+  syscalls (`SIGTSTP`, `SIGUSR1/2`, `Setpgid`, `Getpgrp`) that Go's
+  `syscall` package doesn't define on Windows, so embedding it makes the
+  whole binary POSIX-only and `.goreleaser.yml` ships linux/darwin only.
+  Restoring a Windows target means build-tagging this panel out behind
+  stubs, NOT adding `windows` back to the goos list — that just breaks
+  the release again (it broke ced's first one).
 - grsh's `cd` chdirs the whole editor process (grsh's deliberate
   design) — keep ced's own file operations absolute-path based.
 - **rc file, the grsh analog of ~/.zshrc**: `ensureTermSession` sources

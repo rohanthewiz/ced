@@ -25,13 +25,13 @@ builds:
     main: .
     env:
       - CGO_ENABLED=0
-    goos: [linux, darwin, windows]
+    # POSIX only. The embedded grsh terminal panel (internal/app/terminal.go)
+    # depends on process-group and job-control syscalls — SIGTSTP, SIGUSR1/2,
+    # Setpgid, Getpgrp — that don't exist in Go's syscall package on Windows,
+    # so a windows target simply doesn't compile. Restoring it means
+    # build-tagging the terminal panel out, not flipping this list back.
+    goos: [linux, darwin]
     goarch: [amd64, arm64]
-    # Skip windows/arm64 — less common, and we'd rather not ship binaries
-    # we can't easily test. Add it back if there's demand.
-    ignore:
-      - goos: windows
-        goarch: arm64
     ldflags:
       - -s -w
 
@@ -39,9 +39,6 @@ archives:
   - id: default
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
     files:
       - LICENSE*
       - README*

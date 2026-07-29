@@ -14,7 +14,7 @@
 #      number, commits the change back to `release` with [skip ci], and
 #      pushes.
 #   2. Tags v<x.y.z> and pushes the tag.
-#   3. Runs goreleaser to cross-compile binaries (linux/darwin/windows ×
+#   3. Runs goreleaser to cross-compile binaries (linux/darwin ×
 #      amd64/arm64), package them, attach them to a GitHub Release, and
 #      push an updated Homebrew formula into Formula/ in this same repo
 #      (using the default GITHUB_TOKEN — no separate tap repo or PAT
@@ -95,6 +95,17 @@ jobs:
       # Commit the bumped version.go back to `release`. The [skip ci]
       # marker in the commit message tells GitHub Actions not to re-run
       # this workflow (which would loop forever).
+      # Git identity has to be configured UNCONDITIONALLY, before anything
+      # that writes an object. It used to live inside the version-bump step
+      # below, which is skipped whenever version.go was hand-edited — and
+      # `git tag -a` still needs an identity on that path, so a manual
+      # major/minor bump always died with "empty ident name". Keep this step
+      # ahead of both consumers.
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Commit version bump
         if: steps.version.outputs.bumped == 'true'
         run: |
@@ -103,8 +114,6 @@ jobs:
 
           sed -i -E "s/(const Version = )\"[0-9]+\.[0-9]+\.[0-9]+\"/\1\"$NEW\"/" internal/version/version.go
 
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add internal/version/version.go
           git commit -m "Release v$NEW [skip ci]"
           git push origin HEAD:release

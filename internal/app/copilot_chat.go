@@ -1637,9 +1637,11 @@ func (a *App) chatPasteClip() {
 // keeping only the first line. The whole paste lands in one step, so a
 // long snippet doesn't cost one field edit per character.
 //
-// No flash here, unlike termInsertPaste: flattened prose still reads as
-// what the user pasted, and an agent doesn't care about line breaks. A
-// flattened COMMAND is a different animal, so that side says so.
+// The terminal panel deliberately does the opposite with the same input
+// (termInsertPaste runs each pasted line, because there a break means
+// Enter). A break in a PROMPT means nothing of the kind — there is no
+// "submit" to imply — so flattening loses nothing and keeps the text
+// editable before it's sent.
 func (a *App) chatInsertPaste(text string) {
 	a.chat.input.insertString(flattenPaste(text))
 }

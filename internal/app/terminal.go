@@ -167,6 +167,13 @@ type termPanelState struct {
 	// NeedsMore loop the standalone REPL runs.
 	pending []string
 
+	// pasteQueue is the tail of a multi-line paste waiting its turn. A
+	// pasted line can't just be looped over: Eval runs on a goroutine,
+	// so each line submits only once the previous one reports done (see
+	// termRunPasteQueue). Dropped by ⏹ and by `exit` — an aborted batch
+	// must not resume.
+	pasteQueue []string
+
 	running     bool // an Eval is in flight
 	interrupted bool // ⏹ already clicked once; next click escalates to Kill
 }
@@ -456,13 +463,17 @@ func (a *App) handleTermDone(e *termDoneEvent) {
 	a.term.interrupted = false
 	if code, ok := termExitCode(e.err); ok {
 		// `exit` ends the session, not the editor: close the panel and
-		// drop the session so the next open starts a fresh shell.
+		// drop the session so the next open starts a fresh shell. A
+		// pasted batch dies with it — the shell the rest of those lines
+		// were meant for is gone, and running them in a fresh one is
+		// not what the paste said.
 		a.term.open = false
 		a.term.focused = false
 		a.term.sess = nil
 		a.term.lines = nil
 		a.term.partial = ""
 		a.term.pending = nil
+		a.termDropPasteQueue()
 		a.flash("terminal session ended (exit " + itoa(code) + ")")
 		return
 	}
@@ -471,6 +482,9 @@ func (a *App) handleTermDone(e *termDoneEvent) {
 	}
 	a.termDrainNotifications()
 	a.refreshTreeNow()
+	// A failed line does NOT abort the batch: a shell without `set -e`
+	// keeps going, and a paste is a sequence of commands, not a script.
+	a.termRunPasteQueue()
 }
 
 // termDrainNotifications appends finished background-job lines
@@ -487,23 +501,47 @@ func (a *App) termDrainNotifications() {
 
 // termInterrupt is the ⏹ button: SIGINT first, SIGKILL on the second
 // press — the mouse-first stand-in for Ctrl+C / kill -9.
+//
+// It is also the abort for a pasted batch, and that happens FIRST: the
+// queue is dropped whether or not there is a process to signal, because
+// "stop" has to mean the remaining pasted lines never run. Without it,
+// interrupting line 1 of a five-line paste would just hand the shell line
+// 2 — the opposite of what the button promises.
 func (a *App) termInterrupt() {
+	// Each branch below reports the drop itself rather than appending a
+	// second flash: the last flash wins, so a blanket "interrupt sent"
+	// would overwrite — and contradict — "nothing to interrupt".
+	dropped := a.termDropPasteQueue()
+	batch := ""
+	if dropped > 0 {
+		batch = fmt.Sprintf(" — %d pasted lines dropped", dropped)
+	}
 	if a.term.sess == nil || !a.term.running {
+		// Nothing is running, but a queue can still exist: a paste whose
+		// first line needed no Eval leaves the rest waiting.
+		if dropped > 0 {
+			a.flash(fmt.Sprintf("dropped %d queued pasted lines", dropped))
+		}
 		return
 	}
 	if a.term.interrupted {
 		if a.term.sess.Kill() {
-			a.flash("kill sent")
+			a.flash("kill sent" + batch)
 		}
 		return
 	}
 	if a.term.sess.Interrupt() {
 		a.term.interrupted = true
-		a.flash("interrupt sent — ⏹ again to force kill")
+		if dropped > 0 {
+			a.flash("interrupt sent" + batch)
+		} else {
+			a.flash("interrupt sent — ⏹ again to force kill")
+		}
 	} else {
 		// Builtins and pure-Go evaluation have no process to signal;
-		// say so instead of silently doing nothing.
-		a.flash("nothing to interrupt (builtin or Go code running)")
+		// say so instead of silently doing nothing. The batch still
+		// stops — that part doesn't need a signal.
+		a.flash("nothing to interrupt (builtin or Go code running)" + batch)
 	}
 }
 
@@ -1046,33 +1084,104 @@ func (a *App) termPasteClip() {
 	a.termInsertPaste(a.clipBuf)
 }
 
-// termInsertPaste drops pasted text into the command line at the caret
-// as one splice. It is the single entry point for both paste gestures:
-// Cmd+V from the editor's own clipboard (termPasteClip) and a real
-// terminal paste, routed here by handlePaste once termPasteTarget claims
-// it (see textpaste.go).
+// termInsertPaste lands pasted text on the command line. It is the single
+// entry point for both paste gestures: Cmd+V from the editor's own
+// clipboard (termPasteClip) and a real terminal paste, routed here by
+// handlePaste once termPasteTarget claims it (see textpaste.go).
 //
-// A paste never executes anything. The input is one line and Enter is the
-// only thing that submits, so a multi-line paste is flattened
-// (flattenPaste, shared with the chat composer) and left sitting there to
-// be read, edited, and run — or not. Two tempting alternatives are
-// deliberately rejected: replaying the paste as keystrokes RUNS every
-// line but the last (the old behavior, and the bug this replaces), and
-// joining lines with "; " invents shell separators the user never typed
-// — which a pasted `#` comment would then silently swallow the rest of.
+// It follows real-shell paste semantics, which the owner chose over
+// flattening: a line break in a paste means what pressing Enter means, so
+// every complete line RUNS, in order, and a trailing fragment with no
+// break after it is left on the input line to be finished by hand.
+// Pasting "cd /tmp\nls" runs `cd /tmp` and parks `ls` at the prompt;
+// adding a trailing newline runs `ls` too.
 //
-// A multi-line paste flashes what happened. Folding two commands into one
-// line is exactly the case where an unreviewed Enter does something
-// unintended, so the panel says so instead of looking like a clean paste.
+// Three details make that behave like a terminal rather than a keystroke
+// replay (the old, broken behavior — see textpaste.go):
+//
+//   - The paste's FIRST line joins whatever is already on the input line,
+//     at the caret. Pasting "world" onto "echo hello " submits
+//     "echo hello world", exactly as typing it would.
+//   - Lines are submitted one at a time, each waiting for the previous
+//     Eval to finish (termRunPasteQueue) — Eval is async, so a loop here
+//     would interleave commands or hit submitTermCommand's busy guard.
+//   - Each line goes through submitTermCommand, so pasted blocks feed
+//     grsh's NeedsMore continuation exactly like typed ones: an
+//     "if x {" … "}" paste accumulates and evaluates as one unit.
+//
+// Every pasted line is echoed into the scrollback with its prompt, so a
+// batch reads back as the commands it ran. ⏹ aborts the remainder.
 func (a *App) termInsertPaste(text string) {
-	flat := flattenPaste(text)
-	if flat == "" {
+	if text == "" {
 		return
 	}
-	a.term.input.insertString(flat)
-	if n := pasteLineCount(text); n > 1 {
-		a.flash(fmt.Sprintf("Pasted %d lines as one command — review before Enter", n))
+	// Normalize the break flavors, then flatten each line on its own:
+	// within a single command line, a stray tab or control rune is still
+	// noise the single-line field can't render.
+	norm := strings.ReplaceAll(text, "\r\n", "\n")
+	norm = strings.ReplaceAll(norm, "\r", "\n")
+	lines := strings.Split(norm, "\n")
+	for i, ln := range lines {
+		lines[i] = flattenPaste(ln)
 	}
+
+	a.term.input.insertString(lines[0])
+	if len(lines) == 1 {
+		return // no break pasted: nothing to run, same as typing it
+	}
+
+	// Each remaining line means "submit what's on the input line now,
+	// then put this there" — so the LAST one is what stays at the prompt
+	// (empty when the paste ended with a newline, which submits it).
+	// Say what's about to run. Executing on paste is the surprising part
+	// of these semantics, and the queue length is the one thing the
+	// screen doesn't already show — but don't offer "⏹ stops the rest"
+	// when there is no rest (a single command copied with its trailing
+	// newline is the common case here).
+	a.term.pasteQueue = append(a.term.pasteQueue, lines[1:]...)
+	if n := len(lines) - 1; n == 1 {
+		a.flash("Running the pasted line")
+	} else {
+		a.flash(fmt.Sprintf("Running %d pasted lines in order — ⏹ stops the rest", n))
+	}
+	a.termRunPasteQueue()
+}
+
+// termRunPasteQueue submits as much of a pasted batch as it can right
+// now: each queued line takes the input line and goes through
+// submitTermCommand, stopping the moment one of them starts an Eval.
+// handleTermDone calls back in when that Eval finishes, so the batch
+// walks itself forward one command at a time.
+//
+// Lines that need no Eval (blank ones, and continuation lines grsh is
+// still accumulating) don't stop the walk — they submit and the loop goes
+// straight on to the next, which is what makes a pasted multi-line block
+// arrive as one unit.
+func (a *App) termRunPasteQueue() {
+	for len(a.term.pasteQueue) > 0 {
+		if a.term.running {
+			return // resumes from handleTermDone
+		}
+		if a.term.sess == nil {
+			a.term.pasteQueue = nil // session gone; nothing can run
+			return
+		}
+		next := a.term.pasteQueue[0]
+		a.term.pasteQueue = a.term.pasteQueue[1:]
+		a.submitTermCommand()
+		a.term.input = newTextField(next)
+	}
+}
+
+// termDropPasteQueue abandons the rest of a pasted batch, reporting how
+// many lines were thrown away so the caller can say so. Used by the paths
+// that mean "stop": ⏹ and a session that ended under us. Hiding the panel
+// deliberately does NOT drop the queue — a running command already
+// survives hide/show, and a batch is the same promise.
+func (a *App) termDropPasteQueue() int {
+	n := len(a.term.pasteQueue)
+	a.term.pasteQueue = nil
+	return n
 }
 
 // -----------------------------------------------------------------------------

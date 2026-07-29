@@ -133,18 +133,18 @@ func (a *App) termPasteTarget() bool {
 	return a.term.open && a.term.focused
 }
 
-// flattenPaste folds multi-line pasted text into a single line: line
-// breaks and tabs each become one space (a CRLF pair counts once, so
+// flattenPaste folds text into something a single-line field can hold:
+// line breaks and tabs each become one space (a CRLF pair counts once, so
 // Windows-flavored text doesn't double-space), and the remaining control
-// runes — which a single-line field can't render and no consumer wants —
-// are dropped.
+// runes — which such a field can't render and no consumer wants — are
+// dropped.
 //
-// Both single-line inputs (the chat composer, the terminal command line)
-// share this policy so the two panels can't drift apart. Flattening is
-// the conservative reading of a multi-line paste: it keeps the whole
-// text visible and editable, where the alternatives silently drop
-// everything after the first line or — in the terminal's case — invent
-// separators the user never typed.
+// The two callers use it at different granularity, which is the whole
+// difference between the panels. The chat composer flattens a paste
+// WHOLE: a prompt is prose, so a snippet arriving as one long line keeps
+// every word, and the alternative silently drops everything after the
+// first line. The terminal calls it per LINE and then runs the lines in
+// order (termInsertPaste), because there a break means Enter.
 func flattenPaste(text string) string {
 	var b strings.Builder
 	b.Grow(len(text))
@@ -167,29 +167,6 @@ func flattenPaste(text string) string {
 		prevBreak = false
 	}
 	return b.String()
-}
-
-// pasteLineCount counts the lines a paste actually carried, so a caller
-// can say so when flattening changed the shape of the text. Trailing
-// breaks don't count (a copied line usually brings one along, and
-// calling that "2 lines" would be a lie), and a CRLF pair counts once.
-func pasteLineCount(text string) int {
-	trimmed := strings.TrimRight(text, "\r\n")
-	if trimmed == "" {
-		return 0
-	}
-	n, prevBreak := 1, false
-	for _, r := range trimmed {
-		if r == '\r' || r == '\n' {
-			if !prevBreak {
-				n++
-			}
-			prevBreak = true
-			continue
-		}
-		prevBreak = false
-	}
-	return n
 }
 
 // editorPasteTarget returns the tab a paste should land in, or nil when

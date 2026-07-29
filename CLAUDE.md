@@ -364,8 +364,11 @@ House rules:
   predicates are mutually exclusive on purpose. Without that gate a
   paste aimed at the prompt resolved through the active tab and landed
   in the FILE behind the panel. Both gestures funnel through
-  `chatInsertPaste` → `chatFlattenPaste`, so Cmd+V and a terminal paste
-  can never drift apart.
+  `chatInsertPaste` → `flattenPaste`, so Cmd+V and a terminal paste can
+  never drift apart. The composer flattens a paste WHOLE, unlike the
+  terminal, which runs it line by line — deliberate, not an
+  inconsistency: a break in a prompt implies no "submit", so flattening
+  loses nothing and keeps the text editable before it's sent.
 - **Selection + copy live in the panel, not the terminal.** The app
   captures the mouse, so the terminal's own drag-to-select can never
   reach the transcript — the editor provides it. Selection is a
@@ -582,17 +585,29 @@ scope by design. House rules:
 - **Coalescing writer**: grsh output lands in `termWriter`'s buffer
   with at most one `termOutputEvent` in flight — never post
   per-chunk events (heavy output would overflow tcell's queue).
-- **A paste never runs anything.** `termPasteTarget` (textpaste.go)
-  claims bracketed pastes for the input line, and `termInsertPaste`
-  flattens them via the shared `flattenPaste`. Before that gate a paste
-  arrived as raw keys, so every Enter it carried EXECUTED the line
-  before it — a pasted three-line snippet ran two commands nobody
-  typed. Enter is the only thing that submits; keep it that way. Do not
-  "improve" the flattening into `; ` joins (that invents separators the
-  user never typed, and a pasted `#` comment then swallows the rest of
-  the line) and do not restore per-rune replay. A multi-line paste
-  flashes its line count, because that's the case where an unreviewed
-  Enter does something unintended.
+- **Paste is real-shell paste: a line break means Enter.**
+  `termPasteTarget` (textpaste.go) claims bracketed pastes for the panel
+  and `termInsertPaste` runs the complete lines in order, parking an
+  unterminated tail at the prompt — owner's call, chosen over
+  flattening. The paste's first line joins what's already on the input
+  line, at the caret. Three invariants hold it together:
+  - **One at a time.** Eval is async, so lines can't be looped over:
+    `term.pasteQueue` holds the tail and `termRunPasteQueue` submits the
+    next line only when the previous Eval reports done (re-entered from
+    `handleTermDone`). A loop here would interleave commands or trip
+    `submitTermCommand`'s busy guard.
+  - **Through `submitTermCommand`, always.** That's what makes a pasted
+    block feed grsh's `NeedsMore` continuation as ONE unit and echo each
+    line into the scrollback, so a batch reads back as what it ran.
+  - **⏹ aborts the remainder**, and drops the queue whether or not
+    there's a process to signal — "stop" has to mean the rest never
+    runs. `exit` drops it too (that shell is gone). Hiding the panel does
+    NOT: a running command already survives hide/show.
+
+  What NOT to do: don't restore per-rune replay (that ran every line but
+  the last, through `handleKey`'s shortcut machinery), and don't join
+  lines with `; ` (invents separators the user never typed, and a pasted
+  `#` comment then swallows the rest of the line).
 - **Stop button, not Ctrl+C**: ⏹ sends Interrupt (SIGINT to the
   child's own process group), a second press escalates to Kill.
   grsh's embedded mode guarantees the signal cannot hit the editor.

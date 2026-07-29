@@ -8,10 +8,12 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -262,50 +264,181 @@ func TestPaste_ChatPromptWithNoTabOpen(t *testing.T) {
 	}
 }
 
-// TestPaste_IntoFocusedTerminalPrompt is the regression pin for the old
-// terminal behavior: a paste replayed as keystrokes meant every Enter it
-// carried RAN the line before it. A multi-line paste must now land in the
-// command line, flattened to one line, with nothing submitted.
+// TestPaste_IntoFocusedTerminalPrompt pins real-shell paste semantics in
+// the panel: complete lines run IN ORDER, one at a time (never stacked —
+// Eval is async), the unterminated tail is left at the prompt, and none of
+// it touches the file behind the panel. The old keystroke-replay path got
+// the first part accidentally right and everything else wrong.
 func TestPaste_IntoFocusedTerminalPrompt(t *testing.T) {
 	a := openBlankTab(t)
-	a.term.open, a.term.focused = true, true
+	f := openTestTerm(t, a)
 
 	feedPaste(a, "cd /tmp\nls -la\necho done")
 
-	want := "cd /tmp ls -la echo done"
-	if got := a.term.input.String(); got != want {
-		t.Errorf("terminal input = %q, want %q", got, want)
+	// Line 1 runs; the rest wait their turn (Eval is async, so they must
+	// NOT all be submitted at once).
+	if evals := f.waitEvals(t, 1); evals[0] != "cd /tmp" {
+		t.Fatalf("first Eval = %q, want %q", evals[0], "cd /tmp")
 	}
-	if len(a.term.history) != 0 {
-		t.Errorf("paste submitted commands: history = %v", a.term.history)
+	if got := a.term.input.String(); got != "ls -la" {
+		t.Errorf("input while line 1 runs = %q, want the next line parked", got)
 	}
-	if a.term.running {
-		t.Error("paste started a command; nothing should run without Enter")
+	if got := len(a.term.pasteQueue); got != 1 {
+		t.Errorf("pasteQueue = %d, want the final line still queued", got)
+	}
+
+	// Each completion walks the batch forward one command.
+	a.handleTermDone(&termDoneEvent{when: time.Now()})
+	if evals := f.waitEvals(t, 2); evals[1] != "ls -la" {
+		t.Fatalf("second Eval = %q, want %q", evals[1], "ls -la")
+	}
+	a.handleTermDone(&termDoneEvent{when: time.Now()})
+
+	// No trailing newline, so the last line is left at the prompt rather
+	// than run — real-shell paste semantics.
+	if got := a.term.input.String(); got != "echo done" {
+		t.Errorf("input = %q, want the unterminated tail parked", got)
+	}
+	f.mu.Lock()
+	n := len(f.evals)
+	f.mu.Unlock()
+	if n != 2 {
+		t.Errorf("evals = %d, want 2 (the tail needs an Enter)", n)
+	}
+	if len(a.term.pasteQueue) != 0 {
+		t.Errorf("pasteQueue = %v, want drained", a.term.pasteQueue)
 	}
 	if got := a.activeTabPtr().Buffer.String(); got != "" {
 		t.Errorf("paste leaked into the editor buffer: %q", got)
 	}
-	// The panel says the shape changed — an unreviewed Enter here would
-	// run something the user never typed.
-	if !strings.Contains(a.statusMsg, "3 lines") {
-		t.Errorf("statusMsg = %q, want a multi-line paste notice", a.statusMsg)
-	}
 }
 
-// TestPaste_TerminalSingleLineNoFlash pins that the notice is reserved
-// for pastes that actually got flattened: the common case (one command,
-// with or without its trailing newline) must stay quiet.
-func TestPaste_TerminalSingleLineNoFlash(t *testing.T) {
+// TestPaste_TerminalTrailingNewlineRuns pins the difference a trailing
+// break makes: with one, the last line runs too and the prompt is left
+// empty. This is also the one-line case — pasting "go test ./...\n" runs
+// it, exactly as pressing Enter on it would.
+func TestPaste_TerminalTrailingNewlineRuns(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	a.term.open, a.term.focused = true, true
+	f := openTestTerm(t, a)
 
 	feedPaste(a, "go test ./...\n")
 
-	if got := a.term.input.String(); got != "go test ./... " {
-		t.Errorf("terminal input = %q", got)
+	if evals := f.waitEvals(t, 1); evals[0] != "go test ./..." {
+		t.Errorf("Eval = %q, want %q", evals[0], "go test ./...")
 	}
-	if a.statusMsg != "" {
-		t.Errorf("statusMsg = %q, want no notice for a one-line paste", a.statusMsg)
+	if got := a.term.input.String(); got != "" {
+		t.Errorf("input = %q, want empty after the line ran", got)
+	}
+}
+
+// TestPaste_TerminalNoBreakDoesNotRun pins the other half of the rule: a
+// paste carrying no line break is just text arriving at the caret, and
+// joins whatever is already there. Nothing runs without a break or an
+// Enter.
+func TestPaste_TerminalNoBreakDoesNotRun(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	f := openTestTerm(t, a)
+	typeTermLine(a, "echo ")
+
+	feedPaste(a, "hello")
+
+	if got := a.term.input.String(); got != "echo hello" {
+		t.Errorf("input = %q, want the paste appended at the caret", got)
+	}
+	f.mu.Lock()
+	n := len(f.evals)
+	f.mu.Unlock()
+	if n != 0 {
+		t.Errorf("evals = %d, want 0 — a break-free paste runs nothing", n)
+	}
+}
+
+// TestPaste_TerminalFirstLineJoinsInput pins that the paste's first line
+// continues the command already being typed, the way a real terminal
+// paste does: "echo " + "hello\n" submits "echo hello", not two pieces.
+func TestPaste_TerminalFirstLineJoinsInput(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	f := openTestTerm(t, a)
+	typeTermLine(a, "echo ")
+
+	feedPaste(a, "hello\nls")
+
+	if evals := f.waitEvals(t, 1); evals[0] != "echo hello" {
+		t.Errorf("Eval = %q, want %q", evals[0], "echo hello")
+	}
+	if got := a.term.input.String(); got != "ls" {
+		t.Errorf("input = %q, want %q", got, "ls")
+	}
+}
+
+// TestPaste_TerminalBlockFeedsContinuation pins that a pasted multi-line
+// block goes through grsh's NeedsMore loop exactly like a typed one: the
+// lines accumulate and evaluate as ONE unit, not three broken commands.
+func TestPaste_TerminalBlockFeedsContinuation(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	f := openTestTerm(t, a)
+	f.needsMore = func(src string) bool { return !strings.Contains(src, "}") }
+
+	feedPaste(a, "if true {\n\techo hi\n}\n")
+
+	evals := f.waitEvals(t, 1)
+	if want := "if true {\n echo hi\n}"; evals[0] != want {
+		t.Errorf("Eval = %q, want the block as one unit %q", evals[0], want)
+	}
+	if a.term.pending != nil {
+		t.Errorf("pending = %v, want cleared once the unit evaluated", a.term.pending)
+	}
+}
+
+// TestPaste_TerminalInterruptDropsQueue is the safety pin: ⏹ has to mean
+// the REST of a pasted batch never runs. Without it, stopping line 1 of a
+// three-line paste would just hand the shell line 2.
+func TestPaste_TerminalInterruptDropsQueue(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	f := openTestTerm(t, a)
+	f.interruptOK = true
+
+	feedPaste(a, "sleep 30\nrm -rf important\necho gone\n")
+	f.waitEvals(t, 1)
+	if len(a.term.pasteQueue) == 0 {
+		t.Fatal("expected the rest of the batch to be queued")
+	}
+
+	a.termInterrupt()
+	if len(a.term.pasteQueue) != 0 {
+		t.Fatalf("⏹ left %v queued", a.term.pasteQueue)
+	}
+
+	// The completion that follows an interrupt must not resurrect it.
+	a.handleTermDone(&termDoneEvent{when: time.Now()})
+	f.mu.Lock()
+	n := len(f.evals)
+	f.mu.Unlock()
+	if n != 1 {
+		t.Errorf("evals = %d, want 1 — the interrupted batch resumed", n)
+	}
+}
+
+// TestPaste_TerminalExitDropsQueue pins the same rule for a batch whose
+// shell ends under it: the remaining lines were meant for THAT session,
+// and a fresh one is not where they should land.
+func TestPaste_TerminalExitDropsQueue(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	f := openTestTerm(t, a)
+
+	prev := termExitCode
+	termExitCode = func(error) (int, bool) { return 0, true }
+	t.Cleanup(func() { termExitCode = prev })
+
+	feedPaste(a, "exit\necho after\n")
+	f.waitEvals(t, 1)
+
+	a.handleTermDone(&termDoneEvent{when: time.Now(), err: errors.New("exit 0")})
+	if len(a.term.pasteQueue) != 0 {
+		t.Errorf("exit left %v queued", a.term.pasteQueue)
+	}
+	if a.term.sess != nil {
+		t.Error("exit should drop the session")
 	}
 }
 
@@ -361,18 +494,22 @@ func TestPaste_TerminalTargetGating(t *testing.T) {
 	}
 }
 
-// TestTermPasteClip_CmdV drives Cmd+V through the real key path and pins
-// the mangling it used to do: dropping newlines outright glued the last
-// word of one line onto the first of the next ("cd foo" + "ls" read as
-// "cd fools"). Breaks must become spaces.
+// TestTermPasteClip_CmdV drives Cmd+V through the real key path to pin
+// gesture equivalence: the two paste gestures share one entry point, so
+// Cmd+V runs a complete pasted line exactly as a terminal paste does. The
+// old path dropped breaks instead, gluing the tail of one line onto the
+// head of the next ("cd foo" + "ls" read as "cd fools").
 func TestTermPasteClip_CmdV(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	a.term.open, a.term.focused = true, true
+	f := openTestTerm(t, a)
 	a.clipBuf, a.clipKind = "cd foo\nls", clipText
 
 	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModMeta))
 
-	if got, want := a.term.input.String(), "cd foo ls"; got != want {
+	if evals := f.waitEvals(t, 1); evals[0] != "cd foo" {
+		t.Errorf("Eval = %q, want %q", evals[0], "cd foo")
+	}
+	if got, want := a.term.input.String(), "ls"; got != want {
 		t.Errorf("terminal input = %q, want %q", got, want)
 	}
 }
@@ -398,24 +535,54 @@ func TestFlattenPaste(t *testing.T) {
 	}
 }
 
-// TestPasteLineCount pins the count behind the terminal's notice: a
-// trailing break doesn't invent a line, and CRLF counts once.
-func TestPasteLineCount(t *testing.T) {
-	cases := []struct {
-		in   string
-		want int
-	}{
-		{"", 0},
-		{"\n", 0},
-		{"one line", 1},
-		{"one line\n", 1},
-		{"a\nb", 2},
-		{"a\r\nb\r\n", 2},
-		{"a\nb\nc", 3},
+// TestPaste_TerminalCRLFAndTabs pins the normalization the terminal path
+// does before it runs anything: CRLF is one break (not two, which would
+// submit a blank line between every command), a lone CR is a break too,
+// and a tab inside a line survives as a space rather than as a rune the
+// field can't draw.
+func TestPaste_TerminalCRLFAndTabs(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	f := openTestTerm(t, a)
+
+	feedPaste(a, "echo\tone\r\necho two\r")
+
+	evals := f.waitEvals(t, 1)
+	if evals[0] != "echo one" {
+		t.Errorf("first Eval = %q, want the tab as a space", evals[0])
 	}
-	for _, c := range cases {
-		if got := pasteLineCount(c.in); got != c.want {
-			t.Errorf("pasteLineCount(%q) = %d, want %d", c.in, got, c.want)
-		}
+	a.handleTermDone(&termDoneEvent{when: time.Now()})
+	if evals = f.waitEvals(t, 2); evals[1] != "echo two" {
+		t.Errorf("second Eval = %q, want the lone CR to end line 2", evals[1])
+	}
+	// Two lines, two Evals — a CRLF must not have submitted a blank
+	// third one in between.
+	if len(evals) != 2 {
+		t.Errorf("evals = %v, want exactly two", evals)
+	}
+}
+
+// TestPaste_TerminalStopWithNothingRunning covers the queue's other exit:
+// a paste whose first line needs no Eval (a blank line, or a block grsh is
+// still accumulating) leaves the rest waiting with `running` false. ⏹ has
+// to drop it there too, and say so rather than claiming an interrupt.
+func TestPaste_TerminalStopWithNothingRunning(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	f := openTestTerm(t, a)
+	f.needsMore = func(string) bool { return true } // never complete
+
+	feedPaste(a, "if true {\n\techo hi\n}\n")
+	if a.term.running {
+		t.Fatal("an incomplete unit should not be running")
+	}
+	if len(a.term.pending) == 0 {
+		t.Fatal("expected the pasted block to be accumulating")
+	}
+
+	a.termInterrupt()
+	if len(a.term.pasteQueue) != 0 {
+		t.Errorf("⏹ left %v queued", a.term.pasteQueue)
+	}
+	if strings.Contains(a.statusMsg, "interrupt sent") {
+		t.Errorf("statusMsg = %q, want no claim of an interrupt", a.statusMsg)
 	}
 }

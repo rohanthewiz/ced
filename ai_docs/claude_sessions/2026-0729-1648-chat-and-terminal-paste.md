@@ -3,6 +3,12 @@
 Session ID: 7771ada1-03f6-42aa-8e5d-91582ce9d329
 Date: 2026-07-29
 
+> **Superseded in part:** the routing and the chat behavior below still
+> hold, but the TERMINAL policy here ("a paste never runs anything",
+> flattening, the rejected `; ` join) was reversed the same day —
+> multi-line terminal pastes now run their lines in order. See
+> `2026-0729-1708-sequential-terminal-paste.md`.
+
 ### Ask
 
 > "I need the ability to paste into the Copilot Chat prompt of ced"

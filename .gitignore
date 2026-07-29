@@ -15,3 +15,6 @@
 
 # Claude Code local machine-specific settings.
 .claude/settings.local.json
+
+# Local todo-tool state.
+.cats-todo/

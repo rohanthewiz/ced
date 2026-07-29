@@ -621,8 +621,30 @@ UI behavior, build and run it against a real directory.
 Releases are cut deliberately: push to the **`release` branch** (cut it
 from main) and `.github/workflows/release.yml` runs. Ordinary pushes to
 `main` no longer ship anything; `workflow_dispatch` is the manual escape
-hatch. **Pushing `release` is itself the trigger** — expect a real
-release on the very first push.
+hatch.
+
+> **⚠️ This repo is a FORK, so pushing does NOT trigger anything.**
+> `rohanthewiz/ced` is a fork of `cloudmanic/spice-edit`, and GitHub
+> suppresses *automatic* workflow triggers on forks until someone opens
+> the repo's Actions tab and clicks **"I understand my workflows, go
+> ahead and enable them."** Until that happens:
+>
+> - `git push origin release` cuts **no** release. Dispatch it by hand:
+>   `gh workflow run release.yml --repo rohanthewiz/ced --ref release`
+> - `test.yml` never runs either — CI is silent on every push to `main`,
+>   so a green PR check means nothing yet. Run `make test` locally and
+>   don't trust the absence of a red X.
+>
+> Nothing in the API surface exposes this gate: the repo reports
+> `actions/permissions` → `enabled: true`, and both workflows report
+> `state: active`. The only symptom is zero runs. Don't go hunting
+> through permissions or the workflow YAML — check `.fork` on the repo
+> first. Delete this block once Actions are enabled on the fork.
+
+The fork is also why the repo inherited **no tags, releases, or CI
+history** — v0.2.0 was the first tag it has ever had.
+
+Once a run does start (pushed or dispatched), the workflow:
 
 1. Reads `internal/version/version.go`.
 2. **If that file was edited in the pushed commit**, the version is used
@@ -633,6 +655,16 @@ release on the very first push.
    and writes `Formula/ced.rb` back into this repo (using the
    default `GITHUB_TOKEN` — no PAT). The formula commit also carries
    `[skip ci]` to break the loop.
+
+**Step 2 inspects the TIP commit only** (`git diff HEAD~1..HEAD`), which
+makes pinning a version fragile in a non-obvious way: stack a follow-up
+commit on top of your version bump and the tip no longer touches
+`version.go`, so CI silently auto-bumps past the number you chose.
+**Amend the version commit, don't stack onto it.** Same trap with a merge
+commit — its first-parent diff drags in whatever `main` changed. And if a
+run already tagged before failing, delete the remote tag
+(`git push origin :refs/tags/vX.Y.Z`) before re-dispatching, or GoReleaser
+releases the old tagged tree instead of your fix.
 
 There is no site deploy step. The inherited SpiceEdit marketing site
 (`website/`, spice-edit.com) went dormant with the ced rebrand — its

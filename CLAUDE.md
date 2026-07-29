@@ -354,9 +354,18 @@ House rules:
   re-wraps `[]chatMsg` on demand (word wrap for prose, hard wrap for
   fenced code, ❯ gutter on user prompts), so resizes re-flow for
   free. Scroll follows the termAtBottom rule. The composer is a
-  single-line `textField` (Enter sends, Up/Down history, Cmd+V pastes
-  with newlines flattened); a multi-line composer is a known
-  follow-up, not an accident.
+  single-line `textField` (Enter sends, Up/Down history, and both paste
+  gestures — Cmd+V from the internal clipboard and a real terminal
+  paste — land there with newlines flattened); a multi-line composer is
+  a known follow-up, not an accident.
+- **A focused chat panel owns the paste.** `chatPasteTarget`
+  (textpaste.go) claims bracketed pastes for the composer, and
+  `editorPasteTarget` returns nil while the panel has focus — the two
+  predicates are mutually exclusive on purpose. Without that gate a
+  paste aimed at the prompt resolved through the active tab and landed
+  in the FILE behind the panel. Both gestures funnel through
+  `chatInsertPaste` → `chatFlattenPaste`, so Cmd+V and a terminal paste
+  can never drift apart.
 - **Selection + copy live in the panel, not the terminal.** The app
   captures the mouse, so the terminal's own drag-to-select can never
   reach the transcript — the editor provides it. Selection is a
@@ -573,6 +582,17 @@ scope by design. House rules:
 - **Coalescing writer**: grsh output lands in `termWriter`'s buffer
   with at most one `termOutputEvent` in flight — never post
   per-chunk events (heavy output would overflow tcell's queue).
+- **A paste never runs anything.** `termPasteTarget` (textpaste.go)
+  claims bracketed pastes for the input line, and `termInsertPaste`
+  flattens them via the shared `flattenPaste`. Before that gate a paste
+  arrived as raw keys, so every Enter it carried EXECUTED the line
+  before it — a pasted three-line snippet ran two commands nobody
+  typed. Enter is the only thing that submits; keep it that way. Do not
+  "improve" the flattening into `; ` joins (that invents separators the
+  user never typed, and a pasted `#` comment then swallows the rest of
+  the line) and do not restore per-rune replay. A multi-line paste
+  flashes its line count, because that's the case where an unreviewed
+  Enter does something unintended.
 - **Stop button, not Ctrl+C**: ⏹ sends Interrupt (SIGINT to the
   child's own process group), a second press escalates to Kill.
   grsh's embedded mode guarantees the signal cannot hit the editor.

@@ -570,14 +570,16 @@ func TestTermPromptStates(t *testing.T) {
 }
 
 // TestTermPasteClip checks Cmd+V routes the text clipboard into the
-// input line, dropping newlines (the input is single-line).
+// input line, flattening it (the input is single-line). Breaks become
+// SPACES, not nothing: dropping them outright glued the tail of one line
+// onto the head of the next, silently rewriting the command.
 func TestTermPasteClip(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	openTestTerm(t, a)
 	a.clipBuf = "ls -la\n/tmp"
 	a.termPasteClip()
-	if got := a.term.input.String(); got != "ls -la/tmp" {
-		t.Errorf("pasted input = %q, want control runes dropped", got)
+	if got := a.term.input.String(); got != "ls -la /tmp" {
+		t.Errorf("pasted input = %q, want the break flattened to a space", got)
 	}
 }
 

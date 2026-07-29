@@ -1218,3 +1218,38 @@ func TestChatInitialize_WriteCapability(t *testing.T) {
 		t.Error("read-only chat still declared fs.writeTextFile")
 	}
 }
+
+// TestChatPasteClip_CmdV drives the Cmd+V gesture through the real key
+// path: with the panel focused the editor's text clipboard lands in the
+// composer at the caret, flattened to one line.
+func TestChatPasteClip_CmdV(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.chat.open, a.chat.focused = true, true
+	a.clipBuf, a.clipKind = "line one\nline two", clipText
+	typeChatText(a, "fix: ")
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModMeta))
+
+	if got, want := a.chat.input.String(), "fix: line one line two"; got != want {
+		t.Errorf("chat prompt = %q, want %q", got, want)
+	}
+}
+
+// TestChatInsertPaste_EmptyIsNoop pins that an empty clipboard (or a
+// paste that flattens to nothing) leaves the composer alone rather than
+// disturbing the caret.
+func TestChatInsertPaste_EmptyIsNoop(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.chat.input = newTextField("kept")
+	a.chat.input.cursor = 2
+
+	a.chatInsertPaste("")
+	a.chatInsertPaste("\x00\x01")
+
+	if got := a.chat.input.String(); got != "kept" {
+		t.Errorf("input = %q, want %q", got, "kept")
+	}
+	if a.chat.input.cursor != 2 {
+		t.Errorf("caret moved to %d, want 2", a.chat.input.cursor)
+	}
+}

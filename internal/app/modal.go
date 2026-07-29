@@ -153,6 +153,24 @@ func (f *textField) handleKey(ev *tcell.EventKey) (handled, edited bool) {
 	return false, false
 }
 
+// insertString splices s in at the caret and leaves the caret after it —
+// the paste counterpart to handleKey's per-rune insertion, so a pasted
+// blob costs one splice instead of one per character. The value is
+// inserted verbatim: sanitizing (a single-line field has no meaning for
+// newlines) belongs to the caller, which knows its own paste policy.
+func (f *textField) insertString(s string) {
+	if s == "" {
+		return
+	}
+	add := []rune(s)
+	next := make([]rune, 0, len(f.value)+len(add))
+	next = append(next, f.value[:f.cursor]...)
+	next = append(next, add...)
+	next = append(next, f.value[f.cursor:]...)
+	f.value = next
+	f.cursor += len(add)
+}
+
 // clickAt moves the caret to the rune under a click at screen column x,
 // given the field's visible span [fieldStart, fieldEnd). Clicks past
 // the end of the value park the caret at the end.

@@ -1617,23 +1617,31 @@ func (a *App) chatPanelDrag(x, y int) {
 }
 
 // chatPasteClip inserts the text clipboard into the input line — the
-// Cmd+V path while the chat has focus. Newlines become spaces: the
-// composer is single-line (a multi-line composer is a known phase-3
-// follow-up), and flattening a pasted snippet beats dropping most of
-// it.
+// Cmd+V path while the chat has focus. Routed through chatInsertPaste so
+// it behaves identically to a terminal (bracketed) paste; the only
+// difference between the two gestures is where the text came from.
 func (a *App) chatPasteClip() {
-	if a.clipBuf == "" {
-		return
-	}
-	for _, r := range a.clipBuf {
-		if r == '\n' || r == '\r' {
-			r = ' '
-		}
-		if r < 0x20 {
-			continue
-		}
-		a.chat.input.handleKey(tcell.NewEventKey(tcell.KeyRune, r, 0))
-	}
+	a.chatInsertPaste(a.clipBuf)
+}
+
+// chatInsertPaste drops pasted text into the composer at the caret as
+// one splice. It is the single entry point for both paste gestures:
+// Cmd+V from the editor's own clipboard (chatPasteClip) and a real
+// terminal paste, which handlePaste routes here once chatPasteTarget
+// claims it (see textpaste.go).
+//
+// The text is flattened to one line first (flattenPaste, shared with the
+// terminal panel): the composer is a single-line field (a multi-line
+// composer is a known follow-up), and pasting a snippet, a stack trace,
+// or a log excerpt into a prompt is common enough that flattening beats
+// keeping only the first line. The whole paste lands in one step, so a
+// long snippet doesn't cost one field edit per character.
+//
+// No flash here, unlike termInsertPaste: flattened prose still reads as
+// what the user pasted, and an agent doesn't care about line breaks. A
+// flattened COMMAND is a different animal, so that side says so.
+func (a *App) chatInsertPaste(text string) {
+	a.chat.input.insertString(flattenPaste(text))
 }
 
 // -----------------------------------------------------------------------------

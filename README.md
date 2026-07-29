@@ -615,7 +615,13 @@ agent). The panel docks as a full-height strip on the **left** edge, and
 the file tree slides over to the right while it's open.
 
 - Type in the composer at the bottom; **`Enter` sends**. Answers stream
-  in live. `↑` / `↓` recall previous prompts, `Cmd+V` pastes.
+  in live. `↑` / `↓` recall previous prompts.
+- **Paste into the prompt** with your terminal's normal paste (`Cmd+V`,
+  right-click, middle-click) or with `Cmd+V` for text you copied inside
+  ced. Either way the text lands at the caret; since the composer is one
+  line, a multi-line snippet is flattened — line breaks and tabs become
+  single spaces — so the whole paste survives instead of just its first
+  line.
 - **⏹ stops** an answer mid-turn; **✕** (or the menu toggle) hides the
   panel — the conversation survives hide/show.
 - **Model picker**: **≡ → Copilot → Chat model: …** lists the models

@@ -35,6 +35,7 @@
 package app
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -1037,17 +1038,40 @@ func (a *App) termPanelPress(x, y int) (startDrag bool) {
 
 // termPasteClip inserts the text clipboard into the input line — the
 // Cmd+V path while the terminal has focus (pasting a path or snippet
-// into a command is the common case; the editor buffer is not the
-// target when the shell owns the keyboard).
+// into a command is the common case; the editor buffer is not the target
+// when the shell owns the keyboard). Routed through termInsertPaste so
+// it behaves identically to a real terminal paste; the only difference
+// between the two gestures is where the text came from.
 func (a *App) termPasteClip() {
-	if a.clipBuf == "" {
+	a.termInsertPaste(a.clipBuf)
+}
+
+// termInsertPaste drops pasted text into the command line at the caret
+// as one splice. It is the single entry point for both paste gestures:
+// Cmd+V from the editor's own clipboard (termPasteClip) and a real
+// terminal paste, routed here by handlePaste once termPasteTarget claims
+// it (see textpaste.go).
+//
+// A paste never executes anything. The input is one line and Enter is the
+// only thing that submits, so a multi-line paste is flattened
+// (flattenPaste, shared with the chat composer) and left sitting there to
+// be read, edited, and run — or not. Two tempting alternatives are
+// deliberately rejected: replaying the paste as keystrokes RUNS every
+// line but the last (the old behavior, and the bug this replaces), and
+// joining lines with "; " invents shell separators the user never typed
+// — which a pasted `#` comment would then silently swallow the rest of.
+//
+// A multi-line paste flashes what happened. Folding two commands into one
+// line is exactly the case where an unreviewed Enter does something
+// unintended, so the panel says so instead of looking like a clean paste.
+func (a *App) termInsertPaste(text string) {
+	flat := flattenPaste(text)
+	if flat == "" {
 		return
 	}
-	for _, r := range a.clipBuf {
-		if r == '\n' || r == '\r' || r < 0x20 {
-			continue // input is single-line; drop control runes
-		}
-		a.term.input.handleKey(tcell.NewEventKey(tcell.KeyRune, r, 0))
+	a.term.input.insertString(flat)
+	if n := pasteLineCount(text); n > 1 {
+		a.flash(fmt.Sprintf("Pasted %d lines as one command — review before Enter", n))
 	}
 }
 

@@ -72,6 +72,8 @@ internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → au
 internal/app/zipops.go        Zip file/folder — stdlib archive/zip, async zipDoneEvent
 internal/app/format.go        Format-on-save bridge: project config, builtin Go, prompts
 internal/app/nav.go           Back/forward file-navigation history (Esc-o/O, Alt+←/→)
+internal/app/gitlog.go        Git log panel: commit list + `git show` detail (Esc-L)
+internal/app/gitlogactions.go Git log verbs: cherry-pick, revert, reset, branch/tag, copies
 internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PTY)
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
@@ -509,6 +511,40 @@ commit, and the two select-all/clear helpers. House rules:
   "Git panel actions" row is the keyboard twin of the button — the panel
   is mouse-driven, but macOS Terminal can swallow clicks.
 
+### Git log panel (app/gitlog.go + gitlogactions.go)
+A JetBrains-style history browser (Esc-L) in the SAME bottom strip as
+the changes panel: commits on the left (● marks ref-decorated rows;
+`--all` so cherry-pick can reach other branches, capped at 400 with a
+"400+" title when truncated), the selected commit's `git show
+--pretty=fuller --stat --patch` on the right. It deliberately MIRRORS
+gitpanel.go's shape rather than sharing code — the house patterns are
+the shared part. House rules:
+
+- **Single-occupancy in every direction**: log, changes panel, and a
+  bottom-docked terminal swap, never stack — each opener closes the
+  other two. `growBottomPanel`/`shrinkBottomPanel` fan out to all
+  three; single occupancy guarantees at most one acts.
+- **Verbs live behind `Actions ▾`** (openPicker, the house rule):
+  cherry-pick, revert, reset, detached checkout, branch/tag creation,
+  the two copies. Labels name the branch and hash they'll touch. Reset
+  modes are a SECOND picker; only `--hard` confirms — soft/mixed are a
+  reflog entry away from undone, and cherry-pick/revert CREATE commits.
+  The ≡ "Git log actions" row is the keyboard twin.
+- Header buttons are single-width glyphs through btnRects: `⧉ hash`
+  (one-click full-hash copy), `⟳` (manual refresh), `✕`. The rule
+  outside them is the height handle; the list/detail divider drags too.
+- **Refresh rides refreshGitStatus** (no-op while collapsed), so
+  finished git commands and the 10s tick keep it honest for free.
+  Selection is preserved BY HASH across refreshes; a detail pane
+  already showing the selected hash is never refetched (commits are
+  immutable). Detail fetches post `gitLogShowEvent`s and stale results
+  drop against the current selection.
+- Double-click on a detail row jumps to the file/line that diff row
+  touched (`gitLogDetailTarget` — diffTargetLine generalized to a
+  multi-file patch, paths resolved against the repo toplevel and
+  confined to rootDir). Best-effort: history may have moved on, so a
+  line past EOF clamps.
+
 ### Navigation history (app/nav.go)
 Browser-style Go back / Go forward across files (≡ menu, Esc-o / Esc-O,
 Alt+Left / Alt+Right). Recording happens CENTRALLY: openFile records the
@@ -700,8 +736,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 60 group actions + 10 headers (72), height 78, dividers
-`[2, 5, 75]`.
+2 top-zone rows + 62 group actions + 10 headers (74), height 80, dividers
+`[2, 5, 77]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.

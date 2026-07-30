@@ -248,6 +248,9 @@ func builtinMenuGroups() []menuGroup {
 			// the panel is mouse-driven by design, but macOS Terminal can
 			// swallow clicks, so its verbs must be menu-reachable too.
 			{label: "Git panel actions", action: (*App).menuGitPanelActions, enabled: (*App).hasGitPanelOpen},
+			{shortcut: "esc L", action: (*App).menuToggleGitLog, enabled: (*App).hasGitRepo, labelFor: (*App).gitLogToggleLabel},
+			// Same keyboard-twin rule for the log panel's Actions ▾ button.
+			{label: "Git log actions", action: (*App).menuGitLogActions, enabled: (*App).hasGitLogOpen},
 		}},
 		// Code intelligence (LSP-backed; rows dim when no server)
 		{title: "Code", collapsible: true, items: []menuItemDef{
@@ -675,6 +678,11 @@ type App struct {
 	// diff fetches post gitPanelDiffEvents. See gitpanel.go.
 	gitPanel gitPanelState
 
+	// gitLog is the commit-history browser sharing the same bottom
+	// strip (the two swap, never stack). Mutated only on the main loop;
+	// detail fetches post gitLogShowEvents. See gitlog.go.
+	gitLog gitLogState
+
 	// term is the embedded grsh terminal panel. It shares the bottom
 	// strip with the git panel (exactly one may be open) and is the
 	// only surface besides modals that takes the keyboard — via its
@@ -870,6 +878,10 @@ func (a *App) refreshGitStatus() {
 	// tree's dirty colors honest keeps the panel honest too: the 10s
 	// tick, saves, file ops, and finished git commands.
 	a.refreshGitPanelFiles()
+	// The log panel rides the same pipeline (no-op while collapsed), so
+	// a commit, cherry-pick, or outside-the-editor fetch shows up on the
+	// next tick without a dedicated refresh path.
+	a.refreshGitLogCommits()
 }
 
 // startTreeRefresh launches a goroutine that posts a treeRefreshEvent every
@@ -965,6 +977,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleGitCmdDone(e)
 	case *gitPanelDiffEvent:
 		a.handleGitPanelDiff(e)
+	case *gitLogShowEvent:
+		a.handleGitLogShow(e)
 	case *termOutputEvent:
 		a.handleTermOutput()
 	case *termDoneEvent:
@@ -1327,6 +1341,9 @@ func (a *App) editorRect() (x, y, w, h int) {
 	}
 	if a.gitPanel.open {
 		h -= a.gitPanelHeight()
+	}
+	if a.gitLog.open {
+		h -= a.gitLogHeight()
 	}
 	if a.term.open && !a.termDockLeft {
 		h -= a.termPanelHeight()
@@ -1912,6 +1929,16 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
+	// Git log resize / divider drags — same two gestures, other panel.
+	if leftDown && a.dragMode == "gitlog" {
+		a.dragGitLogTo(y)
+		return
+	}
+	if leftDown && a.dragMode == "gitlogdiv" {
+		a.dragGitLogDivTo(x)
+		return
+	}
+
 	// Terminal panel resize drag — same gesture, other bottom panel.
 	if leftDown && a.dragMode == "termpanel" {
 		a.dragTermPanelTo(y)
@@ -1957,6 +1984,8 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// instead of a click (gitPanelPress names which mode).
 		case a.gitPanel.open && a.gitPanelContains(x, y):
 			a.dragMode = a.gitPanelPress(x, y)
+		case a.gitLog.open && a.gitLogContains(x, y):
+			a.dragMode = a.gitLogPress(x, y)
 		case y > 0 && y < a.height-1:
 			a.editorPress(x, y)
 			a.dragMode = "editor"
@@ -1999,6 +2028,10 @@ func (a *App) scrollAt(x, y, delta int) {
 	}
 	if a.gitPanel.open && a.gitPanelContains(x, y) {
 		a.gitPanelScroll(x, y, delta)
+		return
+	}
+	if a.gitLog.open && a.gitLogContains(x, y) {
+		a.gitLogScroll(x, y, delta)
 		return
 	}
 	if a.chatPanelContains(x, y) {
@@ -3023,6 +3056,9 @@ func (a *App) draw() {
 
 	if a.gitPanel.open {
 		a.drawGitPanel()
+	}
+	if a.gitLog.open {
+		a.drawGitLog()
 	}
 	if a.term.open {
 		a.drawTermPanel()

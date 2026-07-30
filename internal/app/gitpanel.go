@@ -196,8 +196,9 @@ func (a *App) menuToggleGitPanel() {
 	if a.gitPanel.open {
 		// Single-occupancy bottom strip: a bottom-docked terminal
 		// yields (its session and scrollback survive — Esc-` brings
-		// it right back). A left-docked strip isn't competing for
-		// the bottom, so it stays.
+		// it right back), and so does the git log panel. A left-docked
+		// strip isn't competing for the bottom, so it stays.
+		a.gitLog.open = false
 		if !a.termDockLeft {
 			a.term.open = false
 			a.term.focused = false

@@ -81,6 +81,11 @@ func leaderBindings() []leaderBinding {
 		// primary surface is dragging the panel header, same as the
 		// sidebar splitter.
 		{key: 'g', action: (*App).menuToggleGitPanel},
+		// 'L' for the git Log — shifted because lowercase 'l' is too
+		// close to the common typing flow after a stray Esc, and the
+		// h/H, o/O pairs already teach that shift means "the other git
+		// surface".
+		{key: 'L', action: (*App).menuToggleGitLog},
 		{key: '=', action: (*App).growBottomPanel, repeat: true},
 		{key: '-', action: (*App).shrinkBottomPanel, repeat: true},
 		// '`' for the terminal — the key VS Code binds, minus the Ctrl.

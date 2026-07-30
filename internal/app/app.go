@@ -239,6 +239,10 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Stage file", action: (*App).menuGitStageFile, enabled: (*App).hasStageableFile},
 			{label: "Unstage file", action: (*App).menuGitUnstageFile, enabled: (*App).hasUnstageableFile},
 			{label: "Commit staged", action: (*App).menuGitCommit, enabled: (*App).hasGitStaged},
+			// Keyboard twin of the panel's Suggest row — the chat agent
+			// drafts the message for the panel's selection, or for the
+			// index when nothing is ticked.
+			{label: "Suggest commit message", action: (*App).menuGitSuggestCommit, enabled: (*App).hasSuggestableCommit},
 			{label: "Stash changes", action: (*App).menuGitStash, enabled: (*App).hasGitChanges},
 			{label: "Pop stash", action: (*App).menuGitStashPop, enabled: (*App).hasGitStash},
 			{label: "Switch branch", action: (*App).menuGitSwitchBranch, enabled: (*App).hasGitRepo},
@@ -979,6 +983,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleGitPanelDiff(e)
 	case *gitLogShowEvent:
 		a.handleGitLogShow(e)
+	case *gitCommitDiffEvent:
+		a.handleGitCommitDiff(e)
 	case *termOutputEvent:
 		a.handleTermOutput()
 	case *termDoneEvent:

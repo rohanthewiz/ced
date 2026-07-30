@@ -8,8 +8,8 @@
 // gitpanelactions.go is the git panel's verb surface: the "Actions ▾"
 // button in the panel header (and the matching ≡ menu row) gathers the
 // ticked files and offers everything that can be done to them — stage,
-// unstage, discard, delete, open, copy paths — plus Commit staged and
-// the two selection helpers.
+// unstage, discard, delete, open, copy paths — plus the commit rows
+// (see gitcommitmsg.go) and the two selection helpers.
 //
 // The split of labour with gitpanel.go: that file owns the panel's
 // state, geometry, and pixels; this one owns what the checkboxes are
@@ -190,8 +190,20 @@ func (a *App) gitPanelActionItems(targets []gitPanelFile) []paletteItem {
 			})
 		}
 		add("Delete "+what+" from disk…", func(app *App) { app.gitPanelDelete(targets) })
+		add("Commit "+what+"…", func(app *App) { app.openCommitPrompt(targets, "") })
 	}
 
+	// The suggestion row sits next to the commit rows because that's
+	// the sequence it belongs to — draft, then edit, then commit. It
+	// targets the ticked set when there is one and the index otherwise,
+	// so it always describes the same change the neighbouring Commit
+	// row would make.
+	if a.canSuggestCommitMsg() && (len(targets) > 0 || a.gitHasStaged) {
+		suggestFor := targets
+		add("Suggest commit message for "+gitCommitLabel(suggestFor)+" ("+a.chatAgent().name+")", func(app *App) {
+			app.gitPanelSuggestCommit(suggestFor)
+		})
+	}
 	if a.gitHasStaged {
 		add("Commit staged…", (*App).menuGitCommit)
 	}

@@ -62,6 +62,31 @@ func (a *App) runGitCmd(label string, args ...string) {
 	}()
 }
 
+// runGitCmdSeq runs several git subcommands in order on ONE goroutine,
+// stopping at the first failure and posting a single done-event for the
+// whole set. Verbs that are two git calls in the user's head but one
+// gesture on screen (stage-then-commit these files) need the second
+// command to see the first one's result — firing two runGitCmds would
+// race them, and reporting two flashes for one action reads as a bug.
+func (a *App) runGitCmdSeq(label string, cmds [][]string) {
+	if a.screen == nil || a.rootDir == "" || len(cmds) == 0 {
+		return
+	}
+	scr := a.screen
+	root := a.rootDir
+	go func() {
+		for _, args := range cmds {
+			cmdArgs := append([]string{"-C", root}, args...)
+			out, err := exec.Command("git", cmdArgs...).CombinedOutput()
+			if err != nil {
+				_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out})
+				return
+			}
+		}
+		_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label})
+	}()
+}
+
 // handleGitCmdDone surfaces the result of an async git command. Runs
 // on the main loop only. Success flashes a confirmation and re-syncs
 // everything git touches — the tree's dirty colors, the branch label,
@@ -206,9 +231,7 @@ func (a *App) menuGitStashPop() {
 // in the callback.
 func (a *App) menuGitCommit() {
 	a.closeMenu()
-	a.openPrompt("Commit staged changes", "message", "", func(app *App, msg string) {
-		app.runGitCmd("Commit", "commit", "-m", msg)
-	})
+	a.openCommitPrompt(nil, "")
 }
 
 // menuGitSwitchBranch lists local branches in a fuzzy picker and

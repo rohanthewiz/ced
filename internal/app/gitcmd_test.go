@@ -224,6 +224,31 @@ func TestMenuGitCommit_PromptThenCommit(t *testing.T) {
 	}
 }
 
+// TestRunGitCmdSeq_StopsAtFirstFailure pins the sequential runner's
+// contract: a failing command aborts the rest (the second command here
+// would have created a branch) and reports once, with git's own words.
+func TestRunGitCmdSeq_StopsAtFirstFailure(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	repo := initRepo(t)
+	a := newTestApp(t, repo)
+
+	a.runGitCmdSeq("Two steps", [][]string{
+		{"checkout", "--", "no-such-file"},
+		{"branch", "should-not-exist"},
+	})
+	pumpAppEvents(t, a, func() bool { return a.modal != nil })
+
+	m, ok := a.modal.(*confirmModal)
+	if !ok || !m.info {
+		t.Fatalf("modal = %T, want the failure info modal", a.modal)
+	}
+	if out := gitOut(t, repo, "branch", "--list", "should-not-exist"); out != "" {
+		t.Errorf("second command ran after a failure: %q", out)
+	}
+}
+
 // TestMenuGitSwitchBranch_PickerExcludesCurrent verifies the picker
 // contents — every local branch except the one we're on, under its own
 // title, immune to source re-collection — and that choosing an entry

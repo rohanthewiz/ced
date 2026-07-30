@@ -72,6 +72,7 @@ internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → au
 internal/app/zipops.go        Zip file/folder — stdlib archive/zip, async zipDoneEvent
 internal/app/format.go        Format-on-save bridge: project config, builtin Go, prompts
 internal/app/nav.go           Back/forward file-navigation history (Esc-o/O, Alt+←/→)
+internal/app/gitcommitmsg.go  Commit the panel's selection + agent-drafted messages
 internal/app/gitlog.go        Git log panel: commit list + `git show` detail (Esc-L)
 internal/app/gitlogactions.go Git log verbs: cherry-pick, revert, reset, branch/tag, copies
 internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PTY)
@@ -510,6 +511,44 @@ commit, and the two select-all/clear helpers. House rules:
   the info modal); Discard and Delete confirm first. The ≡ Git group's
   "Git panel actions" row is the keyboard twin of the button — the panel
   is mouse-driven, but macOS Terminal can swallow clicks.
+
+### Commit rows + agent-drafted messages (app/gitcommitmsg.go)
+The panel's Actions list can commit the ticked files themselves, and ask
+the CURRENT chat agent (whatever backend is active — this is not a
+Copilot feature) to draft the message for exactly those files. House
+rules:
+
+- **A commit of the selection stages first.** `gitCommitFiles` runs
+  `add --` then `commit -m … --` through `runGitCmdSeq` (one goroutine,
+  stop at the first failure, ONE done-event): the panel's tick is a
+  work-tree statement, so committing only what happened to be staged
+  would silently commit a stale version. The pathspec-limited commit
+  leaves anything else already staged in the index — that's what makes
+  the row safe on a half-staged tree. "Commit staged…" (no targets) is
+  still the plain index commit.
+- **A suggestion is a normal, visible chat turn** — never a hidden
+  second session. `gitPanelSuggestCommit` opens the panel first (a
+  request streaming into a hidden panel reads as a hang), collects the
+  diff off-loop (`gitCommitDiffEvent`), and sends through
+  `chatSendPrompt`, the single dispatch point. The transcript gets a
+  short ask, not the patch; the panel is a narrow strip.
+- **The answer is claimed by generation + transcript mark**
+  (`commitSuggestReq`), the same staleness discipline as every other
+  chat result — never "the last agent message". A cancelled or errored
+  turn drafts nothing, a torn-down connection's answer is dropped
+  (`chatDisconnect` clears the request), and the draft never steals the
+  modal slot from a pending permission prompt.
+- **Nothing commits without an Enter.** The draft only PRE-FILLS the
+  commit prompt. `commitSubject` strips fences, "Commit message:"
+  labels, bullets and quotes and keeps one line, because the prompt
+  field is single-line — an unparsed answer would put a markdown fence
+  in a commit.
+- **The diff is capped and includes untracked contents.** `diff HEAD`
+  so a half-staged file arrives as one change; untracked targets have
+  no diff at all, so their text is appended under a `new file:` marker
+  or a commit of only-new-files would look empty to the agent.
+- The ≡ Git group's "Suggest commit message" row is the keyboard twin
+  and takes the same targets.
 
 ### Git log panel (app/gitlog.go + gitlogactions.go)
 A JetBrains-style history browser (Esc-L) in the SAME bottom strip as

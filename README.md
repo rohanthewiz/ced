@@ -795,6 +795,73 @@ kill switch for **GitHub's binary only**: it stops the completions
 sidecar and the Copilot chat backend, but Claude Code and Gemini are
 gated purely by their binary being on `$PATH`.
 
+## Themes
+
+ced ships **ten** color themes. Switch with **≡ → Theme** (or type
+"theme" into the command palette, `Esc-a`) — the change is instant, no
+restart, and it's remembered in `~/.config/ced/config.json`.
+
+| Theme | | Theme | |
+|---|---|---|---|
+| `tokyo-night` | Tokyo Night — the default | `dark-game` | Neon / synthwave |
+| `darcula` | JetBrains Darcula | `dark-city` | Desaturated noir |
+| `gruvbox-dark` | Gruvbox Dark | `solarized-light` | Solarized Light ☀ |
+| `solarized-dark` | Solarized Dark | `corporate` | Clean light blue/grey ☀ |
+| `cool-blue` | Nord | | |
+| `super-warm` | Warm amber / rust | | |
+
+Or set it by hand:
+
+```json
+{ "theme": "gruvbox-dark" }
+```
+
+An unknown name falls back to the default with a one-line explanation —
+a color preference can never stop the editor from opening.
+
+### Rolling your own
+
+Theme files live in `~/.config/ced/themes/*.json` (or
+`$XDG_CONFIG_HOME/ced/themes/`). **Only eight colors are required** —
+everything else is derived:
+
+```json
+{
+  "colors": {
+    "bg":     "#101018",   "fg":   "#e0e0f0",
+    "muted":  "#707088",   "line": "#303040",
+    "accent": "#78a8f0",
+    "ok":     "#88cc70",   "warn": "#e0b060",   "err": "#f07080"
+  }
+}
+```
+
+That's a complete, working theme. The file is named `midnight.json`, so
+the theme is called `midnight`. ced fills in the other twenty-seven
+colors from those eight: the selection is a wash of `accent` over `bg`,
+strings take `ok`, deleted-line marks take `err`, and so on. Any derived
+color can be stated explicitly to override it (`"syn-keyword": "#ff5cf5"`,
+`"selection": "#372b6b"`, …), and later derivations follow your value.
+
+Optional top-level keys: `"name"` (defaults to the filename),
+`"label"` (what the picker shows), and `"dark"` (inferred from the
+background's brightness when absent).
+
+### The editing loop
+
+**≡ → Customize theme…** does the tedious part: it copies the theme
+you're on — every derived color spelled out, so you can see the whole
+board — into `themes/<name>-custom.json`, switches to it, and opens the
+file in a tab. Change a hex, hit Save, and the editor repaints
+immediately. That save-to-preview loop is deliberately the whole
+customization UI; ced has no settings dialog and isn't getting one.
+
+Naming your file after a built-in (`tokyo-night.json`) **replaces** it
+in the picker, in place — which is how you tweak a shipped theme without
+adding a near-duplicate row next to it. Editing themes from outside ced?
+**≡ → Reload themes**. A broken theme file costs you that theme and
+nothing else: you get one warning, and the rest of the registry loads.
+
 ## Project layout
 
 ```
@@ -810,7 +877,7 @@ gated purely by their binary being on `$PATH`.
 │   ├── customactions/        # Loader for ~/.config/ced/actions.json
 │   ├── format/               # Format-on-save config + trust store
 │   ├── finder/               # Project file index + fuzzy matcher
-│   ├── theme/                # Tokyo Night-inspired palette
+│   ├── theme/                # Named themes: palette derivation + registry
 │   └── version/              # Single-line version constant
 ├── .github/workflows/        # Auto-release pipeline
 ├── .goreleaser.yml           # Cross-compile + brew formula config

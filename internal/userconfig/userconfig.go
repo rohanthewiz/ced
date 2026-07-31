@@ -46,6 +46,12 @@
 //	                        // (each change still asks permission first)
 //	{"chatwrite": "off"}    // read-only chat: ced declares no write
 //	                        // capability and refuses every edit
+//	{"theme": "<name>"}     // named color theme ("tokyo-night" — the
+//	                        // default — "darcula", "solarized-light", …,
+//	                        // or a user theme from themes/*.json). Not
+//	                        // validated here: the registry is app-layer
+//	                        // knowledge and an unknown name falls back
+//	                        // to the default at resolve time.
 //
 // The loader is best-effort the same way customactions is: missing
 // file → defaults, malformed file → error returned for the app to
@@ -156,6 +162,16 @@ type Config struct {
 	// code and rewriting it are different levels of trust. Persisted by
 	// the ≡ toggle.
 	ChatWrite bool
+
+	// Theme is the named color theme's registry id ("tokyo-night",
+	// "darcula", a user theme's filename stem, …). Empty (the default)
+	// means the shipped default. Deliberately not validated here for
+	// the same reason as ChatModel and ChatAgent: the theme registry
+	// includes files the user can add and remove between runs, so an
+	// unresolvable name has to be a silent fallback at resolve time,
+	// not a config-load failure that stops the editor starting.
+	// Persisted by the ≡ theme picker.
+	Theme string
 }
 
 // Defaults returns a Config populated with the values used when no
@@ -182,6 +198,7 @@ type fileFormat struct {
 	ChatAgent   string `json:"chatagent,omitempty"`
 	ChatContext string `json:"chatcontext,omitempty"`
 	ChatWrite   string `json:"chatwrite,omitempty"`
+	Theme       string `json:"theme,omitempty"`
 }
 
 // configFilePath resolves the ced config directory
@@ -231,6 +248,19 @@ func RcPath() string { return configFilePath("rc.grsh") }
 // lives in internal/mcp; this package only knows where the file is, so
 // the two config locations can never drift apart.
 func MCPPath() string { return configFilePath("mcp.json") }
+
+// ThemesDir returns the canonical user-themes directory:
+// $XDG_CONFIG_HOME/ced/themes, falling back to ~/.config/ced/themes
+// (or "" when no config location resolves).
+//
+// A directory rather than a key in config.json, for the mcp.json reason:
+// config.json holds the flat preferences the ≡ toggles write back, while
+// a theme is a document the user hand-edits — and one file per theme is
+// what makes "shadow a built-in by name" and "delete this theme" both
+// obvious operations. The parser and registry live in internal/theme;
+// this package only knows where the directory is, so the two config
+// locations can never drift apart.
+func ThemesDir() string { return configFilePath("themes") }
 
 // Load reads and parses the config file at path, returning a Config
 // with defaults filled in for any missing or blank fields.
@@ -380,10 +410,12 @@ func Load(path string) (Config, error) {
 		)
 	}
 
-	// Any non-blank value is accepted as-is — see Config.ChatModel and
-	// Config.ChatAgent for why there's no allowlist to check against.
+	// Any non-blank value is accepted as-is — see Config.ChatModel,
+	// Config.ChatAgent, and Config.Theme for why there's no allowlist to
+	// check against.
 	cfg.ChatModel = strings.TrimSpace(ff.ChatModel)
 	cfg.ChatAgent = strings.ToLower(strings.TrimSpace(ff.ChatAgent))
+	cfg.Theme = strings.ToLower(strings.TrimSpace(ff.Theme))
 	return cfg, nil
 }
 
@@ -464,6 +496,12 @@ func SaveChatWrite(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "chatwrite", val)
+}
+
+// SaveTheme persists the named color theme into the config file at
+// path. See saveKey for the round-trip guarantees.
+func SaveTheme(path, name string) error {
+	return saveKey(path, "theme", name)
 }
 
 // saveKey writes one preference into the config file at path,

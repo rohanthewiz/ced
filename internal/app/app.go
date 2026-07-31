@@ -214,6 +214,15 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuToggleExecMarks, enabled: alwaysTrue, labelFor: (*App).execMarksToggleLabel},
 			{shortcut: "esc `", action: (*App).menuToggleTerminal, enabled: alwaysTrue, labelFor: (*App).termToggleLabel},
 			{action: (*App).menuToggleTermDock, enabled: alwaysTrue, labelFor: (*App).termDockToggleLabel},
+			// Color themes (theme.go). They live in View rather than in a
+			// group of their own for the same above-the-fold reason the
+			// terminal rows do: the menu scrolls on short windows, and a
+			// theme picker buried under Git is a theme picker nobody
+			// finds. The label names the theme in force, so this row also
+			// answers "what am I looking at?" without being clicked.
+			{action: (*App).menuTheme, enabled: alwaysTrue, labelFor: (*App).themeMenuLabel},
+			{label: "Customize theme…", action: (*App).menuThemeCustomize, enabled: alwaysTrue},
+			{label: "Reload themes", action: (*App).menuThemeReload, enabled: alwaysTrue},
 		}},
 		{title: "History", collapsible: true, items: []menuItemDef{
 			{label: "Undo", shortcut: "esc u", action: (*App).menuUndo, enabled: (*App).hasUndo},
@@ -536,6 +545,14 @@ func (a *App) seedMenuFoldDefault() {
 type App struct {
 	screen tcell.Screen
 	theme  theme.Theme
+
+	// themeName is the registry id of the palette in force, and
+	// themeSpecs is the registry it was resolved from (built-ins plus
+	// ~/.config/ced/themes/*.json). Both are re-read on demand rather
+	// than cached forever — see theme.go — so a theme file added or
+	// edited mid-session shows up without a restart.
+	themeName  string
+	themeSpecs []theme.Spec
 
 	rootDir   string
 	tree      *filetree.Tree
@@ -871,6 +888,12 @@ func (a *App) loadUserConfig() {
 	a.chat.agent = chatAgentByID(cfg.ChatAgent)
 	a.chat.autoContext = cfg.ChatContext
 	a.chat.writeEnabled = cfg.ChatWrite
+	// Themes last: loadThemes and applyThemeName both flash on failure,
+	// and a color problem is the least urgent thing in this function —
+	// letting it land last keeps a more important message visible.
+	// persist=false: we're reading the preference, not restating it.
+	a.loadThemes()
+	a.applyThemeName(cfg.Theme, false)
 }
 
 // refreshGitStatus re-runs `git status --porcelain` against the project
@@ -2480,6 +2503,10 @@ func (a *App) saveTabAt(idx int) bool {
 	a.refreshGitStatus()
 	a.requestFileDiff(tab.Path)
 	a.lspDidSave(tab)
+	// Saving a file under ~/.config/ced/themes re-reads the registry and
+	// repaints — the save-to-preview loop that stands in for a settings
+	// modal (theme.go). A no-op for every other path.
+	a.themeAfterSave(tab.Path)
 	a.flash(fmt.Sprintf("Saved %s", filepath.Base(tab.Path)))
 	// Format-on-save runs after the disk write succeeds, so a broken
 	// formatter never blocks the user's save from landing. The

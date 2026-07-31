@@ -810,3 +810,58 @@ func TestChatWrite_LoadAndSave(t *testing.T) {
 		t.Fatal("unknown key was dropped by the save round-trip")
 	}
 }
+
+// TestTheme_LoadAndSave pins the theme key: absent means "" (the
+// editor's shipped default), any non-blank name loads trimmed and
+// lowercased but un-validated — the theme registry includes files the
+// user adds and removes between runs, so an unresolvable name has to be
+// a silent fallback at resolve time rather than a config-load failure
+// that stops the editor starting. SaveTheme round-trips alongside
+// hand-set keys like every other SaveX.
+func TestTheme_LoadAndSave(t *testing.T) {
+	if got := Defaults().Theme; got != "" {
+		t.Fatalf("default Theme = %q, want empty", got)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"theme\": \"  Solarized-Light  \",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Theme != "solarized-light" {
+		t.Fatalf("Theme = %q, want the trimmed, lowercased name", cfg.Theme)
+	}
+	// A name no build of ced has ever shipped still loads cleanly —
+	// that's the whole point of not validating here.
+	if err := SaveTheme(path, "my-own-theme"); err != nil {
+		t.Fatalf("SaveTheme: %v", err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.Theme != "my-own-theme" {
+		t.Fatalf("round trip: Theme = %q", cfg.Theme)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}
+
+// TestThemesDirSitsBesideConfig pins the themes directory's location
+// against config.json's, so the two config locations can never drift
+// into different directories — the same invariant TestMCPPathSitsBesideConfig
+// pins for mcp.json.
+func TestThemesDirSitsBesideConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got, want := ThemesDir(), filepath.Join("/xdg", "ced", "themes"); got != want {
+		t.Fatalf("ThemesDir() = %q, want %q", got, want)
+	}
+	if got, want := filepath.Dir(ThemesDir()), filepath.Dir(DefaultPath()); got != want {
+		t.Fatalf("themes dir lives in %q but config.json lives in %q", got, want)
+	}
+}

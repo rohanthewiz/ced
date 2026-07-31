@@ -5,11 +5,28 @@
 // Copyright: 2026 Cloudmanic, LLC. All rights reserved.
 // =============================================================================
 
-// Package theme defines the editor's curated color palette. The editor
-// intentionally ships one opinionated dark theme — there is no runtime
-// configuration, no theme file, no JSON. To restyle the editor, edit this
-// file and recompile. The palette is inspired by Tokyo Night and tuned so
-// the syntax colors stay legible against the chrome.
+// Package theme owns every color the editor renders.
+//
+// It has three layers, one per file:
+//
+//   - theme.go (here) — the Theme struct the renderers consume, plus
+//     Default(), the Tokyo Night palette ced has always shipped with.
+//   - palette.go — the color model: a flat map of canonical keys, of
+//     which only eight are required, and a derivation table that fills
+//     the other twenty-seven.
+//   - builtin.go / load.go — ten named themes, and the registry that
+//     merges them with the user's own ~/.config/ced/themes/*.json.
+//
+// The layering is what keeps the rest of the editor unaware that themes
+// exist at all: every renderer still takes a plain Theme by value, the
+// same as before named themes were added. Switching themes is nothing
+// more than assigning a different Theme to App.theme and re-rendering.
+//
+// Default() is deliberately still a hand-written literal rather than a
+// call into the registry. It is the floor the editor falls back to when
+// a theme file is broken or a saved preference names something that no
+// longer exists, so it must not be able to fail — and a test pins that
+// resolving the "tokyo-night" built-in reproduces it exactly.
 package theme
 
 import "github.com/gdamore/tcell/v2"
@@ -76,9 +93,13 @@ type Theme struct {
 	SynConstant tcell.Color
 }
 
-// Default returns the editor's curated dark theme. It is the only theme the
-// editor ships with — calling code can tweak fields on the returned value if
-// it really needs to, but there is no theme-loading machinery on purpose.
+// Default returns the editor's original curated dark theme — Tokyo
+// Night. It is the fallback used when no preference is set and the
+// safety net when a preference can't be honored (unknown name, broken
+// user theme file), which is why it stays a literal that cannot fail
+// rather than a lookup through the registry. The named-theme equivalent
+// is Builtins()[0]; TestBuiltin_TokyoNightMatchesDefault pins the two
+// together so this palette and that one can never drift.
 func Default() Theme {
 	return Theme{
 		// Surfaces.

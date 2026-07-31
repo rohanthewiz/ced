@@ -83,9 +83,13 @@ internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PT
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, chat*) + mcp.json path
+internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, chat*, theme) + mcp.json / themes dir paths
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
-internal/theme/theme.go       Tokyo Night palette + syntax color mapping
+internal/theme/theme.go       Theme struct (tcell colors) + Default() fallback
+internal/theme/palette.go     Canonical color keys + the 8-core derivation table
+internal/theme/builtin.go     Spec type + the ten shipped themes
+internal/theme/load.go        themes/*.json registry, shadowing, encode/save
+internal/app/theme.go         Theme state, live switch, ≡ picker, save-to-preview
 internal/version/version.go   const Version = "x.y.z" — single line, CI bumps it
 ```
 
@@ -774,6 +778,52 @@ scope by design. House rules:
   newTestApp. Only TestTermRealGrshIntegration may execute a real
   command, and it is restricted to `echo`.
 
+### Named themes (internal/theme + app/theme.go)
+Ten shipped palettes plus `~/.config/ced/themes/*.json`, switchable live
+from ≡ → Theme. House rules:
+
+- **Eight core keys, twenty-seven derived.** A theme states `bg fg muted
+  line accent ok warn err`; `Normalize` fills the rest from the ordered
+  derivation table in palette.go (`selection ← 32% accent over bg`,
+  `syn-string ← ok`, `git-deleted ← err`, …). That's what keeps a
+  hand-written theme eight lines long, and it means **adding a new color
+  key never invalidates a theme file somebody already wrote** — give it a
+  derivation and every existing theme gains it. A stated key always wins,
+  and later rules see the stated value (syn-operator lightens whatever
+  syn-type ended up being), so order the table by dependency.
+- **Palettes are `map[string]string`, not a struct of colors.** "Was this
+  key stated?" has to be answerable and zero is a real color. Specs hold
+  the SPARSE palette — what the author literally wrote — so re-saving an
+  eight-line theme can't balloon it to thirty-five.
+- **`theme.Default()` stays a hardcoded literal.** It's the floor when a
+  file is broken or a saved name is gone, so it must not be able to fail;
+  `TestBuiltin_TokyoNightMatchesDefault` pins it against the built-in of
+  the same name so the two can't drift.
+- **A switch is a live restyle.** `setTheme` assigns `App.theme`,
+  repaints the screen default style, and marks every tab `StyleStale`.
+  `Tab.Styles` is the ONE cache of theme-derived colors in the editor —
+  everything else builds its styles inside its own draw call. Anything
+  that starts caching colors must join `restyleTabs` or it keeps painting
+  the old palette until the buffer is edited.
+- **Same silent-degradation contract as LSP/formatters.** Unknown name,
+  broken file, unwritable config → one flash, editor keeps running on the
+  default. Per-file degradation in the registry: one bad theme costs that
+  theme, never its neighbours. A missing themes directory says nothing at
+  all (it's the common case).
+- **A user theme shadows a built-in IN PLACE** (same name → same list
+  position), so tweaking a shipped theme doesn't produce two identical
+  picker rows.
+- **The editing loop is the customization UI.** "Customize theme…" writes
+  the active palette out FULLY EXPANDED under a `-custom` name (so the
+  original stays reachable), switches to it, and opens it as a tab;
+  `themeAfterSave` re-reads the registry on any save under the themes
+  directory. Don't replace that with a color-picker modal — ced has no
+  settings dialog by design.
+- The picker is `openPicker` (house rule) and KEEPS the current theme in
+  the list, annotated — unlike the chat-model picker — because re-picking
+  is how a user reverts after previewing. Rows are in the ≡ **View**
+  group for the same above-the-fold reason the terminal rows are.
+
 ### Three-way external-change reconciliation (app.go)
 On each tree-refresh tick, `reconcileOpenTabsWithDisk` checks each open
 tab's mtime: clean buffer + changed file → silent reload; dirty buffer
@@ -929,8 +979,11 @@ loops forever.
   files under `~/.config/ced/` are the deliberate exceptions, and each
   earned it by being something ced cannot know for you: which shell
   aliases you use, which formatters your repo trusts, which MCP servers
-  and credentials you have. None of them add extension POINTS to the
-  editor itself — that's still the line.)
+  and credentials you have, which colors you can actually read. None of
+  them add extension POINTS to the editor itself — that's still the
+  line. Themes in particular are DATA, not code: a theme file can only
+  set colors from a fixed key list, which is why it doesn't count as a
+  plugin system.)
 - CGO dependencies. The whole point is one static binary.
 - Tree-sitter. We use Chroma intentionally — pure Go, no setup.
 - A separate `homebrew-tap` repo. The formula lives here under

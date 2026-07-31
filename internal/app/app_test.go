@@ -56,12 +56,23 @@ func newTestApp(t *testing.T, root string) *App {
 	a := &App{
 		screen:         scr,
 		theme:          theme.Default(),
+		themeName:      theme.DefaultName,
+		themeSpecs:     theme.Builtins(),
 		rootDir:        tree.Root.Path,
 		tree:           tree,
 		hoveredMenuRow: -1,
 		sidebarShown:   true,
 		sidebarWidth:   defaultSidebarWidth,
 	}
+	// Point the theme feature at throwaway directories so no test can
+	// read the developer's personal themes or rewrite their config.json
+	// by picking a theme. Tests that exercise user themes write into
+	// themeDirFn()'s directory; it starts out empty (built-ins only).
+	themeHome := t.TempDir()
+	prevThemeDir, prevThemeCfg := themeDirFn, themeConfigPathFn
+	themeDirFn = func() string { return filepath.Join(themeHome, "themes") }
+	themeConfigPathFn = func() string { return filepath.Join(themeHome, "config.json") }
+	t.Cleanup(func() { themeDirFn, themeConfigPathFn = prevThemeDir, prevThemeCfg })
 	a.setActiveFolder(tree.Root.Path)
 	a.width, a.height = scr.Size()
 	// Kill the LSP integration for tests: openFile would otherwise
@@ -1850,16 +1861,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 85 {
-		t.Errorf("modalHeight = %d, want 85", h)
+	if h != 88 {
+		t.Errorf("modalHeight = %d, want 88", h)
 	}
-	if got := len(items); got != 79 {
-		t.Errorf("row count = %d, want 79 (2 top-zone + 66 group actions + 11 headers)", got)
+	if got := len(items); got != 82 {
+		t.Errorf("row count = %d, want 82 (2 top-zone + 69 group actions + 11 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (82) — headers separate the
+	// one setting off the headerless Quit group (85) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 82}
+	wantDiv := []int{2, 5, 85}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2187,8 +2198,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 88 { // 85 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 88", h)
+	if h != 91 { // 88 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 91", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

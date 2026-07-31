@@ -65,6 +65,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/lsp"
+	"github.com/rohanthewiz/ced/internal/mcp"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
@@ -287,7 +288,8 @@ type chatReadyEvent struct {
 	sessionID string
 	models    []chatModel
 	modelID   string
-	embedded  bool // agent accepts embedded resource blocks in a prompt
+	embedded  bool   // agent accepts embedded resource blocks in a prompt
+	mcpNote   string // MCP servers this session was opened with, for the transcript
 }
 
 // When satisfies the tcell.Event interface.
@@ -368,6 +370,11 @@ func (a *App) chatEnsureStarted() {
 	pref := a.chat.modelPref
 	seq := a.chat.connSeq
 	allowWrite := a.chat.writeEnabled
+	// The MCP inventory is resolved HERE, on the main loop, and carried
+	// into the goroutine — a session only ever declares the servers that
+	// were configured when it started, and a later mcp.json reload
+	// applies to the next connection (like the write capability).
+	mcpServers := a.mcpEnabledServers()
 	go func() {
 		// Both callbacks run on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
@@ -408,7 +415,7 @@ func (a *App) chatEnsureStarted() {
 			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), seq: seq, err: err})
 			return
 		}
-		sess, err := chatInitialize(client, root, pref, allowWrite)
+		sess, err := chatInitialize(client, root, pref, allowWrite, mcpServers)
 		if err != nil {
 			client.Close()
 			// A failed handshake may leave the process alive with no
@@ -419,7 +426,7 @@ func (a *App) chatEnsureStarted() {
 		}
 		_ = scr.PostEvent(&chatReadyEvent{when: time.Now(), seq: seq, client: client,
 			sessionID: sess.id, models: sess.models, modelID: sess.modelID,
-			embedded: sess.embedded})
+			embedded: sess.embedded, mcpNote: sess.mcpNote})
 	}()
 }
 
@@ -430,6 +437,12 @@ type chatSession struct {
 	models   []chatModel
 	modelID  string
 	embedded bool // promptCapabilities.embeddedContext from initialize
+
+	// mcpNote names the MCP servers this session was opened with (and
+	// any the agent can't reach). Transcript text, not state: tools the
+	// agent gained are invisible otherwise, and an answer that quietly
+	// used one — or quietly couldn't — is the confusing case.
+	mcpNote string
 }
 
 // chatInitialize runs the ACP handshake and opens the session; returns
@@ -450,7 +463,17 @@ type chatSession struct {
 // takes them, and fold into the prompt text when it doesn't (see
 // copilot_chat_context.go). An agent that reports nothing gets the
 // text-only treatment — the safe direction.
-func chatInitialize(c *lsp.Client, root, prefModel string, allowWrite bool) (chatSession, error) {
+//
+// mcpServers is ced's configured MCP inventory (mcp.go), handed to the
+// agent in session/new so ITS turns can use those tools. The agent
+// spawns its own copies — ced's connections to the same servers, if any,
+// are a separate, user-driven thing. Transports the agent didn't
+// advertise under agentCapabilities.mcpCapabilities are dropped and
+// named in the returned note rather than sent: some agents reject the
+// whole session/new call over one unreachable entry, which would trade a
+// missing server for no chat at all.
+func chatInitialize(c *lsp.Client, root, prefModel string, allowWrite bool,
+	mcpServers []mcp.Server) (chatSession, error) {
 	initParams := map[string]any{
 		"protocolVersion": 1,
 		"clientCapabilities": map[string]any{
@@ -462,6 +485,10 @@ func chatInitialize(c *lsp.Client, root, prefModel string, allowWrite bool) (cha
 			PromptCapabilities struct {
 				EmbeddedContext bool `json:"embeddedContext"`
 			} `json:"promptCapabilities"`
+			MCPCapabilities struct {
+				HTTP bool `json:"http"`
+				SSE  bool `json:"sse"`
+			} `json:"mcpCapabilities"`
 		} `json:"agentCapabilities"`
 	}
 	// Same keychain-stall budget as the LSP sidecar handshake: the
@@ -484,8 +511,15 @@ func chatInitialize(c *lsp.Client, root, prefModel string, allowWrite bool) (cha
 	}
 	// cwd must be absolute — root is absolutized by New, the same
 	// contract that keeps LSP rootUris well-formed.
+	decls, mcpNote := mcpDeclarations(mcpServers,
+		caps.AgentCapabilities.MCPCapabilities.HTTP,
+		caps.AgentCapabilities.MCPCapabilities.SSE)
+	if decls == nil {
+		// An explicit empty array, never null — the field is required.
+		decls = []any{}
+	}
 	err := c.CallWithTimeout("session/new",
-		map[string]any{"cwd": root, "mcpServers": []any{}},
+		map[string]any{"cwd": root, "mcpServers": decls},
 		&sess, chatSessionTimeout)
 	if err != nil {
 		return chatSession{}, err
@@ -497,6 +531,7 @@ func chatInitialize(c *lsp.Client, root, prefModel string, allowWrite bool) (cha
 		id:       sess.SessionID,
 		modelID:  sess.Models.CurrentModelID,
 		embedded: caps.AgentCapabilities.PromptCapabilities.EmbeddedContext,
+		mcpNote:  mcpNote,
 	}
 	for _, m := range sess.Models.Available {
 		if m.ModelID == "" {
@@ -536,6 +571,11 @@ func (a *App) handleChatReady(e *chatReadyEvent) {
 	a.chat.models = e.models
 	a.chat.modelID = e.modelID
 	a.chat.embeddedContext = e.embedded
+	if e.mcpNote != "" {
+		// Tools the agent gained (or couldn't) are invisible otherwise,
+		// and an answer that quietly used one is the confusing case.
+		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: e.mcpNote})
+	}
 	if q := a.chat.queuedPrompt; q != "" {
 		a.chat.queuedPrompt = ""
 		a.chatSendPrompt(q)

@@ -73,6 +73,10 @@ The goals, in order:
   Installing an agent's binary is the whole opt-in; without one the
   editor never mentions AI. See
   [AI features](#ai-features-chat-agents--copilot-completions).
+- **MCP servers** — declare Model Context Protocol servers once in
+  `~/.config/ced/mcp.json` (the same format Claude Desktop uses) and
+  they're handed to whichever chat agent you run, plus browsable and
+  runnable from the menu. See [MCP servers](#8-mcp-servers-more-tools-for-your-agent).
 - **Single binary, no CGO** — cross-compiled for macOS and Linux on
   amd64 and arm64. POSIX only: the embedded terminal panel needs
   job-control syscalls Windows doesn't provide.
@@ -503,12 +507,13 @@ them while still making it one click to opt a project in.
 
 ## AI features (chat agents + Copilot completions)
 
-ced has two independent AI surfaces:
+ced has three independent AI surfaces:
 
 | Surface | What it is | Provided by |
 | --- | --- | --- |
 | **Inline suggestions** | Dimmed ghost text at your caret, `Tab` to accept | GitHub Copilot only |
 | **Chat panel** | Full-height strip on the left: streaming answers, your code as context, and — with your approval — edits to your files | Any agent that speaks [ACP](https://agentclientprotocol.com) — Copilot, Claude Code, or Gemini |
+| **MCP servers** | Extra tools — issue trackers, databases, docs, your own scripts — handed to whichever chat agent is running, and browsable from the menu | Any [MCP](https://modelcontextprotocol.io) server you declare |
 
 Both follow the same philosophy as everything else here:
 
@@ -702,6 +707,69 @@ queued. Re-allowing writes mid-session only updates what the agent was
 *told* it can do after you restart it (**Chat agent → current —
 restart**) — the transcript says so when it matters.
 
+### 8. MCP servers (more tools for your agent)
+
+[Model Context Protocol](https://modelcontextprotocol.io) servers give an
+agent tools beyond your code: an issue tracker, a database, a docs index,
+your own scripts. Declare them once and **whichever chat backend you're
+running gets them** — this isn't a Copilot feature.
+
+Create `~/.config/ced/mcp.json`. It's the same shape Claude Desktop and
+friends use, so you can paste a block you already have:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}
+    },
+    "filesystem": {"command": "mcp-server-filesystem", "args": ["/srv/data"]},
+    "parked":     {"command": "old-server", "disabled": true}
+  }
+}
+```
+
+VS Code's `"servers"` spelling of the top-level key works too. Remote
+servers take `{"type": "http", "url": "…", "headers": {…}}` instead of a
+command.
+
+**What happens with them:**
+
+- **Your chat agent gets them at connect time.** ced hands the enabled
+  servers to the agent when the chat session opens; the agent runs its
+  own copy of each and calls their tools during a turn. The transcript
+  says which servers went out — and names any the agent can't reach
+  (some agents don't support remote MCP transports), because a tool
+  that's silently missing is the one you can't debug.
+- **You can drive them yourself** from **≡ → MCP → MCP servers…**:
+
+  | Row | What it does |
+  | --- | --- |
+  | `● github (12 tools)` | Status per server — `●` connected, `◌` connecting, `✕` failed with the reason, `○` idle, `·` disabled |
+  | **Tools…** | Connects if needed, then lists the server's tools |
+  | **Connect / Reconnect / Disconnect** | Manual lifecycle — a crashed server never restarts itself |
+  | **Server info** | What was declared, what the server reports about itself, and why the last attempt failed |
+
+  Picking a tool opens a JSON-arguments prompt pre-filled from the tool's
+  own schema (a tool that needs no arguments just runs). The result opens
+  in a dialog; **Copy last result** puts the untruncated text on your
+  clipboard.
+
+Notes:
+
+- **Nothing is spawned until you ask.** Declaring a server doesn't launch
+  it — ced starts one only when you connect from the menu, and the chat
+  agent starts its own separately.
+- ced's own connections are **stdio-only**. Remote (`http`/`sse`) servers
+  are still declared to your agent; ced just doesn't dial them itself.
+- One server failing is that server's problem: it gets a `✕` row with the
+  reason and everything else carries on.
+- Edited the file while ced was running? **≡ → MCP → Reload MCP config**.
+- `env` values are secrets — ced shows only the **keys** in menu rows, so
+  a screenshot of the picker never leaks a token.
+
 ### Turning it off
 
 Every switch lives in the `≡ → Copilot` menu and persists to
@@ -718,6 +786,9 @@ Every switch lives in the `≡ → Copilot` menu and persists to
 }
 ```
 
+MCP servers live in their own file (`~/.config/ced/mcp.json`) — delete an
+entry, or give it `"disabled": true`, to take it out of play.
+
 The four toggles default to `"on"` — which costs nothing until you
 actually install a binary and sign in. Note that `"copilot": "off"` is a
 kill switch for **GitHub's binary only**: it stops the completions
@@ -733,7 +804,8 @@ gated purely by their binary being on `$PATH`.
 │   ├── app/                  # Event loop, layout, menu modal, splitter
 │   ├── editor/               # Buffer, tab, cursor, syntax highlighting
 │   ├── filetree/             # Lazy directory tree with identity-preserving refresh
-│   ├── lsp/                  # JSON-RPC client (gopls, Copilot sidecar + ACP chat)
+│   ├── lsp/                  # JSON-RPC client (gopls, Copilot sidecar, ACP chat, MCP)
+│   ├── mcp/                  # MCP inventory (mcp.json) + stdio client
 │   ├── clipboard/            # OSC 52 clipboard with tmux passthrough
 │   ├── customactions/        # Loader for ~/.config/ced/actions.json
 │   ├── format/               # Format-on-save config + trust store

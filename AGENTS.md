@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-ced ("Cats Editor") is a Go terminal editor module at `github.com/rohanthewiz/ced`; the CLI entry point is `main.go` and the binary is `ced`. Core packages live under `internal/`: `app` owns the event loop and rendering, `editor` owns buffers/tabs/editing behavior, `filetree` manages the sidebar tree, and supporting packages cover clipboard, formatting, icons, config, theme, finder, and versioning. Tests sit beside source files as `*_test.go`. Release packaging includes `Formula/ced.rb`, `install.sh`, and samples under `samples/`. `website/` holds the inherited SpiceEdit Hugo site — dormant since the ced rebrand and no longer built or deployed; leave it alone.
+ced ("Cats Editor") is a Go terminal editor module at `github.com/rohanthewiz/ced`; the CLI entry point is `main.go` and the binary is `ced`. Core packages live under `internal/`: `app` owns the event loop and rendering, `editor` owns buffers/tabs/editing behavior, `filetree` manages the sidebar tree, and supporting packages cover clipboard, formatting, icons, config, theme, finder, versioning, and the JSON-RPC clients (`lsp` for gopls/ACP, `mcp` for Model Context Protocol servers). Tests sit beside source files as `*_test.go`. Release packaging includes `Formula/ced.rb`, `install.sh`, and samples under `samples/`. `website/` holds the inherited SpiceEdit Hugo site — dormant since the ced rebrand and no longer built or deployed; leave it alone.
 
 ## Build, Test, and Development Commands
 
@@ -28,4 +28,4 @@ Recent commits use concise, imperative summaries, often with PR numbers, such as
 
 ## Security & Configuration Tips
 
-Format-on-save commands are project config and require trust prompts; do not bypass that flow. Keep generated artifacts (`bin/`, `coverage.out`, `coverage.html`) out of normal feature commits unless the release workflow explicitly requires them.
+Format-on-save commands are project config and require trust prompts; do not bypass that flow. `~/.config/ced/mcp.json` holds MCP server commands and their credentials: never echo an entry's `env` values into the UI, logs, or tests — surface the keys only. Keep generated artifacts (`bin/`, `coverage.out`, `coverage.html`) out of normal feature commits unless the release workflow explicitly requires them.

@@ -16,6 +16,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -32,6 +33,7 @@ import (
 	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/format"
 	"github.com/rohanthewiz/ced/internal/icons"
+	"github.com/rohanthewiz/ced/internal/mcp"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
 
@@ -87,6 +89,17 @@ func newTestApp(t *testing.T, root string) *App {
 	// built by hand here, so the zero value would silently put every
 	// test in read-only chat mode. Read-only tests flip it back off.
 	a.chat.writeEnabled = true
+	// Same paranoia for MCP: nothing in the app auto-connects today, but
+	// a stub launcher means a future eager path can't spawn whatever
+	// servers the developer has declared in ~/.config/ced/mcp.json.
+	// MCP tests install their own fake. The clipboard var is neutered for
+	// the same reason as Copilot's below.
+	prevMCPConnect, prevMCPCopy := mcpConnect, mcpCopyResult
+	mcpConnect = func(string, mcp.Server, string, func(error)) (mcpClient, error) {
+		return nil, errors.New("mcp disabled in tests")
+	}
+	mcpCopyResult = func(string) error { return nil }
+	t.Cleanup(func() { mcpConnect, mcpCopyResult = prevMCPConnect, prevMCPCopy })
 	// Neuter the sign-in flow's host side-effects so no test can write
 	// the dev machine's clipboard or launch a real browser. Copilot
 	// tests that assert on these swap in their own recorders.
@@ -229,10 +242,10 @@ func TestMenuButtonRect(t *testing.T) {
 // to (0,0) when the window is too small to fit it.
 func TestMenuModalRect_Centered(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	// The menu (75 rows fully expanded) outgrew the 40-row default sim
+	// The menu (79 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 84
+	a.height = 88
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -1827,9 +1840,9 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 
 // TestMenuLayout_NoCustomActions pins down the baseline geometry with
 // every section expanded: the pinned top zone contributes two rows (the
-// command palette + the expand/collapse-all toggle), ten collapsible
-// groups each contribute a header row (10) plus their 63 action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 75 total. The
+// command palette + the expand/collapse-all toggle), eleven collapsible
+// groups each contribute a header row (11) plus their 66 action rows, and
+// Quit renders headerless behind a divider (its 1 row) — 79 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1837,16 +1850,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 81 {
-		t.Errorf("modalHeight = %d, want 81", h)
+	if h != 85 {
+		t.Errorf("modalHeight = %d, want 85", h)
 	}
-	if got := len(items); got != 75 {
-		t.Errorf("row count = %d, want 75 (2 top-zone + 63 group actions + 10 headers)", got)
+	if got := len(items); got != 79 {
+		t.Errorf("row count = %d, want 79 (2 top-zone + 66 group actions + 11 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (78) — headers separate the
+	// one setting off the headerless Quit group (82) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 78}
+	wantDiv := []int{2, 5, 82}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2174,8 +2187,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 84 { // 81 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 84", h)
+	if h != 88 { // 85 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 88", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -2629,7 +2642,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 84
+	a.height = 88
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

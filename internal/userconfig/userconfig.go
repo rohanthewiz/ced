@@ -219,6 +219,19 @@ func DefaultPath() string { return configFilePath("config.json") }
 // exactly the gap that fills.
 func RcPath() string { return configFilePath("rc.grsh") }
 
+// MCPPath returns the canonical MCP-inventory location:
+// $XDG_CONFIG_HOME/ced/mcp.json, falling back to ~/.config/ced/mcp.json
+// (or "" when no config location resolves).
+//
+// It's a file of its own, not a key in config.json, for the same reason
+// actions.json is: config.json holds flat preferences the ≡ toggles
+// write back, while mcp.json is a nested inventory the user hand-edits
+// in the shape the rest of the MCP ecosystem already uses. Keeping them
+// apart means a syntax error in one can't disable the other. The parser
+// lives in internal/mcp; this package only knows where the file is, so
+// the two config locations can never drift apart.
+func MCPPath() string { return configFilePath("mcp.json") }
+
 // Load reads and parses the config file at path, returning a Config
 // with defaults filled in for any missing or blank fields.
 //

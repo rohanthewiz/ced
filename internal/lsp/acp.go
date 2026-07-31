@@ -27,7 +27,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os/exec"
 )
 
 // NewClientACP wraps an existing reader/writer pair in an ACP-framed
@@ -57,29 +56,17 @@ func NewClientACP(r io.Reader, w io.Writer,
 // Client wired to its stdio, the ACP twin of Start. The caller should
 // have verified the binary exists (exec.LookPath) — same
 // silent-degradation contract as the LSP starters.
+//
+// The body is StartNDJSON (ndjson.go): ACP and MCP servers are launched
+// identically, and this name is kept so the chat call site reads in the
+// protocol it speaks. ACP agents inherit the editor's environment
+// unchanged — an agent's credentials live in its own store, not in
+// ced's config.
 func StartACP(dir, bin string, args []string,
 	onNotify func(string, json.RawMessage),
 	onRequest func(string, json.RawMessage) (any, error),
 	onExit func(error)) (*Client, error) {
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = dir
-	// stderr goes to our stderr (tcell owns the tty, so effectively
-	// /dev/null) — deliberate, same as Start: agent logs are noise for
-	// an editor user.
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	c := NewClientACP(stdout, stdin, onNotify, onRequest, onExit)
-	c.cmd = cmd
-	return c, nil
+	return StartNDJSON(dir, bin, args, nil, onNotify, onRequest, onExit)
 }
 
 // readLineMessage parses one newline-delimited JSON-RPC message — the

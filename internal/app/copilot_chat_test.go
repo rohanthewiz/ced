@@ -29,6 +29,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/lsp"
+	"github.com/rohanthewiz/ced/internal/mcp"
 )
 
 // wireChat installs a live fake chat connection, bypassing the async
@@ -783,6 +784,13 @@ type fakeACPAgent struct {
 	// declared at initialize — what read-only chat actually tells the
 	// agent about itself.
 	declaredWrite bool
+
+	// mcpHTTP makes initialize advertise agentCapabilities.mcpCapabilities.http,
+	// the flag that decides whether a remote MCP server is declared to
+	// this agent or dropped with a note. newSessionParams keeps the whole
+	// session/new payload so the mcpServers array can be asserted on.
+	mcpHTTP          bool
+	newSessionParams json.RawMessage
 }
 
 // serve runs the agent's read loop until the client side closes.
@@ -811,16 +819,21 @@ func (f *fakeACPAgent) serve(r io.Reader, w io.Writer) {
 			f.mu.Lock()
 			f.declaredWrite = ip.ClientCapabilities.FS.WriteTextFile
 			f.mu.Unlock()
-			result = map[string]any{"protocolVersion": 1}
+			agentCaps := map[string]any{}
 			if f.embedded {
-				result = map[string]any{
-					"protocolVersion": 1,
-					"agentCapabilities": map[string]any{
-						"promptCapabilities": map[string]any{"embeddedContext": true},
-					},
-				}
+				agentCaps["promptCapabilities"] = map[string]any{"embeddedContext": true}
+			}
+			if f.mcpHTTP {
+				agentCaps["mcpCapabilities"] = map[string]any{"http": true}
+			}
+			result = map[string]any{"protocolVersion": 1}
+			if len(agentCaps) > 0 {
+				result = map[string]any{"protocolVersion": 1, "agentCapabilities": agentCaps}
 			}
 		case "session/new":
+			f.mu.Lock()
+			f.newSessionParams = append(json.RawMessage(nil), req.Params...)
+			f.mu.Unlock()
 			result = map[string]any{
 				"sessionId": "sess-acp",
 				"models": map[string]any{
@@ -876,7 +889,7 @@ func startFakeACPAgent(t *testing.T, agent *fakeACPAgent) *lsp.Client {
 func TestChatInitialize_ModelRoster(t *testing.T) {
 	// No preference: roster decoded, agent default kept, no set call.
 	agent := &fakeACPAgent{}
-	sess, err := chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "", true)
+	sess, err := chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "", true, nil)
 	if err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
@@ -892,7 +905,7 @@ func TestChatInitialize_ModelRoster(t *testing.T) {
 
 	// Saved preference in the roster: applied, session reports it.
 	agent = &fakeACPAgent{}
-	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "gpt-5.5", true)
+	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "gpt-5.5", true, nil)
 	if err != nil {
 		t.Fatalf("pref handshake: %v", err)
 	}
@@ -902,7 +915,7 @@ func TestChatInitialize_ModelRoster(t *testing.T) {
 
 	// Stale preference (not in roster): no call, default kept.
 	agent = &fakeACPAgent{}
-	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "retired-model", true)
+	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "retired-model", true, nil)
 	if err != nil {
 		t.Fatalf("stale-pref handshake: %v", err)
 	}
@@ -913,7 +926,7 @@ func TestChatInitialize_ModelRoster(t *testing.T) {
 	// set_model failure: swallowed, agent default kept — a broken pref
 	// must never break the handshake.
 	agent = &fakeACPAgent{failSet: true}
-	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "gpt-5.5", true)
+	sess, err = chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "gpt-5.5", true, nil)
 	if err != nil {
 		t.Fatalf("failing-set handshake: %v", err)
 	}
@@ -928,7 +941,7 @@ func TestChatInitialize_ModelRoster(t *testing.T) {
 // says nothing gets the text-only fallback — the safe direction, since a
 // prompt the agent can't parse is worse than a verbose one.
 func TestChatInitialize_EmbeddedContextCapability(t *testing.T) {
-	sess, err := chatInitialize(startFakeACPAgent(t, &fakeACPAgent{embedded: true}), "/tmp/x", "", true)
+	sess, err := chatInitialize(startFakeACPAgent(t, &fakeACPAgent{embedded: true}), "/tmp/x", "", true, nil)
 	if err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
@@ -936,12 +949,85 @@ func TestChatInitialize_EmbeddedContextCapability(t *testing.T) {
 		t.Error("advertised embeddedContext was not captured")
 	}
 
-	sess, err = chatInitialize(startFakeACPAgent(t, &fakeACPAgent{}), "/tmp/x", "", true)
+	sess, err = chatInitialize(startFakeACPAgent(t, &fakeACPAgent{}), "/tmp/x", "", true, nil)
 	if err != nil {
 		t.Fatalf("silent-agent handshake: %v", err)
 	}
 	if sess.embedded {
 		t.Error("an agent that advertises nothing must not get resource blocks")
+	}
+}
+
+// TestChatInitialize_DeclaresMCPServers pins the handshake's other half
+// of the MCP story against real framing: the configured inventory rides
+// out in session/new's mcpServers array in ACP's shape (env as
+// name/value objects), a disabled entry never leaves ced, and a remote
+// server is declared only to an agent that advertised the transport —
+// with the drop named in the note, because a silently missing tool is
+// the failure a user can't diagnose.
+func TestChatInitialize_DeclaresMCPServers(t *testing.T) {
+	servers := []mcp.Server{
+		{Name: "docs", Transport: mcp.TransportHTTP, URL: "https://example.com/mcp"},
+		{Name: "gh", Transport: mcp.TransportStdio, Command: "npx",
+			Args: []string{"-y", "server-github"}, Env: map[string]string{"TOKEN": "t"}},
+	}
+
+	// Agent without http support: only the stdio server is declared.
+	agent := &fakeACPAgent{}
+	sess, err := chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "", true, servers)
+	if err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	var params struct {
+		MCPServers []struct {
+			Type    string   `json:"type"`
+			Name    string   `json:"name"`
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+			Env     []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(agent.newSessionParams, &params); err != nil {
+		t.Fatalf("session/new params: %v", err)
+	}
+	if len(params.MCPServers) != 1 {
+		t.Fatalf("declared %d servers, want 1 (%s)", len(params.MCPServers), agent.newSessionParams)
+	}
+	got := params.MCPServers[0]
+	if got.Name != "gh" || got.Command != "npx" || len(got.Args) != 2 {
+		t.Errorf("stdio declaration = %+v", got)
+	}
+	if len(got.Env) != 1 || got.Env[0].Name != "TOKEN" || got.Env[0].Value != "t" {
+		t.Errorf("env should be ACP's name/value objects, got %+v", got.Env)
+	}
+	if !strings.Contains(sess.mcpNote, "gh") || !strings.Contains(sess.mcpNote, "docs") {
+		t.Errorf("note should name the declared and the skipped server, got %q", sess.mcpNote)
+	}
+
+	// Agent WITH http support: both go out.
+	agent = &fakeACPAgent{mcpHTTP: true}
+	if _, err := chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "", true, servers); err != nil {
+		t.Fatalf("http handshake: %v", err)
+	}
+	if err := json.Unmarshal(agent.newSessionParams, &params); err != nil {
+		t.Fatalf("session/new params: %v", err)
+	}
+	if len(params.MCPServers) != 2 {
+		t.Fatalf("http-capable agent got %d servers, want 2 (%s)",
+			len(params.MCPServers), agent.newSessionParams)
+	}
+
+	// No inventory: the field is still an empty ARRAY, never null — it's
+	// required, and some agents reject a null outright.
+	agent = &fakeACPAgent{}
+	if _, err := chatInitialize(startFakeACPAgent(t, agent), "/tmp/x", "", true, nil); err != nil {
+		t.Fatalf("empty handshake: %v", err)
+	}
+	if !strings.Contains(string(agent.newSessionParams), `"mcpServers":[]`) {
+		t.Errorf("empty inventory should send [], got %s", agent.newSessionParams)
 	}
 }
 
@@ -1197,7 +1283,7 @@ func TestChatDrawSelectionHighlight(t *testing.T) {
 // would only be refused.
 func TestChatInitialize_WriteCapability(t *testing.T) {
 	allowed := &fakeACPAgent{}
-	if _, err := chatInitialize(startFakeACPAgent(t, allowed), "/tmp/x", "", true); err != nil {
+	if _, err := chatInitialize(startFakeACPAgent(t, allowed), "/tmp/x", "", true, nil); err != nil {
 		t.Fatalf("handshake: %v", err)
 	}
 	allowed.mu.Lock()
@@ -1208,7 +1294,7 @@ func TestChatInitialize_WriteCapability(t *testing.T) {
 	}
 
 	blocked := &fakeACPAgent{}
-	if _, err := chatInitialize(startFakeACPAgent(t, blocked), "/tmp/x", "", false); err != nil {
+	if _, err := chatInitialize(startFakeACPAgent(t, blocked), "/tmp/x", "", false, nil); err != nil {
 		t.Fatalf("read-only handshake: %v", err)
 	}
 	blocked.mu.Lock()

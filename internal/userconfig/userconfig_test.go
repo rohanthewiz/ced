@@ -203,6 +203,29 @@ func TestRcPathFallsBackToHome(t *testing.T) {
 	}
 }
 
+// TestMCPPathSitsBesideConfig pins the MCP inventory's location: same
+// directory as config.json under either resolution rule, so the editor's
+// three config files never split across directories.
+func TestMCPPathSitsBesideConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/tmp/xdg-test")
+	got := MCPPath()
+	want := filepath.Join("/tmp/xdg-test", "ced", "mcp.json")
+	if got != want {
+		t.Fatalf("MCPPath() = %q, want %q", got, want)
+	}
+	if filepath.Dir(got) != filepath.Dir(DefaultPath()) {
+		t.Fatalf("MCPPath dir %q != DefaultPath dir %q", filepath.Dir(got), filepath.Dir(DefaultPath()))
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/tmp/home-test")
+	got = MCPPath()
+	want = filepath.Join("/tmp/home-test", ".config", "ced", "mcp.json")
+	if got != want {
+		t.Fatalf("MCPPath() fallback = %q, want %q", got, want)
+	}
+}
+
 // TestDefaultsAutoSaveOn pins the documented auto-save default: on.
 // Flipping this silently would change save semantics for every user
 // with no config file, so it gets its own guard.

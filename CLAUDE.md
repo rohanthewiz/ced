@@ -67,6 +67,10 @@ internal/app/chatagent.go     Chat backend registry + ≡ picker (Copilot / Clau
 internal/app/copilot_chat_context.go  Chat context: file / selection attachments
 internal/app/copilot_chat_perm.go     Phase 4: permission prompts + agent fs read/write
 internal/lsp/acp.go           ACP framing (ndjson) + onRequest hook over the same Client
+internal/lsp/ndjson.go        StartNDJSON — generic ndjson process launcher (ACP + MCP), env-aware
+internal/mcp/config.go        mcp.json inventory (Claude-Desktop shape): stdio/http/sse entries
+internal/mcp/client.go        MCP client: handshake, tools/list, tools/call, roots/list + ping
+internal/app/mcp.go           MCP state, ≡ server/tool pickers, and the chat-agent declaration
 internal/editor/ghost.go      GhostText display form + the render-row splice overlay
 internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → autoSaveEvent)
 internal/app/zipops.go        Zip file/folder — stdlib archive/zip, async zipDoneEvent
@@ -79,7 +83,7 @@ internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PT
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, chat*)
+internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, chat*) + mcp.json path
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
 internal/theme/theme.go       Tokyo Night palette + syntax color mapping
 internal/version/version.go   const Version = "x.y.z" — single line, CI bumps it
@@ -347,6 +351,9 @@ House rules:
   and die with the connection; `modelPref` survives. All Copilot menu
   rows (auth, chat toggle, model, suggestions, kill switch) live in
   the ≡ Copilot group — owner preference, one block.
+- **MCP servers are declared, not connected** (mcp.go): `session/new`
+  carries ced's configured inventory in `mcpServers`, and the agent
+  spawns its own copies. It's agent-agnostic — see the MCP section.
 - **Permissions + fs are real as of phase 4** (copilot_chat_perm.go):
   the handshake declares fs read/write capabilities, and
   `session/request_permission` opens the agent's own options as a
@@ -481,6 +488,60 @@ context" to "you could go look"; don't add one. House rules:
 - The ≡ Copilot group carries the keyboard/menu twins (toggle, attach
   current-or-selection, attach-file picker, clear). Attaching opens the
   panel — context you can't see is context you can't trust.
+
+### MCP servers (internal/mcp + app/mcp.go)
+Model Context Protocol support. **One inventory, two consumers** — hold
+onto that and the rest follows:
+
+1. **The chat agent.** Enabled servers are declared in ACP's
+   `session/new` `mcpServers` array (`mcpDeclarations`, called from
+   `chatInitialize`), and the AGENT spawns its own copies. This is the
+   path that makes MCP useful day to day and it needs no connection from
+   ced at all. It is agent-agnostic — not a Copilot feature.
+2. **ced itself**, so a user can verify a server works, read its tool
+   list, and run one by hand from ≡ → MCP.
+
+House rules:
+
+- **The inventory is `~/.config/ced/mcp.json`, in the ecosystem's shape**
+  (`{"mcpServers": {name: {command, args, env, …}}}`, VS Code's
+  `"servers"` accepted too) so a user pastes the block they already have.
+  A separate file from config.json for the actions.json reason: flat
+  toggles the ≡ writes back vs. a nested inventory the user hand-edits,
+  and a syntax error in one must not disable the other. `userconfig`
+  owns only the PATH (`MCPPath`); the parser lives in `internal/mcp`.
+- **Nothing spawns at startup.** `New` reads the inventory; ced connects
+  only on a deliberate ≡ action. "I declared a server" must never mean
+  "the editor launched three node processes while I wasn't looking".
+  Silent degradation is PER SERVER: one that won't start gets a `✕` row
+  with the reason, no modal, and no auto-restart (Reconnect is the retry
+  gesture, same as every other integration).
+- **Same transport, not a new one.** MCP stdio framing IS ndjson, so it
+  rides `lsp.StartNDJSON` (ndjson.go — `StartACP` is now an alias of it).
+  Do NOT add an MCP SDK or a second framing layer. The handshake is
+  three steps, not two: `initialize`, then the
+  `notifications/initialized` NOTIFICATION. ced answers `ping` and
+  `roots/list` (that's how a server scopes itself to the project) and
+  honestly declines `sampling`/`elicitation` — they want an LLM and a
+  prompt surface this client hasn't got.
+- **ced's own client is stdio-only.** http/sse entries still parse and
+  are declared to the agent (gated on the agent's advertised
+  `mcpCapabilities`; an unsupported one is dropped and NAMED in the
+  transcript note, because some agents reject the whole `session/new`
+  over one unreachable entry). ced's picker offers such a server only
+  "Server info", which says why.
+- **Generation-checked, events-only**, like the chat layer: every
+  connection carries a seq, teardown bumps it, and a ready/result event
+  from an older generation is dropped — and a stale ready event CLOSES
+  the client it carried, or a disconnect leaks the process it disowned.
+- Surfaces are all palette pickers (the house rule): servers → per-server
+  actions → tools → a JSON-arguments prompt pre-filled from the tool's
+  schema (`mcpArgSkeleton`; `"{}"` means "just run it"). Bad JSON flashes
+  the parse error and hands the text BACK. Results open in the info
+  modal, which does not scroll — hence the capped preview plus the
+  full text kept on `mcp.lastResult` for the "Copy last result" row.
+- `Describe()` shows env KEYS, never values: picker rows end up in
+  screenshots and bug reports.
 
 ### Git panel checkboxes + Actions (app/gitpanel.go + gitpanelactions.go)
 The panel's checkbox is a **multi-selection tick, not a stage toggle**.
@@ -775,8 +836,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 62 group actions + 10 headers (74), height 80, dividers
-`[2, 5, 77]`.
+2 top-zone rows + 66 group actions + 11 headers (79), height 85, dividers
+`[2, 5, 82]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.
@@ -864,7 +925,12 @@ loops forever.
 
 - `Ctrl+` editor shortcuts (they fight tmux/terminals — that's the
   whole reason the action menu exists).
-- A config file / dotfile / plugin system. ced is opinionated.
+- A config file / dotfile / plugin system. ced is opinionated. (The
+  files under `~/.config/ced/` are the deliberate exceptions, and each
+  earned it by being something ced cannot know for you: which shell
+  aliases you use, which formatters your repo trusts, which MCP servers
+  and credentials you have. None of them add extension POINTS to the
+  editor itself — that's still the line.)
 - CGO dependencies. The whole point is one static binary.
 - Tree-sitter. We use Chroma intentionally — pure Go, no setup.
 - A separate `homebrew-tap` repo. The formula lives here under

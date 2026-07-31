@@ -295,6 +295,17 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuToggleSuggestions, enabled: alwaysTrue, labelFor: (*App).suggestionsToggleLabel},
 			{action: (*App).menuToggleCopilot, enabled: alwaysTrue, labelFor: (*App).copilotToggleLabel},
 		}},
+		// Model Context Protocol servers (mcp.go). Its own group, not a
+		// row in Copilot's: the inventory is declared to whichever chat
+		// agent is active, and ced connects to it independently of any
+		// of them. Rows stay clickable with nothing configured — the
+		// empty case opens the setup help, which is the answer to the
+		// question a user with no servers is actually asking.
+		{title: "MCP", collapsible: true, items: []menuItemDef{
+			{action: (*App).menuMCPServers, enabled: alwaysTrue, labelFor: (*App).mcpServersLabel},
+			{label: "Reload MCP config", action: (*App).menuMCPReload, enabled: alwaysTrue},
+			{action: (*App).menuMCPCopyResult, enabled: (*App).hasMCPResult, labelFor: (*App).mcpCopyResultLabel},
+		}},
 		{title: "File", collapsible: true, items: []menuItemDef{
 			{shortcut: "esc n", action: (*App).menuNewFile, enabled: alwaysTrue, labelFor: (*App).newFileLabel},
 			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
@@ -711,6 +722,12 @@ type App struct {
 	// chat*Events. See copilot_chat.go.
 	chat chatState
 
+	// mcp is the Model Context Protocol integration: the inventory read
+	// from mcp.json, ced's own connections to those servers, and the
+	// declaration handed to the chat agent. Mutated only on the main
+	// loop; connects and tool calls post mcp*Events. See mcp.go.
+	mcp mcpState
+
 	// nav is the app-wide file-navigation history (Go back / Go
 	// forward). Recorded centrally in openFile and tabBarClick so every
 	// navigation surface — tree, tabs, finder, go-to-definition — feeds
@@ -782,6 +799,10 @@ func New(rootDir string) (*App, error) {
 	}
 	a.setActiveFolder(tree.Root.Path)
 	a.loadUserConfig()
+	// The MCP inventory is read at startup but nothing is SPAWNED here:
+	// the chat agent needs the declaration at its own start, and ced's
+	// own connections wait for a deliberate ≡ action. See mcp.go.
+	a.loadMCPConfig()
 	a.refreshGitStatus()
 	a.loadCustomActions()
 	// Seed the fold default AFTER custom actions load so the synthetic
@@ -927,6 +948,7 @@ func (a *App) Close() {
 	a.lspShutdown()
 	a.copilotShutdown()
 	a.chatShutdown()
+	a.mcpShutdown()
 	if a.screen != nil {
 		a.screen.Fini()
 	}
@@ -1047,6 +1069,14 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleChatFSRequest(e)
 	case *chatModelSetEvent:
 		a.handleChatModelSet(e)
+	case *mcpReadyEvent:
+		a.handleMCPReady(e)
+	case *mcpFailedEvent:
+		a.handleMCPFailed(e)
+	case *mcpExitEvent:
+		a.handleMCPExit(e)
+	case *mcpToolResultEvent:
+		a.handleMCPToolResult(e)
 	}
 	// After every dispatch, let the LSP layer notice buffer edits and
 	// (re-)arm its didChange debounce. Runs unconditionally because

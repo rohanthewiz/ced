@@ -380,7 +380,12 @@ func mcpResultLines(text string) []string {
 	if strings.TrimSpace(text) == "" {
 		return []string{"(the tool returned no content)"}
 	}
-	raw := strings.Split(strings.ReplaceAll(text, "\t", "    "), "\n")
+	// Trailing newlines are an artifact of how tools emit text, not
+	// content — splitting on them would end every result with a blank
+	// row in a modal that sizes itself to its line count. Interior blank
+	// lines are content and survive.
+	text = strings.TrimRight(strings.ReplaceAll(text, "\t", "    "), "\n")
+	raw := strings.Split(text, "\n")
 	out := make([]string, 0, mcpResultMaxLines+1)
 	for i, line := range raw {
 		if i >= mcpResultMaxLines {

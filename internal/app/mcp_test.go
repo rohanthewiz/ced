@@ -522,6 +522,12 @@ func TestMCPResultLines(t *testing.T) {
 	if got := mcpResultLines("  \n "); len(got) != 1 || !strings.Contains(got[0], "no content") {
 		t.Errorf("empty result = %v", got)
 	}
+	// Nearly every real tool result ends in a newline; that must not
+	// become a blank row in a modal that sizes itself to its line count.
+	// Interior blanks are content and stay.
+	if got := mcpResultLines("one\n\ntwo\n\n"); len(got) != 3 || got[1] != "" || got[2] != "two" {
+		t.Errorf("trailing newlines = %q, want [one, \"\", two]", got)
+	}
 	long := strings.Repeat("x", mcpResultMaxWidth+40)
 	got := mcpResultLines(long)
 	if len([]rune(got[0])) != mcpResultMaxWidth {

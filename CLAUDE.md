@@ -593,6 +593,10 @@ here. House rules:
   save hook. `skillsUserDirFn` / `skillsCedDirFn` are package vars;
   newTestApp pins them at temp dirs so no test reads the developer's real
   skills.
+- Leader: **Esc-S** opens the picker. Shifted because plain `s` is Save,
+  and outside the h/H, o/O pair convention on purpose — there is no
+  reverse of opening a picker. The shift-slip on Save costs a modal Esc
+  dismisses, which is why the mnemonic won.
 
 ### Git panel checkboxes + Actions (app/gitpanel.go + gitpanelactions.go)
 The panel's checkbox is a **multi-selection tick, not a stage toggle**.

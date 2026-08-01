@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
+
 	"github.com/rohanthewiz/ced/internal/skills"
 )
 
@@ -171,6 +173,36 @@ func TestMenuUseSkill_RescansBeforeOpening(t *testing.T) {
 	}
 	if len(pm.items) != 1 || !strings.Contains(pm.items[0].label, "fresh") {
 		t.Fatalf("picker rows = %+v", pm.items)
+	}
+}
+
+// TestLeaderSkills_OpensThePicker pins Esc-S as the keyboard path to the
+// skill picker. The menu row carries the same accelerator in its hint
+// column, and a hint with no dispatch behind it is a menu that lies.
+func TestLeaderSkills_OpensThePicker(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	seedProjectSkill(t, a, "run-ced", "Drive the real binary")
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'S'))
+
+	pm, ok := a.modal.(*paletteModal)
+	if !ok || pm.title != "Use skill in chat" {
+		t.Fatalf("modal = %T (%+v), want the skill picker", a.modal, a.modal)
+	}
+	// The hint column and the dispatch table have to agree — a menu that
+	// advertises a key nothing dispatches is a menu that lies. The row
+	// draws its label through labelFor, so it's found that way rather
+	// than by the static label field (which is empty for toggles).
+	items, _, _ := a.menuLayout()
+	found := ""
+	for _, it := range items {
+		if it.labelFor != nil && it.labelFor(a) == a.skillsMenuLabel() {
+			found = it.shortcut
+		}
+	}
+	if found != "esc S" {
+		t.Errorf("menu hint = %q, want esc S", found)
 	}
 }
 

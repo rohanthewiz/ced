@@ -74,6 +74,13 @@ func leaderBindings() []leaderBinding {
 		// variant walks backwards, mirroring find's Enter/Shift-Enter.
 		{key: 'h', action: (*App).menuNextHunk, repeat: true},
 		{key: 'H', action: (*App).menuPrevHunk, repeat: true},
+		// 'S' for Skills — the picker that attaches a SKILL.md to the
+		// next chat message. Shifted because plain 's' is Save, and it
+		// keeps 'S' free of the pair convention the h/H and o/O bindings
+		// use (there is no "reverse" of opening a picker). A shift slip
+		// on Esc-s opens a modal instead of saving, which Esc dismisses
+		// with nothing lost — the price of the only mnemonic letter left.
+		{key: 'S', action: (*App).menuUseSkill},
 		// 'g' for "git" — collapse/expand the diff review panel.
 		// '=' / '-' resize whichever bottom panel is open (grow/shrink,
 		// borrowing the browser-zoom mnemonic); silent no-ops while

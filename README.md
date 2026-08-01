@@ -208,6 +208,7 @@ within half a second tap one of the letters below.
 | `Esc /`     | Toggle line comment  |
 | `Esc f`     | Find in file         |
 | `Esc p`     | Find file in project |
+| `Esc S`     | Use skill in chat    |
 
 A lone `Esc` is harmless — if you don't follow it with a bound key
 within the window, your next keystroke goes to the editor as normal,

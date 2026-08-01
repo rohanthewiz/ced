@@ -323,7 +323,7 @@ func builtinMenuGroups() []menuGroup {
 		// nothing installed — the empty case opens the setup help, which
 		// is the answer to the question a user with no skills is asking.
 		{title: "Skills", collapsible: true, items: []menuItemDef{
-			{action: (*App).menuUseSkill, enabled: alwaysTrue, labelFor: (*App).skillsMenuLabel},
+			{shortcut: "esc S", action: (*App).menuUseSkill, enabled: alwaysTrue, labelFor: (*App).skillsMenuLabel},
 			{label: "Open skill…", action: (*App).menuOpenSkill, enabled: (*App).hasSkills},
 			{label: "Reload skills", action: (*App).menuReloadSkills, enabled: alwaysTrue},
 		}},

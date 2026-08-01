@@ -208,11 +208,30 @@ within half a second tap one of the letters below.
 | `Esc /`     | Toggle line comment  |
 | `Esc f`     | Find in file         |
 | `Esc p`     | Find file in project |
-| `Esc S`     | Use skill in chat    |
+| `Esc k`     | Command palette      |
 
 A lone `Esc` is harmless — if you don't follow it with a bound key
 within the window, your next keystroke goes to the editor as normal,
 so accidental `Esc` taps never swallow a real character.
+
+**`Esc a` is the AI prefix** — everything the chat agent touches lives one
+key deeper. Tap `Esc a` and the status bar lists your options; you have two
+seconds to pick one.
+
+| Combo       | Action                          |
+| ----------- | ------------------------------- |
+| `Esc a c`   | Chat panel (focus, or toggle)   |
+| `Esc a s`   | Use skill in chat               |
+| `Esc a a`   | Attach current file / selection |
+| `Esc a f`   | Attach file…                    |
+| `Esc a m`   | Chat model                      |
+| `Esc a b`   | Chat backend (agent)            |
+| `Esc a t`   | Tools — MCP servers             |
+
+Unlike a lone `Esc`, a chord that misses **is** swallowed: `Esc a` is two
+deliberate keys, so a mistyped second key tells you what's bound instead of
+dropping a stray character into your code. `Esc` gets you out of a
+half-typed chord.
 
 Everything reachable by hotkey is also reachable from the `≡` menu —
 the hotkeys are just a faster path for the actions you reach for most.

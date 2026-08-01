@@ -15,7 +15,19 @@
 
 package app
 
-import "time"
+import (
+	"time"
+
+	"github.com/gdamore/tcell/v2"
+)
+
+// leaderChordFor is how long a prefix stays armed waiting for its second
+// rune. Deliberately longer than doubleEscMs (the double-Esc window): a
+// chord is a two-stage gesture the user is composing, not a double-tap
+// reflex, and 500ms is not enough time to think "which letter was the
+// model picker again?". Short enough that a forgotten prefix can't
+// swallow a keystroke seconds later.
+const leaderChordFor = 2 * time.Second
 
 // leaderBinding is one Esc-leader entry: the trigger rune and the App method
 // that fires when the user presses Esc, <rune> in quick succession. Each method
@@ -25,6 +37,21 @@ import "time"
 type leaderBinding struct {
 	key    rune
 	action func(*App)
+
+	// sub makes this entry a PREFIX rather than an action: firing it
+	// arms a second window in which one more rune dispatches from this
+	// table (see fireLeader / handleChordKey). One namespace exists
+	// today — Esc-a for the AI surface — and it exists because that
+	// surface is fifteen actions deep while the flat table has run out
+	// of mnemonic letters. Don't add a second namespace without the
+	// same justification: a chord is a real cost, paid by everyone who
+	// has to remember which letters are prefixes.
+	sub []leaderBinding
+	// hint is the one-line menu of a prefix's sub-bindings, flashed the
+	// moment the prefix arms. A namespace nobody can enumerate from the
+	// keyboard is a namespace nobody uses; this is the flat table's ≡
+	// hint column, compressed into a status line.
+	hint string
 	// repeat marks actions that make sense in rapid succession (undo,
 	// hunk-walking, panel resize). Firing one keeps the leader window
 	// armed in "chain" mode: the next repeatable rune within
@@ -64,23 +91,23 @@ func leaderBindings() []leaderBinding {
 		{key: '/', action: (*App).menuToggleLineComment},
 		{key: 'f', action: (*App).openFind},
 		{key: 'p', action: (*App).openFinder},
-		// 'a' for "actions" — the palette is the searchable twin of the
-		// ≡ action menu, so it borrows the menu's vocabulary. 'k' is an
-		// alias for Cmd+K muscle memory (VS Code/Slack); the real Cmd+K
-		// never reaches a terminal app, so Esc-k is the closest stand-in.
-		{key: 'a', action: (*App).openPalette},
+		// 'k' for the palette — the Cmd+K muscle memory every editor and
+		// chat app teaches (the real Cmd+K never reaches a terminal app,
+		// so Esc-k is the closest stand-in). It used to share the binding
+		// with 'a' for "actions"; 'a' now opens the AI namespace below,
+		// which is the higher-traffic use of the letter. The palette is
+		// still the ≡ menu's pinned headline row, so it keeps three ways
+		// in without that alias.
 		{key: 'k', action: (*App).openPalette},
+		// 'a' for AI — a PREFIX, not an action. Everything the chat agent
+		// touches lives one rune deeper: the panel itself, context, the
+		// model and backend pickers, skills, and MCP tools.
+		{key: 'a', sub: aiLeaderBindings(),
+			hint: "AI  c chat · s skills · a attach · f file · m model · b backend · t tools"},
 		// 'h' for "hunk" — jump between git-changed regions. Shifted
 		// variant walks backwards, mirroring find's Enter/Shift-Enter.
 		{key: 'h', action: (*App).menuNextHunk, repeat: true},
 		{key: 'H', action: (*App).menuPrevHunk, repeat: true},
-		// 'S' for Skills — the picker that attaches a SKILL.md to the
-		// next chat message. Shifted because plain 's' is Save, and it
-		// keeps 'S' free of the pair convention the h/H and o/O bindings
-		// use (there is no "reverse" of opening a picker). A shift slip
-		// on Esc-s opens a modal instead of saving, which Esc dismisses
-		// with nothing lost — the price of the only mnemonic letter left.
-		{key: 'S', action: (*App).menuUseSkill},
 		// 'g' for "git" — collapse/expand the diff review panel.
 		// '=' / '-' resize whichever bottom panel is open (grow/shrink,
 		// borrowing the browser-zoom mnemonic); silent no-ops while
@@ -108,6 +135,41 @@ func leaderBindings() []leaderBinding {
 		// Alt+Left / Alt+Right (handleKey) are the arrow twins.
 		{key: 'o', action: (*App).menuNavBack, repeat: true},
 		{key: 'O', action: (*App).menuNavForward, repeat: true},
+	}
+}
+
+// aiLeaderBindings is the Esc-a namespace: every keyboard path into the
+// chat agent's surface. It exists because that surface outgrew the flat
+// table — fifteen menu rows competing for the letters a single-rune
+// table had left, which is how skills ended up on a shifted 'S' before
+// this namespace replaced it.
+//
+// Letters are mnemonic within the namespace and may collide with the
+// top-level table on purpose ('a', 'f', 'm', 't' all mean something else
+// after a bare Esc). That's the point of a namespace: 'f' can be "find
+// file" out here and "attach file" in there, because the prefix already
+// said which world you're in.
+//
+// Nothing here is repeatable — these all open a panel or a picker, and
+// re-arming the window after one would only swallow the next keystroke.
+func aiLeaderBindings() []leaderBinding {
+	return []leaderBinding{
+		// 'c' for chat — focus-or-toggle, the same gesture Esc-` uses for
+		// the terminal, so an open-but-unfocused panel is one key away.
+		{key: 'c', action: (*App).leaderChat},
+		{key: 's', action: (*App).menuUseSkill},
+		// 'a' doubles the prefix: Esc-a-a is "attach what I'm looking
+		// at", the namespace's most-reached-for verb, and a doubled
+		// prefix is the standard way to spell "the obvious one".
+		{key: 'a', action: (*App).menuChatAttachCurrent},
+		{key: 'f', action: (*App).menuChatAttachFile},
+		{key: 'm', action: (*App).menuChatModel},
+		// 'b' for backend — 'a' was taken by attach, and "backend" is
+		// the word the ≡ row's help text uses for the agent registry.
+		{key: 'b', action: (*App).menuChatAgent},
+		// 't' for tools — what MCP servers actually are from the chat
+		// panel's side, and the word the README leads with.
+		{key: 't', action: (*App).menuMCPServers},
 	}
 }
 
@@ -139,7 +201,22 @@ func leaderActionFor(r rune) func(*App) {
 // a repeatable action re-arms the window in chain mode so the next
 // repeatable rune fires without a fresh Esc; anything else closes the
 // window outright.
+//
+// A PREFIX binding runs no action at all — it arms the chord window and
+// flashes its hint, and the next rune resolves against its sub-table
+// (handleChordKey). Both leader entry paths funnel through here, so the
+// namespace works identically inside tmux (where "Esc a" arrives folded
+// as one Alt+a event) and outside it.
 func (a *App) fireLeader(b *leaderBinding) {
+	if b.sub != nil {
+		a.leaderChord = b.sub
+		a.leaderChordAt = time.Now()
+		a.lastEscape = time.Time{}
+		a.leaderChained = false
+		a.flash(b.hint)
+		return
+	}
+	a.clearChord()
 	if b.repeat {
 		a.lastEscape = time.Now()
 		a.leaderChained = true
@@ -148,4 +225,47 @@ func (a *App) fireLeader(b *leaderBinding) {
 		a.leaderChained = false
 	}
 	b.action(a)
+}
+
+// handleChordKey resolves the second rune of a chord, reporting whether
+// it consumed the keystroke. Returns false when no chord is pending or
+// the window has expired, so the caller carries on as if nothing was
+// armed.
+//
+// An unbound rune inside a live chord is SWALLOWED with a flash, which
+// is deliberately unlike the top-level table's fall-through. A lone Esc
+// can be a stray tap — the flat table stays harmless to mash for exactly
+// that reason — but "Esc a" is two deliberate keys, so the likelier
+// reading of a miss is a mistyped chord, not text. Falling through would
+// answer that by dropping a stray character into the user's code.
+func (a *App) handleChordKey(ev *tcell.EventKey) bool {
+	if a.leaderChord == nil {
+		return false
+	}
+	if time.Since(a.leaderChordAt) >= leaderChordFor {
+		a.clearChord()
+		return false
+	}
+	// Esc out of a chord: the universal "drop that" gesture. Handled by
+	// the caller's Esc branch, which clears the chord before running.
+	if ev.Key() != tcell.KeyRune {
+		a.clearChord()
+		return false
+	}
+	sub := a.leaderChord
+	a.clearChord()
+	for i := range sub {
+		if sub[i].key == ev.Rune() {
+			sub[i].action(a)
+			return true
+		}
+	}
+	a.flash("No AI action bound to " + string(ev.Rune()) + " — esc a again for the list")
+	return true
+}
+
+// clearChord disarms a pending chord.
+func (a *App) clearChord() {
+	a.leaderChord = nil
+	a.leaderChordAt = time.Time{}
 }

@@ -593,10 +593,9 @@ here. House rules:
   save hook. `skillsUserDirFn` / `skillsCedDirFn` are package vars;
   newTestApp pins them at temp dirs so no test reads the developer's real
   skills.
-- Leader: **Esc-S** opens the picker. Shifted because plain `s` is Save,
-  and outside the h/H, o/O pair convention on purpose — there is no
-  reverse of opening a picker. The shift-slip on Save costs a modal Esc
-  dismisses, which is why the mnemonic won.
+- Leader: **Esc-a-s**, in the AI namespace with the rest of the chat
+  surface. (It was briefly a top-level `Esc S` — the flat table having
+  nothing better left is what argued for the namespace.)
 
 ### Git panel checkboxes + Actions (app/gitpanel.go + gitpanelactions.go)
 The panel's checkbox is a **multi-selection tick, not a stage toggle**.
@@ -719,6 +718,44 @@ right-aligned and muted in the ≡ menu ("esc s", "alt+←"). Dispatch
 still lives in the leader table / handleKey — when adding or rebinding
 a key, update both or the menu lies. Rows without a binding leave it
 empty; drawMenu skips the hint when a long label would collide.
+
+### The Esc-a AI namespace (leader.go)
+The leader table is flat with ONE exception: a `leaderBinding` carrying a
+`sub` table is a PREFIX. Firing it runs no action — it stores the
+sub-table on `App.leaderChord`, stamps `leaderChordAt`, and flashes the
+binding's `hint`; the next rune resolves against that table in
+`handleChordKey`, which handleKey calls before everything else. House
+rules:
+
+- **It exists because the AI surface outgrew the flat table.** Fifteen
+  menu rows, and the letters had run out — skills briefly lived on a
+  shifted `Esc S` for exactly that reason. That's the bar for a second
+  namespace; don't add one without it. A chord is a real cost, paid by
+  everyone who has to remember which letters are prefixes.
+- **`Esc a` took the palette's alias.** The palette is `Esc k` (plus the
+  ≡ menu's pinned headline row) — owner's call, on the grounds that the
+  namespace is the higher-traffic use of the letter.
+- **One level only.** A sub-binding with its own `sub` is a bug the
+  binding-table test rejects. Sub-bindings collide with the top-level
+  table on purpose (`a`, `f`, `m`, `t`) — the prefix already said which
+  world you're in.
+- **A miss inside a live chord is SWALLOWED with a flash**, deliberately
+  unlike the flat table's fall-through. A lone Esc can be a stray tap, so
+  the flat table stays harmless to mash; `Esc a` is two deliberate keys,
+  and falling through would answer a mistyped chord by dropping a
+  character into the user's code.
+- **The window is `leaderChordFor` (2s), not `doubleEscMs`.** A chord is
+  composed, not reflexive — 500ms isn't long enough to remember which
+  letter the model picker is. Esc drops a pending chord (handleChordKey
+  disarms on any non-rune and reports false, so the normal Esc handling
+  still runs and `Esc a Esc s` saves).
+- **tmux comes free.** Both leader entry paths — bare Esc + rune, and the
+  folded `Alt+<rune>` tmux delivers — funnel through `fireLeader`, so the
+  prefix arms identically either way and the second rune arrives bare.
+  `TestLeaderChord_TmuxAltPath` pins it.
+- The flashed hint is the namespace's ONLY keyboard discovery surface
+  (the flat table gets that from the ≡ hint column), so a test asserts
+  every sub-binding appears in it.
 
 ### Format-on-save precedence + builtin Go pass (app/format.go)
 `runFormatOnSave(idx, quiet)` routes: project `format.json` entry

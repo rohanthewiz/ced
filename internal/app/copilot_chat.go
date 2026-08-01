@@ -1303,6 +1303,19 @@ func (a *App) menuToggleChat() {
 	a.chatOpenPanel()
 }
 
+// leaderChat is Esc-a-c: focus an open-but-unfocused panel, otherwise
+// toggle it. The same focus-or-toggle gesture Esc-` gives the terminal,
+// for the same reason — the panel you can see but can't type into is the
+// one you reach for the keyboard to fix.
+func (a *App) leaderChat() {
+	if a.chat.open && !a.chat.focused {
+		a.chat.focused = true
+		a.term.focused = false
+		return
+	}
+	a.menuToggleChat()
+}
+
 // chatOpenPanel opens the chat strip and starts the agent, explaining
 // unavailability with a flash instead of failing quietly. Shared by the
 // ≡ toggle and by attaching context — attaching a file to a panel you

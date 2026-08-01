@@ -279,13 +279,13 @@ func builtinMenuGroups() []menuGroup {
 			// The chat toggle moved here from the View group (owner
 			// preference): every Copilot surface — auth, chat, model,
 			// ghost text, the kill switch — reads as one block.
-			{action: (*App).menuToggleChat, enabled: alwaysTrue, labelFor: (*App).chatToggleLabel},
+			{shortcut: "esc a c", action: (*App).menuToggleChat, enabled: alwaysTrue, labelFor: (*App).chatToggleLabel},
 			// The backend picker (chatagent.go): the chat panel is a
 			// generic ACP client, and this row switches which agent
 			// binary answers it. Re-picking the current agent is the
 			// crash-retry path for non-Copilot backends.
-			{action: (*App).menuChatAgent, enabled: alwaysTrue, labelFor: (*App).chatAgentLabel},
-			{action: (*App).menuChatModel, enabled: alwaysTrue, labelFor: (*App).chatModelLabel},
+			{shortcut: "esc a b", action: (*App).menuChatAgent, enabled: alwaysTrue, labelFor: (*App).chatAgentLabel},
+			{shortcut: "esc a m", action: (*App).menuChatModel, enabled: alwaysTrue, labelFor: (*App).chatModelLabel},
 			// Context attachments. The panel's chips carry ✕ buttons, but
 			// ATTACHING has no mouse surface of its own — these rows are
 			// it (copilot_chat_context.go).
@@ -294,8 +294,8 @@ func builtinMenuGroups() []menuGroup {
 			// toggle asks about reads (copilot_chat_perm.go): off is
 			// read-only chat, enforced whatever a permission prompt says.
 			{action: (*App).menuToggleChatWrite, enabled: alwaysTrue, labelFor: (*App).chatWriteToggleLabel},
-			{action: (*App).menuChatAttachCurrent, enabled: (*App).hasFileTab, labelFor: (*App).chatAttachActionLabel},
-			{label: "Attach file to chat…", action: (*App).menuChatAttachFile, enabled: (*App).hasFinder},
+			{shortcut: "esc a a", action: (*App).menuChatAttachCurrent, enabled: (*App).hasFileTab, labelFor: (*App).chatAttachActionLabel},
+			{label: "Attach file to chat…", shortcut: "esc a f", action: (*App).menuChatAttachFile, enabled: (*App).hasFinder},
 			{action: (*App).menuChatClearAttachments, enabled: (*App).hasChatAttachments, labelFor: (*App).chatClearAttachLabel},
 			// Keyboard twin of the transcript's trailing ⧉ button, for
 			// the same reason the git panel has one: the panel is
@@ -311,7 +311,7 @@ func builtinMenuGroups() []menuGroup {
 		// empty case opens the setup help, which is the answer to the
 		// question a user with no servers is actually asking.
 		{title: "MCP", collapsible: true, items: []menuItemDef{
-			{action: (*App).menuMCPServers, enabled: alwaysTrue, labelFor: (*App).mcpServersLabel},
+			{shortcut: "esc a t", action: (*App).menuMCPServers, enabled: alwaysTrue, labelFor: (*App).mcpServersLabel},
 			{label: "Reload MCP config", action: (*App).menuMCPReload, enabled: alwaysTrue},
 			{action: (*App).menuMCPCopyResult, enabled: (*App).hasMCPResult, labelFor: (*App).mcpCopyResultLabel},
 		}},
@@ -323,7 +323,7 @@ func builtinMenuGroups() []menuGroup {
 		// nothing installed — the empty case opens the setup help, which
 		// is the answer to the question a user with no skills is asking.
 		{title: "Skills", collapsible: true, items: []menuItemDef{
-			{shortcut: "esc S", action: (*App).menuUseSkill, enabled: alwaysTrue, labelFor: (*App).skillsMenuLabel},
+			{shortcut: "esc a s", action: (*App).menuUseSkill, enabled: alwaysTrue, labelFor: (*App).skillsMenuLabel},
 			{label: "Open skill…", action: (*App).menuOpenSkill, enabled: (*App).hasSkills},
 			{label: "Reload skills", action: (*App).menuReloadSkills, enabled: alwaysTrue},
 		}},
@@ -415,7 +415,7 @@ func (a *App) menuLayout() (items []menuItemDef, dividers []int, modalHeight int
 	// sets the zone off from the (usually folded) section list below it.
 	items = append(items, menuItemDef{
 		label:    paletteMenuLabel,
-		shortcut: "esc a / esc k",
+		shortcut: "esc k",
 		relY:     y,
 		action:   (*App).menuCommandPalette,
 		enabled:  alwaysTrue,
@@ -637,6 +637,13 @@ type App struct {
 	// repeatable bindings fire ("Esc z z z" undoes three times); any
 	// other key drops back to normal typing. See leaderBinding.repeat.
 	leaderChained bool
+
+	// leaderChord holds a prefix binding's sub-table while a chord is
+	// half-typed (Esc-a waiting for its second rune), with leaderChordAt
+	// stamping when it armed so handleChordKey can expire it. nil means
+	// no chord pending — the overwhelmingly common state. See leader.go.
+	leaderChord   []leaderBinding
+	leaderChordAt time.Time
 	// menuScroll is how many content rows the action menu is scrolled
 	// when its layout is taller than the window (the menu outgrew short
 	// terminals at ~40 rows). 0 whenever everything fits; reset on every
@@ -1594,6 +1601,13 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		return
 	}
 
+	// A half-typed chord (Esc-a waiting for its second rune) claims the
+	// next keystroke before anything else can. Checked ahead of the Esc
+	// branch so Esc still means "drop that": handleChordKey disarms on a
+	// non-rune and reports false, letting the normal Esc handling run.
+	if a.handleChordKey(ev) {
+		return
+	}
 	if ev.Key() == tcell.KeyEsc {
 		// Esc always dismisses a ghost suggestion — the one editing
 		// gesture that clears it without moving the cursor. Purely a

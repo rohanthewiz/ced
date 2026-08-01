@@ -176,15 +176,16 @@ func TestMenuUseSkill_RescansBeforeOpening(t *testing.T) {
 	}
 }
 
-// TestLeaderSkills_OpensThePicker pins Esc-S as the keyboard path to the
-// skill picker. The menu row carries the same accelerator in its hint
-// column, and a hint with no dispatch behind it is a menu that lies.
+// TestLeaderSkills_OpensThePicker pins Esc-a-s as the keyboard path to
+// the skill picker. The menu row carries the same accelerator in its
+// hint column, and a hint with no dispatch behind it is a menu that lies.
 func TestLeaderSkills_OpensThePicker(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	seedProjectSkill(t, a, "run-ced", "Drive the real binary")
 
 	a.handleKey(keyEv(tcell.KeyEsc, 0))
-	a.handleKey(keyEv(tcell.KeyRune, 'S'))
+	a.handleKey(keyEv(tcell.KeyRune, 'a'))
+	a.handleKey(keyEv(tcell.KeyRune, 's'))
 
 	pm, ok := a.modal.(*paletteModal)
 	if !ok || pm.title != "Use skill in chat" {
@@ -201,8 +202,8 @@ func TestLeaderSkills_OpensThePicker(t *testing.T) {
 			found = it.shortcut
 		}
 	}
-	if found != "esc S" {
-		t.Errorf("menu hint = %q, want esc S", found)
+	if found != "esc a s" {
+		t.Errorf("menu hint = %q, want esc a s", found)
 	}
 }
 

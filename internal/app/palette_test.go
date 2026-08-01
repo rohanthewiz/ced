@@ -264,17 +264,19 @@ func TestPalette_FoldedSectionActionsStillListed(t *testing.T) {
 	}
 }
 
-// TestLeader_AFiresPalette pins the Esc-a binding so a leader-table
-// refactor can't quietly drop the palette shortcut.
-func TestLeader_AFiresPalette(t *testing.T) {
+// TestLeader_KFiresPalette pins the Esc-k binding so a leader-table
+// refactor can't quietly drop the palette shortcut. It is the palette's
+// only leader since 'a' became the AI prefix, which makes this the one
+// test standing between the palette and a keyboard-unreachable state.
+func TestLeader_KFiresPalette(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	action := leaderActionFor('a')
+	action := leaderActionFor('k')
 	if action == nil {
-		t.Fatal("Esc-a has no leader binding")
+		t.Fatal("Esc-k has no leader binding")
 	}
 	action(a)
 	if paletteOf(a) == nil {
-		t.Fatal("Esc-a should open the palette")
+		t.Fatal("Esc-k should open the palette")
 	}
 }
 

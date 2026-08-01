@@ -11,6 +11,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,13 +19,183 @@ import (
 )
 
 // TestLeaderActionFor_AllBindingsResolve walks the binding table and
-// verifies every entry returns a non-nil action. Catches accidentally
-// dropping a method reference when the table is reshuffled.
+// verifies every entry resolves to something that can fire: an action,
+// or a prefix carrying a populated sub-table and the hint that makes it
+// discoverable. Catches accidentally dropping a method reference when
+// the table is reshuffled.
 func TestLeaderActionFor_AllBindingsResolve(t *testing.T) {
 	for _, b := range leaderBindings() {
+		if b.sub != nil {
+			if b.action != nil {
+				t.Errorf("prefix %q also carries an action — it can only do one", b.key)
+			}
+			if len(b.sub) == 0 || b.hint == "" {
+				t.Errorf("prefix %q has %d sub-bindings and hint %q", b.key, len(b.sub), b.hint)
+			}
+			continue
+		}
 		if leaderActionFor(b.key) == nil {
 			t.Errorf("binding %q resolved to nil", b.key)
 		}
+	}
+	for _, b := range aiLeaderBindings() {
+		if b.action == nil {
+			t.Errorf("AI binding %q resolved to nil", b.key)
+		}
+		if b.sub != nil {
+			t.Errorf("AI binding %q nests another namespace — one level is the limit", b.key)
+		}
+		if b.repeat {
+			t.Errorf("AI binding %q is repeatable; these all open a panel or picker", b.key)
+		}
+	}
+}
+
+// TestAILeaderHint_ListsEveryBinding keeps the flashed hint honest: it's
+// the namespace's only discovery surface from the keyboard, so a binding
+// missing from it is a binding nobody finds.
+func TestAILeaderHint_ListsEveryBinding(t *testing.T) {
+	var prefix *leaderBinding
+	for _, b := range leaderBindings() {
+		if b.key == 'a' {
+			b := b
+			prefix = &b
+		}
+	}
+	if prefix == nil {
+		t.Fatal("Esc-a is no longer the AI prefix")
+	}
+	for _, sub := range prefix.sub {
+		if !strings.Contains(prefix.hint, string(sub.key)+" ") {
+			t.Errorf("hint %q omits binding %q", prefix.hint, sub.key)
+		}
+	}
+}
+
+// TestLeaderChord_FiresSubBinding drives the two-key gesture end to end:
+// Esc-a arms (flashing the hint, running nothing), and the next rune
+// dispatches from the AI table.
+func TestLeaderChord_FiresSubBinding(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'a'))
+	if a.leaderChord == nil {
+		t.Fatal("Esc-a should arm the chord, not act")
+	}
+	if a.modal != nil {
+		t.Fatalf("Esc-a opened %T — the prefix must run no action", a.modal)
+	}
+	if !strings.Contains(a.statusMsg, "chat") {
+		t.Errorf("arming flash = %q, want the namespace hint", a.statusMsg)
+	}
+
+	a.handleKey(keyEv(tcell.KeyRune, 't')) // tools → MCP servers
+	if a.leaderChord != nil {
+		t.Error("the chord should disarm once its second rune lands")
+	}
+	if a.modal == nil {
+		t.Fatal("Esc-a-t should have opened the MCP surface")
+	}
+}
+
+// TestLeaderChord_TmuxAltPath pins the namespace inside tmux, the
+// editor's primary habitat: tmux folds "Esc a" into one Alt+a event, so
+// the prefix must arm from that path too, with the second rune arriving
+// bare.
+func TestLeaderChord_TmuxAltPath(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModAlt))
+	if a.leaderChord == nil {
+		t.Fatal("Alt+a should arm the chord (tmux-folded Esc-a)")
+	}
+	a.handleKey(keyEv(tcell.KeyRune, 't'))
+	if a.modal == nil {
+		t.Fatal("Alt+a then t should have opened the MCP surface")
+	}
+}
+
+// TestLeaderChord_UnboundRuneIsSwallowed pins the one place chords
+// deliberately differ from the flat table: a miss inside a live chord
+// flashes instead of falling through, because "Esc a" is two deliberate
+// keys and dropping a stray character into the user's code is the worse
+// reading of a typo.
+func TestLeaderChord_UnboundRuneIsSwallowed(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte(""), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'a'))
+	a.handleKey(keyEv(tcell.KeyRune, 'j')) // not in the AI table
+
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "" {
+		t.Errorf("buffer = %q, want the miss swallowed", got)
+	}
+	if !strings.Contains(a.statusMsg, "No AI action") {
+		t.Errorf("flash = %q, want the miss explained", a.statusMsg)
+	}
+	// And the next keystroke types normally — a miss disarms.
+	a.handleKey(keyEv(tcell.KeyRune, 'j'))
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "j" {
+		t.Errorf("buffer = %q, want j typed after the chord disarmed", got)
+	}
+}
+
+// TestLeaderChord_ExpiresAndEscCancels pins both exits from a half-typed
+// chord: the window times out, and Esc drops it the way Esc drops
+// everything else in this editor.
+func TestLeaderChord_ExpiresAndEscCancels(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte(""), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+
+	// Expired: the rune types normally instead of being claimed.
+	a.leaderChord = aiLeaderBindings()
+	a.leaderChordAt = time.Now().Add(-2 * leaderChordFor)
+	a.handleKey(keyEv(tcell.KeyRune, 't'))
+	if a.modal != nil {
+		t.Fatalf("an expired chord fired %T", a.modal)
+	}
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "t" {
+		t.Errorf("buffer = %q, want the rune typed after expiry", got)
+	}
+
+	// Esc cancels a live chord and still arms the ordinary leader, so
+	// "Esc a Esc s" saves rather than doing nothing.
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'a'))
+	if a.leaderChord == nil {
+		t.Fatal("chord did not arm")
+	}
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	if a.leaderChord != nil {
+		t.Error("Esc should drop a pending chord")
+	}
+	a.handleKey(keyEv(tcell.KeyRune, 's'))
+	if a.activeTabPtr().Dirty {
+		t.Error("Esc-a Esc-s should have saved")
+	}
+}
+
+// TestLeaderPalette_KeepsEscK pins the binding the AI namespace took
+// 'a' from: the palette still answers to Esc-k.
+func TestLeaderPalette_KeepsEscK(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'k'))
+	pm, ok := a.modal.(*paletteModal)
+	if !ok || pm.title != paletteMenuLabel {
+		t.Fatalf("Esc-k opened %T, want the command palette", a.modal)
 	}
 }
 
@@ -248,18 +419,23 @@ func TestHandleKey_LeaderToggleLineComment(t *testing.T) {
 	}
 }
 
-// TestHandleKey_LeaderPaletteAliases pins down that BOTH palette leaders
-// — Esc-a (actions) and Esc-k (the Cmd+K muscle-memory alias) — open the
-// command palette modal. Guards against one alias being dropped when the
-// table is reshuffled.
-func TestHandleKey_LeaderPaletteAliases(t *testing.T) {
-	for _, key := range []rune{'a', 'k'} {
-		a := newTestApp(t, t.TempDir())
-		a.handleKey(keyEv(tcell.KeyEsc, 0))
-		a.handleKey(keyEv(tcell.KeyRune, key))
-		if _, ok := a.modal.(*paletteModal); !ok {
-			t.Errorf("Esc-%c should open the command palette, modal is %T", key, a.modal)
-		}
+// TestHandleKey_LeaderPalette pins Esc-k as the palette's leader. It
+// used to share the binding with Esc-a ("actions"); 'a' now opens the AI
+// namespace, so this also guards the split — Esc-a must NOT open the
+// palette, or the chord it arms would be unreachable.
+func TestHandleKey_LeaderPalette(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'k'))
+	if _, ok := a.modal.(*paletteModal); !ok {
+		t.Errorf("Esc-k should open the command palette, modal is %T", a.modal)
+	}
+
+	b := newTestApp(t, t.TempDir())
+	b.handleKey(keyEv(tcell.KeyEsc, 0))
+	b.handleKey(keyEv(tcell.KeyRune, 'a'))
+	if b.modal != nil {
+		t.Errorf("Esc-a opened %T — it is the AI prefix now, not the palette", b.modal)
 	}
 }
 

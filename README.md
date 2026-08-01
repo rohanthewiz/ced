@@ -214,6 +214,7 @@ within half a second tap one of the letters below.
 | `Esc m`     | Add caret below      |
 | `Esc M`     | Add caret above      |
 | `Esc *`     | Add next occurrence  |
+| `Esc &`     | Select all occurrences |
 
 A lone `Esc` is harmless — if you don't follow it with a bound key
 within the window, your next keystroke goes to the editor as normal,
@@ -254,7 +255,7 @@ thing at once.
 | `Esc m` / `Esc M`     | Add a caret below / above the column           |
 | `Alt+click`           | Add or remove a caret at the pointer           |
 | `Esc *`               | Select this word, then claim the next match    |
-| ≡ Select all occurrences | A caret on every match at once              |
+| `Esc &`               | A caret on every match in the file             |
 | `Esc`                 | Back to one caret                              |
 
 `Esc *` is the rename-a-local gesture: the first press selects the word

@@ -235,17 +235,36 @@ func TestPlural(t *testing.T) {
 	}
 }
 
-// TestMultiCaretLeaderBindings pins the three leader keys against the
-// menu rows they mirror — the ≡ hint column claims "esc m", "esc M" and
-// "esc *", and a rebind that updated only one side would make it lie.
+// TestMultiCaretLeaderBindings pins the four leader keys against the
+// menu rows they mirror — the ≡ hint column claims "esc m", "esc M",
+// "esc *" and "esc &", and a rebind that updated only one side would
+// make it lie. The repeat flags are part of the contract: the three
+// incremental gestures chain, the bulk one doesn't (it has nothing left
+// to add, and re-arming would swallow the next keystroke).
 func TestMultiCaretLeaderBindings(t *testing.T) {
-	for _, r := range []rune{'m', 'M', '*'} {
+	want := map[rune]bool{'m': true, 'M': true, '*': true, '&': false}
+	for r, repeat := range want {
 		b := leaderBindingFor(r)
 		if b == nil || b.action == nil {
 			t.Fatalf("no leader binding for %q", r)
 		}
-		if !b.repeat {
-			t.Errorf("binding %q should repeat — building a caret column is a burst", r)
+		if b.repeat != repeat {
+			t.Errorf("binding %q repeat = %v, want %v", r, b.repeat, repeat)
 		}
+	}
+}
+
+// TestSelectAllOccurrencesLeaderFires drives Esc-& the way a user does —
+// through handleKey, not by calling the action — so the leader window
+// and the menu-row wiring are both covered.
+func TestSelectAllOccurrencesLeaderFires(t *testing.T) {
+	a, tab := caretApp(t, "x := 1\ny := x\nz := x")
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, '&', tcell.ModNone))
+
+	if got := tab.CaretCount(); got != 3 {
+		t.Fatalf("caret count after Esc-& = %d, want 3", got)
 	}
 }

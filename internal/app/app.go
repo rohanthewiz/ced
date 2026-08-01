@@ -357,7 +357,7 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Add caret below", shortcut: "esc m", action: (*App).menuAddCaretBelow, enabled: (*App).hasEditableTab},
 			{label: "Add caret above", shortcut: "esc M", action: (*App).menuAddCaretAbove, enabled: (*App).hasEditableTab},
 			{label: "Add next occurrence", shortcut: "esc *", action: (*App).menuAddNextOccurrence, enabled: (*App).hasMultiCaretTarget},
-			{label: "Select all occurrences", action: (*App).menuSelectAllOccurrences, enabled: (*App).hasMultiCaretTarget},
+			{label: "Select all occurrences", shortcut: "esc &", action: (*App).menuSelectAllOccurrences, enabled: (*App).hasMultiCaretTarget},
 			{label: "Clear extra carets", shortcut: "esc", action: (*App).menuClearCarets, enabled: (*App).hasCarets},
 		}},
 		{title: "Quit", collapsible: false, items: []menuItemDef{

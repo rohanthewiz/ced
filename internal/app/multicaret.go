@@ -25,7 +25,9 @@
 //     so "Esc m m m" builds a four-line column without re-arming.
 //   - **Esc-*** adds the next occurrence — vim's word-under-cursor key,
 //     which is the muscle memory this gesture actually competes with
-//     (Cmd+D never reaches a terminal app).
+//     (Cmd+D never reaches a terminal app). **Esc-&** is its bulk form,
+//     one shift-key over on the same row: "all of them" beside "the
+//     next one".
 package app
 
 import "github.com/rohanthewiz/ced/internal/editor"

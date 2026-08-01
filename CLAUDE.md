@@ -244,8 +244,9 @@ one. House rules:
   the line count or order, so surviving carets would point at the wrong
   line; fanning them out isn't the fix either (two carets on one line
   would duplicate it twice).
-- Leaders: Esc-m below, Esc-M above, Esc-* next occurrence, all
-  repeatable. Esc clears carets as a SIDE EFFECT (like the ghost and the
+- Leaders: Esc-m below, Esc-M above, Esc-* next occurrence (all
+  repeatable), Esc-& every occurrence (not — it has nothing left to
+  add). Esc clears carets as a SIDE EFFECT (like the ghost and the
   chat highlight) — it must not consume the keystroke.
 
 ### Matching word highlight (editor/wordhl.go + app/wordhl.go)

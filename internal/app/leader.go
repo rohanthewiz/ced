@@ -114,6 +114,12 @@ func leaderBindings() []leaderBinding {
 		// this actually competes with — VS Code's Cmd+D never reaches a
 		// terminal app. Repeats, so "Esc * * *" claims three occurrences.
 		{key: '*', action: (*App).menuAddNextOccurrence, repeat: true},
+		// '&' is the bulk form of the same idea, one shift-key over on
+		// the row — "all of them" next to "the next one". Deliberately
+		// NOT repeatable: it already claimed every occurrence in the
+		// file, so a second press has nothing to add and re-arming the
+		// window would only swallow the next keystroke.
+		{key: '&', action: (*App).menuSelectAllOccurrences},
 		// 'h' for "hunk" — jump between git-changed regions. Shifted
 		// variant walks backwards, mirroring find's Enter/Shift-Enter.
 		{key: 'h', action: (*App).menuNextHunk, repeat: true},

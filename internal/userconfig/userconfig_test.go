@@ -865,3 +865,23 @@ func TestThemesDirSitsBesideConfig(t *testing.T) {
 		t.Fatalf("themes dir lives in %q but config.json lives in %q", got, want)
 	}
 }
+
+// TestSkillsDirSitsBesideConfig pins ced's own skills directory the same
+// way, including the home fallback: it is one of three directories the
+// skill inventory scans, and a drift here would send the editor looking
+// somewhere the user never wrote to.
+func TestSkillsDirSitsBesideConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got, want := SkillsDir(), filepath.Join("/xdg", "ced", "skills"); got != want {
+		t.Fatalf("SkillsDir() = %q, want %q", got, want)
+	}
+	if got, want := filepath.Dir(SkillsDir()), filepath.Dir(DefaultPath()); got != want {
+		t.Fatalf("skills dir lives in %q but config.json lives in %q", got, want)
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/tmp/home-test")
+	if got, want := SkillsDir(), filepath.Join("/tmp/home-test", ".config", "ced", "skills"); got != want {
+		t.Fatalf("SkillsDir() fallback = %q, want %q", got, want)
+	}
+}

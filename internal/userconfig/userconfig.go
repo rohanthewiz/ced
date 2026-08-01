@@ -262,6 +262,19 @@ func MCPPath() string { return configFilePath("mcp.json") }
 // locations can never drift apart.
 func ThemesDir() string { return configFilePath("themes") }
 
+// SkillsDir returns the canonical ced-owned skills directory:
+// $XDG_CONFIG_HOME/ced/skills, falling back to ~/.config/ced/skills
+// (or "" when no config location resolves).
+//
+// It is ONE of the directories the skills inventory scans, and the least
+// used of them: the ecosystem keeps personal skills in ~/.claude/skills
+// and project skills in <project>/.claude/skills, and ced reads both of
+// those as they are rather than asking anyone to duplicate a folder. This
+// directory is for skills written for ced itself. See internal/skills for
+// the scan order and the shadowing rule; this package only knows where
+// the directory is, so the config locations can never drift apart.
+func SkillsDir() string { return configFilePath("skills") }
+
 // Load reads and parses the config file at path, returning a Config
 // with defaults filled in for any missing or blank fields.
 //

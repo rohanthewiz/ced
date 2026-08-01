@@ -114,6 +114,16 @@ type chatAttach struct {
 	// the flag rides along so the chip can label it and its ✕ can mean
 	// "turn the toggle off" rather than "drop this entry".
 	auto bool
+
+	// skill names the skill this attachment IS, when the path points at
+	// a SKILL.md (skills.go). Set, it changes two things and nothing
+	// else: the label reads "skill: <name>" rather than a path that is
+	// usually outside the project, and the turn carries a directive
+	// saying the text is a procedure to follow. skillDir is the skill's
+	// own directory, named in that directive so an agent can reach the
+	// supporting files ced doesn't ship.
+	skill    string
+	skillDir string
 }
 
 // ranged reports whether the attachment covers a line range rather than
@@ -225,7 +235,14 @@ func (a *App) chatRemoveAttachment(i int) {
 
 // chatAttachLabel names an attachment for chips, flashes and transcript
 // notes: project-relative path plus the line span when it has one.
+//
+// A skill is named by its NAME, not its path: personal skills live under
+// the home directory, so relativePathFor would render a chip full of
+// ../../ for the entry whose identity is a single word.
 func (a *App) chatAttachLabel(at chatAttach) string {
+	if at.skill != "" {
+		return "skill: " + at.skill
+	}
 	label := a.relativePathFor(at.path)
 	if at.ranged() {
 		label += fmt.Sprintf(":%d-%d", at.lineFrom, at.lineTo)
@@ -370,6 +387,13 @@ func (a *App) chatPromptBlocks(text string) (blocks []map[string]any, notes []st
 	prompt := text
 	if inline.Len() > 0 {
 		prompt = "Context:\n\n" + inline.String() + text
+	}
+	// An attached skill is a procedure, not a document — the directive is
+	// what says so, and it goes in the TEXT block either way, because in
+	// the embedded-resource shape there is nothing else the agent is
+	// guaranteed to read (skills.go).
+	if dir := chatSkillDirective(pending); dir != "" {
+		prompt = dir + "\n" + prompt
 	}
 	return append(blocks, map[string]any{"type": "text", "text": prompt}), notes
 }

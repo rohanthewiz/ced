@@ -140,6 +140,16 @@ func newTestApp(t *testing.T, root string) *App {
 	prevRcPath := termRcPath
 	termRcPath = func() string { return "" }
 	t.Cleanup(func() { termRcPath = prevRcPath })
+	// Point skill discovery at throwaway directories: the inventory scan
+	// would otherwise read the developer's real ~/.claude/skills, so a
+	// picker assertion would pass or fail depending on whose machine ran
+	// it. The project directory (under the test's own root) is left
+	// alone — tests that want skills write into it or into skillHome.
+	skillHome := t.TempDir()
+	prevSkillUser, prevSkillCed := skillsUserDirFn, skillsCedDirFn
+	skillsUserDirFn = func() string { return filepath.Join(skillHome, "user") }
+	skillsCedDirFn = func() string { return filepath.Join(skillHome, "ced") }
+	t.Cleanup(func() { skillsUserDirFn, skillsCedDirFn = prevSkillUser, prevSkillCed })
 	return a
 }
 
@@ -253,10 +263,10 @@ func TestMenuButtonRect(t *testing.T) {
 // to (0,0) when the window is too small to fit it.
 func TestMenuModalRect_Centered(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	// The menu (79 rows fully expanded) outgrew the 40-row default sim
+	// The menu (86 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 88
+	a.height = 92
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -1851,9 +1861,9 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 
 // TestMenuLayout_NoCustomActions pins down the baseline geometry with
 // every section expanded: the pinned top zone contributes two rows (the
-// command palette + the expand/collapse-all toggle), eleven collapsible
-// groups each contribute a header row (11) plus their 66 action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 79 total. The
+// command palette + the expand/collapse-all toggle), twelve collapsible
+// groups each contribute a header row (12) plus their 72 action rows, and
+// Quit renders headerless behind a divider (its 1 row) — 86 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1861,16 +1871,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 88 {
-		t.Errorf("modalHeight = %d, want 88", h)
+	if h != 92 {
+		t.Errorf("modalHeight = %d, want 92", h)
 	}
-	if got := len(items); got != 82 {
-		t.Errorf("row count = %d, want 82 (2 top-zone + 69 group actions + 11 headers)", got)
+	if got := len(items); got != 86 {
+		t.Errorf("row count = %d, want 86 (2 top-zone + 72 group actions + 12 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (85) — headers separate the
+	// one setting off the headerless Quit group (89) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 85}
+	wantDiv := []int{2, 5, 89}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2198,8 +2208,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 91 { // 88 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 91", h)
+	if h != 95 { // 92 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 95", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -2653,7 +2663,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 88
+	a.height = 92
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

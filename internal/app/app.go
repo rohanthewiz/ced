@@ -315,6 +315,18 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Reload MCP config", action: (*App).menuMCPReload, enabled: alwaysTrue},
 			{action: (*App).menuMCPCopyResult, enabled: (*App).hasMCPResult, labelFor: (*App).mcpCopyResultLabel},
 		}},
+		// Agent skills (skills.go) — the folders of markdown instructions
+		// kept in ~/.claude/skills and <project>/.claude/skills. Its own
+		// group next to MCP for the same reason MCP has one: both are
+		// inventories handed to whichever chat agent is running, not
+		// features of any one backend. The first row stays clickable with
+		// nothing installed — the empty case opens the setup help, which
+		// is the answer to the question a user with no skills is asking.
+		{title: "Skills", collapsible: true, items: []menuItemDef{
+			{action: (*App).menuUseSkill, enabled: alwaysTrue, labelFor: (*App).skillsMenuLabel},
+			{label: "Open skill…", action: (*App).menuOpenSkill, enabled: (*App).hasSkills},
+			{label: "Reload skills", action: (*App).menuReloadSkills, enabled: alwaysTrue},
+		}},
 		{title: "File", collapsible: true, items: []menuItemDef{
 			{shortcut: "esc n", action: (*App).menuNewFile, enabled: alwaysTrue, labelFor: (*App).newFileLabel},
 			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
@@ -745,6 +757,12 @@ type App struct {
 	// loop; connects and tool calls post mcp*Events. See mcp.go.
 	mcp mcpState
 
+	// skills is the agent-skill inventory scanned from the three standard
+	// skills directories. Read-only data: picking a skill attaches its
+	// SKILL.md to the next chat turn, and nothing in it is ever executed.
+	// See skills.go.
+	skills skillsState
+
 	// nav is the app-wide file-navigation history (Go back / Go
 	// forward). Recorded centrally in openFile and tabBarClick so every
 	// navigation surface — tree, tabs, finder, go-to-definition — feeds
@@ -820,6 +838,10 @@ func New(rootDir string) (*App, error) {
 	// the chat agent needs the declaration at its own start, and ced's
 	// own connections wait for a deliberate ≡ action. See mcp.go.
 	a.loadMCPConfig()
+	// Skills are three directory scans of small markdown files — cheap
+	// enough to do eagerly so the ≡ row can carry a count, and (like the
+	// MCP inventory) nothing is spawned, connected, or run by reading it.
+	a.loadSkills()
 	a.refreshGitStatus()
 	a.loadCustomActions()
 	// Seed the fold default AFTER custom actions load so the synthetic

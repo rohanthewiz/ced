@@ -77,6 +77,11 @@ The goals, in order:
   `~/.config/ced/mcp.json` (the same format Claude Desktop uses) and
   they're handed to whichever chat agent you run, plus browsable and
   runnable from the menu. See [MCP servers](#8-mcp-servers-more-tools-for-your-agent).
+- **Skills** — the `SKILL.md` folders you already keep in
+  `~/.claude/skills` (and `.claude/skills` in a repo) show up in the
+  menu; pick one and its instructions ride along with your next chat
+  message. Read as-is, never executed. See
+  [Skills](#9-skills-reusable-instructions-for-your-agent).
 - **Single binary, no CGO** — cross-compiled for macOS and Linux on
   amd64 and arm64. POSIX only: the embedded terminal panel needs
   job-control syscalls Windows doesn't provide.
@@ -770,6 +775,67 @@ Notes:
 - `env` values are secrets — ced shows only the **keys** in menu rows, so
   a screenshot of the picker never leaks a token.
 
+### 9. Skills (reusable instructions for your agent)
+
+A **skill** is a folder with a `SKILL.md` in it — a named, reusable set
+of instructions ("how to run this project's app", "how we use this
+library"). Claude Code and friends already keep them in `~/.claude/skills`
+and in `.claude/skills` inside a repo, and **ced reads those folders as
+they are**. Nothing to duplicate, nothing to convert.
+
+```
+~/.claude/skills/my-skill/SKILL.md      # personal — all your projects
+<project>/.claude/skills/my-skill/      # project — checked in beside the code
+~/.config/ced/skills/my-skill/          # ced's own, if you want a third place
+```
+
+A skill file is markdown with a small frontmatter block:
+
+```markdown
+---
+name: run-ced
+description: Launch the real binary and capture the screen. Use when
+  asked to run ced or confirm a UI change works in the real app.
+---
+
+# Running ced
+…the instructions…
+```
+
+**Using one:** **≡ → Skills → Use skill in chat…** lists everything found,
+with its scope and description:
+
+```
+btypedb-embedded-kv-store (user) — btypedb is an embedded, typed, ordered…
+run-ced (project) — Launch and drive the real ced binary to see what it…
+```
+
+Pick one and it attaches to your **next** chat message — the chat panel
+opens with a `▤ skill: run-ced` chip above the composer, so you can see
+what's about to go out (and drop it with `✕`). Type your question, press
+Enter, and the skill's instructions go with it, along with the path to
+the skill's own folder so an agent with file access can read the scripts
+and references sitting beside the markdown.
+
+Two more rows: **Open skill…** opens a `SKILL.md` in a tab (reading it is
+how you learn what it will actually tell the agent to do — and editing it
+is how you change that), and **Reload skills** rescans and reports what
+it found, which is where a file that failed to load says why.
+
+Notes:
+
+- **ced never runs a skill.** It's markdown handed to your chat agent —
+  the same as attaching a file, with a line saying "follow this".
+- **Per message, not sticky.** A skill applies to the turn you attach it
+  to. Attaching it to every message afterwards would re-send the whole
+  file each time, and you'd pay for it each time.
+- **Agent-agnostic.** Copilot, Claude Code, Gemini — whichever backend
+  the panel is running gets it.
+- **A project skill shadows a personal one of the same name**, so a repo
+  can override a habit of yours for the people working in it.
+- The pickers rescan every time you open them, so a skill you just wrote
+  is already in the list.
+
 ### Turning it off
 
 Every switch lives in the `≡ → Copilot` menu and persists to
@@ -788,6 +854,9 @@ Every switch lives in the `≡ → Copilot` menu and persists to
 
 MCP servers live in their own file (`~/.config/ced/mcp.json`) — delete an
 entry, or give it `"disabled": true`, to take it out of play.
+
+Skills have no switch: an empty skills folder means an empty list, and
+nothing about them runs until you pick one.
 
 The four toggles default to `"on"` — which costs nothing until you
 actually install a binary and sign in. Note that `"copilot": "off"` is a
@@ -873,6 +942,7 @@ nothing else: you get one warning, and the rest of the registry loads.
 │   ├── filetree/             # Lazy directory tree with identity-preserving refresh
 │   ├── lsp/                  # JSON-RPC client (gopls, Copilot sidecar, ACP chat, MCP)
 │   ├── mcp/                  # MCP inventory (mcp.json) + stdio client
+│   ├── skills/               # SKILL.md inventory (~/.claude/skills et al)
 │   ├── clipboard/            # OSC 52 clipboard with tmux passthrough
 │   ├── customactions/        # Loader for ~/.config/ced/actions.json
 │   ├── format/               # Format-on-save config + trust store

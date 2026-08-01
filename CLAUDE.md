@@ -71,6 +71,8 @@ internal/lsp/ndjson.go        StartNDJSON — generic ndjson process launcher (A
 internal/mcp/config.go        mcp.json inventory (Claude-Desktop shape): stdio/http/sse entries
 internal/mcp/client.go        MCP client: handshake, tools/list, tools/call, roots/list + ping
 internal/app/mcp.go           MCP state, ≡ server/tool pickers, and the chat-agent declaration
+internal/skills/skills.go     SKILL.md inventory: three dirs scanned, frontmatter, shadowing
+internal/app/skills.go        Skills state, ≡ pickers, skill → chat attachment + directive
 internal/editor/ghost.go      GhostText display form + the render-row splice overlay
 internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → autoSaveEvent)
 internal/app/zipops.go        Zip file/folder — stdlib archive/zip, async zipDoneEvent
@@ -83,7 +85,7 @@ internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PT
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, chat*, theme) + mcp.json / themes dir paths
+internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, chat*, theme) + mcp.json / themes / skills dir paths
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
 internal/theme/theme.go       Theme struct (tcell colors) + Default() fallback
 internal/theme/palette.go     Canonical color keys + the 8-core derivation table
@@ -547,6 +549,51 @@ House rules:
 - `Describe()` shows env KEYS, never values: picker rows end up in
   screenshots and bug reports.
 
+### Agent skills (internal/skills + app/skills.go)
+The folders of markdown instructions the coding-agent ecosystem keeps in
+`~/.claude/skills` and `<project>/.claude/skills`. ced reads those
+directories AS THEY ARE (plus `~/.config/ced/skills` for skills written
+for ced itself) — nobody should have to duplicate a folder to use it
+here. House rules:
+
+- **A skill is PUSHED, and only on purpose.** ced is not a model; it
+  can't read a description and decide a skill applies. So there is no
+  auto-selection and no skill index riding along on every prompt — the
+  user picks one from ≡ → Skills, it attaches, and it goes out with the
+  next message. That also keeps the cost visible: the chip is on screen
+  before Enter.
+- **Attachment, not a new mechanism.** A skill IS a `chatAttach`
+  (copilot_chat_context.go) carrying a `skill`/`skillDir` pair: same
+  chips, same ✕, same per-turn consumption, same size cap, same
+  embedded-resource / fenced-block wire formats. The additions are the
+  label (`skill: <name>` — a personal skill's path is outside the
+  project, so `relativePathFor` would render `../../` noise) and
+  `chatSkillDirective`, which leads the TEXT block because that is the
+  one part of the payload the agent reads in BOTH wire shapes. It says
+  the markdown is a procedure to follow and names the skill's DIRECTORY:
+  ced ships only the SKILL.md (a skill folder can run to megabytes), so
+  naming the directory is what keeps its scripts and references reachable
+  by an agent that has fs access.
+- **Agent-agnostic**, like MCP: whatever backend the panel is running
+  gets the skill. Not a Copilot feature, hence its own ≡ group.
+- **Nothing is executed.** A skill is markdown ced hands to an agent,
+  never a script ced runs. That's what keeps these directories on the
+  right side of the no-plugin-system line — same as themes being data.
+- **Precedence is ced < user < project, shadowing by name IN PLACE of a
+  second row** (the theme registry's rule): a checked-in skill overriding
+  a personal one is the whole reason to scan a project directory, and two
+  rows with one name in a picker is a bug report.
+- Frontmatter is parsed by hand (`parseFrontmatter`) — quoted scalars,
+  block scalars, wrapped continuations, nested structures skipped. Do NOT
+  add a YAML dependency for two string keys. A file with no frontmatter
+  still loads, named by its directory; only an unreadable file is an
+  error, and it costs that one skill.
+- Both pickers rescan first, so a skill written moments ago in ced is
+  already there — the theme feature's save-to-preview loop, minus the
+  save hook. `skillsUserDirFn` / `skillsCedDirFn` are package vars;
+  newTestApp pins them at temp dirs so no test reads the developer's real
+  skills.
+
 ### Git panel checkboxes + Actions (app/gitpanel.go + gitpanelactions.go)
 The panel's checkbox is a **multi-selection tick, not a stage toggle**.
 It used to stage/unstage on click, which capped the panel at exactly one
@@ -886,8 +933,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 66 group actions + 11 headers (79), height 85, dividers
-`[2, 5, 82]`.
+2 top-zone rows + 72 group actions + 12 headers (86), height 92, dividers
+`[2, 5, 89]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.
@@ -983,7 +1030,11 @@ loops forever.
   them add extension POINTS to the editor itself — that's still the
   line. Themes in particular are DATA, not code: a theme file can only
   set colors from a fixed key list, which is why it doesn't count as a
-  plugin system.)
+  plugin system. Skills sit on the same side of that line for a
+  different reason: ced never runs one. A SKILL.md is markdown handed
+  to the chat agent, so the skills directories — including the
+  `~/.claude/skills` and `<project>/.claude/skills` ced reads but
+  doesn't own — extend the AGENT, not the editor.)
 - CGO dependencies. The whole point is one static binary.
 - Tree-sitter. We use Chroma intentionally — pure Go, no setup.
 - A separate `homebrew-tap` repo. The formula lives here under

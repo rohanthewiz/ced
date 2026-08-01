@@ -36,6 +36,7 @@ func (t *Tab) DuplicateLines() {
 	if t.IsImage() {
 		return
 	}
+	t.dropCaretsForLineOp()
 	first, last := t.selectedLineRange()
 	t.pushUndo(undoGroupStructural)
 
@@ -65,6 +66,7 @@ func (t *Tab) MoveLines(delta int) bool {
 	if t.IsImage() || (delta != -1 && delta != 1) {
 		return false
 	}
+	t.dropCaretsForLineOp()
 	first, last := t.selectedLineRange()
 	if delta < 0 && first == 0 {
 		return false

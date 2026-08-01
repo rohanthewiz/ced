@@ -111,6 +111,15 @@ type Config struct {
 	// ≡ view toggle, same as AutoSave.
 	ExecMarks bool
 
+	// WordHL controls whether the editor tints the other visible
+	// instances of the word under the cursor. Defaults to on — reading
+	// code is the editor's primary job and "where else is this used"
+	// is the question you ask most while doing it. Off is here because
+	// the wash is ambient decoration nobody asked for, which is
+	// precisely the kind of thing a subset of users find noisy.
+	// Persisted by the ≡ view toggle, same as ExecMarks.
+	WordHL bool
+
 	// Copilot controls whether the editor runs the GitHub Copilot
 	// sidecar (copilot-language-server). Defaults to on because the
 	// binary is only ever spawned when the user has installed it —
@@ -178,7 +187,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, ExecMarks: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true}
+	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -192,6 +201,7 @@ type fileFormat struct {
 	AutoSave    string `json:"autosave,omitempty"`
 	TermDock    string `json:"termdock,omitempty"`
 	ExecMarks   string `json:"execmarks,omitempty"`
+	WordHL      string `json:"wordhl,omitempty"`
 	Copilot     string `json:"copilot,omitempty"`
 	Suggestions string `json:"suggestions,omitempty"`
 	ChatModel   string `json:"chatmodel,omitempty"`
@@ -367,6 +377,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(ff.WordHL)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.WordHL = true
+	case "off":
+		cfg.WordHL = false
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: wordhl must be \"on\" or \"off\" (got %q)",
+			path, ff.WordHL,
+		)
+	}
+
 	switch strings.ToLower(strings.TrimSpace(ff.Copilot)) {
 	case "":
 		// field omitted — keep default
@@ -456,6 +480,16 @@ func SaveExecMarks(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "execmarks", val)
+}
+
+// SaveWordHL persists the matching-word-highlight preference into the
+// config file at path. See saveKey for the round-trip guarantees.
+func SaveWordHL(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "wordhl", val)
 }
 
 // SaveCopilot persists the Copilot-sidecar preference into the config

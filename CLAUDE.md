@@ -58,6 +58,10 @@ internal/editor/buffer.go     Position + Buffer ([]string lines), edit primitive
 internal/editor/tab.go        Tab: path, buffer, cursor, anchor, scroll, dirty state
 internal/editor/highlight.go  Chroma → []tcell.Style per line
 internal/editor/decoration.go Span/GutterMark overlay system merged in Tab.Render
+internal/editor/multicaret.go Secondary carets + the bottom-up edit fan-out
+internal/editor/wordhl.go     Word scanner, occurrence matcher, word-highlight source
+internal/app/multicaret.go    Multi-caret UI: ≡ rows, Esc-m/M/*, Alt+click, status
+internal/app/wordhl.go        Word-highlight ≡ toggle + per-tab flag plumbing
 internal/lsp/client.go        Minimal JSON-RPC-over-stdio LSP client (stdlib only)
 internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition, hover
 internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
@@ -193,6 +197,91 @@ via `Tab.DecoSources`; built-ins (selection, find) run last so merge
 precedence is: syntax < external annotations < selection < find. The
 gutter mark column is the single cell at `x + gutterWidth`, between
 the line numbers and the code.
+
+### Multi-caret editing (editor/multicaret.go + app/multicaret.go)
+Extra editing points that type, delete, and move alongside the primary
+one. House rules:
+
+- **Primary + secondaries, NOT a list of equal carets.** `Tab.Cursor` /
+  `Tab.Anchor` stay exactly what they were — the caret the hardware
+  cursor sits on, the one `EnsureVisible` scrolls to, the one find,
+  ghost text, hover, line ops, and the status bar already read.
+  Secondaries live in `Tab.Carets`, empty in the common case. Don't
+  "clean this up" into one slice; every one of those features would
+  need to learn which entry is special.
+- **The fan-out reuses the single-caret primitives.** `applyAtCarets`
+  swaps each caret into Cursor/Anchor, runs the ORIGINAL code
+  (`insertRuneAt`, `backspaceAt`, …), and reads the position back —
+  which is why the exported methods are thin wrappers and the cores are
+  unexported. A core must never call an exported sibling: that
+  re-enters the fan-out and visits every caret once per caret.
+- **Bottom-up, always.** Carets are visited in descending document
+  order so an edit can only move text AFTER the carets still waiting.
+  Top-down invalidates every position below the first edit.
+- **One undo step per burst.** The fan-out pushes one structural
+  snapshot and sets `undoSuppress`; `pushUndo` returns early while it's
+  set. Nothing else may set that flag — an unbalanced true silently
+  disables undo. Undo/redo then DROP the carets (`applySnapshot`),
+  because their positions were measured against a buffer that's gone.
+- **Explicit jumps drop the carets**: `MoveCursorTo` (click, definition
+  jump, nav history), `FocusCurrentMatch`, `SelectAll`, `Reload`. Arrow
+  keys and Home/End do the opposite and move ALL of them — that's how a
+  column gets lined up ("place carets, press End, type"). Alt+click adds
+  a caret and deliberately starts no drag.
+- **Secondary carets are PAINTED, not decorated** (`paintCarets`, called
+  per row from Render). A caret is a zero-width position; the one at
+  end-of-line has no cell for a Span to cover, and end-of-line is
+  exactly where a column lands after End. Same exception shape as ghost
+  text. Their SELECTIONS are decorations, though — `selectionSource`
+  iterates `AllCarets`.
+- **New carets are promoted to primary** (`promoteCaret`) so the
+  viewport follows what the user just created, and "the primary is the
+  last caret you placed" stays true. `caretGoalCol` (the widest caret's
+  column) is what keeps a column from walking left across short lines —
+  don't replace it with `Cursor.Col`, that's the drift bug.
+- **Whole-line gestures collapse the set** (`dropCaretsForLineOp` in
+  DuplicateLines / MoveLines / ToggleLineComment). Two of them change
+  the line count or order, so surviving carets would point at the wrong
+  line; fanning them out isn't the fix either (two carets on one line
+  would duplicate it twice).
+- Leaders: Esc-m below, Esc-M above, Esc-* next occurrence, all
+  repeatable. Esc clears carets as a SIDE EFFECT (like the ghost and the
+  chat highlight) — it must not consume the keystroke.
+
+### Matching word highlight (editor/wordhl.go + app/wordhl.go)
+Every other visible instance of the word under the cursor, tinted.
+House rules:
+
+- **A DecorationSource, running FIRST** among the built-ins, so
+  selection and find always paint over it. Subordinate in PRECEDENCE,
+  not in weight — the first cut derived `word-highlight` as a quiet 18%
+  accent wash "because it's ambient", and it was invisible on an
+  ordinary terminal. The key is now a NEUTRAL box (26% fg over bg) plus
+  bold on the span. Neutral is load-bearing: `selection` is also an
+  accent wash, so any accent tint strong enough to see read as "I
+  selected that". Keep the blue fill exclusive to the selection, and
+  keep the bold — a background step alone is at the mercy of the
+  terminal's contrast.
+- **Window-scoped by design.** Find caches its match list against a
+  query; the word under the cursor changes on every caret move, so
+  there's nothing to cache and the scan runs inside the frame.
+  Scanning `[firstLine, lastLine]` keeps that proportional to the
+  screen. The tradeoff (a match scrolled off-screen doesn't light its
+  on-screen twin) is deliberate — don't "fix" it with a whole-buffer
+  scan per frame.
+- **Case-sensitive, whole-word from a bare cursor** (unlike find, which
+  is a reading tool). `caretQuery` decides whole-word from what the
+  RANGE is, not from which branch found it — a selection that exactly
+  spans an identifier matches whole-word. That's what keeps Esc-* from
+  widening `count` to `counter` after its first press turns the word
+  into a selection.
+- **Quiet unless it has something to say**: a lone on-screen match, a
+  caret in punctuation, a one-rune selection, and multi-caret mode all
+  produce nothing.
+- `MatchOccurrences` and `WordRange` are shared with multicaret.go —
+  one scanner, two consumers. `Tab.WordHighlight` gates it per tab
+  because sources are asked per-tab; `App.wordHLEnabled` is the
+  authoritative copy and `applyWordHighlight` the single write path.
 
 ### LSP integration (internal/lsp + app/lsp.go)
 The client is a hand-rolled JSON-RPC subset — do NOT add an LSP
@@ -974,8 +1063,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 72 group actions + 12 headers (86), height 92, dividers
-`[2, 5, 89]`.
+2 top-zone rows + 78 group actions + 12 headers (92), height 98, dividers
+`[2, 5, 95]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.

@@ -97,6 +97,16 @@ func derivations() []derivation {
 		{"find-match", func(p Palette) string { return mix(p["bg"], p["warn"], 0.38) }},
 		{"find-current", func(p Palette) string { return p["warn"] }},
 
+		// The word-under-cursor highlight is a NEUTRAL box — the text
+		// color washed over the background, not the accent. Two reasons,
+		// both learned the hard way: an accent wash quiet enough to read
+		// as "ambient" was invisible at normal terminal contrast, and one
+		// strong enough to see was a near-twin of `selection` (also an
+		// accent wash), so a highlight looked like something the user had
+		// selected. Going neutral buys visibility without that collision
+		// — the selection stays the only blue fill in the editor body.
+		{"word-highlight", func(p Palette) string { return mix(p["bg"], p["fg"], 0.26) }},
+
 		// Git gutter — the near-universal green / blue / red convention,
 		// expressed in the theme's own three signal colors.
 		{"git-added", func(p Palette) string { return p["ok"] }},
@@ -226,6 +236,8 @@ func ToTheme(p Palette) Theme {
 
 		FindMatch:   c("find-match"),
 		FindCurrent: c("find-current"),
+
+		WordHL: c("word-highlight"),
 
 		GitAdded:    c("git-added"),
 		GitModified: c("git-modified"),

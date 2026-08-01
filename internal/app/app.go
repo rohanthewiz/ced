@@ -212,6 +212,7 @@ func builtinMenuGroups() []menuGroup {
 		{title: "View", collapsible: true, items: []menuItemDef{
 			{shortcut: "esc t", action: (*App).menuToggleSidebar, enabled: alwaysTrue, labelFor: (*App).sidebarToggleLabel},
 			{action: (*App).menuToggleExecMarks, enabled: alwaysTrue, labelFor: (*App).execMarksToggleLabel},
+			{action: (*App).menuToggleWordHighlight, enabled: alwaysTrue, labelFor: (*App).wordHighlightToggleLabel},
 			{shortcut: "esc `", action: (*App).menuToggleTerminal, enabled: alwaysTrue, labelFor: (*App).termToggleLabel},
 			{action: (*App).menuToggleTermDock, enabled: alwaysTrue, labelFor: (*App).termDockToggleLabel},
 			// Color themes (theme.go). They live in View rather than in a
@@ -349,6 +350,15 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Duplicate line", shortcut: "ctrl+d", action: (*App).menuDuplicateLines, enabled: (*App).hasEditableTab},
 			{label: "Move line up", shortcut: "alt+↑", action: (*App).menuMoveLinesUp, enabled: (*App).hasEditableTab},
 			{label: "Move line down", shortcut: "alt+↓", action: (*App).menuMoveLinesDown, enabled: (*App).hasEditableTab},
+			// Multi-line editing (multicaret.go). The mouse gesture is
+			// Alt+click, which has no menu row it could be — these are
+			// the keyboard paths, and the Clear row is the way back for
+			// anyone who got here by accident.
+			{label: "Add caret below", shortcut: "esc m", action: (*App).menuAddCaretBelow, enabled: (*App).hasEditableTab},
+			{label: "Add caret above", shortcut: "esc M", action: (*App).menuAddCaretAbove, enabled: (*App).hasEditableTab},
+			{label: "Add next occurrence", shortcut: "esc *", action: (*App).menuAddNextOccurrence, enabled: (*App).hasMultiCaretTarget},
+			{label: "Select all occurrences", action: (*App).menuSelectAllOccurrences, enabled: (*App).hasMultiCaretTarget},
+			{label: "Clear extra carets", shortcut: "esc", action: (*App).menuClearCarets, enabled: (*App).hasCarets},
 		}},
 		{title: "Quit", collapsible: false, items: []menuItemDef{
 			{label: "Quit editor", shortcut: "esc q", action: (*App).menuQuit, enabled: alwaysTrue},
@@ -584,6 +594,12 @@ type App struct {
 	// sidebarShown controls whether the file explorer panel is visible.
 	// When false the editor and tab bar fill the whole window.
 	sidebarShown bool
+
+	// wordHLEnabled mirrors the persisted matching-word-highlight
+	// preference (≡ View toggle, default on). The authoritative copy —
+	// every open tab carries its own flag for the decoration source to
+	// read, kept in step by applyWordHighlight. See wordhl.go.
+	wordHLEnabled bool
 
 	// termDockLeft selects the alternate layout: the terminal panel
 	// docks as a vertical strip on the LEFT edge and the file tree
@@ -907,6 +923,8 @@ func (a *App) loadUserConfig() {
 		a.tree.ExecMarks = cfg.ExecMarks
 	}
 	a.autoSaveEnabled = cfg.AutoSave
+	a.wordHLEnabled = cfg.WordHL
+	a.applyWordHighlight() // no-op at startup; matters when the config is re-read
 	a.termDockLeft = cfg.TermDock == userconfig.TermDockLeft
 	a.copilot.enabled = cfg.Copilot
 	a.copilot.suggest = cfg.Suggestions
@@ -1617,6 +1635,10 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// universal "drop that" gesture, and a stale highlight sitting
 		// in the panel has no other way out.
 		a.chatClearSelection()
+		// …and for a column of extra carets. Also a side effect: the
+		// menu / leader behavior below still runs, so Esc-Esc opens the
+		// menu and Esc-s saves whether or not carets were dropped.
+		a.clearCarets()
 		// A real Esc always re-opens the full leader table — chain mode
 		// (repeatable-only) is an artifact of the previous action. Note
 		// whether the window was chain-armed before clearing: a chained
@@ -2082,6 +2104,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		case a.gitLog.open && a.gitLogContains(x, y):
 			a.dragMode = a.gitLogPress(x, y)
 		case y > 0 && y < a.height-1:
+			// Alt+click drops (or lifts) an extra caret instead of
+			// moving the one you have — the multi-line editing gesture.
+			// It deliberately starts no drag: the press placed a caret,
+			// and a stray mouse wiggle afterwards must not turn that
+			// into a selection that wipes the whole caret set.
+			if ev.Modifiers()&tcell.ModAlt != 0 && a.editorAltPress(x, y) {
+				return
+			}
 			a.editorPress(x, y)
 			a.dragMode = "editor"
 		}
@@ -2504,6 +2534,9 @@ func (a *App) openFile(path string) {
 	// The diagnostics source registers after git so on a line that is
 	// both changed and broken, the diagnostic dot wins the mark cell.
 	t.DecoSources = append(t.DecoSources, gitDiffSource{app: a}, lspDiagSource{app: a})
+	// The matching-word highlight is a built-in source gated by a per-tab
+	// flag, so the preference has to ride along at open time (wordhl.go).
+	t.WordHighlight = a.wordHLEnabled
 	a.requestFileDiff(path)
 	a.tabs = append(a.tabs, t)
 	a.activeTab = len(a.tabs) - 1
@@ -3425,9 +3458,9 @@ func (a *App) drawStatusBar() {
 			if tab.Dirty {
 				dirty = " · ●"
 			}
-			left = fmt.Sprintf(" %s · Ln %d, Col %d · %d lines%s%s",
+			left = fmt.Sprintf(" %s · Ln %d, Col %d · %d lines%s%s%s",
 				lang, tab.Cursor.Line+1, tab.Cursor.Col+1, tab.Buffer.LineCount(), dirty,
-				a.diagStatusSuffix())
+				a.caretStatusSuffix(), a.diagStatusSuffix())
 		}
 	} else {
 		left = " " + filepath.Base(a.rootDir)

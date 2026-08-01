@@ -85,6 +85,11 @@ func (t *Tab) applySnapshot(s snapshot) {
 	t.Buffer.Lines = lines
 	t.Cursor = s.Cursor
 	t.Anchor = s.Anchor
+	// Secondary carets were positioned against a buffer state we just
+	// threw away — keeping them would leave the next keystroke editing a
+	// line that has moved. The primary is restored from the snapshot, so
+	// the user still lands where the step happened.
+	t.Carets = nil
 	t.cursorMoved = true
 	t.StyleStale = true
 	t.EditRev++
@@ -106,6 +111,13 @@ func (t *Tab) initUndo() {
 // no-op, while undoGroupStructural always creates a new entry. Any new
 // edit invalidates the redo stack.
 func (t *Tab) pushUndo(group undoGroup) {
+	// A multi-caret fan-out already filed one snapshot for the whole
+	// burst (applyAtCarets); the per-caret primitives running inside it
+	// must not each file another, or undoing a five-caret keystroke
+	// would take five presses.
+	if t.undoSuppress {
+		return
+	}
 	if t.canCoalesce(group) {
 		t.lastUndoAt = time.Now() // extend the window
 		return

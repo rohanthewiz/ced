@@ -102,6 +102,50 @@ func TestNormalize_KeywordsAndFunctionsDiffer(t *testing.T) {
 	}
 }
 
+// TestNormalize_WordHighlightIsVisibleAndNotTheSelection pins the two
+// properties the derivation was rewritten to guarantee, both of which
+// the first cut failed. It has to stand off the background hard enough
+// to SEE on an ordinary terminal (an 18% accent wash didn't), and it has
+// to stay well away from the selection color (a wash strong enough to
+// see was a near-twin of it, so a highlight looked selected).
+func TestNormalize_WordHighlightIsVisibleAndNotTheSelection(t *testing.T) {
+	got, err := Normalize(minimal())
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	dist := func(a, b string) int {
+		ar, ag, ab := rgb(a)
+		br, bg, bb := rgb(b)
+		return abs(ar-br) + abs(ag-bg) + abs(ab-bb)
+	}
+	if d := dist(got["word-highlight"], got["bg"]); d < 90 {
+		t.Errorf("word-highlight %s is only %d from bg %s — too faint to notice",
+			got["word-highlight"], d, got["bg"])
+	}
+	// "Different from the selection" is about HUE, not channel distance:
+	// the two land at similar brightness by design. What separates them
+	// is that the selection is chromatic (an accent wash) and the
+	// highlight is neutral, which is exactly what channel spread
+	// measures.
+	spread := func(hex string) int {
+		r, g, b := rgb(hex)
+		lo, hi := r, r
+		for _, v := range []int{g, b} {
+			if v < lo {
+				lo = v
+			}
+			if v > hi {
+				hi = v
+			}
+		}
+		return hi - lo
+	}
+	if spread(got["word-highlight"]) >= spread(got["selection"]) {
+		t.Errorf("word-highlight %s is no more neutral than selection %s — a highlight would read as a selection",
+			got["word-highlight"], got["selection"])
+	}
+}
+
 // abs is the integer absolute value used by the channel-distance check.
 func abs(v int) int {
 	if v < 0 {

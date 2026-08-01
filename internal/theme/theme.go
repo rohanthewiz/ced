@@ -59,6 +59,14 @@ type Theme struct {
 	FindMatch   tcell.Color
 	FindCurrent tcell.Color
 
+	// WordHL boxes every other instance of the word under the cursor
+	// (wordhl.go). Deliberately NEUTRAL rather than accent-tinted:
+	// Selection is the editor body's only blue fill, so a highlight can
+	// never be mistaken for something the user selected. It still loses
+	// every overlap to Selection — that's decoration precedence, not
+	// color weight.
+	WordHL tcell.Color
+
 	// Git gutter marks (the mark column between line numbers and code).
 	// Follows the near-universal editor convention: green = added,
 	// blue = modified, red = deleted — users read these without a key.
@@ -124,6 +132,11 @@ func Default() Theme {
 		// so the active match jumps off the page.
 		FindMatch:   tcell.NewRGBColor(0x6f, 0x52, 0x1f),
 		FindCurrent: tcell.NewRGBColor(0xe8, 0x98, 0x38),
+
+		// Word highlight — a NEUTRAL box (26% text over background), not
+		// an accent wash. That's what keeps it visible without looking
+		// like the (blue) selection. See palette.go's derivation.
+		WordHL: tcell.NewRGBColor(0x45, 0x49, 0x5c),
 
 		// Git gutter — the standard Tokyo Night green / blue / red.
 		GitAdded:    tcell.NewRGBColor(0x9e, 0xce, 0x6a),

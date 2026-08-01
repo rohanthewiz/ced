@@ -133,6 +133,9 @@ func (t *Tab) FocusCurrentMatch() {
 	m := t.FindMatches[t.FindIndex]
 	t.Cursor = MatchPosition(m)
 	t.Anchor = t.Cursor
+	// Jumping to a hit is an explicit navigation, so it drops secondary
+	// carets for the same reason MoveCursorTo does.
+	t.Carets = nil
 	t.cursorMoved = true
 }
 

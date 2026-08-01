@@ -432,6 +432,75 @@ func TestLoadExecMarksValues(t *testing.T) {
 	}
 }
 
+// TestDefaultsWordHLOn pins the documented default: the matching-word
+// highlight is on unless the user opts out. Flipping this silently would
+// change what the editor body looks like for everyone with no config.
+func TestDefaultsWordHLOn(t *testing.T) {
+	if !Defaults().WordHL {
+		t.Fatal("Defaults().WordHL = false, want true")
+	}
+}
+
+// TestLoadWordHLValues exercises the recognised wordhl values and the
+// absent-field default, mirroring the execmarks table.
+func TestLoadWordHLValues(t *testing.T) {
+	cases := map[string]bool{
+		`{"wordhl":"on"}`:    true,
+		`{"wordhl":"off"}`:   false,
+		`{"wordhl":" OFF "}`: false, // case/whitespace tolerant
+		`{}`:                 true,  // omitted field keeps the default
+	}
+	for body, want := range cases {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", body, err)
+		}
+		if cfg.WordHL != want {
+			t.Errorf("Load(%s).WordHL = %v, want %v", body, cfg.WordHL, want)
+		}
+	}
+}
+
+// TestSaveWordHL_RoundTripsAndPreserves makes the same unknown-key
+// guarantee for the new key that every other Save* helper makes.
+func TestSaveWordHL_RoundTripsAndPreserves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"icons\": \"on\",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveWordHL(path, false); err != nil {
+		t.Fatalf("SaveWordHL: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.WordHL || cfg.Icons != IconsOn {
+		t.Fatalf("round trip lost values: wordhl=%v icons=%q", cfg.WordHL, cfg.Icons)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}
+
+// TestLoadWordHLInvalid mirrors the execmarks rule: a typo'd value is an
+// error the caller can flash, not a silent fallback.
+func TestLoadWordHLInvalid(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"wordhl":"maybe"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("invalid wordhl value should error")
+	}
+}
+
 // TestLoadExecMarksInvalid mirrors the icons/autosave rule: a typo'd
 // value is an error the caller can flash, not a silent fallback.
 func TestLoadExecMarksInvalid(t *testing.T) {

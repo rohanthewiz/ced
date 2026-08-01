@@ -108,6 +108,26 @@ type Tab struct {
 	// display form here and clears it on any invalidating event; the
 	// Tab only paints it (see ghost.go for the splice mechanism).
 	Ghost *GhostText
+
+	// Carets holds the SECONDARY editing points for multi-line editing;
+	// the primary one is Cursor/Anchor above. Empty (the common case)
+	// means every edit primitive runs its plain single-caret path. See
+	// multicaret.go for the fan-out and for why the primary isn't just
+	// another entry in this slice.
+	Carets []Caret
+
+	// WordHighlight gates the "tint every other instance of the word
+	// under the cursor" decoration (wordhl.go). Set from the user
+	// config when the tab is opened, and by the ≡ toggle across every
+	// open tab — it lives per-tab because DecorationSources are asked
+	// per-tab and have no route back to the App.
+	WordHighlight bool
+
+	// undoSuppress is set while a multi-caret fan-out is in flight so
+	// the per-caret primitives don't each file their own undo entry —
+	// applyAtCarets pushes one snapshot for the whole burst. Nothing
+	// else may set it: an unbalanced true silently disables undo.
+	undoSuppress bool
 }
 
 // NewTab opens path and returns a Tab. If the file does not exist, the tab
@@ -252,6 +272,7 @@ func (t *Tab) Reload() error {
 	t.Buffer = NewBuffer(string(data))
 	t.Cursor = t.Buffer.Clamp(t.Cursor)
 	t.Anchor = t.Cursor // drop any selection — line indices may have shifted.
+	t.Carets = nil      // …and with them every secondary caret, for the same reason.
 	t.Dirty = false
 	t.DiskGone = false
 	t.Mtime = info.ModTime()
@@ -272,17 +293,31 @@ func (t *Tab) HasSelection() bool {
 }
 
 // SelectionText returns the currently selected text, or "" if nothing is
-// selected. The text is always returned in document order.
+// selected. The text is always returned in document order. With
+// secondary carets active every caret's selection is included, joined by
+// newlines — copying a column of matches should yield the column.
 func (t *Tab) SelectionText() string {
+	if t.HasCarets() {
+		return t.CaretText()
+	}
 	if !t.HasSelection() {
 		return ""
 	}
 	return t.Buffer.Substring(t.Anchor, t.Cursor)
 }
 
-// DeleteSelection removes the selected range and collapses the cursor to the
-// start of the selection. A no-op when nothing is selected.
+// DeleteSelection removes the selected range at every caret and
+// collapses each cursor to the start of its selection. A no-op where
+// nothing is selected.
 func (t *Tab) DeleteSelection() {
+	t.applyAtCarets(true, t.deleteSelectionAt)
+}
+
+// deleteSelectionAt is the single-caret core of DeleteSelection. The
+// other primitives call THIS rather than the exported wrapper — they're
+// already running inside a fan-out, and re-entering it would visit every
+// caret once per caret.
+func (t *Tab) deleteSelectionAt() {
 	if t.IsImage() || !t.HasSelection() {
 		return
 	}
@@ -300,19 +335,24 @@ func (t *Tab) DeleteSelection() {
 	t.EditRev++
 }
 
-// InsertString inserts s at the cursor (replacing any selection first) and
-// advances the cursor past the inserted text. Always recorded as a
+// InsertString inserts s at every caret (replacing any selection first)
+// and advances each cursor past the inserted text. Always recorded as a
 // structural undo step — pasted text or "\n" presses shouldn't merge
 // with the surrounding typing burst. No-op on image tabs.
 func (t *Tab) InsertString(s string) {
+	t.applyAtCarets(true, func() { t.insertStringAt(s) })
+}
+
+// insertStringAt is the single-caret core of InsertString.
+func (t *Tab) insertStringAt(s string) {
 	if t.IsImage() {
 		return
 	}
 	if t.HasSelection() {
-		// DeleteSelection records its own structural step. Don't push a
+		// deleteSelectionAt records its own structural step. Don't push a
 		// second one here or the user would have to undo twice to get
 		// back to the pre-paste-with-selection state.
-		t.DeleteSelection()
+		t.deleteSelectionAt()
 	} else {
 		t.pushUndo(undoGroupStructural)
 	}
@@ -324,18 +364,23 @@ func (t *Tab) InsertString(s string) {
 	t.EditRev++
 }
 
-// InsertRune inserts a single typed character at the cursor. Coalesces
+// InsertRune inserts a single typed character at every caret. Coalesces
 // with adjacent runes inside the undo window so a typed word collapses
 // into a single undo step rather than one entry per keystroke. No-op
 // on image tabs.
 func (t *Tab) InsertRune(r rune) {
+	t.applyAtCarets(true, func() { t.insertRuneAt(r) })
+}
+
+// insertRuneAt is the single-caret core of InsertRune.
+func (t *Tab) insertRuneAt(r rune) {
 	if t.IsImage() {
 		return
 	}
 	if t.HasSelection() {
-		// First-rune-after-selection: let DeleteSelection capture the
+		// First-rune-after-selection: let deleteSelectionAt capture the
 		// pre-state, then run the insert without a second push.
-		t.DeleteSelection()
+		t.deleteSelectionAt()
 	} else {
 		t.pushUndo(undoGroupTyping)
 	}
@@ -347,15 +392,20 @@ func (t *Tab) InsertRune(r rune) {
 	t.EditRev++
 }
 
-// Backspace deletes the character before the cursor (or the selection if any).
-// Coalesces with adjacent backspaces inside the undo window. No-op on
-// image tabs.
+// Backspace deletes the character before every caret (or its selection
+// if any). Coalesces with adjacent backspaces inside the undo window.
+// No-op on image tabs.
 func (t *Tab) Backspace() {
+	t.applyAtCarets(true, t.backspaceAt)
+}
+
+// backspaceAt is the single-caret core of Backspace.
+func (t *Tab) backspaceAt() {
 	if t.IsImage() {
 		return
 	}
 	if t.HasSelection() {
-		t.DeleteSelection()
+		t.deleteSelectionAt()
 		return
 	}
 	if t.Cursor.Line == 0 && t.Cursor.Col == 0 {
@@ -377,15 +427,20 @@ func (t *Tab) Backspace() {
 	t.EditRev++
 }
 
-// Delete removes the character after the cursor (or the selection if any).
-// Coalesces with adjacent forward-deletes inside the undo window. No-op
-// on image tabs.
+// Delete removes the character after every caret (or its selection if
+// any). Coalesces with adjacent forward-deletes inside the undo window.
+// No-op on image tabs.
 func (t *Tab) Delete() {
+	t.applyAtCarets(true, t.deleteAt)
+}
+
+// deleteAt is the single-caret core of Delete.
+func (t *Tab) deleteAt() {
 	if t.IsImage() {
 		return
 	}
 	if t.HasSelection() {
-		t.DeleteSelection()
+		t.deleteSelectionAt()
 		return
 	}
 	end := t.Buffer.EndPos()
@@ -408,9 +463,16 @@ func (t *Tab) Delete() {
 	t.EditRev++
 }
 
-// MoveCursor shifts the cursor by (dLine, dCol). When extend is true the
-// anchor is left in place so the user is extending a selection.
+// MoveCursor shifts every caret by (dLine, dCol). When extend is true
+// the anchors are left in place so the user is extending a selection.
+// Arrow keys move the whole caret set on purpose — placing carets and
+// then pressing End is how a column of edits gets lined up.
 func (t *Tab) MoveCursor(dLine, dCol int, extend bool) {
+	t.applyAtCarets(false, func() { t.moveCursorAt(dLine, dCol, extend) })
+}
+
+// moveCursorAt is the single-caret core of MoveCursor.
+func (t *Tab) moveCursorAt(dLine, dCol int, extend bool) {
 	cur := t.Cursor
 	if dLine != 0 {
 		cur.Line += dLine
@@ -459,7 +521,14 @@ func (t *Tab) MoveCursor(dLine, dCol int, extend bool) {
 
 // MoveCursorTo sets the cursor to a specific buffer position. Position is
 // clamped within the buffer; extend=true preserves the selection anchor.
+//
+// Any explicit jump — a click, a find hit, a definition jump — DROPS the
+// secondary carets. The user pointed at one place; leaving carets behind
+// somewhere off-screen would make the next keystroke edit text they
+// aren't looking at. Alt+click, which adds a caret instead of moving to
+// one, goes through AddCaretAt and never reaches here.
 func (t *Tab) MoveCursorTo(p Position, extend bool) {
+	t.Carets = nil
 	p = t.Buffer.Clamp(p)
 	t.Cursor = p
 	if !extend {
@@ -469,28 +538,38 @@ func (t *Tab) MoveCursorTo(p Position, extend bool) {
 	t.breakUndoGroup()
 }
 
-// MoveLineHome moves the cursor to column 0 of the current line.
+// MoveLineHome moves every caret to column 0 of its own line.
 func (t *Tab) MoveLineHome(extend bool) {
-	t.Cursor.Col = 0
-	if !extend {
-		t.Anchor = t.Cursor
-	}
-	t.cursorMoved = true
-	t.breakUndoGroup()
+	t.applyAtCarets(false, func() {
+		t.Cursor.Col = 0
+		if !extend {
+			t.Anchor = t.Cursor
+		}
+		t.cursorMoved = true
+		t.breakUndoGroup()
+	})
 }
 
-// MoveLineEnd moves the cursor to the last column of the current line.
+// MoveLineEnd moves every caret to the last column of its own line —
+// the gesture that turns a column of carets into "append to each of
+// these lines".
 func (t *Tab) MoveLineEnd(extend bool) {
-	t.Cursor.Col = len([]rune(t.Buffer.Lines[t.Cursor.Line]))
-	if !extend {
-		t.Anchor = t.Cursor
-	}
-	t.cursorMoved = true
-	t.breakUndoGroup()
+	t.applyAtCarets(false, func() {
+		t.Cursor.Col = len([]rune(t.Buffer.Lines[t.Cursor.Line]))
+		if !extend {
+			t.Anchor = t.Cursor
+		}
+		t.cursorMoved = true
+		t.breakUndoGroup()
+	})
 }
 
 // SelectAll selects the entire buffer (anchor at start, cursor at end).
+// Secondary carets are dropped — one selection spanning everything is
+// what the user asked for, and extra carets inside it would each edit
+// the same range.
 func (t *Tab) SelectAll() {
+	t.Carets = nil
 	t.Anchor = Position{Line: 0, Col: 0}
 	t.Cursor = t.Buffer.EndPos()
 	t.cursorMoved = true
@@ -699,6 +778,13 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		if visualCol-scrollVisual > contentW {
 			scr.SetContent(contentX+contentW-1, cy, '›', nil, overflowStyle)
 		}
+
+		// Secondary carets sitting on this row. Painted here rather than
+		// emitted as decoration spans because a caret is a zero-width
+		// POSITION: the one at the end of a line has no cell for a Span
+		// to cover, and end-of-line is exactly where a column of carets
+		// lands after Home/End. See multicaret.go.
+		t.paintCarets(scr, th, lineIdx, cy, contentX, contentW, lineBg)
 	}
 
 	// Position the hardware cursor at its visual column (so a cursor

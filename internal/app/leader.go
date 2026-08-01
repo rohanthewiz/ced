@@ -104,6 +104,16 @@ func leaderBindings() []leaderBinding {
 		// model and backend pickers, skills, and MCP tools.
 		{key: 'a', sub: aiLeaderBindings(),
 			hint: "AI  c chat · s skills · a attach · f file · m model · b backend · t tools"},
+		// Multi-line editing (multicaret.go). 'm' grows the caret column
+		// downward, 'M' upward — the same "shift means the other
+		// direction" convention as h/H and o/O. Both repeat, so
+		// "Esc m m m" builds a four-line column in one gesture.
+		{key: 'm', action: (*App).menuAddCaretBelow, repeat: true},
+		{key: 'M', action: (*App).menuAddCaretAbove, repeat: true},
+		// '*' is vim's word-under-cursor key, which is the muscle memory
+		// this actually competes with — VS Code's Cmd+D never reaches a
+		// terminal app. Repeats, so "Esc * * *" claims three occurrences.
+		{key: '*', action: (*App).menuAddNextOccurrence, repeat: true},
 		// 'h' for "hunk" — jump between git-changed regions. Shifted
 		// variant walks backwards, mirroring find's Enter/Shift-Enter.
 		{key: 'h', action: (*App).menuNextHunk, repeat: true},

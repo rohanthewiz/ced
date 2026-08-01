@@ -104,6 +104,7 @@ func (t *Tab) ToggleLineComment() (changed bool, ok bool) {
 	if !ok {
 		return false, false
 	}
+	t.dropCaretsForLineOp()
 	start, end := t.commentLineRange()
 	if !hasNonBlankLine(t.Buffer.Lines, start, end) {
 		return false, true

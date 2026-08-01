@@ -129,9 +129,12 @@ type DecorationSource interface {
 func (t *Tab) collectDecorations(th theme.Theme, firstLine, lastLine int) ([]Span, []GutterMark) {
 	var spans []Span
 	var marks []GutterMark
-	sources := make([]DecorationSource, 0, len(t.DecoSources)+2)
+	sources := make([]DecorationSource, 0, len(t.DecoSources)+3)
 	sources = append(sources, t.DecoSources...)
-	sources = append(sources, selectionSource{}, findSource{})
+	// The word highlight is ambient — it answers a question the user
+	// didn't ask — so it runs ahead of both interaction built-ins and
+	// loses every overlap to them.
+	sources = append(sources, wordHighlightSource{}, selectionSource{}, findSource{})
 	for _, src := range sources {
 		s, m := src.Decorations(t, th, firstLine, lastLine)
 		spans = append(spans, s...)
@@ -148,21 +151,30 @@ func (t *Tab) collectDecorations(th theme.Theme, firstLine, lastLine int) ([]Spa
 // selectionSource emits one span covering the active selection.
 type selectionSource struct{}
 
-// Decorations returns the selection as a single background span, or
-// nothing when no selection is active or it lies entirely off-screen.
+// Decorations returns one background span per caret's selection, culled
+// to the visible window. Iterating AllCarets rather than just the
+// primary is what makes a multi-caret "select next occurrence" show all
+// of its matches — each caret carries its own anchor.
 func (selectionSource) Decorations(t *Tab, th theme.Theme, firstLine, lastLine int) ([]Span, []GutterMark) {
-	if !t.HasSelection() {
+	if !t.HasSelection() && !t.HasCarets() {
 		return nil, nil
 	}
-	start, end := PosOrdered(t.Anchor, t.Cursor)
-	if end.Line < firstLine || start.Line > lastLine {
-		return nil, nil
+	var spans []Span
+	for _, c := range t.AllCarets() {
+		if !c.HasSelection() {
+			continue
+		}
+		start, end := PosOrdered(c.Anchor, c.Cursor)
+		if end.Line < firstLine || start.Line > lastLine {
+			continue
+		}
+		spans = append(spans, Span{
+			Start: start,
+			End:   end,
+			Delta: StyleDelta{SetBG: true, BG: th.Selection},
+		})
 	}
-	return []Span{{
-		Start: start,
-		End:   end,
-		Delta: StyleDelta{SetBG: true, BG: th.Selection},
-	}}, nil
+	return spans, nil
 }
 
 // findSource emits one span per visible find match. The current match

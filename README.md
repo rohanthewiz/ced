@@ -187,6 +187,8 @@ Then:
 - Drag the splitter between the sidebar and editor to resize.
 - Click and drag in the editor to select; drag past the top or bottom
   edge to auto-scroll the selection.
+- **Alt+click** in the editor drops an extra caret instead of moving the
+  one you have — see [Multi-line editing](#multi-line-editing).
 
 ### Hotkeys
 
@@ -209,6 +211,9 @@ within half a second tap one of the letters below.
 | `Esc f`     | Find in file         |
 | `Esc p`     | Find file in project |
 | `Esc k`     | Command palette      |
+| `Esc m`     | Add caret below      |
+| `Esc M`     | Add caret above      |
+| `Esc *`     | Add next occurrence  |
 
 A lone `Esc` is harmless — if you don't follow it with a bound key
 within the window, your next keystroke goes to the editor as normal,
@@ -235,6 +240,51 @@ half-typed chord.
 
 Everything reachable by hotkey is also reachable from the `≡` menu —
 the hotkeys are just a faster path for the actions you reach for most.
+
+### Multi-line editing
+
+Several carets, one keystroke. Build a column with `Esc m` (add a caret
+below) and `Esc M` (above), or **Alt+click** anywhere in the editor to
+drop one exactly where you want it — Alt+click a caret again to take it
+back. Then type, backspace, or press `End`: every caret does the same
+thing at once.
+
+| Gesture               | What it does                                  |
+| --------------------- | --------------------------------------------- |
+| `Esc m` / `Esc M`     | Add a caret below / above the column           |
+| `Alt+click`           | Add or remove a caret at the pointer           |
+| `Esc *`               | Select this word, then claim the next match    |
+| ≡ Select all occurrences | A caret on every match at once              |
+| `Esc`                 | Back to one caret                              |
+
+`Esc *` is the rename-a-local gesture: the first press selects the word
+under the cursor, each press after that adds the next occurrence, and
+then you type the new name once. Matching is whole-word and
+case-sensitive, so claiming `count` never lands inside `counter`.
+
+Because the leader repeats, `Esc m m m` builds a four-line column in one
+gesture. The whole burst is **one undo step** — one `Esc u` puts every
+line back. A plain click, a find hit, a jump to a definition, or `Esc`
+collapses back to a single caret, so you can never be left typing into
+lines you aren't looking at. The status bar says how many carets are
+live whenever there's more than one.
+
+### Matching word highlight
+
+Rest the cursor in an identifier and every other instance of it on
+screen picks up a neutral box and bold weight — the "where else is this
+used?" question, answered without typing a search. Selecting two or more
+characters highlights matches of the selection instead.
+
+The marking is deliberately *not* tinted with the accent: that blue fill
+belongs to the selection, and a highlight that borrowed it would look
+like something you'd selected.
+
+Matching is case-sensitive (`Cursor` and `cursor` are different
+identifiers) and whole-word for the cursor case. A word that appears only
+once on screen isn't tinted — that's just where you already are. Turn the
+whole thing off from `≡` → **Hide matching word highlight**; it persists
+as `"wordhl": "off"` in `~/.config/ced/config.json`.
 
 ### Find in file
 

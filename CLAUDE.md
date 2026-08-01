@@ -239,6 +239,14 @@ one. House rules:
   last caret you placed" stays true. `caretGoalCol` (the widest caret's
   column) is what keeps a column from walking left across short lines —
   don't replace it with `Cursor.Col`, that's the drift bug.
+- **Secondary carets blink on ced's own ticker** (`caretBlinkAfterEvent`
+  arms it from the dispatch tail, `caretBlinkEvent` toggles
+  `Tab.CaretsHidden`). Two constraints: it must be armed ONLY while
+  carets exist — the loop is event-driven, so a standing timer would
+  wake an idle editor twice a second forever — and `stopCaretBlink` must
+  restore the on-phase, or disarming mid-blink strands a caret
+  invisible. Not tcell's `AttrBlink`: SGR blink toggles the GLYPH, and
+  an end-of-line caret paints a space.
 - **Whole-line gestures collapse the set** (`dropCaretsForLineOp` in
   DuplicateLines / MoveLines / ToggleLineComment). Two of them change
   the line count or order, so surviving carets would point at the wrong

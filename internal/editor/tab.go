@@ -116,6 +116,12 @@ type Tab struct {
 	// another entry in this slice.
 	Carets []Caret
 
+	// CaretsHidden is the off-phase of the secondary carets' blink: when
+	// set, paintCarets draws nothing and the cells show plain text. The
+	// app owns the phase (it's the one with an event loop to drive a
+	// timer from) — see app/multicaret.go.
+	CaretsHidden bool
+
 	// WordHighlight gates the "tint every other instance of the word
 	// under the cursor" decoration (wordhl.go). Set from the user
 	// config when the tab is opened, and by the ≡ toggle across every

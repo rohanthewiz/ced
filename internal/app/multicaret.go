@@ -30,7 +30,29 @@
 //     next one".
 package app
 
-import "github.com/rohanthewiz/ced/internal/editor"
+import (
+	"time"
+
+	"github.com/rohanthewiz/ced/internal/editor"
+)
+
+// caretBlinkInterval is the secondary carets' blink period. 530ms is the
+// cadence terminals and GUI editors have used for decades — matching it
+// means the painted carets and the terminal's own hardware cursor look
+// like the same kind of object, even though they can't be driven from
+// the same clock.
+const caretBlinkInterval = 530 * time.Millisecond
+
+// caretBlinkEvent is posted by the blink ticker while secondary carets
+// are live. The main loop toggles the phase and redraws — the same
+// goroutine → custom event → main loop pattern auto-scroll and the tree
+// refresh use, because only the main loop may touch App.
+type caretBlinkEvent struct {
+	when time.Time
+}
+
+// When satisfies the tcell.Event interface.
+func (e *caretBlinkEvent) When() time.Time { return e.when }
 
 // menuAddCaretBelow drops a caret one line below the lowest one, at the
 // current column. The workhorse gesture: three presses and a typed
@@ -149,6 +171,94 @@ func (a *App) caretStatusSuffix() string {
 		return ""
 	}
 	return " · " + plural(t.CaretCount(), "caret", "carets")
+}
+
+// -----------------------------------------------------------------------------
+// Blink
+// -----------------------------------------------------------------------------
+//
+// A terminal has ONE hardware cursor. The primary caret owns it and the
+// terminal blinks it for us; the secondaries are cells ced paints, so
+// without this they sit there static and read as highlights rather than
+// as cursors — which is exactly what the owner noticed.
+//
+// The ticker runs ONLY while secondary carets exist. ced's loop is
+// event-driven (PollEvent → handle → draw → Show), so an always-on
+// timer would turn an idle editor into one that wakes twice a second
+// forever. Scoped this way it costs nothing in the single-caret case,
+// and even while armed the wire cost over SSH is a few cells — tcell's
+// Show diffs against its own buffer, so a blink sends the caret cells
+// and nothing else.
+//
+// Phase deliberately isn't reset on keystrokes. The hardware cursor
+// blinks to the terminal's clock and we can't read it, so the two are
+// out of phase no matter what; chasing sync buys nothing and a caret
+// that restarts its cycle on every keypress just makes the mismatch
+// more obvious.
+
+// caretBlinkAfterEvent runs on the dispatch tail: arm the blink while
+// the active tab has secondary carets, disarm it when it doesn't. A
+// hook rather than start/stop calls in each gesture, so a new way of
+// creating carets can't forget to make them blink — the same reason
+// the LSP, auto-save, and chat-permission hooks live there.
+func (a *App) caretBlinkAfterEvent() {
+	if a.hasCarets() {
+		a.startCaretBlink()
+		return
+	}
+	a.stopCaretBlink()
+}
+
+// startCaretBlink launches the blink ticker (idempotent).
+func (a *App) startCaretBlink() {
+	if a.caretBlinkStop != nil {
+		return
+	}
+	a.caretBlinkStop = make(chan struct{})
+	stop := a.caretBlinkStop
+	scr := a.screen
+	go func() {
+		ticker := time.NewTicker(caretBlinkInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case t := <-ticker.C:
+				_ = scr.PostEvent(&caretBlinkEvent{when: t})
+			}
+		}
+	}()
+}
+
+// stopCaretBlink shuts the ticker down and leaves the carets VISIBLE
+// (idempotent). Restoring the on-phase matters: stopping during the
+// off-phase would otherwise strand a caret invisible until something
+// else redrew — which is the state you'd land in switching to a tab
+// whose carets were mid-blink.
+func (a *App) stopCaretBlink() {
+	if a.caretBlinkStop != nil {
+		close(a.caretBlinkStop)
+		a.caretBlinkStop = nil
+	}
+	a.caretBlinkOff = false
+	a.applyCaretBlink()
+}
+
+// handleCaretBlink flips the phase on each tick. Run's redraw follows
+// the dispatch, so the toggle is the whole animation.
+func (a *App) handleCaretBlink() {
+	a.caretBlinkOff = !a.caretBlinkOff
+	a.applyCaretBlink()
+}
+
+// applyCaretBlink pushes the phase onto every tab. Only the active one
+// renders, but the others are stamped too so a tab switch mid-blink
+// can't show a stale phase for a frame.
+func (a *App) applyCaretBlink() {
+	for _, t := range a.tabs {
+		t.CaretsHidden = a.caretBlinkOff
+	}
 }
 
 // editorAltPress handles an Alt+click in the editor body: toggle a caret

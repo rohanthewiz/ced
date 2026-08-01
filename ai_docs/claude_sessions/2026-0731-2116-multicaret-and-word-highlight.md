@@ -172,3 +172,32 @@ unselected twin paints `WordHL`.
   the right answer: a completion at five carets isn't a thing.
 - **`Esc &` isn't repeatable** and the multi-caret rows don't get a
   namespace. The flat table had exactly enough letters left.
+
+### Postscript: the carets didn't blink
+
+Noticed by the owner after the doc above was written. The primary caret
+is the terminal's *hardware* cursor and the terminal blinks it; the
+secondaries are cells ced paints, so they sat there static and read as
+highlights rather than as cursors.
+
+The tempting fix is tcell's `AttrBlink` — free, no timer, the terminal
+does the work. It's wrong here: SGR blink toggles the **glyph**, and a
+caret past the end of a line paints a *space*, so exactly the carets a
+column produces after `End` wouldn't blink at all. Inconsistent beats
+nothing only when you can't see which case you're in.
+
+So it's ced's own ticker, following the auto-scroll pattern: a
+`caretBlinkEvent` posted every 530ms, the main loop toggling
+`Tab.CaretsHidden`, and `Run`'s existing redraw doing the rest. Two
+details that matter more than they look:
+
+- **Armed only while carets exist.** The loop is `PollEvent → handle →
+  draw → Show`, so a standing timer would wake an idle editor twice a
+  second forever. The dispatch-tail hook (`caretBlinkAfterEvent`) arms
+  and disarms it, so a future way of creating carets can't forget.
+- **Stopping restores the on-phase.** Disarming mid-blink would
+  otherwise strand a caret invisible until something else redrew.
+
+Phase deliberately isn't reset on keystrokes: the hardware cursor blinks
+to a clock we can't read, so the two are out of phase regardless, and
+restarting the cycle on every keypress only makes the mismatch louder.

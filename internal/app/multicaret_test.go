@@ -224,6 +224,103 @@ func TestHasCarets_GatesTheClearRow(t *testing.T) {
 	}
 }
 
+// TestCaretBlink_ArmsOnlyWhileCaretsExist pins the lifecycle rule that
+// keeps an idle single-caret editor from waking on a timer: the ticker
+// is armed by the dispatch tail when carets appear and disarmed the
+// moment they're gone.
+func TestCaretBlink_ArmsOnlyWhileCaretsExist(t *testing.T) {
+	a, tab := caretApp(t, "a\nb\nc")
+	t.Cleanup(a.stopCaretBlink)
+
+	a.caretBlinkAfterEvent()
+	if a.caretBlinkStop != nil {
+		t.Fatal("no carets — the blink must not be running")
+	}
+
+	tab.AddCaretLine(1)
+	a.caretBlinkAfterEvent()
+	if a.caretBlinkStop == nil {
+		t.Fatal("carets exist — the blink should be armed")
+	}
+
+	tab.ClearCarets()
+	a.caretBlinkAfterEvent()
+	if a.caretBlinkStop != nil {
+		t.Fatal("carets gone — the blink should be disarmed")
+	}
+}
+
+// TestCaretBlink_TogglesPhaseOntoTabs covers the tick itself: the phase
+// flips and reaches the Tab flag paintCarets reads.
+func TestCaretBlink_TogglesPhaseOntoTabs(t *testing.T) {
+	a, tab := caretApp(t, "a\nb\nc")
+	tab.AddCaretLine(1)
+
+	a.handleCaretBlink()
+	if !a.caretBlinkOff || !tab.CaretsHidden {
+		t.Fatal("first tick should enter the off phase and stamp the tab")
+	}
+	a.handleCaretBlink()
+	if a.caretBlinkOff || tab.CaretsHidden {
+		t.Fatal("second tick should return to the on phase")
+	}
+}
+
+// TestCaretBlink_StopLeavesCaretsVisible pins the detail that would
+// otherwise strand a caret invisible: disarming mid-blink has to restore
+// the on phase, since nothing else is going to redraw it.
+func TestCaretBlink_StopLeavesCaretsVisible(t *testing.T) {
+	a, tab := caretApp(t, "a\nb\nc")
+	tab.AddCaretLine(1)
+	a.startCaretBlink()
+	a.handleCaretBlink() // now in the off phase
+	if !tab.CaretsHidden {
+		t.Fatal("fixture should be mid-blink")
+	}
+
+	a.stopCaretBlink()
+
+	if tab.CaretsHidden {
+		t.Error("stopping the blink must leave the carets visible")
+	}
+	if a.caretBlinkStop != nil {
+		t.Error("stop should clear the channel so a later start re-arms")
+	}
+}
+
+// TestCaretBlink_HiddenPhaseDrawsNoCaret closes the loop at the render
+// layer — the off phase shows the plain text underneath, which is what
+// makes it read as a blink rather than a flicker of some other color.
+func TestCaretBlink_HiddenPhaseDrawsNoCaret(t *testing.T) {
+	a, tab := caretApp(t, "abc\ndef")
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
+	tab.AddCaretAt(editor.Position{Line: 1, Col: 1})
+	th := a.theme
+
+	scr := a.screen.(tcell.SimulationScreen)
+	// The caret sits on row 1, column 1 of the code — one cell past the
+	// gutter (6) and its mark column (1).
+	caretCell := func() tcell.Color {
+		cells, w, _ := scr.GetContents()
+		_, bg, _ := cells[1*w+7+1].Style.Decompose()
+		return bg
+	}
+
+	tab.CaretsHidden = true
+	tab.Render(scr, th, 0, 0, 40, 10)
+	scr.Show()
+	if caretCell() == th.Accent {
+		t.Fatal("the off phase should paint no caret cell")
+	}
+
+	tab.CaretsHidden = false
+	tab.Render(scr, th, 0, 0, 40, 10)
+	scr.Show()
+	if caretCell() != th.Accent {
+		t.Fatal("the on phase should paint the caret cell")
+	}
+}
+
 // TestPlural covers the wording helper both caret messages route
 // through — "1 caret", never "1 carets".
 func TestPlural(t *testing.T) {

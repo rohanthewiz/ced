@@ -706,6 +706,13 @@ type App struct {
 	// treeRefreshStop signals the background tree-refresh goroutine to exit.
 	treeRefreshStop chan struct{}
 
+	// Secondary-caret blink. caretBlinkStop signals the ticker goroutine
+	// to exit (nil = not running, which is the state whenever there are
+	// no extra carets); caretBlinkOff is the current phase, pushed onto
+	// every tab's CaretsHidden. See multicaret.go.
+	caretBlinkStop chan struct{}
+	caretBlinkOff  bool
+
 	// Auto-save state. autoSaveEnabled mirrors the persisted user
 	// preference (≡ menu toggle, default on). autoSaveTimer is the
 	// pending idle countdown — armed/reset only from the main loop.
@@ -1015,6 +1022,7 @@ func (a *App) Close() {
 	a.stopTreeRefresh()
 	a.stopAutoScroll()
 	a.stopAutoSave()
+	a.stopCaretBlink()
 	a.lspShutdown()
 	a.copilotShutdown()
 	a.chatShutdown()
@@ -1061,6 +1069,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleAutoSave()
 	case *treeRefreshEvent:
 		a.refreshTreeNow()
+	case *caretBlinkEvent:
+		a.handleCaretBlink()
 	case *gitDiffEvent:
 		a.handleGitDiff(e)
 	case *customActionDoneEvent:
@@ -1163,6 +1173,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// resurfaces as soon as the modal slot frees up. See
 	// copilot_chat_perm.go.
 	a.chatPermAfterEvent()
+	// And the secondary carets' blink: armed while they exist, disarmed
+	// the moment they don't, so an idle single-caret editor never wakes
+	// on a timer. See multicaret.go.
+	a.caretBlinkAfterEvent()
 }
 
 // workspaceChanged re-syncs every subsystem that mirrors on-disk

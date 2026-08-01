@@ -449,8 +449,11 @@ func (t *Tab) applyAtCarets(mutating bool, op func()) {
 // A terminal has exactly ONE hardware cursor, which the primary caret
 // owns; every other caret has to be drawn as content, and it has to be
 // drawn after the row's paint walk so it wins over the text underneath.
+// That's also why the blink is CaretsHidden and not a style attribute:
+// SGR blink toggles the glyph, and a caret past the end of a line has no
+// glyph to toggle — the cell it paints is a space.
 func (t *Tab) paintCarets(scr tcell.Screen, th theme.Theme, lineIdx, cy, contentX, contentW int, lineBg tcell.Color) {
-	if len(t.Carets) == 0 {
+	if len(t.Carets) == 0 || t.CaretsHidden {
 		return
 	}
 	runes := t.Buffer.LineRunes(lineIdx)

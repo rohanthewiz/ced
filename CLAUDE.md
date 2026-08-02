@@ -62,6 +62,7 @@ internal/editor/multicaret.go Secondary carets + the bottom-up edit fan-out
 internal/editor/wordhl.go     Word scanner, occurrence matcher, word-highlight source
 internal/app/multicaret.go    Multi-caret UI: ≡ rows, Esc-m/M/*, Alt+click, status
 internal/app/wordhl.go        Word-highlight ≡ toggle + per-tab flag plumbing
+internal/app/findall.go       Find-all peek list: compacted rows, preview, Esc-restore
 internal/lsp/client.go        Minimal JSON-RPC-over-stdio LSP client (stdlib only)
 internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition, hover
 internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
@@ -291,6 +292,67 @@ House rules:
   one scanner, two consumers. `Tab.WordHighlight` gates it per tab
   because sources are asked per-tab; `App.wordHLEnabled` is the
   authoritative copy and `applyWordHighlight` the single write path.
+
+### Find all in file (app/findall.go)
+Every occurrence of a query listed as one compacted row each — line
+number, then the line with the hit lit — under the editor. Esc-F, the ≡
+Search group, or ↓ from the find bar. House rules:
+
+- **It's a PEEK, which is why it isn't a palette picker.** The house
+  rule is that every choose-one-from-a-list UI reuses `openPicker`, and
+  this is the one documented exception. The palette's grammar is
+  pick-run-close with a no-op dismissal; here moving the highlight moves
+  the editor's cursor LIVE and Esc puts it back, a click PREVIEWS
+  instead of dismissing, and a row is two columns (number ┃ code) rather
+  than a label. Three different contracts, not a skin. Don't "unify"
+  them — the picker would have to grow a preview hook, a cancel that
+  undoes, and a two-column row, at which point it isn't the palette.
+- **It takes rows OUT of the editor band, never floats over it**
+  (`editorBandRows` → `editorRect` → `findAllPanelHeight`). A popup that
+  covered the line it was previewing would defeat the feature. Height is
+  FIXED, so unlike the resizable bottom panels it needs no clamp
+  negotiation with them — it just displaces, and `findAllMinEditorRows`
+  is the floor it never eats through. `editorBandRows` exists because
+  the popup (like every panel) must ask "what would the editor have
+  left?" — a question `editorRect` can't answer, since it already
+  subtracts them.
+- **The rows come off the TOP** — pinned under the tab bar, editor
+  pushed down (owner's call): the list is what you're reading and the
+  code is the reference under it. It's the only surface that costs the
+  editor rows at that end, which is why `editorRect` returns a y of
+  `1 + findAllPanelHeight()` rather than a constant 1. Everything that
+  positions itself inside the editor already reads that y — hit-testing,
+  drag auto-scroll, the hover modal, Alt+click — so nothing else needed
+  to learn about it. Keep it that way: no second call site may assume
+  the editor starts at row 1.
+- **A preview CENTERS the hit** (`Tab.CenterOnCursor`), it doesn't just
+  scroll it into view. EnsureVisible's minimal scroll parks a hit below
+  the viewport on the last row — every line before it, none after —
+  which is useless when the question is "what is this line doing?".
+  Centering also pins where the eye looks: walking the list keeps every
+  hit on the same row. Like RestoreView it must CLEAR `cursorMoved`, or
+  the next Render minimally-scrolls the line straight back to the edge.
+- **Esc restores through `Tab.RestoreView`, not `MoveCursorTo`.** Every
+  other cursor write sets `cursorMoved` so the next Render scrolls the
+  cursor into view; a restore wants the opposite, because the captured
+  SCROLL is part of what's being put back. Without it, a user who
+  wheeled away from their own cursor before peeking gets a viewport
+  yanked to the cursor instead of their view. Everything else that
+  dismisses (Enter, double-click, a click outside) ACCEPTS — Esc is the
+  one gesture that means "put it back".
+- **The tab's find state is BORROWED, and returned on both exits.** The
+  popup sets `SetFindQuery` so the editor tints every occurrence while
+  the list explains them, and `FindIndex` tracks the highlighted row so
+  the previewed hit paints as the current match for free. The tint has
+  to leave with the list — same contract as closing the find bar.
+- **Rows are compacted at open, once.** Leading indentation comes off
+  and interior tabs render as ONE space, which keeps the display text
+  aligned rune-for-rune with the buffer so a match column maps to a
+  display column by subtracting the trim. No width table, nothing to
+  drift. Two hits on one line are two rows — the list is occurrences,
+  not lines.
+- Seeding is a ladder: find bar → single-line selection → word under the
+  cursor → a prompt. No match flashes rather than opening an empty box.
 
 ### LSP integration (internal/lsp + app/lsp.go)
 The client is a hand-rolled JSON-RPC subset — do NOT add an LSP

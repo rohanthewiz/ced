@@ -235,6 +235,7 @@ func builtinMenuGroups() []menuGroup {
 		// entry even when every section is folded (the startup default).
 		{title: "Search", collapsible: true, items: []menuItemDef{
 			{label: "Find in file", shortcut: "esc f", action: (*App).menuFind, enabled: (*App).hasFindable},
+			{label: "Find all in file", shortcut: "esc F", action: (*App).menuFindAll, enabled: (*App).hasFindAll},
 			{label: "Find file in project", shortcut: "esc p", action: (*App).menuFindFile, enabled: (*App).hasFinder},
 		}},
 		// Navigation — browser-style back/forward through the file
@@ -1446,16 +1447,19 @@ func (a *App) tabBarRect() (x, y, w, h int) {
 	return lw, 0, a.width - lw - a.rightBlockW(), 1
 }
 
-// editorRect returns the editor body's screen rectangle — the column
-// band between the docked side blocks, between the tab bar and the
-// status bar. When the find bar is open, one row is taken out of the
-// bottom — the bar is pinned directly above the status bar. The git
-// panel takes its rows out of the bottom too, stacking above the find
-// bar; a bottom-docked terminal does the same, while a left-docked one
-// costs columns instead (via leftBlockW).
-func (a *App) editorRect() (x, y, w, h int) {
-	lw := a.leftBlockW()
-	h = a.height - 2
+// editorBandRows is how many rows the editor body gets from the window
+// once the pinned strips below it have taken theirs. When the find bar
+// is open, one row comes out of the bottom — the bar is pinned directly
+// above the status bar. The git panel takes its rows out of the bottom
+// too, stacking above the find bar; a bottom-docked terminal does the
+// same, while a left-docked one costs columns instead (via leftBlockW).
+//
+// Split out from editorRect for one reason: the resizable panels clamp
+// their own heights against "what would the editor have left?", and so
+// does the Find-all popup — none of them can ask editorRect, which
+// already subtracts them.
+func (a *App) editorBandRows() int {
+	h := a.height - 2
 	if a.findOpen {
 		h -= findBarHeight
 	}
@@ -1468,7 +1472,24 @@ func (a *App) editorRect() (x, y, w, h int) {
 	if a.term.open && !a.termDockLeft {
 		h -= a.termPanelHeight()
 	}
-	return lw, 1, a.width - lw - a.rightBlockW(), h
+	return h
+}
+
+// editorRect returns the editor body's screen rectangle — the column
+// band between the docked side blocks, between the tab bar and the
+// status bar, minus whatever the strips around it claimed.
+//
+// The Find-all popup is the only one that costs rows off the TOP: it
+// sits directly under the tab bar and pushes the editor down, rather
+// than floating over it, so the shortened viewport still scrolls the
+// line it's previewing into view (see findall.go). Everything that
+// positions itself inside the editor reads the y returned here, so the
+// offset costs those call sites nothing.
+func (a *App) editorRect() (x, y, w, h int) {
+	lw := a.leftBlockW()
+	top := a.findAllPanelHeight()
+	h = a.editorBandRows() - top
+	return lw, 1 + top, a.width - lw - a.rightBlockW(), h
 }
 
 // statusRect returns the status bar's screen rectangle (full-width bottom row).

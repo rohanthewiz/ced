@@ -582,6 +582,58 @@ func (t *Tab) SelectAll() {
 	t.breakUndoGroup()
 }
 
+// RestoreView puts the cursor, the selection anchor, and both scroll
+// offsets back to a state captured earlier — the "abort a peek"
+// primitive, used by the Find-all popup when Esc means "put me back".
+//
+// It is deliberately NOT MoveCursorTo. Every other cursor write sets
+// cursorMoved so the next Render scrolls the cursor into view; a restore
+// wants the opposite, because the captured scroll is part of what's
+// being restored. A user who had wheeled away from their own cursor
+// before peeking must get that view back, not a viewport yanked to the
+// cursor. Clearing the flag also swallows any pending move the peek
+// itself armed. Positions are clamped: a background reload can shrink
+// the buffer while a peek is open.
+func (t *Tab) RestoreView(cursor, anchor Position, scrollY, scrollX int) {
+	if t.Buffer == nil {
+		return
+	}
+	t.Cursor = t.Buffer.Clamp(cursor)
+	t.Anchor = t.Buffer.Clamp(anchor)
+	t.ScrollY, t.ScrollX = scrollY, scrollX
+	t.cursorMoved = false
+}
+
+// CenterOnCursor scrolls the viewport so the cursor's LINE sits in the
+// middle of a viewH-row view instead of merely being on screen — the
+// "peek at this" counterpart to EnsureVisible, used by the Find-all
+// popup so every previewed hit lands in the same place with context on
+// both sides of it.
+//
+// Two details it must keep. Horizontal scroll goes through EnsureVisible
+// rather than a second copy of the column rule — centering is a vertical
+// idea and a long line still has to bring its match into view. And the
+// cursorMoved flag is CLEARED afterwards (the RestoreView rationale):
+// leaving it set would let the next Render run EnsureVisible over the
+// top of the centering, which minimally-scrolls the line straight back
+// to an edge.
+//
+// Near the top of a file the line simply can't be centered, so it sits
+// wherever ScrollY 0 puts it; near the bottom, Render's clampScroll has
+// the last word — its overscroll allowance (half a view) is exactly
+// enough to keep centering honest down to the final line.
+func (t *Tab) CenterOnCursor(viewW, viewH int) {
+	if viewH <= 0 {
+		return
+	}
+	t.EnsureVisible(viewW, viewH)
+	t.ScrollY = t.Cursor.Line - viewH/2
+	if t.ScrollY < 0 {
+		t.ScrollY = 0
+	}
+	t.cursorMoved = false
+}
+
 // EnsureVisible scrolls the viewport so the cursor is on screen. The
 // caller passes the editor area's width and height because the Tab itself
 // doesn't know its render rect.

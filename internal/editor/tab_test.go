@@ -1074,3 +1074,101 @@ func TestTab_CursorScreenCell(t *testing.T) {
 		t.Error("cursor left of the h-scroll window should report ok=false")
 	}
 }
+
+// TestRestoreView_PutsTheViewBackWithoutRescrolling pins the abort-a-peek
+// primitive: cursor, anchor, and both scroll offsets come back verbatim,
+// and — the part that matters — the next Render must NOT drag the
+// viewport to the cursor. Anything that restored via MoveCursorTo would
+// arm EnsureVisible and lose a scrolled-away view.
+func TestRestoreView_PutsTheViewBackWithoutRescrolling(t *testing.T) {
+	lines := make([]string, 0, 200)
+	for i := 0; i < 200; i++ {
+		lines = append(lines, "line")
+	}
+	tab := &Tab{Buffer: &Buffer{Lines: lines}, IndentUnit: "\t"}
+
+	// Peek somewhere far away, then put it back.
+	tab.MoveCursorTo(Position{Line: 150, Col: 2}, false)
+	tab.RestoreView(Position{Line: 3, Col: 1}, Position{Line: 3, Col: 1}, 60, 4)
+
+	if tab.Cursor != (Position{Line: 3, Col: 1}) {
+		t.Errorf("Cursor = %v, want line 3 col 1", tab.Cursor)
+	}
+	if tab.Anchor != (Position{Line: 3, Col: 1}) {
+		t.Errorf("Anchor = %v, want line 3 col 1", tab.Anchor)
+	}
+	if tab.ScrollY != 60 || tab.ScrollX != 4 {
+		t.Fatalf("scroll = (%d,%d), want (60,4)", tab.ScrollY, tab.ScrollX)
+	}
+
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer scr.Fini()
+	tab.Render(scr, theme.Default(), 0, 0, 40, 20)
+	if tab.ScrollY != 60 {
+		t.Errorf("ScrollY = %d after render, want 60 — the restore armed EnsureVisible", tab.ScrollY)
+	}
+}
+
+// TestRestoreView_ClampsToAShrunkenBuffer covers the external-reload
+// case: a peek can outlive the lines it was measured against, and the
+// restore must land somewhere legal rather than past the end.
+func TestRestoreView_ClampsToAShrunkenBuffer(t *testing.T) {
+	tab := &Tab{Buffer: &Buffer{Lines: []string{"one", "two"}}}
+	tab.RestoreView(Position{Line: 90, Col: 40}, Position{Line: 90, Col: 40}, 0, 0)
+	if tab.Cursor.Line != 1 || tab.Cursor.Col != 3 {
+		t.Errorf("Cursor = %v, want the clamped end of the buffer", tab.Cursor)
+	}
+}
+
+// TestCenterOnCursor_PutsTheLineInTheMiddle pins the peek scroll: the
+// cursor's line lands mid-view rather than at whichever edge a minimal
+// scroll would have parked it, and the next Render must not undo that.
+func TestCenterOnCursor_PutsTheLineInTheMiddle(t *testing.T) {
+	lines := make([]string, 0, 300)
+	for i := 0; i < 300; i++ {
+		lines = append(lines, "line")
+	}
+	tab := &Tab{Buffer: &Buffer{Lines: lines}, IndentUnit: "\t"}
+
+	tab.MoveCursorTo(Position{Line: 200, Col: 0}, false)
+	tab.CenterOnCursor(80, 20)
+
+	if want := 200 - 10; tab.ScrollY != want {
+		t.Fatalf("ScrollY = %d, want %d (line 200 centered in 20 rows)", tab.ScrollY, want)
+	}
+
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer scr.Fini()
+	tab.Render(scr, theme.Default(), 0, 0, 80, 20)
+	if tab.ScrollY != 190 {
+		t.Errorf("ScrollY = %d after render, want 190 — centering armed EnsureVisible", tab.ScrollY)
+	}
+}
+
+// TestCenterOnCursor_TopOfFileAndLongLines covers the two cases centering
+// can't take literally: a line too near the top to sit in the middle
+// clamps at 0, and a cursor off the right edge still gets scrolled into
+// view horizontally (centering is a vertical idea only).
+func TestCenterOnCursor_TopOfFileAndLongLines(t *testing.T) {
+	long := strings.Repeat("x", 400)
+	tab := &Tab{Buffer: &Buffer{Lines: []string{"a", long, "c"}}, IndentUnit: "\t"}
+
+	tab.MoveCursorTo(Position{Line: 1, Col: 350}, false)
+	tab.CenterOnCursor(80, 20)
+
+	if tab.ScrollY != 0 {
+		t.Errorf("ScrollY = %d near the top of the file, want the clamped 0", tab.ScrollY)
+	}
+	if tab.ScrollX == 0 {
+		t.Error("a cursor at column 350 should still have scrolled horizontally")
+	}
+	if tab.Cursor.Col < tab.ScrollX {
+		t.Errorf("cursor col %d left of ScrollX %d — not visible", tab.Cursor.Col, tab.ScrollX)
+	}
+}

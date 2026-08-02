@@ -115,6 +115,7 @@ func (a *App) findBarRect() (x, y, w, h int) {
 //	Esc                     close the bar
 //	Enter                   jump to the next match
 //	Shift+Enter             jump to the previous match
+//	Down                    list every occurrence (findall.go)
 //	Backspace / Delete      edit the input (live re-search)
 //	Left / Right / Home/End cursor movement inside the input
 //	printable rune          insert into the input (live re-search)
@@ -131,6 +132,11 @@ func (a *App) handleFindKey(ev *tcell.EventKey) {
 		} else {
 			a.findNext()
 		}
+	case tcell.KeyDown:
+		// Down out of a one-line input means "show me the rest" — the
+		// same reflex a browser's search field trains. The bar closes as
+		// the list opens: they're one search in two shapes, not two.
+		a.openFindAllFromBar()
 	case tcell.KeyLeft:
 		if a.findCursor > 0 {
 			a.findCursor--
@@ -201,7 +207,7 @@ func (a *App) drawFindBar() {
 
 	// Right side: counter + hint, drawn first so we can clip the input
 	// against them on a narrow window.
-	hint := " Enter: next · Shift+Enter: prev · Esc: close "
+	hint := " Enter: next · ⇧Enter: prev · ↓: list all · Esc: close "
 	counter := a.findCounterText()
 	rightPadding := 1
 	rightTextStart := bx + bw

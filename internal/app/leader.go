@@ -90,6 +90,12 @@ func leaderBindings() []leaderBinding {
 		{key: 't', action: (*App).menuToggleSidebar},
 		{key: '/', action: (*App).menuToggleLineComment},
 		{key: 'f', action: (*App).openFind},
+		// 'F' lists every occurrence instead of walking them one Enter at
+		// a time — the shifted variant of the same verb, following the
+		// h/H and o/O convention. It seeds itself from the find bar, the
+		// selection, or the word under the cursor, so it's a one-key
+		// gesture from anywhere in the file.
+		{key: 'F', action: (*App).menuFindAll},
 		{key: 'p', action: (*App).openFinder},
 		// 'k' for the palette — the Cmd+K muscle memory every editor and
 		// chat app teaches (the real Cmd+K never reaches a terminal app,

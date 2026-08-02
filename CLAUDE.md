@@ -316,22 +316,40 @@ Search group, or ↓ from the find bar. House rules:
   the popup (like every panel) must ask "what would the editor have
   left?" — a question `editorRect` can't answer, since it already
   subtracts them.
-- **The rows come off the TOP** — pinned under the tab bar, editor
-  pushed down (owner's call): the list is what you're reading and the
-  code is the reference under it. It's the only surface that costs the
-  editor rows at that end, which is why `editorRect` returns a y of
-  `1 + findAllPanelHeight()` rather than a constant 1. Everything that
-  positions itself inside the editor already reads that y — hit-testing,
-  drag auto-scroll, the hover modal, Alt+click — so nothing else needed
-  to learn about it. Keep it that way: no second call site may assume
-  the editor starts at row 1.
-- **A preview CENTERS the hit** (`Tab.CenterOnCursor`), it doesn't just
-  scroll it into view. EnsureVisible's minimal scroll parks a hit below
-  the viewport on the last row — every line before it, none after —
-  which is useless when the question is "what is this line doing?".
-  Centering also pins where the eye looks: walking the list keeps every
-  hit on the same row. Like RestoreView it must CLEAR `cursorMoved`, or
-  the next Render minimally-scrolls the line straight back to the edge.
+- **Two docks, one displacement rule.** TOP (default) takes rows off the
+  top — pinned under the tab bar, editor pushed down: the list is what
+  you're reading and the code is the reference under it. RIGHT takes
+  COLUMNS off the editor's right edge and runs full height, which trades
+  line length for showing three times as many hits. So `editorRect`
+  returns `y = 1 + findAllPanelHeight()` and `w = editorBandCols() -
+  findAllPanelWidth()`, with exactly one of the two ever non-zero.
+  Everything that positions itself inside the editor already reads that
+  x/y — hit-testing, drag auto-scroll, the hover modal, Alt+click — so
+  nothing else needed to learn about it. Keep it that way: **no call
+  site may assume the editor starts at row 1 or runs to the right edge
+  of its band.** Width precedence in the right dock follows
+  `gitPanelHeight`: the editor's reserve caps the column, but the
+  column's own floor is applied last and wins on a band too narrow for
+  both — a list too narrow to read is worse than a narrow editor.
+- **The dock is a persisted preference with THREE surfaces**
+  (`"findalldock"`, default top): the ◨/⬒ button in the popup's title
+  row, `d` inside the popup, and the ≡ View row. The `d` key is not
+  redundant — a modal owns the keyboard, so the ≡ menu is unreachable
+  from inside the list, which would leave a mouse-only path on a
+  terminal that eats clicks (the macOS-Terminal rule). The glyph names
+  the layout it switches TO, and both halves are single-width per the
+  marker rule. A flip re-runs `preview` because the band it centered
+  against just changed.
+- **A preview CENTERS an off-screen hit** (`Tab.CenterOnCursor`), rather
+  than just scrolling it into view: EnsureVisible's minimal scroll parks
+  it on the last row — every line before it, none after — which is
+  useless when the question is "what is this line doing?". Like
+  RestoreView it must CLEAR `cursorMoved`, or the next Render
+  minimally-scrolls the line straight back to the edge. A hit ALREADY on
+  screen is left exactly where it is (`Tab.CursorLineVisible`), so
+  walking a cluster of nearby hits holds the view still and only falling
+  out of the band re-centers. The primitive stays unconditional — that
+  policy belongs to the caller, not to the Tab.
 - **Esc restores through `Tab.RestoreView`, not `MoveCursorTo`.** Every
   other cursor write sets `cursorMoved` so the next Render scrolls the
   cursor into view; a restore wants the opposite, because the captured

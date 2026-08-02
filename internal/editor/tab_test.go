@@ -1172,3 +1172,35 @@ func TestCenterOnCursor_TopOfFileAndLongLines(t *testing.T) {
 		t.Errorf("cursor col %d left of ScrollX %d — not visible", tab.Cursor.Col, tab.ScrollX)
 	}
 }
+
+// TestCursorLineVisible_BandEdges pins the visibility test callers use to
+// decide whether a scroll is needed at all: inclusive at the top row,
+// exclusive one past the bottom, and false for a zero-height view.
+func TestCursorLineVisible_BandEdges(t *testing.T) {
+	lines := make([]string, 0, 100)
+	for i := 0; i < 100; i++ {
+		lines = append(lines, "line")
+	}
+	tab := &Tab{Buffer: &Buffer{Lines: lines}}
+	tab.ScrollY = 30
+
+	cases := []struct {
+		line int
+		want bool
+	}{
+		{29, false}, // one above the window
+		{30, true},  // first visible row
+		{49, true},  // last visible row of a 20-row view
+		{50, false}, // one past it
+	}
+	for _, c := range cases {
+		tab.Cursor = Position{Line: c.line}
+		if got := tab.CursorLineVisible(20); got != c.want {
+			t.Errorf("CursorLineVisible(20) at line %d = %v, want %v", c.line, got, c.want)
+		}
+	}
+	tab.Cursor = Position{Line: 30}
+	if tab.CursorLineVisible(0) {
+		t.Error("a zero-height view can't be showing anything")
+	}
+}

@@ -604,11 +604,21 @@ func (t *Tab) RestoreView(cursor, anchor Position, scrollY, scrollX int) {
 	t.cursorMoved = false
 }
 
+// CursorLineVisible reports whether the cursor's line falls inside a
+// viewH-row viewport at the current scroll offset. Callers that want to
+// scroll only when they have to (CenterOnCursor's "off-screen only"
+// rule) ask this first, rather than each re-deriving the window bounds.
+func (t *Tab) CursorLineVisible(viewH int) bool {
+	return viewH > 0 && t.Cursor.Line >= t.ScrollY && t.Cursor.Line < t.ScrollY+viewH
+}
+
 // CenterOnCursor scrolls the viewport so the cursor's LINE sits in the
 // middle of a viewH-row view instead of merely being on screen — the
 // "peek at this" counterpart to EnsureVisible, used by the Find-all
-// popup so every previewed hit lands in the same place with context on
-// both sides of it.
+// popup to land an off-screen hit with context on both sides of it.
+// Unconditional by design: whether a line already on screen is worth
+// re-centering is the caller's policy, not this primitive's (see
+// CursorLineVisible).
 //
 // Two details it must keep. Horizontal scroll goes through EnsureVisible
 // rather than a second copy of the column rule — centering is a vertical

@@ -402,34 +402,233 @@ func TestFindAll_ShrinksEditorAndSitsAboveIt(t *testing.T) {
 	}
 }
 
-// TestFindAll_PreviewCentersTheHitInTheBand pins the peek scroll: the
-// previewed line sits mid-band with context on both sides, not parked on
-// the edge a minimal scroll would have chosen. The row it lands on has to
-// be measured against the SHORTENED band — the popup is open.
-func TestFindAll_PreviewCentersTheHitInTheBand(t *testing.T) {
+// TestFindAll_PreviewCentersAnOffscreenHit pins the peek scroll: a hit
+// outside the band lands mid-band with context on both sides, not parked
+// on the edge a minimal scroll would have chosen. The row it lands on has
+// to be measured against the SHORTENED band — the popup is open.
+func TestFindAll_PreviewCentersAnOffscreenHit(t *testing.T) {
 	a, tab := seedFindAllLongApp(t)
 	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
 
 	m := openFindAllT(t, a, "count")
-	m.selectRow(a, 15) // a hit far enough down that centering can happen
-
 	_, _, _, eh := a.editorRect()
+	m.selectRow(a, 15) // line 60 — well past the band from a ScrollY of 0
+
 	row := tab.Cursor.Line - tab.ScrollY
 	if want := eh / 2; row != want {
 		t.Errorf("previewed hit drawn on band row %d of %d, want the middle row %d", row, eh, want)
 	}
 }
 
+// TestFindAll_PreviewLeavesAnOnscreenHitInPlace is the other half of the
+// rule: a hit the user can already see must not scroll the code out from
+// under them. Walking a cluster of nearby hits holds the view still.
+func TestFindAll_PreviewLeavesAnOnscreenHitInPlace(t *testing.T) {
+	a, tab := seedFindAllLongApp(t)
+	m := openFindAllT(t, a, "count")
+	m.selectRow(a, 15) // off-screen: this one centers
+	settled := tab.ScrollY
+
+	_, _, _, eh := a.editorRect()
+	m.selectRow(a, 16) // the next hit, four lines down — still inside the band
+	if !tab.CursorLineVisible(eh) {
+		t.Fatalf("fixture drifted: hit on line %d isn't visible at ScrollY %d (band %d)",
+			tab.Cursor.Line, tab.ScrollY, eh)
+	}
+	if tab.ScrollY != settled {
+		t.Errorf("ScrollY = %d, want %d held still — an on-screen hit re-centered", tab.ScrollY, settled)
+	}
+}
+
 // TestFindAll_PreviewNearTopOfFileDoesNotScrollPastIt keeps centering
 // honest at the edge: a hit in the first few lines can't be centered, and
-// must not push the buffer up to fake it.
+// must not push the buffer up to fake it. Jumping there from far down the
+// file is what makes it an off-screen (i.e. centering) preview.
 func TestFindAll_PreviewNearTopOfFileDoesNotScrollPastIt(t *testing.T) {
 	a, tab := seedFindAllLongApp(t)
 	m := openFindAllT(t, a, "count")
-	m.selectRow(a, 0) // the hit on line 0
+	m.selectRow(a, 20) // scroll away first
+	if tab.ScrollY == 0 {
+		t.Fatal("fixture drifted: previewing row 20 should have scrolled")
+	}
+	m.selectRow(a, 0) // back to the hit on line 0
 
 	if tab.ScrollY != 0 {
 		t.Errorf("ScrollY = %d previewing the first line, want 0", tab.ScrollY)
+	}
+}
+
+// TestFindAll_RightDockTakesColumnsNotRows pins the alternate layout:
+// the list becomes a full-height column at the far end of the editor's
+// band, the editor keeps its rows and loses columns instead, and the two
+// still don't overlap.
+func TestFindAll_RightDockTakesColumnsNotRows(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	_, _, beforeW, beforeH := a.editorRect()
+
+	a.findAllDockRight = true
+	m := openFindAllT(t, a, "count")
+	ex, ey, ew, eh := a.editorRect()
+	mx, my, mw, mh := m.rect(a)
+
+	if eh != beforeH {
+		t.Errorf("editor height = %d, want %d unchanged — the right dock costs columns", eh, beforeH)
+	}
+	if ey != 1 {
+		t.Errorf("editor y = %d, want 1 — nothing is pushing it down", ey)
+	}
+	if ew != beforeW-mw {
+		t.Errorf("editor width = %d, want %d (band %d minus column %d)", ew, beforeW-mw, beforeW, mw)
+	}
+	if mx != ex+ew {
+		t.Errorf("column x = %d, want %d (the editor's right edge)", mx, ex+ew)
+	}
+	if my != 1 || mh != beforeH {
+		t.Errorf("column = y%d h%d, want the full band y1 h%d", my, mh, beforeH)
+	}
+	if ew < findAllMinEditorCols {
+		t.Errorf("editor left with %d columns, want at least %d", ew, findAllMinEditorCols)
+	}
+	// A tall column shows more hits than the strip does — the point of it.
+	if got := m.visibleRows(a); got <= findAllVisibleRows {
+		t.Errorf("visible rows = %d, want more than the strip's %d", got, findAllVisibleRows)
+	}
+}
+
+// TestFindAll_RightDockWidthClamps pins the width band and its
+// precedence. On a normal window the editor's reserve is what binds; on
+// a band too narrow for both, the list keeps its own floor and the
+// editor eats the difference — the git panel's rule, because a column
+// too narrow to read is worse than a narrow editor.
+func TestFindAll_RightDockWidthClamps(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.findAllDockRight = true
+	m := openFindAllT(t, a, "count")
+
+	if _, _, ew, _ := a.editorRect(); ew < findAllMinEditorCols {
+		t.Errorf("editor columns = %d on a 120-col window, want >= %d", ew, findAllMinEditorCols)
+	}
+
+	a.width = 70 // band of 40 with the sidebar open: both can't fit
+	if w := m.width(a); w != findAllMinWidth {
+		t.Errorf("column width = %d on a cramped band, want the floor %d", w, findAllMinWidth)
+	}
+	if _, _, ew, _ := a.editorRect(); ew != a.editorBandCols()-findAllMinWidth {
+		t.Errorf("editor columns = %d, want the remainder %d", ew, a.editorBandCols()-findAllMinWidth)
+	}
+}
+
+// TestFindAll_DockButtonFlipsTheLayout drives the ◨ button: a click on it
+// swaps the dock, leaves the list open, and is not mistaken for a row
+// click (which would preview) or half a double-click (which would accept).
+func TestFindAll_DockButtonFlipsTheLayout(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a, tab := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	before := tab.Cursor
+
+	btn := m.dockRect(a)
+	m.handleMouse(a, btn.x+1, btn.y, tcell.Button1)
+
+	if !a.findAllDockRight {
+		t.Fatal("clicking the dock button should have flipped the layout")
+	}
+	if a.modal == nil {
+		t.Fatal("the list must stay open across a dock flip")
+	}
+	if tab.Cursor != before {
+		t.Errorf("cursor = %v, want %v — the button is not a row", tab.Cursor, before)
+	}
+	// Clicking it again flips back, which proves it wasn't recorded as
+	// the first half of a double-click accept either.
+	btn = m.dockRect(a)
+	m.handleMouse(a, btn.x+1, btn.y, tcell.Button1)
+	if a.findAllDockRight {
+		t.Error("a second click should have flipped it back")
+	}
+	if a.modal == nil {
+		t.Error("two clicks on the button must not accept")
+	}
+}
+
+// TestFindAll_DockKeyIsTheKeyboardTwin covers `d`. It exists because a
+// modal owns the keyboard, so the ≡ row can't be reached from inside the
+// list — the button would otherwise be the only way in.
+func TestFindAll_DockKeyIsTheKeyboardTwin(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'd', tcell.ModNone))
+	if !a.findAllDockRight {
+		t.Fatal("d should flip the dock")
+	}
+	if a.modal == nil {
+		t.Fatal("d must not close the list")
+	}
+	// Any other rune stays inert — the list has no input field.
+	before := m.selected
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'x', tcell.ModNone))
+	if m.selected != before || !a.findAllDockRight {
+		t.Error("an unbound rune should do nothing at all")
+	}
+}
+
+// TestFindAll_DockPersistsAndMenuRowMatches pins the preference: the
+// choice is written to config.json (so it survives a restart) and the ≡
+// row names the layout it will switch TO.
+func TestFindAll_DockPersistsAndMenuRowMatches(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a, _ := seedFindAllApp(t)
+
+	if got := a.findAllDockToggleLabel(); got != "Dock find-all results right" {
+		t.Errorf("label = %q, want the action, not the state", got)
+	}
+	a.menuToggleFindAllDock()
+	if !a.findAllDockRight {
+		t.Fatal("the ≡ row should flip the dock")
+	}
+	if got := a.findAllDockToggleLabel(); got != "Dock find-all results at top" {
+		t.Errorf("flipped label = %q", got)
+	}
+
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ced", "config.json"))
+	if err != nil {
+		t.Fatalf("config not written: %v", err)
+	}
+	if !strings.Contains(string(data), `"findalldock": "right"`) {
+		t.Errorf("config.json = %s, want the findalldock key", data)
+	}
+}
+
+// TestFindAll_DockGlyphNamesTheTarget keeps the button honest: it shows
+// the layout a click produces, not the one in force.
+func TestFindAll_DockGlyphNamesTheTarget(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	if got := a.findAllDockGlyph(); got != " ◨ " {
+		t.Errorf("glyph = %q while docked top, want the right-column mark", got)
+	}
+	a.findAllDockRight = true
+	if got := a.findAllDockGlyph(); got != " ⬒ " {
+		t.Errorf("glyph = %q while docked right, want the top-strip mark", got)
+	}
+}
+
+// TestFindAll_DrawsInRightDock smoke-tests the alternate layout end to
+// end: the frame, a row, and the dock glyph all land on screen.
+func TestFindAll_DrawsInRightDock(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.findAllDockRight = true
+	openFindAllT(t, a, "count")
+	a.draw()
+	a.screen.Show()
+	out := screenText(a)
+
+	if !strings.Contains(out, "4 │ count := 0") {
+		t.Errorf("row not drawn in the right dock:\n%s", out)
+	}
+	if !strings.Contains(out, "⬒") {
+		t.Errorf("dock glyph missing:\n%s", out)
 	}
 }
 

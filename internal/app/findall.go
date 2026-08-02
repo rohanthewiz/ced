@@ -49,6 +49,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 const (
@@ -68,6 +69,20 @@ const (
 	// findAllMinLineDigits keeps the number column from twitching
 	// between widths on files under 100 lines.
 	findAllMinLineDigits = 3
+
+	// findAllRightCols is the width of the right-docked column. Wide
+	// enough for a line number plus a readable slice of code; anything
+	// wider stops being a column and starts being a second editor.
+	findAllRightCols = 62
+	// findAllMinEditorCols is what the editor keeps when the list docks
+	// right — the column twin of findAllMinEditorRows.
+	findAllMinEditorCols = 34
+	// findAllMinWidth is the narrowest the column may be squeezed to
+	// before it stops being able to say anything.
+	findAllMinWidth = 24
+	// findAllDockBtnW is the dock button's cell width: glyph plus a
+	// pad either side, so it's a comfortable click target.
+	findAllDockBtnW = 3
 )
 
 // findAllRow is one result: where the hit is in the buffer, plus the
@@ -318,13 +333,15 @@ func (m *findAllModal) tab(a *App) *editor.Tab {
 // survive. Dropping secondary carets is the documented cost of any
 // explicit jump.
 //
-// The hit is CENTERED in the band rather than merely scrolled into view.
-// EnsureVisible's minimal scroll parks a hit below the viewport on the
-// last row, which shows the lines before it and nothing after — no use
-// when the question is "what is this line doing?". Centering also fixes
-// where the eye has to look: walking the list keeps every hit on the
-// same row instead of moving it around the screen. The band is read
-// AFTER the popup is installed, so it's the shortened one.
+// An OFF-SCREEN hit is CENTERED rather than merely scrolled into view:
+// EnsureVisible's minimal scroll parks it on the last row, which shows
+// the lines before it and nothing after — no use when the question is
+// "what is this line doing?". A hit already on screen is left exactly
+// where it is, because scrolling the code out from under a line the
+// user can already see is motion that buys nothing. So walking a
+// cluster of nearby hits holds the view still, and falling out of the
+// band re-centers once. The band is read AFTER the popup is installed,
+// so it's the shortened one.
 func (m *findAllModal) preview(a *App) {
 	tab := m.tab(a)
 	if tab == nil || m.selected < 0 || m.selected >= len(m.rows) {
@@ -335,8 +352,12 @@ func (m *findAllModal) preview(a *App) {
 		tab.FindIndex = m.selected // paint this hit as the current one
 	}
 	tab.MoveCursorTo(editor.Position{Line: r.line, Col: r.col}, false)
-	_, _, ew, eh := a.editorRect()
-	tab.CenterOnCursor(ew, eh)
+	// Left alone, the on-screen case still gets Render's EnsureVisible
+	// off the cursorMoved flag MoveCursorTo just set — a vertical no-op
+	// that keeps a long line's column in view.
+	if _, _, ew, eh := a.editorRect(); !tab.CursorLineVisible(eh) {
+		tab.CenterOnCursor(ew, eh)
+	}
 	m.previewed = true
 	m.ensureRowVisible(a)
 }
@@ -447,22 +468,44 @@ func (m *findAllModal) clampScroll(a *App) {
 // -----------------------------------------------------------------------------
 
 // findAllPanelHeight is the rows the open Find-all popup takes out of the
-// editor band, or 0 when it isn't up. Lives on App (not the modal) because
+// editor band — 0 when it isn't up, and 0 when it's docked right (that
+// mode costs columns instead). Lives on App (not the modal) because
 // editorRect needs it without knowing what's in the modal slot.
 func (a *App) findAllPanelHeight() int {
 	m, ok := a.modal.(*findAllModal)
-	if !ok {
+	if !ok || a.findAllDockRight {
 		return 0
 	}
 	return m.height(a)
 }
 
-// height is the popup's cell height: the desired size, capped so the
-// editor keeps its minimum working rows. It reads the band directly
-// (never editorRect, which subtracts this very value) — that's the whole
-// reason editorBandRows exists as a separate helper.
+// findAllPanelWidth is the columns the right-docked list takes out of
+// the editor band — 0 in the default top dock. The exact mirror of
+// findAllPanelHeight, and exactly one of the two is ever non-zero.
+func (a *App) findAllPanelWidth() int {
+	m, ok := a.modal.(*findAllModal)
+	if !ok || !a.findAllDockRight {
+		return 0
+	}
+	return m.width(a)
+}
+
+// height is the popup's cell height. Docked right it's the full editor
+// band — a tall column is the whole point of that mode, and it costs the
+// editor no rows. Docked top it's the desired size capped so the editor
+// keeps its minimum working rows.
+//
+// Both read the band directly (never editorRect, which subtracts these
+// very values) — that's the whole reason editorBandRows/Cols exist as
+// separate helpers.
 func (m *findAllModal) height(a *App) int {
 	band := a.editorBandRows()
+	if a.findAllDockRight {
+		if band < 0 {
+			return 0
+		}
+		return band
+	}
 	h := findAllVisibleRows + findAllChromeRows
 	if max := band - findAllMinEditorRows; h > max {
 		h = max
@@ -479,6 +522,38 @@ func (m *findAllModal) height(a *App) int {
 	return h
 }
 
+// width is the popup's cell width: the editor's full column band in the
+// top dock, or the fixed column width (capped so the editor keeps its
+// minimum working columns) when docked right.
+func (m *findAllModal) width(a *App) int {
+	band := a.editorBandCols()
+	if !a.findAllDockRight {
+		if band < 0 {
+			return 0
+		}
+		return band
+	}
+	w := findAllRightCols
+	if max := band - findAllMinEditorCols; w > max {
+		w = max
+	}
+	// The floor is applied AFTER the editor's reserve, so on a band too
+	// narrow for both the list keeps its minimum and the editor eats the
+	// difference — the same precedence gitPanelHeight uses. A column too
+	// narrow to read is worse than a narrow editor, and the real fix on
+	// a window that small is hiding the sidebar.
+	if w < findAllMinWidth {
+		w = findAllMinWidth
+	}
+	if w > band {
+		w = band // narrow window: take what there is
+	}
+	if w < 0 {
+		w = 0
+	}
+	return w
+}
+
 // visibleRows is how many result rows fit in the current height.
 func (m *findAllModal) visibleRows(a *App) int {
 	h := m.height(a) - findAllChromeRows
@@ -488,15 +563,89 @@ func (m *findAllModal) visibleRows(a *App) int {
 	return h
 }
 
-// rect is the popup's screen rectangle: the editor's column band, at the
-// TOP of it — directly under the tab bar, with the editor pushed down
-// beneath it. Above rather than below because the list is what the user
-// is reading; the code it's previewing is the reference, and reference
-// material belongs under the thing referring to it (it's also where the
-// eye already is after the tab bar).
+// rect is the popup's screen rectangle, in whichever dock is in force.
+//
+// TOP (default): the editor's full column band, directly under the tab
+// bar, editor pushed down beneath it. Above rather than below because
+// the list is what the user is reading and the code is the reference
+// under it — and it's where the eye already is after the tab bar.
+//
+// RIGHT: a full-height column at the far end of the editor's band,
+// editor narrowed to its left. `ex + ew` IS that edge, because
+// editorRect has already subtracted the column's width.
 func (m *findAllModal) rect(a *App) (x, y, w, h int) {
 	ex, _, ew, _ := a.editorRect()
+	if a.findAllDockRight {
+		return ex + ew, 1, m.width(a), m.height(a)
+	}
 	return ex, 1, ew, m.height(a)
+}
+
+// findAllDockRect is the ◨ / ⬒ dock button in the title row, parked left
+// of the "esc" hint drawFrame pins to the right edge. One source for
+// draw and hit-test (the btnRect house rule), and the count and title
+// are positioned off it so the three can't overlap.
+func (m *findAllModal) dockRect(a *App) btnRect {
+	mx, my, mw, _ := m.rect(a)
+	// drawFrame's "esc " occupies the four columns ending at mx+mw-2.
+	return btnRect{x: mx + mw - 5 - findAllDockBtnW, y: my + 1, w: findAllDockBtnW}
+}
+
+// findAllDockGlyph names the layout the button will switch TO, not the
+// one in force — the action-not-state convention the ≡ toggle rows use.
+// Half-filled squares because the glyph IS the layout: ◨ is a column on
+// the right, ⬒ a strip across the top. Single-width, per the marker rule
+// (a double-width emoji would overrun the row).
+func (a *App) findAllDockGlyph() string {
+	if a.findAllDockRight {
+		return " ⬒ "
+	}
+	return " ◨ "
+}
+
+// setFindAllDock installs the dock preference and persists it. Same
+// silent-degradation contract as every other ≡ toggle: an unwritable
+// config flashes and the session keeps the new layout anyway.
+func (a *App) setFindAllDock(right bool) {
+	a.findAllDockRight = right
+	dock := userconfig.FindAllDockTop
+	if right {
+		dock = userconfig.FindAllDockRight
+	}
+	if a.findAllDockRight {
+		a.flash("Find all docks right — ⬒ or d for the top strip")
+	} else {
+		a.flash("Find all docks at the top — ◨ or d for the right column")
+	}
+	if err := userconfig.SaveFindAllDock(userconfig.DefaultPath(), dock); err != nil {
+		a.flash("config: " + err.Error())
+	}
+}
+
+// toggleFindAllDock flips the dock — the button, the `d` key, and the ≡
+// row all land here.
+func (a *App) toggleFindAllDock() { a.setFindAllDock(!a.findAllDockRight) }
+
+// menuToggleFindAllDock is the ≡ View row. It exists because the ≡ menu
+// can't be opened while the popup owns the keyboard: without it, a user
+// whose terminal swallows clicks would have no way to reach the layout
+// at all (macOS Terminal + tmux, the reason every action has a menu
+// twin). Flipping it with the list open reflows on the next draw.
+func (a *App) menuToggleFindAllDock() {
+	a.closeMenu()
+	a.toggleFindAllDock()
+	// A dock change moves the band the preview was centered against.
+	if m, ok := a.modal.(*findAllModal); ok {
+		m.preview(a)
+	}
+}
+
+// findAllDockToggleLabel names the layout the row will switch TO.
+func (a *App) findAllDockToggleLabel() string {
+	if a.findAllDockRight {
+		return "Dock find-all results at top"
+	}
+	return "Dock find-all results right"
 }
 
 // rowIndexAt maps a screen cell to the result index drawn there, or -1
@@ -542,12 +691,21 @@ func (m *findAllModal) lineDigits() int {
 //	Up/Down          preview the neighbouring hit
 //	PgUp/PgDn        preview a page away
 //	Home/End         preview the first / last hit
+//	d                flip the dock (top strip ⇄ right column)
 //
 // Everything else is dropped: the list has no input field, and letting
 // keys fall through to the buffer behind a popup that owns the screen
-// would type into code the user can't see.
+// would type into code the user can't see. `d` is the exception because
+// the ≡ menu — the usual keyboard twin of a click — can't be opened
+// while a modal holds the keyboard, which would leave the button as the
+// ONLY way in on a terminal that eats clicks.
 func (m *findAllModal) handleKey(a *App, ev *tcell.EventKey) {
 	switch ev.Key() {
+	case tcell.KeyRune:
+		if r := ev.Rune(); r == 'd' || r == 'D' {
+			a.toggleFindAllDock()
+			m.preview(a) // the band it was centered against just changed
+		}
 	case tcell.KeyEsc:
 		m.abort(a)
 	case tcell.KeyEnter:
@@ -592,6 +750,14 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		m.accept(a)
 		return
 	}
+	// The dock button is checked before the rows and returns without
+	// touching lastClick — flipping the layout is not half a
+	// double-click on whatever row lands under the pointer afterwards.
+	if m.dockRect(a).contains(x, y) {
+		a.toggleFindAllDock()
+		m.preview(a)
+		return
+	}
 	idx := m.rowIndexAt(a, x, y)
 	if idx < 0 {
 		return
@@ -618,7 +784,7 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 // Layout (relative to the frame's top-left):
 //
 //	0        top border
-//	1        title — Find all "query"        3/57   esc
+//	1        title — Find all "query"    3/57  ◨  esc
 //	2        divider
 //	3..N     result rows —  123 │ compacted line text
 //	N+1      bottom border, carrying the key hint
@@ -629,15 +795,23 @@ func (m *findAllModal) draw(a *App) {
 	}
 	c := a.chrome()
 
+	dock := m.dockRect(a)
 	count := fmt.Sprintf("%d/%d ", m.selected+1, len(m.rows))
+	countX := dock.x - runeLen(count)
 	title := fmt.Sprintf("Find all %q", m.query)
-	// Clip the title against the count + "esc" tail so a long query can
-	// never overwrite them.
-	if room := mw - 4 - runeLen(count) - 5; room > 0 && runeLen(title) > room {
+	// Clip the title against everything to its right — the count, the
+	// dock button, and drawFrame's "esc" — so a long query on a narrow
+	// column can never overwrite them.
+	if room := countX - (mx + 2); room > 0 && runeLen(title) > room {
 		title = string([]rune(title)[:room-1]) + "…"
 	}
 	c.drawFrame(a.screen, mx, my, mw, mh, title)
-	drawAt(a.screen, mx+mw-5-runeLen(count), my+1, count, c.muted)
+	if countX > mx+1 {
+		drawAt(a.screen, countX, my+1, count, c.muted)
+	}
+	// The dock button reads as a control, not as chrome — accent, like
+	// the panels' header buttons.
+	drawAt(a.screen, dock.x, dock.y, a.findAllDockGlyph(), c.title)
 
 	vis := m.visibleRows(a)
 	digits := m.lineDigits()
@@ -655,9 +829,19 @@ func (m *findAllModal) draw(a *App) {
 		m.drawRow(a, mx, ry, mw, digits, m.rows[idx], idx == m.selected)
 	}
 
-	hint := " ↑↓ preview · enter accept · esc back "
-	if mw > runeLen(hint)+6 {
-		drawAt(a.screen, mx+2, my+mh-1, hint, c.muted)
+	// Footer hint, widest form that fits — the right-docked column has
+	// less than half the room the top strip does, and a hint clipped
+	// mid-word reads worse than a shorter one.
+	for _, hint := range []string{
+		" ↑↓ preview · enter accept · esc back · d dock ",
+		" ↑↓ preview · enter accept · esc back ",
+		" enter accept · esc back ",
+		" esc back ",
+	} {
+		if mw > runeLen(hint)+6 {
+			drawAt(a.screen, mx+2, my+mh-1, hint, c.muted)
+			break
+		}
 	}
 }
 

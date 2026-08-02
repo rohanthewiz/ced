@@ -954,3 +954,66 @@ func TestSkillsDirSitsBesideConfig(t *testing.T) {
 		t.Fatalf("SkillsDir() fallback = %q, want %q", got, want)
 	}
 }
+
+// TestLoad_FindAllDock covers the Find-all dock key: absent keeps the
+// top-strip default, "right" selects the column, and an unknown value is
+// an error rather than a silent fallback (the same contract termdock has
+// — a typo'd layout key should be reported, not ignored).
+func TestLoad_FindAllDock(t *testing.T) {
+	cases := []struct {
+		name    string
+		json    string
+		want    FindAllDock
+		wantErr bool
+	}{
+		{"absent", `{}`, FindAllDockTop, false},
+		{"top", `{"findalldock": "top"}`, FindAllDockTop, false},
+		{"right", `{"findalldock": "right"}`, FindAllDockRight, false},
+		{"cased", `{"findalldock": "RIGHT"}`, FindAllDockRight, false},
+		{"bogus", `{"findalldock": "sideways"}`, FindAllDockTop, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(c.json), 0644); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			cfg, err := Load(path)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, c.wantErr)
+			}
+			if cfg.FindAllDock != c.want {
+				t.Errorf("FindAllDock = %q, want %q", cfg.FindAllDock, c.want)
+			}
+		})
+	}
+}
+
+// TestSaveFindAllDock_RoundTripsUnknownKeys pins the save path's promise:
+// writing the dock preference must not drop keys this build doesn't know
+// about (a config written by a newer ced, or a hand-added comment key).
+func TestSaveFindAllDock_RoundTripsUnknownKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"icons": "off", "somethingnew": "keep me"}`), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveFindAllDock(path, FindAllDockRight); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	for _, want := range []string{`"findalldock": "right"`, `"somethingnew": "keep me"`, `"icons": "off"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("config = %s, want it to contain %s", data, want)
+		}
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if cfg.FindAllDock != FindAllDockRight {
+		t.Errorf("reloaded FindAllDock = %q, want right", cfg.FindAllDock)
+	}
+}

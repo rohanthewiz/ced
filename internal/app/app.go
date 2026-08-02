@@ -215,6 +215,12 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuToggleWordHighlight, enabled: alwaysTrue, labelFor: (*App).wordHighlightToggleLabel},
 			{shortcut: "esc `", action: (*App).menuToggleTerminal, enabled: alwaysTrue, labelFor: (*App).termToggleLabel},
 			{action: (*App).menuToggleTermDock, enabled: alwaysTrue, labelFor: (*App).termDockToggleLabel},
+			// The Find-all list's edge. Here rather than in Search
+			// because it's a layout preference like the terminal dock
+			// above it — and because it's the only keyboard path to the
+			// setting while the list itself is open (a modal owns the
+			// keyboard, so the menu is unreachable from inside it).
+			{action: (*App).menuToggleFindAllDock, enabled: alwaysTrue, labelFor: (*App).findAllDockToggleLabel},
 			// Color themes (theme.go). They live in View rather than in a
 			// group of their own for the same above-the-fold reason the
 			// terminal rows do: the menu scrolls on short windows, and a
@@ -609,6 +615,14 @@ type App struct {
 	// ("termdock"), toggled from the ≡ menu.
 	termDockLeft bool
 
+	// findAllDockRight selects the Find-all list's edge: false (default)
+	// is the wide strip under the tab bar, true a tall column down the
+	// editor's right side. It lives on App rather than on the modal
+	// because the popup is transient and the preference isn't — it's
+	// persisted via userconfig ("findalldock"), set from the popup's own
+	// ◨ button, its `d` key, and the ≡ View toggle. See findall.go.
+	findAllDockRight bool
+
 	// sidebarWidth is the live width of the file-explorer block (file tree
 	// + 1-cell splitter on its right edge), in screen cells. The user can
 	// drag the splitter to change it within [minSidebarWidth, width-minEditorAfterDrag].
@@ -934,6 +948,7 @@ func (a *App) loadUserConfig() {
 	a.wordHLEnabled = cfg.WordHL
 	a.applyWordHighlight() // no-op at startup; matters when the config is re-read
 	a.termDockLeft = cfg.TermDock == userconfig.TermDockLeft
+	a.findAllDockRight = cfg.FindAllDock == userconfig.FindAllDockRight
 	a.copilot.enabled = cfg.Copilot
 	a.copilot.suggest = cfg.Suggestions
 	a.chat.modelPref = cfg.ChatModel
@@ -1475,21 +1490,31 @@ func (a *App) editorBandRows() int {
 	return h
 }
 
+// editorBandCols is the editor body's column band before the Find-all
+// list (the only surface that can take columns from inside it) claims
+// any — the horizontal twin of editorBandRows, and it exists for the
+// same reason: the claimant can't ask editorRect, which already
+// subtracts it.
+func (a *App) editorBandCols() int {
+	return a.width - a.leftBlockW() - a.rightBlockW()
+}
+
 // editorRect returns the editor body's screen rectangle — the column
 // band between the docked side blocks, between the tab bar and the
 // status bar, minus whatever the strips around it claimed.
 //
-// The Find-all popup is the only one that costs rows off the TOP: it
-// sits directly under the tab bar and pushes the editor down, rather
-// than floating over it, so the shortened viewport still scrolls the
-// line it's previewing into view (see findall.go). Everything that
-// positions itself inside the editor reads the y returned here, so the
-// offset costs those call sites nothing.
+// The Find-all popup is the only one that costs the editor rows off the
+// TOP or columns off the RIGHT (its two dock modes — see findall.go):
+// it displaces the editor rather than floating over it, so the
+// shortened viewport still scrolls the line it's previewing into view.
+// Everything that positions itself inside the editor reads the x/y
+// returned here, so the offsets cost those call sites nothing.
 func (a *App) editorRect() (x, y, w, h int) {
 	lw := a.leftBlockW()
 	top := a.findAllPanelHeight()
 	h = a.editorBandRows() - top
-	return lw, 1 + top, a.width - lw - a.rightBlockW(), h
+	w = a.editorBandCols() - a.findAllPanelWidth()
+	return lw, 1 + top, w, h
 }
 
 // statusRect returns the status bar's screen rectangle (full-width bottom row).

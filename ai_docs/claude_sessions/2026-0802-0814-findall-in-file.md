@@ -12,13 +12,17 @@ Date: 2026-08-02
 > enter to accept the new position, Esc to abort and return to the
 > original position."
 
-Then two refinements, each of which changed a design decision rather
+Then three refinements, each of which changed a design decision rather
 than adding surface:
 
 > "Position the find all popup vertically before the main editor window
 > if possible"
 
-> "center the previewed line in the band"
+> "center the previewed line in the band" … "make the centering
+> conditional - only if off-screen"
+
+> "Also give me an icon to optionally position the findall pane to right
+> / or top (default)"
 
 ### The house rule it had to break, and why
 
@@ -101,9 +105,52 @@ fake it; near the bottom, `clampScroll`'s existing overscroll allowance
 (half a view — the deliberate design already in `CLAUDE.md`) is exactly
 enough to keep the final line centerable.
 
-Centering is **unconditional**, including when the hit is already on
-screen. Deliberate: a fixed reading position beats a still background.
-Easy to gate on "only if off-screen" if it ever feels busy.
+Centering is **conditional** — it fires only when the hit is off-screen
+(`Tab.CursorLineVisible`). The first cut re-centered unconditionally, on
+the theory that a fixed reading position beats a still background; in
+practice it scrolls the code out from under a line the user can already
+see. So walking a cluster of nearby hits now holds the view still, and
+only falling out of the band re-centers. The primitive itself stays
+unconditional: that policy belongs to the peek UI, not to the Tab.
+
+### Two docks, one displacement rule
+
+The third refinement:
+
+> "Also give me an icon to optionally position the findall pane to right
+> / or top (default)"
+
+Because the popup already **displaces** the editor rather than floating
+over it, a second dock was mostly a matter of choosing which axis it
+takes from: TOP costs rows, RIGHT costs columns and runs full height.
+`editorRect` grew a width term next to its height term
+(`editorBandCols() - findAllPanelWidth()`), with exactly one of the two
+ever non-zero — and again nothing downstream changed, because every
+consumer was already reading the returned rect rather than assuming the
+editor's bounds.
+
+The trade between them is real: the strip shows long lines, the column
+shows three times as many hits (30 vs 10 on a 44-row terminal).
+
+Width precedence in the right dock copies `gitPanelHeight`: the editor's
+reserve caps the column, but the column's own floor is applied **last**
+and wins on a band too narrow for both. A list too narrow to read is
+worse than a narrow editor, and the real fix at that size is hiding the
+sidebar.
+
+**Three surfaces for one preference** (`"findalldock"`, persisted like
+`termdock`): the ◨/⬒ button in the title row, `d` inside the popup, and
+a ≡ View row. The `d` key isn't redundant — a modal owns the keyboard,
+so the ≡ menu is *unreachable from inside the list*, which would have
+left a mouse-only path on exactly the terminal (macOS Terminal + tmux)
+the whole no-mouse-only rule exists for. The glyph names the layout it
+switches TO, not the one in force, matching the toggle-row convention;
+both halves are single-width per the marker rule.
+
+Two details the button needed: it's hit-tested **before** the rows and
+returns without touching `lastClick`, so a flip is neither a row preview
+nor half a double-click accept; and a flip re-runs `preview`, because
+the band the hit was centered against just changed.
 
 ### The find state is borrowed, not set
 
@@ -144,19 +191,28 @@ the user has to dismiss to be told "no".
 | File | What |
 |---|---|
 | `internal/app/findall.go` | new — the modal, rows, preview/accept/abort, geometry, draw |
-| `internal/app/findall_test.go` | new — 26 cases |
-| `internal/editor/tab.go` | `RestoreView`, `CenterOnCursor` |
-| `internal/app/app.go` | `editorBandRows` split out; `editorRect` top offset; ≡ row |
+| `internal/app/findall_test.go` | new — 32 cases |
+| `internal/editor/tab.go` | `RestoreView`, `CenterOnCursor`, `CursorLineVisible` |
+| `internal/app/app.go` | `editorBandRows`/`Cols` split out; `editorRect` offsets; 2 ≡ rows |
+| `internal/userconfig/` | the `findalldock` key + `SaveFindAllDock` |
 | `internal/app/leader.go` | `Esc F` |
 | `internal/app/find.go` | `↓` opens the list; hint text |
 | `CLAUDE.md` | architecture map + a house-rules section |
+| `internal/*/[*]_test.go` | menu geometry pins; editor + userconfig cases |
 
 ### Verification
 
 Driven through the real binary with the `run-ced` PTY capture (not just
-`SimulationScreen`): Esc restores to `Ln 31, Col 1`, Enter lands on the
-previewed hit, and after centering, previewing line 63 in a 28-row band
-scrolls to 49–76 with the hit mid-band.
+`SimulationScreen`), because none of this is visible to a
+SimulationScreen assertion alone:
+
+- Esc restores to `Ln 31, Col 1`; Enter lands on the previewed hit.
+- Centering: previewing line 63 in a 28-row band scrolls to 49–76, hit
+  mid-band. Walking hits at lines 22 → 27 → 31 → 63 held the top line at
+  1, then 1, then 17, then 49 — i.e. the two in-band hits moved nothing
+  and only the ones that fell out re-centered.
+- Both docks draw: `◨`/`⬒` land single-width in the title row, and the
+  right column shows 30 rows where the strip shows 10.
 
 `make test`, `go vet`, `gofmt` clean. One pre-existing flake worth
 knowing about: `internal/mcp`'s `TestConnect_Handshake` fails under

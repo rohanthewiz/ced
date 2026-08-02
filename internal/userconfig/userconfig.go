@@ -24,6 +24,10 @@
 //	{"termdock": "bottom"}  // default; terminal panel is a bottom strip
 //	{"termdock": "left"}    // terminal docks as a vertical strip on the
 //	                        // left; the file tree flips to the right
+//	{"findalldock": "top"}  // default; the Find-all results list is a
+//	                        // strip under the tab bar
+//	{"findalldock": "right"}// the list docks as a tall column on the
+//	                        // right of the editor instead
 //	{"execmarks": "on"}     // default; append an ls -F '*' to executables
 //	{"execmarks": "off"}    // hide the executable marker in the file tree
 //	{"copilot": "on"}       // default; run copilot-language-server when
@@ -88,6 +92,17 @@ const (
 	TermDockLeft   TermDock = "left"
 )
 
+// FindAllDock is where the Find-all results list sits: a wide strip
+// under the tab bar, or a tall column down the editor's right edge.
+// Two layouts because the two shapes answer different questions — the
+// strip shows long lines, the column shows many more of them at once.
+type FindAllDock string
+
+const (
+	FindAllDockTop   FindAllDock = "top"
+	FindAllDockRight FindAllDock = "right"
+)
+
 // Config is the resolved, validated form of config.json. Callers get a
 // fully-populated Config back from Load — defaults are filled in for
 // any field the file omitted, so consumers never need to nil-check.
@@ -105,6 +120,11 @@ type Config struct {
 	// vertical on the left, file tree on the right). Persisted by
 	// the ≡ layout toggle, same as AutoSave.
 	TermDock TermDock
+
+	// FindAllDock is the Find-all list's edge. Defaults to the top
+	// strip. Persisted by the popup's own ◨ button and the ≡ view
+	// toggle — a layout preference the user sets once, like TermDock.
+	FindAllDock FindAllDock
 
 	// ExecMarks controls whether the file tree appends an ls -F style
 	// '*' to executable regular files. Defaults to on. Persisted by the
@@ -187,7 +207,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true}
+	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -200,6 +220,7 @@ type fileFormat struct {
 	Icons       string `json:"icons,omitempty"`
 	AutoSave    string `json:"autosave,omitempty"`
 	TermDock    string `json:"termdock,omitempty"`
+	FindAllDock string `json:"findalldock,omitempty"`
 	ExecMarks   string `json:"execmarks,omitempty"`
 	WordHL      string `json:"wordhl,omitempty"`
 	Copilot     string `json:"copilot,omitempty"`
@@ -363,6 +384,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch FindAllDock(strings.ToLower(strings.TrimSpace(ff.FindAllDock))) {
+	case "":
+		// field omitted — keep default
+	case FindAllDockTop:
+		cfg.FindAllDock = FindAllDockTop
+	case FindAllDockRight:
+		cfg.FindAllDock = FindAllDockRight
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: findalldock must be %q or %q (got %q)",
+			path, FindAllDockTop, FindAllDockRight, ff.FindAllDock,
+		)
+	}
+
 	switch strings.ToLower(strings.TrimSpace(ff.ExecMarks)) {
 	case "":
 		// field omitted — keep default
@@ -470,6 +505,12 @@ func SaveAutoSave(path string, on bool) error {
 // file at path. See saveKey for the round-trip guarantees.
 func SaveTermDock(path string, dock TermDock) error {
 	return saveKey(path, "termdock", string(dock))
+}
+
+// SaveFindAllDock persists the Find-all dock preference into the config
+// file at path. See saveKey for the round-trip guarantees.
+func SaveFindAllDock(path string, dock FindAllDock) error {
+	return saveKey(path, "findalldock", string(dock))
 }
 
 // SaveExecMarks persists the executable-marker preference into the

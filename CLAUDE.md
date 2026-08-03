@@ -77,6 +77,8 @@ internal/app/wordhl.go        Word-highlight ≡ toggle + per-tab flag plumbing
 internal/app/findall.go       Find-all peek list: compacted rows, preview, Esc-restore
 internal/lsp/client.go        Minimal JSON-RPC-over-stdio LSP client (stdlib only)
 internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition, hover
+internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
+internal/app/termdiag.go      Terminal output → clickable path:line:col jumps
 internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
 internal/app/copilot_ghost.go Copilot phase 2: doc sync + inline completions (ghost text)
 internal/app/copilot_chat.go  Copilot phase 3: ACP chat panel (left strip, streaming turns)
@@ -589,15 +591,53 @@ framework dependency. House rules it must keep obeying:
   silently diagnoses stale text.
 - Diagnostics are just another `DecorationSource` (registered after
   the git source so the diag gutter dot outranks the git mark).
-- Leaders: Esc-d definition, Esc-i hover. Definition jumps record
-  into the app-wide navigation history (nav.go) — there is no
-  LSP-private jump stack anymore.
+- Leaders: Esc-d definition, Esc-i hover, Esc-D the file's symbol
+  outline. Definition jumps record into the app-wide navigation
+  history (nav.go) — there is no LSP-private jump stack anymore.
 - **Absolute paths only**: `New()` absolutizes rootDir and `openFile`
   absolutizes tab paths. A relative root produces a malformed rootUri
   and gopls then publishes diagnostics keyed by absolute paths that
   never match the tabs — the "gopls installed but no squiggles" bug.
 - Tests kill the integration (`a.lsp.dead = true` in newTestApp) so
   openFile can't spawn a real gopls; LSP tests inject `fakeLSPConn`.
+
+### Go to symbol in file (lsp/types.go + app/lspsymbols.go)
+The active document's declarations, listed in the palette, jump on
+Enter (Esc-D, ≡ Code). House rules:
+
+- **The protocol's two answers collapse in `internal/lsp`, not in the
+  app.** `documentSymbol` returns either the hierarchical
+  `DocumentSymbol[]` or the legacy flat `SymbolInformation[]`;
+  `ParseDocumentSymbols` normalises both into one document-ordered
+  `[]Symbol` carrying a Depth. It tells them apart by a **"location"
+  key, not by a failed unmarshal** — both shapes decode cleanly into
+  either struct, so an error-based sniff would "succeed" with every
+  position at 0:0 and every row jumping to line 1. The jump target is
+  `selectionRange` (the NAME); `range` is the whole declaration, and
+  landing on a 200-line function's opening brace is what this avoids.
+- **It's a PICKER, not a palette source.** palette.go's doc comment
+  floats symbols as a merge source, and that's the one place it
+  shouldn't go: sources are collected synchronously at open, and this
+  costs a round trip to gopls. Feeding it in would either block the
+  palette on a cold server or make its contents arrive late and
+  reorder under the user's fingers.
+- **The kind word goes LAST in a row label.** The fuzzy scorer rewards
+  early matches, so a leading "function " would make every row score
+  alike on the first letters typed. Trailing, "func" still narrows by
+  kind while the name keeps the position that ranks. Indentation is
+  two spaces per Depth, pure decoration that survives filtering — it's
+  what makes an unfiltered list read as the file's outline.
+- Same contracts as the other two verbs: flush before asking (an
+  unsynced new function missing from the list reads as the feature
+  being broken), drop a response whose document is no longer active,
+  re-check the path when a row FIRES (a picker owns the keyboard, not
+  the world), record nav explicitly (a same-file jump is invisible to
+  openFile's path-change recording), and center an off-screen landing
+  per goToLine's policy.
+- Leader is **Esc-D**, the shifted twin of definition's Esc-d: same
+  verb, wider scope — 'd' goes to the definition of what's under the
+  cursor, 'D' lists every definition in the file. The f/F, p/P, h/H
+  convention.
 
 ### Copilot sidecar (app/copilot.go) — phase 1 of the AI integration
 Runs GitHub's official `copilot-language-server` (native binary, found
@@ -1471,6 +1511,56 @@ scope by design. House rules:
   newTestApp. Only TestTermRealGrshIntegration may execute a real
   command, and it is restricted to `echo`.
 
+### Clickable terminal output (app/termdiag.go)
+Any scrollback row naming a file and a line — a compiler error, a
+`go vet` finding, a `grep -n` hit — is a jump into the editor. It
+closes the build→fix loop inside one pane, which is the whole reason
+the panel exists. House rules:
+
+- **ONE parser decides what a location is.** `plugins.ParseDiagnostic`
+  (the exported single-line twin of `ParseDiagnostics`) already speaks
+  the compiler/grep convention the decoration layer is built on; a
+  second implementation here would drift and the user would have no
+  way to tell which one decided a row wasn't a link.
+- **A LOCATION IS ONLY REAL IF THE FILE IS.** That parser is
+  deliberately permissive — it has to be, since its usual caller
+  already knows which file the output describes — so a bare "12:30"
+  parses fine. Terminal output belongs to nobody, so the guard here is
+  stricter: the row must name a PATH, that path must resolve to a
+  regular file, and the file must sit inside rootDir (the git-log
+  jump's confinement rule).
+- **Relative paths resolve against the SHELL's cwd**, not the project
+  root: `go build` prints relative to where it ran, and grsh's `cd`
+  moves that. Output that no longer resolves after a `cd` is inherent
+  to a scrollback, and is what a real terminal's file links do too.
+- **Resolution is CACHED, keyed by cwd + the path as printed.**
+  Drawing asks per visible row per frame; uncached that is a stat
+  syscall per row of output on every repaint. The cwd in the key means
+  a `cd` invalidates exactly the answers that changed.
+- **`termLocSpan` measures the underline, it does not re-parse.** The
+  parse is lossy on purpose (a printed column of 0 clamps to
+  zero-based 0), so rebuilding "path:line:col" from parsed values
+  would match nothing. Measuring the raw text can't disagree with
+  itself. The underline IS the affordance — without it the feature is
+  invisible — so a row is a link only when both agree.
+- **The list is NEWEST COMMAND FIRST, printed order within each.**
+  Plain document order buries the build you just ran; plain reverse
+  order shows one build's three errors backwards. The echoed command
+  rows (`termCmd`) already mark the boundaries, so grouping by them
+  costs nothing and gets both halves right. Capped, with the cap named
+  in the title (the project-search rule).
+- **Double-click is primary, the picker is the twin.** macOS Terminal
+  swallows clicks, so `Esc ~` / ≡ opens the same locations through
+  `openPicker`. `~` is the shifted twin of the terminal's own Esc-`.
+  The menu predicate (`hasTermOutput`) is deliberately approximate —
+  menuLayout runs every frame the menu is open, and the honest
+  question is a scrollback walk with a stat behind it, so it's a cheap
+  gate plus an honest flash.
+- The row lives in the **Code** group, not with the terminal's View
+  toggles: it answers the code-intelligence question ("take me to the
+  problem") and is the one row there needing no language server —
+  `go build` and `grep -n` are the providers.
+
 ### Named themes (internal/theme + app/theme.go)
 Ten shipped palettes plus `~/.config/ced/themes/*.json`, switchable live
 from ≡ → Theme. House rules:
@@ -1579,8 +1669,10 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 95 group actions + 14 headers (111), height 117,
-dividers `[2, 5, 114]`.
+2 top-zone rows + 100 group actions + 14 headers (116), height 122,
+dividers `[2, 5, 119]`. **Adding a menu row means updating those pins**
+(and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
+`TestMenuModalRect_*`).
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.

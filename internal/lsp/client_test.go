@@ -374,3 +374,73 @@ func TestGoplsEndToEnd(t *testing.T) {
 		}
 	}
 }
+
+// TestDocumentSymbolsRequest pins the request wrapper end to end: the
+// right method and document URI go out, and the response comes back
+// already normalised — the app layer never learns that the protocol has
+// two shapes for this answer.
+func TestDocumentSymbolsRequest(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	type result struct {
+		syms []Symbol
+		err  error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		syms, err := c.DocumentSymbols("/tmp/proj/main.go")
+		resCh <- result{syms, err}
+	}()
+
+	m := srv.read(t)
+	if m.Method != "textDocument/documentSymbol" {
+		t.Fatalf("method = %q, want textDocument/documentSymbol", m.Method)
+	}
+	var params DocumentSymbolParams
+	if err := json.Unmarshal(m.Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if params.TextDocument.URI != PathToURI("/tmp/proj/main.go") {
+		t.Errorf("uri = %q, want %q", params.TextDocument.URI, PathToURI("/tmp/proj/main.go"))
+	}
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":[
+		{"name":"main","kind":12,
+		 "range":{"start":{"line":3,"character":0},"end":{"line":5,"character":1}},
+		 "selectionRange":{"start":{"line":3,"character":5},"end":{"line":3,"character":9}}}
+	]}`, *m.ID))
+
+	got := <-resCh
+	if got.err != nil {
+		t.Fatalf("DocumentSymbols: %v", got.err)
+	}
+	if len(got.syms) != 1 || got.syms[0].Name != "main" || got.syms[0].Pos.Line != 3 {
+		t.Errorf("symbols = %+v, want one 'main' at line 3", got.syms)
+	}
+}
+
+// TestDocumentSymbolsNullResult pins the empty answer: a server with
+// nothing to report sends null, and that must read as "no symbols"
+// rather than as a failure — an empty file is a legitimate document.
+func TestDocumentSymbolsNullResult(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	type result struct {
+		syms []Symbol
+		err  error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		syms, err := c.DocumentSymbols("/tmp/proj/empty.go")
+		resCh <- result{syms, err}
+	}()
+
+	m := srv.read(t)
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":null}`, *m.ID))
+
+	got := <-resCh
+	if got.err != nil || got.syms != nil {
+		t.Errorf("null result = (%+v, %v), want (nil, nil)", got.syms, got.err)
+	}
+}

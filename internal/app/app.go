@@ -312,6 +312,19 @@ func builtinMenuGroups() []menuGroup {
 		{title: "Code", collapsible: true, items: []menuItemDef{
 			{label: "Go to definition", shortcut: "esc d", action: (*App).menuGoToDefinition, enabled: (*App).hasLSPActions},
 			{label: "Hover info", shortcut: "esc i", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},
+			// The file's outline as a fuzzy picker (lspsymbols.go). Sits
+			// under its lowercase twin because it answers the same
+			// question at a wider scope: 'd' jumps to the definition of
+			// what's under the cursor, 'D' lists every definition in the
+			// file — the f/F and p/P convention again.
+			{label: "Go to symbol in file…", shortcut: "esc D", action: (*App).menuGoToSymbol, enabled: (*App).hasLSPActions},
+			// Clickable terminal output (termdiag.go). It sits with the
+			// code-intelligence rows rather than the terminal's View
+			// toggles because it answers their question — "take me to the
+			// problem" — and it is the one row here that needs no
+			// language server at all: `go build` and `grep -n` are the
+			// providers.
+			{label: "Go to terminal output location…", shortcut: "esc ~", action: (*App).menuTermLocations, enabled: (*App).hasTermOutput},
 		}},
 		// GitHub Copilot (copilot-language-server sidecar). Rows stay
 		// clickable even when the sidecar is unavailable — the action
@@ -1308,6 +1321,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPDefinition(e)
 	case *lspHoverEvent:
 		a.handleLSPHover(e)
+	case *lspSymbolsEvent:
+		a.handleLSPSymbols(e)
 	case *copilotReadyEvent:
 		a.handleCopilotReady(e)
 	case *copilotExitEvent:

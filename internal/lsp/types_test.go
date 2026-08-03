@@ -101,3 +101,91 @@ func TestHoverText(t *testing.T) {
 		}
 	}
 }
+
+// TestParseDocumentSymbols_Hierarchical pins the modern shape: the tree
+// flattens in document order with Depth recording the nesting, and the
+// jump position comes from selectionRange (the NAME) rather than range
+// (the whole declaration) — landing on a 200-line function's opening
+// brace is exactly what this is meant to avoid.
+func TestParseDocumentSymbols_Hierarchical(t *testing.T) {
+	raw := json.RawMessage(`[
+		{"name":"Tab","kind":23,
+		 "range":{"start":{"line":10,"character":0},"end":{"line":40,"character":1}},
+		 "selectionRange":{"start":{"line":10,"character":5},"end":{"line":10,"character":8}},
+		 "children":[
+			{"name":"Render","kind":6,"detail":"func()",
+			 "range":{"start":{"line":20,"character":0},"end":{"line":30,"character":1}},
+			 "selectionRange":{"start":{"line":20,"character":15},"end":{"line":20,"character":21}}}
+		 ]},
+		{"name":"NewTab","kind":12,
+		 "range":{"start":{"line":50,"character":0},"end":{"line":55,"character":1}},
+		 "selectionRange":{"start":{"line":50,"character":5},"end":{"line":50,"character":11}}}
+	]`)
+	got := ParseDocumentSymbols(raw)
+	if len(got) != 3 {
+		t.Fatalf("parsed %d symbols, want 3: %+v", len(got), got)
+	}
+	want := []Symbol{
+		{Name: "Tab", Kind: 23, Depth: 0, Pos: Position{Line: 10, Character: 5}},
+		{Name: "Render", Detail: "func()", Kind: 6, Depth: 1, Pos: Position{Line: 20, Character: 15}},
+		{Name: "NewTab", Kind: 12, Depth: 0, Pos: Position{Line: 50, Character: 5}},
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("symbol %d = %+v, want %+v", i, got[i], w)
+		}
+	}
+}
+
+// TestParseDocumentSymbols_Flat pins the legacy shape and the reason the
+// two are told apart by a "location" key rather than by a failed
+// unmarshal: SymbolInformation decodes cleanly into DocumentSymbol, so a
+// shape sniff based on error would silently report every symbol at 0:0.
+func TestParseDocumentSymbols_Flat(t *testing.T) {
+	raw := json.RawMessage(`[
+		{"name":"Helper","kind":12,"containerName":"pkg",
+		 "location":{"uri":"file:///a/b.go",
+		   "range":{"start":{"line":7,"character":5},"end":{"line":7,"character":11}}}}
+	]`)
+	got := ParseDocumentSymbols(raw)
+	if len(got) != 1 {
+		t.Fatalf("parsed %d symbols, want 1", len(got))
+	}
+	want := Symbol{Name: "Helper", Detail: "pkg", Kind: 12, Depth: 0,
+		Pos: Position{Line: 7, Character: 5}}
+	if got[0] != want {
+		t.Errorf("symbol = %+v, want %+v", got[0], want)
+	}
+}
+
+// TestParseDocumentSymbols_Degenerate pins the quiet failures: an empty
+// or null payload and unparseable JSON all mean "this document declares
+// nothing", never a panic. A hierarchical entry with no selectionRange
+// falls back to the declaration's start rather than the file origin.
+func TestParseDocumentSymbols_Degenerate(t *testing.T) {
+	for _, raw := range []string{``, `null`, `{"not":"an array"}`, `[[]]`} {
+		if got := ParseDocumentSymbols(json.RawMessage(raw)); got != nil {
+			t.Errorf("ParseDocumentSymbols(%q) = %+v, want nil", raw, got)
+		}
+	}
+	fallback := ParseDocumentSymbols(json.RawMessage(
+		`[{"name":"X","kind":12,"range":{"start":{"line":4,"character":2},"end":{"line":9,"character":0}}}]`))
+	if len(fallback) != 1 || fallback[0].Pos != (Position{Line: 4, Character: 2}) {
+		t.Errorf("missing selectionRange should fall back to range.start, got %+v", fallback)
+	}
+}
+
+// TestSymbolKindName pins the display table's edges: the spec's numbers
+// are dense and 1-based, and a kind this client hasn't heard of costs a
+// blank column rather than a wrong word or a panic.
+func TestSymbolKindName(t *testing.T) {
+	cases := map[int]string{
+		1: "file", 6: "method", 12: "function", 23: "struct", 26: "type parameter",
+		0: "", 27: "", -1: "", 999: "",
+	}
+	for kind, want := range cases {
+		if got := SymbolKindName(kind); got != want {
+			t.Errorf("SymbolKindName(%d) = %q, want %q", kind, got, want)
+		}
+	}
+}

@@ -176,6 +176,12 @@ type termPanelState struct {
 
 	running     bool // an Eval is in flight
 	interrupted bool // ⏹ already clicked once; next click escalates to Kill
+
+	// diagCache memoises "does this printed path name a real file in the
+	// project?" for the clickable-output layer (termdiag.go). Keyed by
+	// cwd + the path as printed, because a relative path means different
+	// things after a `cd`. Rebuilt from scratch when it outgrows its cap.
+	diagCache map[string]string
 }
 
 // -----------------------------------------------------------------------------
@@ -640,6 +646,23 @@ func (a *App) termContentRows() int {
 	return n
 }
 
+// termRowLine returns the scrollback row at idx — committed lines
+// first, then the in-progress partial tail — reporting false past the
+// end. The single accessor for "what is on row N", shared by the
+// renderer and the diagnostic scanner (termdiag.go) so the two can
+// never disagree about which row a click landed on.
+func (a *App) termRowLine(idx int) (termLine, bool) {
+	switch {
+	case idx < 0:
+		return termLine{}, false
+	case idx < len(a.term.lines):
+		return a.term.lines[idx], true
+	case idx == len(a.term.lines) && a.term.partial != "":
+		return termLine{text: a.term.partial, kind: termOut}, true
+	}
+	return termLine{}, false
+}
+
 // termMaxScroll is the scroll offset that pins the newest row to the
 // bottom of the viewport. Hard clamp, no overscroll — a shell reads
 // bottom-up and void rows below the last output would look like lag.
@@ -1072,8 +1095,33 @@ func (a *App) termPanelPress(x, y int) (startDrag bool) {
 	iy, start, end := a.termInputSpan()
 	if y == iy {
 		a.term.input.clickAt(start, end, x)
+		return false
 	}
+	a.termScrollbackPress(x, y)
 	return false
+}
+
+// termScrollbackPress handles a press on a scrollback row: a
+// double-click on a row naming a file jumps to it (termdiag.go).
+//
+// It reuses the editor's own lastClick record and window so the panel's
+// double-click feels identical to the git panel's and the git log's, and
+// so a click here can't be half of a double-click somewhere else. The
+// FIRST press of the pair has already focused the panel — the same
+// "click to focus, click again to act" the other panels teach.
+func (a *App) termScrollbackPress(x, y int) {
+	_, py, _, ph := a.termPanelRect()
+	row := y - py - 1
+	if row < 0 || row >= ph-2 {
+		return
+	}
+	now := time.Now()
+	if a.lastClick.x == x && a.lastClick.y == y && now.Sub(a.lastClick.when) < doubleClickMs {
+		a.lastClick = clickRecord{} // a triple click isn't a second jump
+		a.termJumpToRow(a.term.scroll + row)
+		return
+	}
+	a.lastClick = clickRecord{x: x, y: y, when: now}
 }
 
 // termPasteClip inserts the text clipboard into the input line — the
@@ -1253,31 +1301,44 @@ func (a *App) drawTermPanel() {
 }
 
 // drawTermRow paints scrollback row idx (committed lines first, then
-// the partial tail), truncated to the pane width.
+// the partial tail), truncated to the pane width. A row that names a
+// file the editor could open gets its "path:line[:col]" prefix repainted
+// as a link — that underline IS the affordance for the double-click
+// jump (termdiag.go); without it the feature would be invisible.
 func (a *App) drawTermRow(idx, x, ry, w int) {
 	if w <= 0 || idx < 0 {
 		return
 	}
 	th := a.theme
-	var text string
-	st := tcell.StyleDefault.Background(th.BG).Foreground(th.Text)
-	switch {
-	case idx < len(a.term.lines):
-		ln := a.term.lines[idx]
-		text = ln.text
-		switch ln.kind {
-		case termCmd:
-			st = st.Foreground(th.Accent).Bold(true)
-		case termErr:
-			st = st.Foreground(th.Error)
-		}
-	case idx == len(a.term.lines) && a.term.partial != "":
-		text = a.term.partial
-	default:
+	ln, ok := a.termRowLine(idx)
+	if !ok {
 		return
+	}
+	text := ln.text
+	st := tcell.StyleDefault.Background(th.BG).Foreground(th.Text)
+	switch ln.kind {
+	case termCmd:
+		st = st.Foreground(th.Accent).Bold(true)
+	case termErr:
+		st = st.Foreground(th.Error)
 	}
 	if runeLen(text) > w {
 		text = string([]rune(text)[:w-1]) + "…"
 	}
 	drawAt(a.screen, x, ry, text, st)
+
+	// The link is painted OVER the row rather than the row being drawn
+	// in pieces: the location is always a prefix, so one extra drawAt
+	// costs less than splitting every row's paint for the rare one that
+	// is a link. Clipped against the truncated text so a long line can't
+	// paint its underline past the pane edge.
+	if loc, isLink := a.termDiagAt(idx); isLink {
+		runes := []rune(text)
+		end := min(loc.start+loc.width, len(runes))
+		if loc.start < end {
+			linkSt := tcell.StyleDefault.Background(th.BG).
+				Foreground(th.Accent).Underline(true)
+			drawAt(a.screen, x+loc.start, ry, string(runes[loc.start:end]), linkSt)
+		}
+	}
 }

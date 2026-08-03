@@ -164,3 +164,28 @@ func TestSeverityString(t *testing.T) {
 		t.Errorf("severity labels drifted: %v/%v/%v", SevError, SevWarn, SevInfo)
 	}
 }
+
+// TestParseDiagnostic_SingleLine pins the exported one-line entry point
+// the terminal panel scans scrollback with: it answers exactly what the
+// whole-output parser would for that line, and reports false for prose
+// so a caller holding lines never has to guess.
+func TestParseDiagnostic_SingleLine(t *testing.T) {
+	d, ok := ParseDiagnostic("internal/app/lsp.go:314:22: undefined: foo")
+	if !ok {
+		t.Fatal("a compiler line should parse")
+	}
+	if d.Path != "internal/app/lsp.go" || d.Line != 313 || d.Col != 21 {
+		t.Errorf("parsed %+v, want lsp.go at 0-based 313:21", d)
+	}
+	if d.Message != "undefined: foo" {
+		t.Errorf("message = %q, want %q", d.Message, "undefined: foo")
+	}
+	if _, ok := ParseDiagnostic("go: downloading example.com/mod"); ok {
+		t.Error("a progress line has no location and must not parse")
+	}
+	// Same answer either way — two implementations of this format would
+	// drift, and the user could not tell which one decided.
+	if whole := ParseDiagnostics("internal/app/lsp.go:314:22: undefined: foo"); len(whole) != 1 || whole[0] != d {
+		t.Errorf("ParseDiagnostics disagreed with ParseDiagnostic: %+v vs %+v", whole, d)
+	}
+}

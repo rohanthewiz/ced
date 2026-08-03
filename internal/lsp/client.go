@@ -446,6 +446,15 @@ func (c *Client) Initialize(rootDir string) error {
 				"synchronization":    map[string]any{"didSave": true},
 				"publishDiagnostics": map[string]any{},
 				"definition":         map[string]any{},
+				// Hierarchical symbols are the shape worth asking for:
+				// gopls nests a type's methods under it, which is what
+				// makes the "go to symbol" picker read like an outline
+				// rather than an alphabet soup. Servers that can't
+				// oblige answer with the flat form anyway, and
+				// ParseDocumentSymbols takes either.
+				"documentSymbol": map[string]any{
+					"hierarchicalDocumentSymbolSupport": true,
+				},
 				"hover": map[string]any{
 					// Plaintext first: the hover modal is a dumb text
 					// box, and gopls honours the preference order.
@@ -519,6 +528,22 @@ func (c *Client) Definition(path string, pos Position) ([]Location, error) {
 		return []Location{one}, nil
 	}
 	return nil, nil
+}
+
+// DocumentSymbols asks for every symbol declared in path, normalised to
+// the flat editor-facing form (see ParseDocumentSymbols for why both
+// response shapes collapse here rather than at the call site). A nil
+// slice with a nil error means "this document declares nothing" — which
+// is a real answer for an empty file, not a failure.
+func (c *Client) DocumentSymbols(path string) ([]Symbol, error) {
+	params := DocumentSymbolParams{
+		TextDocument: TextDocumentIdentifier{URI: PathToURI(path)},
+	}
+	var raw json.RawMessage
+	if err := c.Call("textDocument/documentSymbol", params, &raw); err != nil {
+		return nil, err
+	}
+	return ParseDocumentSymbols(raw), nil
 }
 
 // HoverAt asks for hover documentation at pos. A nil result with nil

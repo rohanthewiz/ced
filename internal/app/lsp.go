@@ -67,6 +67,7 @@ type lspConn interface {
 	DidClose(path string) error
 	Definition(path string, pos lsp.Position) ([]lsp.Location, error)
 	HoverAt(path string, pos lsp.Position) (*lsp.Hover, error)
+	DocumentSymbols(path string) ([]lsp.Symbol, error)
 	Close()
 }
 

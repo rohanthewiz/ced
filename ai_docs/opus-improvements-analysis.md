@@ -224,12 +224,54 @@ commit, with tests, per the project's testing convention.
 | 6 | Compare | file↔file, compare with pasted text | **done** — pure-Go differ, see the note below |
 | 7 | Open folder | recent folders, `--last` | **done** — see the note below |
 | 8 | Session restore | open tabs + cursors per root | **done** — same change |
-| 9 | LSP verbs | document symbols first, then references/rename/actions | pending |
-| 10 | Terminal diagnostics | scrollback → `diag.go` → clickable jumps | pending |
+| 9 | LSP verbs | document symbols first, then references/rename/actions | **done (symbols)** — see the note below |
+| 10 | Terminal diagnostics | scrollback → `diag.go` → clickable jumps | **done** — same change |
 | 11 | `--wait` / `--remote` | `$EDITOR` integration, single-instance open | pending |
 | 12 | Undo memory cap | byte-budget the snapshot stack | pending |
 
 Stages 1–4 were the explicitly requested starting order.
+
+### Note from stages 9+10: the two halves of "take me to the problem"
+
+Shipped together because they answer one question from two directions —
+the server's view of a file, and the toolchain's — and they land on the
+same two surfaces (a palette picker, a row in the ≡ **Code** group).
+
+**Stage 9 shipped document symbols only.** References, rename, code
+actions and signature help are still open; they are a different kind of
+work (rename in particular is a multi-file WORKSPACE EDIT, which this
+editor has no primitive for — every write path today is one buffer at a
+time, and applying a WorkspaceEdit means opening files the user never
+opened, editing them, and making the whole thing one undo step). Symbols
+were the "best value per line" item on the list and needed no new
+primitive at all.
+
+Two decisions worth keeping:
+
+- **The protocol's two response shapes collapse inside `internal/lsp`.**
+  `documentSymbol` answers with either a tree or a flat list, and both
+  decode CLEANLY into either Go struct — JSON ignores unknown fields and
+  zeroes missing ones. So a try-one-then-fall-back sniff "succeeds" on
+  the wrong shape and reports every symbol at 0:0. The discriminator is
+  the presence of a `"location"` key.
+- **Symbols are a picker, not a palette source**, even though palette.go
+  invites them. Sources are collected synchronously at open; this one
+  costs a round trip to a server that may be cold.
+
+**Stage 10's guard is the whole feature.** `plugins.ParseDiagnostic` is
+permissive by design — its usual caller already knows which file the
+output is about — so on output that belongs to nobody it happily reads
+"12:30" as a location. The rule that makes it safe is that a row is a
+link only when it names a path, that path resolves to a regular file,
+and that file is inside the project root. Relative paths resolve against
+the SHELL's cwd (grsh's `cd` moves it), the answer is cached because
+drawing asks per visible row per frame, and the underline over the
+location IS the affordance — the feature is invisible without it.
+
+The list's ordering was the one real design question: document order
+buries the build you just ran, reverse order shows one build's errors
+backwards. The echoed command rows already mark where one command's
+output ends, so blocks go newest-first with printed order inside them.
 
 ### Note from stages 7+8: bare `ced` still opens the cwd
 

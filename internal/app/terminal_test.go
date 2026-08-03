@@ -1148,3 +1148,103 @@ func TestTermRc_ErrorSurfacedInScrollback(t *testing.T) {
 		t.Fatalf("broken rc should append a termErr line, got %+v", a.term.lines)
 	}
 }
+
+// TestTermRowLine pins the single scrollback accessor the renderer and
+// the diagnostic scanner share: committed lines first, then the
+// in-progress partial tail, and false past the end. Two answers to
+// "what is on row N" would let a click land on a row the user isn't
+// looking at.
+func TestTermRowLine(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	openTestTerm(t, a)
+	a.term.lines = []termLine{{text: "one", kind: termCmd}, {text: "two"}}
+	a.term.partial = "tail"
+
+	if ln, ok := a.termRowLine(0); !ok || ln.text != "one" || ln.kind != termCmd {
+		t.Errorf("row 0 = %+v (%v), want the command line", ln, ok)
+	}
+	if ln, ok := a.termRowLine(2); !ok || ln.text != "tail" || ln.kind != termOut {
+		t.Errorf("row 2 = %+v (%v), want the partial tail as output", ln, ok)
+	}
+	if _, ok := a.termRowLine(3); ok {
+		t.Error("past the tail must report false")
+	}
+	if _, ok := a.termRowLine(-1); ok {
+		t.Error("a negative row must report false")
+	}
+
+	// With no partial the tail row is simply gone.
+	a.term.partial = ""
+	if _, ok := a.termRowLine(2); ok {
+		t.Error("no partial means no row 2")
+	}
+}
+
+// TestTermScrollbackDoubleClickJumps pins the primary gesture: the first
+// press focuses the panel (the same click-to-focus every other panel
+// teaches) and the second, on the same cell inside the window, jumps to
+// the file the row names.
+func TestTermScrollbackDoubleClickJumps(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(src, []byte("package main\n\nfunc main() {\n}\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	f := openTestTerm(t, a)
+	f.cwd = dir
+	a.term.lines = []termLine{{text: "main.go:3:6: undefined: foo"}}
+
+	px, py, _, _ := a.termPanelRect()
+	x, y := px+2, py+1 // first scrollback row
+
+	a.termPanelPress(x, y)
+	if a.activeTabPtr() != nil {
+		t.Fatal("a single click must not jump — it only focuses")
+	}
+	a.termPanelPress(x, y)
+
+	tab := a.activeTabPtr()
+	if tab == nil || tab.Path != src {
+		t.Fatalf("double-click did not open %s", src)
+	}
+	if tab.Cursor.Line != 2 || tab.Cursor.Col != 5 {
+		t.Errorf("cursor = %v, want line 2 col 5", tab.Cursor)
+	}
+}
+
+// TestDrawTermRowUnderlinesLocation pins the affordance: the underline
+// over the "path:line:col" prefix is the only thing telling the user the
+// row is clickable, so it has to reach the screen — and it must stop at
+// the location, leaving the message plain.
+func TestDrawTermRowUnderlinesLocation(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(src, []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	f := openTestTerm(t, a)
+	f.cwd = dir
+	a.term.lines = []termLine{{text: "main.go:1:1: boom"}}
+
+	a.draw()
+	scr := a.screen.(tcell.SimulationScreen)
+	scr.Show()
+	cells, w, _ := scr.GetContents()
+
+	px, py, _, _ := a.termPanelRect()
+	row := py + 1
+	underlined := func(col int) bool {
+		_, _, attrs := cells[row*w+px+1+col].Style.Decompose()
+		return attrs&tcell.AttrUnderline != 0
+	}
+	for col := range len("main.go:1:1") {
+		if !underlined(col) {
+			t.Fatalf("column %d of the location is not underlined", col)
+		}
+	}
+	if underlined(len("main.go:1:1") + 2) { // into " boom"
+		t.Error("the message must not be underlined — only the location is a link")
+	}
+}

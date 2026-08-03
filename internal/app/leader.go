@@ -203,9 +203,21 @@ func leaderBindings() []leaderBinding {
 		// An open-but-unfocused panel grabs focus first, so the leader
 		// doubles as "jump back into the shell".
 		{key: '`', action: (*App).leaderTerminal},
-		// LSP pair: 'd' definition, 'i' info (hover).
+		// '~' is the shifted twin of the terminal's own key, and it means
+		// "the file locations in what the terminal printed" — the
+		// keyboard path into the clickable-output list (termdiag.go).
+		// The panel is mouse-driven, but macOS Terminal swallows clicks,
+		// so its verbs need a keyboard route; the shift convention (f/F,
+		// p/P, d/D) makes this one guessable from the key beside it.
+		{key: '~', action: (*App).menuTermLocations},
+		// LSP trio: 'd' definition, 'i' info (hover), 'D' the file's whole
+		// symbol outline as a picker. The shifted pair follows the same
+		// convention f/F and p/P do — same verb, wider scope: 'd' goes to
+		// the definition of the symbol under the cursor, 'D' lists every
+		// definition in the file and lets you pick one.
 		{key: 'd', action: (*App).menuGoToDefinition},
 		{key: 'i', action: (*App).menuHoverInfo},
+		{key: 'D', action: (*App).menuGoToSymbol},
 		// Navigation history: 'o' back "out" of a jump — 'b' was
 		// tempting but reads as "buffer" to vim hands. Shifted variant
 		// walks forward again, mirroring the h/H hunk convention.

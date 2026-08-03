@@ -98,11 +98,21 @@ var severityWords = map[string]Severity{
 func ParseDiagnostics(out string) []Diagnostic {
 	var diags []Diagnostic
 	for _, raw := range strings.Split(out, "\n") {
-		if d, ok := parseDiagLine(raw); ok {
+		if d, ok := ParseDiagnostic(raw); ok {
 			diags = append(diags, d)
 		}
 	}
 	return diags
+}
+
+// ParseDiagnostic parses ONE output line, for callers holding lines
+// already — the terminal panel's scrollback asks row by row, since it
+// never has the whole of a command's output as one string and only ever
+// needs to answer "is this row a place I could jump to?". Same parser
+// either way: two implementations of this format would drift, and the
+// user would have no way to tell which one decided.
+func ParseDiagnostic(raw string) (Diagnostic, bool) {
+	return parseDiagLine(raw)
 }
 
 // parseDiagLine parses one output line. Reports false for anything

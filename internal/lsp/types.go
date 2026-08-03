@@ -8,7 +8,8 @@
 // Package lsp is a minimal Language Server Protocol client, hand-rolled
 // over JSON-RPC 2.0 on stdio with nothing beyond the standard library.
 // The editor needs a tiny protocol subset — initialize, document sync,
-// publishDiagnostics, definition, hover — so a dependency-free client is
+// publishDiagnostics, definition, hover, document symbols — so a
+// dependency-free client is
 // both smaller and easier to reason about than pulling in a full LSP
 // framework (which would also fight the project's no-CGO / few-deps
 // philosophy).
@@ -192,6 +193,154 @@ func (h Hover) HoverText() string {
 		return out
 	}
 	return ""
+}
+
+// -----------------------------------------------------------------------------
+// Document symbols
+// -----------------------------------------------------------------------------
+
+// DocumentSymbolParams is the payload of textDocument/documentSymbol.
+type DocumentSymbolParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+// DocumentSymbol is the modern, HIERARCHICAL response element: a symbol
+// plus the symbols declared inside it (a struct's methods, a class's
+// members). Range covers the whole declaration; SelectionRange covers
+// just the name, which is where a "go to symbol" jump wants to land —
+// the top of a 200-line function tells you less than its signature does.
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           int              `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+// SymbolInformation is the LEGACY flat response element, still what a
+// server sends when it doesn't advertise hierarchical support. It
+// carries no children; nesting is implied by ContainerName, which is a
+// string rather than a link and so cannot be re-assembled reliably.
+type SymbolInformation struct {
+	Name          string   `json:"name"`
+	Kind          int      `json:"kind"`
+	Location      Location `json:"location"`
+	ContainerName string   `json:"containerName,omitempty"`
+}
+
+// Symbol is the editor-facing normal form both response shapes collapse
+// into: a flat, document-ordered list where Depth records how deep the
+// entry sat in the tree. Flat because the consumer is a fuzzy picker —
+// a tree would have to be flattened for display anyway, and doing it
+// once here means the app layer never learns that the protocol has two
+// answers to the same question.
+type Symbol struct {
+	Name   string
+	Detail string
+	Kind   int
+	Depth  int
+	// Pos is where the cursor lands: the name's start, not the
+	// declaration's.
+	Pos Position
+}
+
+// symbolKindNames maps the spec's SymbolKind numbers (1-based) to the
+// short word the picker shows beside a name. Kept as a slice rather
+// than a map because the numbering is dense and spec-fixed; index 0 is
+// the unused zero value, so a server that omits Kind gets "".
+var symbolKindNames = []string{
+	"", "file", "module", "namespace", "package", "class", "method",
+	"property", "field", "constructor", "enum", "interface", "function",
+	"variable", "constant", "string", "number", "boolean", "array",
+	"object", "key", "null", "enum member", "struct", "event", "operator",
+	"type parameter",
+}
+
+// SymbolKindName returns the display word for an LSP SymbolKind, or ""
+// for a kind this client doesn't know. A future spec revision adding
+// kind 27 costs a blank column, not a wrong label.
+func SymbolKindName(kind int) string {
+	if kind < 0 || kind >= len(symbolKindNames) {
+		return ""
+	}
+	return symbolKindNames[kind]
+}
+
+// ParseDocumentSymbols normalises a documentSymbol response into the
+// flat Symbol list, tolerating both shapes the protocol allows.
+//
+// The two are told apart by CONTENT, not by trying one unmarshal and
+// falling back on error: both shapes decode cleanly into either struct
+// (JSON ignores unknown fields and leaves missing ones zero), so a
+// SymbolInformation read as a DocumentSymbol would parse "successfully"
+// with every position at 0:0 — every symbol jumping to line 1. A
+// "location" key is the discriminator: only the flat form has one.
+func ParseDocumentSymbols(raw json.RawMessage) []Symbol {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var probe []struct {
+		Location *json.RawMessage `json:"location"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil
+	}
+	flat := false
+	for _, p := range probe {
+		if p.Location != nil {
+			flat = true
+			break
+		}
+	}
+	if flat {
+		var infos []SymbolInformation
+		if err := json.Unmarshal(raw, &infos); err != nil {
+			return nil
+		}
+		out := make([]Symbol, 0, len(infos))
+		for _, si := range infos {
+			// ContainerName is the only nesting hint the flat form
+			// offers; it becomes Detail rather than a Depth, because
+			// mapping names back to parents is guesswork on any
+			// document with two same-named containers.
+			out = append(out, Symbol{
+				Name:   si.Name,
+				Detail: si.ContainerName,
+				Kind:   si.Kind,
+				Pos:    si.Location.Range.Start,
+			})
+		}
+		return out
+	}
+	var tree []DocumentSymbol
+	if err := json.Unmarshal(raw, &tree); err != nil {
+		return nil
+	}
+	var out []Symbol
+	flattenSymbols(tree, 0, &out)
+	return out
+}
+
+// flattenSymbols walks the hierarchy depth-first, preserving the
+// server's ordering so the picker reads top-to-bottom like the file.
+// A zero SelectionRange (a server that sent only Range) falls back to
+// the declaration's start rather than pointing at the document origin.
+func flattenSymbols(syms []DocumentSymbol, depth int, out *[]Symbol) {
+	for _, s := range syms {
+		pos := s.SelectionRange.Start
+		if s.SelectionRange == (Range{}) {
+			pos = s.Range.Start
+		}
+		*out = append(*out, Symbol{
+			Name:   s.Name,
+			Detail: s.Detail,
+			Kind:   s.Kind,
+			Depth:  depth,
+			Pos:    pos,
+		})
+		flattenSymbols(s.Children, depth+1, out)
+	}
 }
 
 // -----------------------------------------------------------------------------

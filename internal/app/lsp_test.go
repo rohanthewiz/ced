@@ -25,7 +25,7 @@ import (
 )
 
 // fakeLSPConn records every notification the app sends and returns
-// canned answers for the two requests, so the whole integration is
+// canned answers for the requests, so the whole integration is
 // testable without a server process.
 type fakeLSPConn struct {
 	mu     sync.Mutex
@@ -36,6 +36,8 @@ type fakeLSPConn struct {
 	defErr   error
 	hoverRes *lsp.Hover
 	hoverErr error
+	symbols  []lsp.Symbol
+	symErr   error
 }
 
 func (f *fakeLSPConn) record(s string) {
@@ -78,6 +80,11 @@ func (f *fakeLSPConn) Definition(string, lsp.Position) ([]lsp.Location, error) {
 
 func (f *fakeLSPConn) HoverAt(string, lsp.Position) (*lsp.Hover, error) {
 	return f.hoverRes, f.hoverErr
+}
+
+func (f *fakeLSPConn) DocumentSymbols(path string) ([]lsp.Symbol, error) {
+	f.record("documentSymbol:" + filepath.Base(path))
+	return f.symbols, f.symErr
 }
 
 func (f *fakeLSPConn) Close() {

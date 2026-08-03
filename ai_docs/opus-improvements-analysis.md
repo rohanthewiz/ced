@@ -217,7 +217,7 @@ commit, with tests, per the project's testing convention.
 |---|---|---|---|
 | 0 | Analysis + plan | this document | done |
 | 1 | Highlight debounce | §1 | **done** — 70.17 ms → 0.0015 ms per keystroke |
-| 2 | Load/save durability | §2, §3, §4 | pending |
+| 2 | Load/save durability | §2, §3, §4 | **done** — see the note below |
 | 3 | Tab switching + overflow | §5 | pending |
 | 4 | Project search | §6 (find in project) | pending |
 | 5 | Find verbs | replace, case/whole-word, go to line | pending |
@@ -230,3 +230,15 @@ commit, with tests, per the project's testing convention.
 | 12 | Undo memory cap | byte-budget the snapshot stack | pending |
 
 Stages 1–4 were the explicitly requested starting order.
+
+### Note from stage 2: format-on-save still normalises endings
+
+`internal/editor/fileio.go` makes a tab round-trip its own line ending
+and BOM, and that holds for any file ced writes itself. It does NOT hold
+for a file rewritten by an external formatter: gofmt and goimports always
+emit LF, so a CRLF `.go` file saved with format-on-save active comes back
+LF and the following reload records it as such.
+
+That is arguably gofmt's call rather than ced's, and it only affects
+languages whose formatter has an opinion — but it is worth knowing before
+someone files it as a bug against this stage.

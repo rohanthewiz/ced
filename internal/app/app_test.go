@@ -447,6 +447,26 @@ func TestOpenFile_ErrorFlash(t *testing.T) {
 	}
 }
 
+// TestOpenFile_RefusesBinary pins the guard at the surface a user
+// actually reaches it from: the file tree opens whatever gets clicked, so
+// one misclick on a vendored artifact used to load it into the editor.
+// The refusal has to leave no tab AND say why.
+func TestOpenFile_RefusesBinary(t *testing.T) {
+	dir := t.TempDir()
+	blob := filepath.Join(dir, "vendor.so")
+	if err := os.WriteFile(blob, []byte("\x7fELF\x02\x01\x00\x00payload"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(blob)
+	if len(a.tabs) != 0 {
+		t.Fatalf("a binary file must not open a tab, got %d", len(a.tabs))
+	}
+	if !strings.Contains(a.statusMsg, "binary") {
+		t.Fatalf("the flash should name the reason, got %q", a.statusMsg)
+	}
+}
+
 // TestRequestCloseTab_DirtyOpensModal proves a dirty tab does not close
 // on first request and instead opens the unsaved-changes modal so the
 // user can pick Save / Discard / Cancel.

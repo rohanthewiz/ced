@@ -56,6 +56,16 @@ type Tab struct {
 	// against the live mtime to detect external edits.
 	Mtime time.Time
 
+	// LineEnding is the ending the file had when it was read ("\n" or
+	// "\r\n"), and the one every save re-emits. The buffer itself always
+	// holds bare LF, so nothing above this layer has to think about it.
+	// BOM records whether the file began with a UTF-8 byte-order mark,
+	// for the same round-trip reason. Both are set by readTextFile; see
+	// fileio.go for why a CRLF file that loses its endings on save is
+	// worse than it sounds.
+	LineEnding string
+	BOM        bool
+
 	// DiskGone is set when the most recent disk check found the file
 	// missing. It exists so we only flash the "deleted on disk" warning
 	// once, instead of re-flashing every reconcile tick.
@@ -158,14 +168,17 @@ func NewTab(path string) (*Tab, error) {
 	if path != "" && isImageExt(path) {
 		return newImageTab(path)
 	}
-	var data []byte
+	var text string
 	var mtime time.Time
+	bom, ending := false, lineEndingLF
 	if path != "" {
-		b, err := os.ReadFile(path)
-		if err != nil && !os.IsNotExist(err) {
+		var err error
+		// Guarded, decoded, and normalised in one place — see fileio.go
+		// for what "guarded" refuses and why the endings come back out.
+		text, bom, ending, err = readTextFile(path)
+		if err != nil {
 			return nil, err
 		}
-		data = b
 		// Record the on-disk mtime so the app can detect external edits
 		// later. A missing file leaves mtime as the zero value, which is
 		// fine — the reconcile loop handles that case explicitly.
@@ -175,12 +188,14 @@ func NewTab(path string) (*Tab, error) {
 	}
 	t := &Tab{
 		Path:       path,
-		Buffer:     NewBuffer(string(data)),
+		Buffer:     NewBuffer(text),
 		StyleStale: true,
 		Mtime:      mtime,
+		BOM:        bom,
+		LineEnding: ending,
 		// Highlighting cost scales with file size, so past a point it is
 		// cheaper — and much better to use — with no colors at all.
-		SyntaxOff: len(data) > MaxHighlightBytes,
+		SyntaxOff: len(text) > MaxHighlightBytes,
 	}
 	t.IndentUnit = DetectIndent(t.Buffer.Lines, path)
 	// Record the on-open buffer state so RevertFile has somewhere to
@@ -243,7 +258,9 @@ func (t *Tab) Save() error {
 	if t.Path == "" {
 		return fmt.Errorf("no path set for tab")
 	}
-	if err := os.WriteFile(t.Path, []byte(t.Buffer.String()), 0644); err != nil {
+	// Atomic (temp + rename) rather than a truncating in-place write, and
+	// re-encoded into the byte form the file arrived in. See fileio.go.
+	if err := writeFileAtomic(t.Path, t.encode()); err != nil {
 		return err
 	}
 	t.Dirty = false
@@ -283,7 +300,10 @@ func (t *Tab) Reload() error {
 		t.DiskGone = false
 		return nil
 	}
-	data, err := os.ReadFile(t.Path)
+	// Same guards and decoding as the open path: a file can grow past the
+	// limit, turn binary, or change its line endings while we hold it
+	// open, and a reload is exactly when we'd find out.
+	text, bom, ending, err := readTextFile(t.Path)
 	if err != nil {
 		return err
 	}
@@ -291,7 +311,9 @@ func (t *Tab) Reload() error {
 	if err != nil {
 		return err
 	}
-	t.Buffer = NewBuffer(string(data))
+	t.Buffer = NewBuffer(text)
+	t.BOM = bom
+	t.LineEnding = ending
 	t.Cursor = t.Buffer.Clamp(t.Cursor)
 	t.Anchor = t.Cursor // drop any selection — line indices may have shifted.
 	t.Carets = nil      // …and with them every secondary caret, for the same reason.
@@ -301,7 +323,7 @@ func (t *Tab) Reload() error {
 	// Re-evaluated, not sticky: a file that grew past the limit while we
 	// held it open should stop highlighting, and one that shrank should
 	// start again.
-	t.SyntaxOff = len(data) > MaxHighlightBytes
+	t.SyntaxOff = len(text) > MaxHighlightBytes
 	t.InvalidateStyles()
 	t.cursorMoved = true
 	t.EditRev++

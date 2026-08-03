@@ -66,6 +66,7 @@ internal/diff/diff.go         Patience line differ + unified-diff rendering (pur
 internal/app/compare.go       Compare panel: buffer ↔ file / saved copy / pasted text
 internal/editor/find.go       Match model + the one scanner (options: case, whole word)
 internal/editor/replace.go    Replace current / replace all — one undo step, bottom-up
+internal/editor/multiedit.go  Multi-range edit of one buffer — bottom-up, ONE undo step
 internal/app/find.go          The find bar: two rows, option toggles, replace buttons
 internal/app/goto.go          Go to line — line, line:col, or a pasted compiler ref
 internal/search/search.go     Project-wide text search over the finder's index
@@ -77,11 +78,13 @@ internal/app/multicaret.go    Multi-caret UI: ≡ rows, Esc-m/M/*, Alt+click, st
 internal/app/wordhl.go        Word-highlight ≡ toggle + per-tab flag plumbing
 internal/app/findall.go       Find-all peek list: compacted rows, preview, Esc-restore
 internal/lsp/client.go        Minimal JSON-RPC-over-stdio LSP client (stdlib only)
+internal/lsp/workspaceedit.go WorkspaceEdit's two wire shapes → one normal form
 internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition, hover
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
 internal/app/lspreferences.go References → the Find-all panel's project mode
 internal/app/lspsignature.go  Signature help → the hover tooltip, active param lit
 internal/app/hovermodal.go    Caret-anchored tooltip (hover + signature help)
+internal/app/workspaceedit.go Cross-file apply: validate, write, one-gesture undo
 internal/app/termdiag.go      Terminal output → clickable path:line:col jumps
 internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
 internal/app/copilot_ghost.go Copilot phase 2: doc sync + inline completions (ghost text)
@@ -263,6 +266,13 @@ BYTES rather than by entry count. House rules:
   running sums are maintained on every path (push, Undo, Redo, redo
   invalidation, `initUndo`). A sum that drifts up silently shrinks the
   history until the budget falsely binds.
+- **The workspace-edit journal is the ONLY thing that sits above this
+  stack** (app/workspaceedit.go). It never touches `undoSuppress` — it
+  goes through `pushUndo(undoGroupStructural)` plus direct Buffer edits,
+  the ReplaceAll route — and it validates a participant with `EditRev`
+  AND `UndoDepth`, because trimUndo can shrink a stack without the buffer
+  changing. `UndoDepth` is the only thing about the stack that's exported,
+  and that is what it's for.
 
 ### File IO guards and round-trip (editor/fileio.go)
 The two edges of a Tab's life, grouped because they're the same question
@@ -628,8 +638,13 @@ framework dependency. House rules it must keep obeying:
   silently diagnoses stale text.
 - Diagnostics are just another `DecorationSource` (registered after
   the git source so the diag gutter dot outranks the git mark).
+- The handshake also declares `workspace.workspaceEdit` with
+  `documentChanges: true` and an EMPTY `resourceOperations`, which is how
+  a server learns ced can apply text edits but cannot create, rename or
+  delete files on its behalf — see the workspace-edit section.
 - Leaders: Esc-d definition, Esc-i hover, Esc-I signature help, Esc-D
-  the file's symbol outline, Esc-R references. Definition jumps record
+  the file's symbol outline, Esc-R references. The ≡ Code group also
+  carries the multi-file undo row, which has no leader (see that section). Definition jumps record
   into the app-wide navigation history (nav.go) — there is no
   LSP-private jump stack.
 - **Absolute paths only**: `New()` absolutizes rootDir and `openFile`
@@ -768,6 +783,114 @@ you're typing lit (Esc-I, ≡ Code). House rules:
 - Leader is **Esc-I**, a true shifted twin of hover's Esc-i: same
   tooltip, same glance, one question over — 'i' describes the symbol
   under the cursor, 'I' describes the call the cursor stands inside.
+
+### Workspace edits — the multi-file primitive
+### (lsp/workspaceedit.go, editor/multiedit.go, app/workspaceedit.go)
+Applying a server-authored `WorkspaceEdit` — text edits spanning files the
+user may never have opened — as ONE gesture they can undo with one press.
+It is a PRIMITIVE, not a verb: code actions and rename both reduce to
+about thirty lines on top of it, which is the argument for building it
+properly rather than special-casing rename. House rules:
+
+- **It opens NO TABS, and the Find-all panel is the receipt.** A rename
+  can touch a dozen files; opening each would fire didOpen for the LSP and
+  Copilot, every plugin's open hook and a syntax pass, then leave a DIRTY
+  tab behind — a dozen modal round-trips at quit, most not even laid out
+  on the strip. That is exactly the cost find-in-project refuses to pay.
+  Files with no tab are loaded into a DETACHED `editor.Tab`, edited, and
+  written through `Tab.Save` (so the open guards, the BOM and the line
+  ending all round-trip); files with a tab are edited in their BUFFER.
+  Visibility comes from `reportWorkspaceEdit`, which lists every applied
+  edit in the Find-all panel's project mode — the `heading` field is still
+  the only thing a non-search producer may change.
+- **The open buffer outranks disk, always.** The server answered from the
+  text ced synced to it, which for an open tab includes unsaved edits.
+  Writing that file's disk copy behind a dirty buffer would apply
+  coordinates to text they were never measured against — `referenceHits`'
+  rule, and here it is the difference between a rename and a corruption.
+  **Open participants are NOT saved**: that would also commit whatever
+  else the user had unsaved and bypass format-on-save's prompts. Auto-save
+  takes them two seconds later, and the flash names the asymmetry.
+- **Validate everything, THEN apply.** A half-applied rename does not
+  compile and the file that failed is the one nobody notices, so
+  `planWorkspaceEdit` does every read, guard and conversion while writing
+  nothing, and one refusal kills the whole edit naming the file and the
+  reason. Order inside the apply is the rest of the story: buffer edits
+  first (pure memory, cannot fail), then disk writes in path order, and a
+  failed write rolls back through the same per-tab snapshots — which is
+  what those retained detached Tabs are for. A rollback that itself fails
+  leaves the journal ARMED rather than clearing it.
+- **The undo journal is ONE SLOT sitting above the per-tab stacks**, the
+  only thing in this editor that does. Validity is `EditRev` **and**
+  `UndoDepth` per participant: EditRev alone can't say the snapshot is
+  still on top (`trimUndo` evicts from the BOTTOM, shrinking a stack
+  without the buffer changing), and depth alone can't either (a push plus
+  an eviction nets to zero). A detached file also checks its mtime — if
+  somebody else wrote it since, rewriting would discard their change.
+- **Plain undo CLAIMS the group from a participant tab**, and degrades
+  LOUDLY when it can't. A reflex Esc-u would otherwise roll back one file
+  of a rename and leave the rest, silently. When a participant has moved,
+  `menuUndo` says which file broke it, undoes just this tab, and CLEARS
+  the slot — falling through beats refusing (an undo that does nothing
+  reads as broken), announcing beats silence, and clearing is what stops a
+  later press half-applying the rest. `closeTab` drops the journal too: a
+  closed tab takes its undo stack with it.
+- **The protocol's two shapes collapse in `internal/lsp`** (the
+  ParseDocumentSymbols rule). `documentChanges` wins over `changes` — it
+  is the shape carrying versions and resource ops, so preferring it never
+  loses information. Sniffing is on a FIELD (`kind`, then `textDocument`),
+  never a failed unmarshal: a `CreateFile` decodes cleanly as a
+  `TextDocumentEdit` with everything zeroed, so an error-based sniff would
+  turn "create this file" into a document with no edits. `changes` is a
+  MAP, so its documents are sorted by path — Go randomises map order, and
+  an unsorted walk would give two runs of one rename two different orders.
+  `documentChanges` is an array whose order the spec makes meaningful, so
+  it is preserved.
+- **Resource ops are declined at the capability and refused BY NAME at the
+  parse.** `Initialize` declares `workspaceEdit.resourceOperations: []`,
+  so a conforming server refuses a package rename ITSELF with its own
+  reason, before anything is applied. `ParseWorkspaceEdit` still parses
+  them, and the app refuses the whole edit naming what it saw — applying
+  the text edits while dropping the file move would rewrite every
+  identifier and leave a tree that no longer builds.
+- **Confinement runs AFTER `EvalSymlinks`, on both sides.**
+  `writeFileAtomic` resolves symlinks before writing, so a lexical check
+  alone is escapable — a link inside the root pointing out of it would
+  pass and then be written through. The ROOT is resolved too, or every
+  file in a project under `/tmp` reads as outside its own root on macOS.
+  `resolveInRoot` is the one implementation (chatFSResolve delegates to
+  it); containment itself is gitstatus.go's `pathInside`.
+- **`ClampEnd`, not `Clamp`, for an exclusive range end.** Clamp pins the
+  line to the last line and THEN the column to that line's length, so
+  `{LineCount, 0}` — how the protocol spells "the whole document" — would
+  spare the final line's text. **Overlapping edits refuse**: applied
+  bottom-up they don't fail, they produce plausible garbage.
+- **`ApplyMultiEdit` is the per-tab half, and `ReplaceAll` was refactored
+  ONTO it** — that pass was this codebase's first multi-range edit, and
+  two copies of "edit a set of ranges as one step" would drift. One
+  `pushUndo(undoGroupStructural)` up front then direct Buffer edits, which
+  is how it stays one step WITHOUT touching `undoSuppress` (that flag is
+  the caret fan-out's alone). Bottom-up, always. `EditResults` derives
+  where each edit LANDED analytically rather than recording it during the
+  pass, because the pass runs backwards and every recorded position would
+  need fixing up as earlier edits arrived.
+- **Planning reads files ON THE MAIN LOOP**, deliberately. Which files are
+  open, which buffers are dirty and which revisions are synced is
+  main-loop-only state, and splitting the read from the validation across
+  the loop boundary would re-open the staleness window this exists to
+  close. Bounded: tens of small files, once per deliberate gesture. The
+  escape hatch if it ever hurts is reading into a map on the request
+  goroutine and re-stat'ing on the loop.
+- Staleness has three comparisons, each against the thing that produced
+  the coordinates: the origin tab's `EditRev` vs. what `captureWSRequest`
+  recorded, every open participant's `EditRev`/`syncedRev` pair (which
+  catches a keystroke plus a fired debounce that would leave the first
+  test true again), and the server's own `textDocument.version` against
+  ced's didChange counter when it makes one.
+- No leader key — the flat table is out of mnemonic letters and plain undo
+  covers the common case. The ≡ **Code** row (`wsEditUndoLabel`, dynamic)
+  is the path for the two cases plain undo can't serve: the active tab
+  isn't a participant, or every touched file went straight to disk.
 
 ### Copilot sidecar (app/copilot.go) — phase 1 of the AI integration
 Runs GitHub's official `copilot-language-server` (native binary, found
@@ -1861,8 +1984,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 103 group actions + 14 headers (119), height 125,
-dividers `[2, 5, 122]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 104 group actions + 14 headers (120), height 126,
+dividers `[2, 5, 123]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

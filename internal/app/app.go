@@ -336,6 +336,16 @@ func builtinMenuGroups() []menuGroup {
 			// language server at all: `go build` and `grep -n` are the
 			// providers.
 			{label: "Go to terminal output location…", shortcut: "esc ~", action: (*App).menuTermLocations, enabled: (*App).hasTermOutput},
+			// Undo a server-authored multi-file edit as one gesture
+			// (workspaceedit.go). Plain undo already claims the press when
+			// the cursor is in one of the touched files; this row is the
+			// path for the two cases it can't serve — the active tab isn't
+			// a participant, or every touched file went straight to disk
+			// and there is no participant tab to stand in. The label names
+			// the verb and the file count because this rewrites files that
+			// may not be on screen. No leader key: the flat table is out of
+			// mnemonic letters and plain undo covers the common case.
+			{labelFor: (*App).wsEditUndoLabel, action: (*App).menuUndoWorkspaceEdit, enabled: (*App).wsUndoAvailable},
 		}},
 		// GitHub Copilot (copilot-language-server sidecar). Rows stay
 		// clickable even when the sidecar is unavailable — the action
@@ -954,6 +964,14 @@ type App struct {
 	// navigation surface — tree, tabs, finder, go-to-definition — feeds
 	// the same trail. See nav.go.
 	nav navState
+
+	// wsGroup is the single "undo the last multi-file edit" slot — the one
+	// thing in this editor that sits ABOVE the per-tab undo stacks. A
+	// server-authored workspace edit (rename, a code action) rewrites
+	// several files at once, so plain undo in any of them claims the whole
+	// group rather than leaving the refactor half applied. nil means no
+	// such edit is pending. See workspaceedit.go.
+	wsGroup *wsEditGroup
 
 	// plugins is the declarative plugin inventory read from
 	// ~/.config/ced/plugins, plus the decorations its providers have
@@ -2995,6 +3013,12 @@ func (a *App) closeTab(idx int) {
 	// (remote.go). A save deliberately doesn't: $EDITOR callers expect
 	// the editor to be finished, not merely to have written once.
 	a.releaseRemote(a.tabs[idx].Path)
+	// A closed tab takes its undo stack with it, so a multi-file edit that
+	// touched this file can no longer be unwound as one gesture. Dropping
+	// the journal is the honest answer — a group that silently skipped a
+	// participant is exactly the half-applied refactor it exists to prevent
+	// (workspaceedit.go).
+	a.wsForgetTab(a.tabs[idx])
 	a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
 	if a.activeTab >= len(a.tabs) {
 		a.activeTab = len(a.tabs) - 1
@@ -3242,6 +3266,20 @@ func (a *App) menuUndo() {
 	if t == nil {
 		return
 	}
+	// A multi-file edit claims the press when the cursor is in one of the
+	// files it touched. Undoing just this tab would roll back one file of a
+	// rename and leave the rest — a half-applied refactor with nothing on
+	// screen to say so. When the group no longer holds together it degrades
+	// LOUDLY and falls through, because an undo that does nothing reads as
+	// broken. See workspaceedit.go.
+	if a.wsGroupClaimsUndo(t) {
+		ok, moved := a.wsGroupValid()
+		if ok {
+			a.undoWorkspaceGroup()
+			return
+		}
+		a.wsDegradeToTabUndo(moved)
+	}
 	if !t.Undo() {
 		a.flash("Nothing to undo")
 	}
@@ -3253,6 +3291,16 @@ func (a *App) menuRedo() {
 	t := a.activeTabPtr()
 	if t == nil {
 		return
+	}
+	// The mirror of menuUndo's claim, so a redo can't re-apply a rename in
+	// one file while the other eleven stay unwound.
+	if a.wsGroupClaimsRedo(t) {
+		ok, moved := a.wsGroupValid()
+		if ok {
+			a.redoWorkspaceGroup()
+			return
+		}
+		a.wsDegradeToTabUndo(moved)
 	}
 	if !t.Redo() {
 		a.flash("Nothing to redo")

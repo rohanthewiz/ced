@@ -643,3 +643,36 @@ func TestInitUndo_ResetsTheBudget(t *testing.T) {
 		t.Fatalf("budget after initUndo = %d/%d, want 0/0", tab.undoBytes, tab.redoBytes)
 	}
 }
+
+// TestUndoDepth_TracksTheStack pins the accessor the cross-file edit journal
+// validates with. It has to move with pushes and pops, and — the case that
+// makes it necessary alongside EditRev — it has to reflect an eviction from
+// the bottom, which shrinks the stack without changing the buffer at all.
+func TestUndoDepth_TracksTheStack(t *testing.T) {
+	tab := &Tab{Buffer: NewBuffer("a")}
+	tab.initUndo()
+	if got := tab.UndoDepth(); got != 0 {
+		t.Fatalf("fresh tab UndoDepth = %d, want 0", got)
+	}
+
+	for i := 0; i < 3; i++ {
+		tab.pushUndo(undoGroupStructural)
+	}
+	if got := tab.UndoDepth(); got != 3 {
+		t.Errorf("after 3 pushes UndoDepth = %d, want 3", got)
+	}
+	tab.Undo()
+	if got := tab.UndoDepth(); got != 2 {
+		t.Errorf("after an undo UndoDepth = %d, want 2", got)
+	}
+
+	// Eviction: overshoot the entry cap and the bottom is dropped, so the
+	// depth stops growing even though the buffer keeps changing. This is
+	// why the journal checks depth AND EditRev rather than either alone.
+	for i := 0; i < maxUndoEntries+10; i++ {
+		tab.pushUndo(undoGroupStructural)
+	}
+	if got := tab.UndoDepth(); got != maxUndoEntries {
+		t.Errorf("past the cap UndoDepth = %d, want %d", got, maxUndoEntries)
+	}
+}

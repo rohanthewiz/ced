@@ -252,13 +252,20 @@ the server's view of a file, and the toolchain's — and they land on the
 same two surfaces (a palette picker, a row in the ≡ **Code** group).
 
 **Stage 9 shipped document symbols only.** References, rename, code
-actions and signature help are still open; they are a different kind of
-work (rename in particular is a multi-file WORKSPACE EDIT, which this
-editor has no primitive for — every write path today is one buffer at a
-time, and applying a WorkspaceEdit means opening files the user never
-opened, editing them, and making the whole thing one undo step). Symbols
-were the "best value per line" item on the list and needed no new
-primitive at all.
+actions and signature help were still open at the time; they are a
+different kind of work (rename in particular is a multi-file WORKSPACE
+EDIT, which this editor had no primitive for — every write path was one
+buffer at a time). Symbols were the "best value per line" item on the
+list and needed no new primitive at all.
+
+**That blocker is now gone.** References and signature help shipped in
+later sessions, and the workspace-edit primitive
+(`internal/lsp/workspaceedit.go`, `internal/editor/multiedit.go`,
+`internal/app/workspaceedit.go`) now applies a cross-file edit as one
+undoable gesture — WITHOUT opening a tab per file, which is the part the
+note above assumed was unavoidable. Rename and code actions are the two
+verbs left, and both are now thin callers of `applyServerEdit`. See the
+workspace-edit section of CLAUDE.md for the house rules.
 
 Two decisions worth keeping:
 

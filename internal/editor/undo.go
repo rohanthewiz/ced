@@ -274,6 +274,19 @@ func (t *Tab) CanUndo() bool {
 	return len(t.undoStack) > 0
 }
 
+// UndoDepth reports how many steps deep the undo stack currently is.
+//
+// It exists for the cross-file edit journal (app/workspaceedit.go), which
+// has to answer "is the snapshot I filed still the one Undo would pop?"
+// before it offers to unwind a whole rename as one gesture. EditRev alone
+// can't answer it — trimUndo evicts from the BOTTOM, so a stack can shrink
+// without the buffer changing at all — and depth alone can't either, since
+// a push plus an eviction nets to zero. The journal checks both, which is
+// why this is the only thing about the stack that's exported.
+func (t *Tab) UndoDepth() int {
+	return len(t.undoStack)
+}
+
 // CanRedo reports whether a previously undone change can be re-applied.
 func (t *Tab) CanRedo() bool {
 	return len(t.redoStack) > 0

@@ -327,3 +327,31 @@ func TestPosLess_AndOrdered(t *testing.T) {
 		t.Fatalf("PosOrdered should be stable for already-ordered: %+v %+v", x, y)
 	}
 }
+
+// TestClampEnd_PastLastLineIsEndOfBuffer pins the one behaviour that makes
+// ClampEnd a separate primitive from Clamp. A range end one line past the
+// last is how the protocol spells "through the end of the document"; Clamp
+// pins the line to the last line and THEN the column to that line's length,
+// which would leave the final line's text untouched by a whole-file replace.
+func TestClampEnd_PastLastLineIsEndOfBuffer(t *testing.T) {
+	b := NewBuffer("aaa\nbbb\nccc")
+	past := Position{Line: 3, Col: 0}
+
+	if got, want := b.Clamp(past), (Position{Line: 2, Col: 0}); got != want {
+		t.Fatalf("Clamp(%v) = %v, want %v — the premise of this test changed", past, got, want)
+	}
+	if got, want := b.ClampEnd(past), (Position{Line: 2, Col: 3}); got != want {
+		t.Errorf("ClampEnd(%v) = %v, want %v (end of buffer)", past, got, want)
+	}
+}
+
+// TestClampEnd_InRangeMatchesClamp pins that ClampEnd only differs past the
+// end — an ordinary position must not take a different path through it.
+func TestClampEnd_InRangeMatchesClamp(t *testing.T) {
+	b := NewBuffer("aaa\nbbbbb\nccc")
+	for _, p := range []Position{{0, 0}, {1, 2}, {1, 99}, {2, 3}, {-1, 0}} {
+		if got, want := b.ClampEnd(p), b.Clamp(p); got != want {
+			t.Errorf("ClampEnd(%v) = %v, want %v (same as Clamp)", p, got, want)
+		}
+	}
+}

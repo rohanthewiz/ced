@@ -469,6 +469,22 @@ func (c *Client) Initialize(rootDir string) error {
 					"contentFormat": []string{"plaintext", "markdown"},
 				},
 			},
+			// The workspace-edit declaration is what stops a server from
+			// asking for something this client would have to refuse after
+			// the fact. documentChanges asks for the modern array shape —
+			// it is the only one carrying document versions, which is what
+			// a staleness check compares against — while the deliberately
+			// EMPTY resourceOperations list says, honestly, that ced cannot
+			// create, rename or delete files on a server's behalf. A
+			// conforming server then declines a package rename ITSELF, with
+			// its own reason, before anything has been applied. That is a
+			// far better message than one ced could synthesise afterwards.
+			"workspace": map[string]any{
+				"workspaceEdit": map[string]any{
+					"documentChanges":    true,
+					"resourceOperations": []string{},
+				},
+			},
 		},
 	}
 	if err := c.Call("initialize", params, nil); err != nil {

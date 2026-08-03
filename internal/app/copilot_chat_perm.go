@@ -522,6 +522,22 @@ func (a *App) handleChatFSRequest(e *chatFSRequestEvent) {
 // model as the rest of the editor, aimed at keeping a confused agent
 // inside the project, not at defeating a hostile one.
 func (a *App) chatFSResolve(path string) (string, error) {
+	return a.resolveInRoot(path)
+}
+
+// resolveInRoot absolutises path against the project root and refuses
+// anything that escapes it. One implementation, because every surface that
+// takes a path from something other than the user — the chat agent, a
+// language server's workspace edit, a git-log jump, terminal output — owes
+// the same answer, and a second copy would eventually disagree.
+//
+// The check is LEXICAL, then repeated after resolving symlinks. Lexical
+// alone is escapable here in a way it isn't for a pure read: writeFileAtomic
+// resolves symlinks before writing (fileio.go), so a link inside the root
+// pointing outside it would pass a textual test and then be written through.
+// A link that can't be resolved (it doesn't exist yet) keeps the lexical
+// answer — that's the ordinary "save creates the file" case.
+func (a *App) resolveInRoot(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("empty path")
 	}
@@ -530,11 +546,31 @@ func (a *App) chatFSResolve(path string) (string, error) {
 		abs = filepath.Join(a.rootDir, abs)
 	}
 	abs = filepath.Clean(abs)
-	rel, err := filepath.Rel(a.rootDir, abs)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !a.insideRoot(abs) {
 		return "", fmt.Errorf("%s is outside the project root", path)
 	}
+	// The resolved path is compared against the resolved ROOT, not the raw
+	// one. The root itself routinely sits behind a link — /tmp is /private/tmp
+	// on macOS, and /home is often a link on Linux — so resolving only one
+	// side would put every file in such a project "outside" its own root.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		root := a.rootDir
+		if rr, err := filepath.EvalSymlinks(root); err == nil {
+			root = rr
+		}
+		if !pathInside(resolved, root) {
+			return "", fmt.Errorf("%s resolves outside the project root", path)
+		}
+	}
 	return abs, nil
+}
+
+// insideRoot reports whether abs (already absolute and cleaned) sits within
+// the project root. Delegates to gitstatus.go's pathInside — one containment
+// rule for the whole app, so a path the git panel considers inside the
+// project can't be one a workspace edit considers outside it.
+func (a *App) insideRoot(abs string) bool {
+	return pathInside(abs, a.rootDir)
 }
 
 // chatFSRead serves a read from the open tab's buffer when the file is

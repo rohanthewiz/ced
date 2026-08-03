@@ -8,7 +8,10 @@
 // replace.go turns the find state into an editing verb: swap the current
 // hit for a replacement, or swap every hit in one step.
 //
-// Two rules shape both entry points.
+// Two rules shape both entry points, and both now live one floor down in
+// multiedit.go — ReplaceAll was this codebase's first multi-range edit, and
+// when a language server's workspace edit needed the identical discipline
+// the pass moved rather than being copied.
 //
 // ONE UNDO STEP PER GESTURE. "Replace all" that took 200 presses to undo
 // would be a trap, not a feature — so the bulk path files exactly one
@@ -81,29 +84,24 @@ func (t *Tab) ReplaceAll(replacement string) int {
 	if len(matches) == 0 {
 		return 0
 	}
-	t.pushUndo(undoGroupStructural)
-	// Carets and any selection were measured against the buffer this is
-	// about to rewrite; keeping either would leave the next keystroke
-	// editing text that moved.
-	t.Carets = nil
-	for i := len(matches) - 1; i >= 0; i-- {
-		start := MatchPosition(matches[i])
-		end := MatchEndPosition(matches[i])
-		t.Buffer.DeleteRange(start, end)
-		t.Buffer.InsertString(start, replacement)
+	// ApplyMultiEdit (multiedit.go) owns the one-snapshot, bottom-up pass
+	// this function used to spell out inline. The rules are the same ones
+	// documented above — they moved because a language server's workspace
+	// edit needs the identical discipline, and two copies of "edit a set of
+	// ranges as one step" would drift exactly where a user would notice.
+	// Matches never overlap (one scanner produces them, left to right), so
+	// the refusal path can't fire here.
+	edits := make([]Edit, len(matches))
+	for i, m := range matches {
+		edits[i] = Edit{
+			Start:   MatchPosition(m),
+			End:     MatchEndPosition(m),
+			NewText: replacement,
+		}
 	}
-	t.Dirty = true
-	t.EditRev++
-	// Structural by definition: a replacement may carry newlines, and
-	// even one that doesn't has changed enough of the file that patching
-	// the style grid row by row would cost more than the re-lex. This is
-	// the InvalidateStyles default the syntax layer asks new mutators to
-	// take unless they can prove the rows still line up.
-	t.InvalidateStyles()
-	// The cursor may now point past the end of a shortened line.
-	t.Cursor = t.Buffer.Clamp(t.Cursor)
-	t.Anchor = t.Cursor
-	t.cursorMoved = true
+	if _, ok := t.ApplyMultiEdit(edits); !ok {
+		return 0
+	}
 	// Re-run the query so the bar's counter and the tinted hits describe
 	// the buffer as it is now — normally zero matches, unless the
 	// replacement contains the query.

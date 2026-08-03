@@ -80,6 +80,24 @@ func (b *Buffer) Clamp(p Position) Position {
 	return p
 }
 
+// ClampEnd clamps p as the EXCLUSIVE end of a range. A line past the last
+// one resolves to the end of the buffer rather than to Clamp's answer, and
+// the difference is not cosmetic: Clamp pins the line to the last line and
+// THEN pins the column to that line's length, so an end of {LineCount, 0}
+// — the range a server sends for "replace the whole document" — comes back
+// as {lastLine, 0} and spares the final line's text.
+//
+// Only range ends want this. A cursor is a point, and a point past the end
+// of the buffer is a bug wherever it came from; Clamp's job is to make it
+// harmless. An exclusive end past the last line is not a bug — it is how
+// the protocol spells "through the end".
+func (b *Buffer) ClampEnd(p Position) Position {
+	if p.Line >= len(b.Lines) {
+		return b.EndPos()
+	}
+	return b.Clamp(p)
+}
+
 // InsertString inserts text (which may contain newlines) at p and returns
 // the position immediately after the inserted text. p is clamped first.
 func (b *Buffer) InsertString(p Position, text string) Position {

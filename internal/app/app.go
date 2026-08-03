@@ -296,6 +296,17 @@ func builtinMenuGroups() []menuGroup {
 			// Same keyboard-twin rule for the log panel's Actions ▾ button.
 			{label: "Git log actions", action: (*App).menuGitLogActions, enabled: (*App).hasGitLogOpen},
 		}},
+		// Diff viewer (compare.go). Its own group rather than rows under
+		// Git, because none of it needs a repository: the sources are the
+		// buffer you're editing, any file in the tree, and text you
+		// pasted, and the differ is ced's own. A user outside a repo — or
+		// with git absent entirely — gets the whole feature.
+		{title: "Compare", collapsible: true, items: []menuItemDef{
+			{label: "Compare with file…", action: (*App).menuCompareFile, enabled: (*App).hasComparable},
+			{label: "Compare with saved copy", action: (*App).menuCompareSaved, enabled: (*App).hasSavedCopy},
+			{label: "Compare with pasted text", action: (*App).menuComparePaste, enabled: (*App).hasComparable},
+			{action: (*App).menuToggleCompare, enabled: (*App).hasCompareResult, labelFor: (*App).compareToggleLabel},
+		}},
 		// Code intelligence (LSP-backed; rows dim when no server)
 		{title: "Code", collapsible: true, items: []menuItemDef{
 			{label: "Go to definition", shortcut: "esc d", action: (*App).menuGoToDefinition, enabled: (*App).hasLSPActions},
@@ -852,6 +863,11 @@ type App struct {
 	// selected file's diff vs HEAD). Mutated only on the main loop;
 	// diff fetches post gitPanelDiffEvents. See gitpanel.go.
 	gitPanel gitPanelState
+
+	// compare is the diff viewer — the active buffer against another
+	// file, its own saved copy, or pasted text — and the fourth
+	// occupant of the single-occupancy bottom strip. See compare.go.
+	compare compareState
 
 	// gitLog is the commit-history browser sharing the same bottom
 	// strip (the two swap, never stack). Mutated only on the main loop;
@@ -1605,6 +1621,9 @@ func (a *App) editorBandRows() int {
 	if a.gitLog.open {
 		h -= a.gitLogHeight()
 	}
+	if a.compare.open {
+		h -= a.comparePanelHeight()
+	}
 	if a.term.open && !a.termDockLeft {
 		h -= a.termPanelHeight()
 	}
@@ -1816,6 +1835,10 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// universal "drop that" gesture, and a stale highlight sitting
 		// in the panel has no other way out.
 		a.chatClearSelection()
+		// …and for an armed compare panel: Esc is the universal "drop
+		// that", and a mode still claiming the next paste is exactly the
+		// thing a user reaches for Esc to get out of.
+		a.compareCancelPaste()
 		// …and for a column of extra carets. Also a side effect: the
 		// menu / leader behavior below still runs, so Esc-Esc opens the
 		// menu and Esc-s saves whether or not carets were dropped.
@@ -1906,6 +1929,13 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// shortcut: Cmd never collides with tmux prefixes or terminal flow
 	// control, which is what the no-Ctrl rule actually protects.
 	if ev.Key() == tcell.KeyRune && ev.Modifiers()&tcell.ModMeta != 0 {
+		// An armed compare panel claims Cmd+V — the internal clipboard is
+		// the only one ced can READ (OSC 52 is write-only), so this is
+		// how a copy made inside the editor becomes the old side.
+		if a.comparePasteTarget() && ev.Rune() == 'v' {
+			a.comparePasteClip()
+			return
+		}
 		// While the chat composer owns the keyboard, Cmd+V pastes the
 		// text clipboard into it — same convenience-layer contract as
 		// the terminal branch below.
@@ -2237,6 +2267,12 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
+	// Compare panel resize drag — same gesture, other bottom panel.
+	if leftDown && a.dragMode == "comparepanel" {
+		a.dragComparePanelTo(y)
+		return
+	}
+
 	// Terminal panel resize drag — same gesture, other bottom panel.
 	if leftDown && a.dragMode == "termpanel" {
 		a.dragTermPanelTo(y)
@@ -2284,6 +2320,8 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			a.dragMode = a.gitPanelPress(x, y)
 		case a.gitLog.open && a.gitLogContains(x, y):
 			a.dragMode = a.gitLogPress(x, y)
+		case a.compare.open && a.comparePanelContains(x, y):
+			a.dragMode = a.comparePanelPress(x, y)
 		// The find bar sits inside the editor's former y-range too, so
 		// its hit-test runs before the catch-all — otherwise a click on
 		// the Aa toggle would land in the file behind it and move the
@@ -2343,6 +2381,10 @@ func (a *App) scrollAt(x, y, delta int) {
 	}
 	if a.gitLog.open && a.gitLogContains(x, y) {
 		a.gitLogScroll(x, y, delta)
+		return
+	}
+	if a.compare.open && a.comparePanelContains(x, y) {
+		a.comparePanelScroll(delta)
 		return
 	}
 	if a.chatPanelContains(x, y) {
@@ -3358,6 +3400,9 @@ func (a *App) draw() {
 
 	if a.gitPanel.open {
 		a.drawGitPanel()
+	}
+	if a.compare.open {
+		a.drawComparePanel()
 	}
 	if a.gitLog.open {
 		a.drawGitLog()

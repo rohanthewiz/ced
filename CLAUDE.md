@@ -61,6 +61,8 @@ internal/editor/highlight.go  Chroma → []tcell.Style per line
 internal/editor/syntax.go     Re-lex settle policy + the style-grid patch
 internal/app/syntax.go        The settle timer that wakes the loop for the re-lex
 internal/app/tabbar.go        Tab strip: scroll, overflow button, switching
+internal/diff/diff.go         Patience line differ + unified-diff rendering (pure Go)
+internal/app/compare.go       Compare panel: buffer ↔ file / saved copy / pasted text
 internal/editor/find.go       Match model + the one scanner (options: case, whole word)
 internal/editor/replace.go    Replace current / replace all — one undo step, bottom-up
 internal/app/find.go          The find bar: two rows, option toggles, replace buttons
@@ -1067,6 +1069,60 @@ there is one dialect, not two. House rules:
   themselves. `TestRunPluginShell_RealShell` is the one exception and is
   restricted to `cat`/`echo`.
 
+### Compare panel (internal/diff + app/compare.go)
+A unified diff of the file you're editing against another file, its own
+saved copy, or text you just pasted — the fourth occupant of the bottom
+strip. House rules:
+
+- **The active buffer is the NEW side, always.** Not cosmetic: it makes
+  the `+` lines the ones that exist in the open file, so `diffTargetLine`
+  — written for the git panel — maps a display row straight to a line in
+  the tab and the double-click jump costs nothing. It also reads the way
+  the question is asked ("what have I got that the saved copy hasn't?").
+- **Pure Go (internal/diff), not `git diff --no-index`.** The sources
+  here are BUFFERS, so shelling out would mean temp files, and neither
+  git nor the repository it wants is guaranteed to be there. Same
+  argument the project search made against ripgrep — and it's why
+  Compare is its own ≡ group rather than rows under Git: none of it
+  needs a repo.
+- **The differ is patience, and that's a correctness choice as much as a
+  performance one.** Anchoring on lines that appear exactly ONCE on each
+  side is what stops "a new function was added" from rendering as "every
+  closing brace moved". A full LCS table is the fallback INSIDE small
+  unanchorable regions only (`lcsCellBudget`); past that the region is
+  reported as a wholesale replace, because an n·m table on two 20k-line
+  files is 400M cells. The common-suffix peel is COUNTED, not collected —
+  prepending each line made a one-line-edit-at-the-top diff quadratic.
+- **`SplitLines` does not invent a trailing empty line.** A file ending
+  in `\n` has as many lines as it has newlines; counting a phantom one
+  would report an edit on every buffer-vs-file comparison.
+- **Both sides come from the BUFFER when the file is open** — you compare
+  what you're looking at, including unsaved edits (the chat-attachment
+  rule). The one exception is a file compared with ITSELF, which only
+  means anything against the saved copy: that side reads from disk and
+  the label says `(saved)`, since "t.txt ↔ t.txt" would look like a bug.
+- **Pasted text is a first-class source** because ced cannot READ the
+  system clipboard (OSC 52 is write-only, and that's correct for an
+  SSH-first editor). "Compare with pasted text" ARMS the panel — visibly,
+  with the instruction in the body, because a mode you can't see is a
+  mode nobody knows they're in — and `comparePasteTarget` then outranks
+  the editor, chat and terminal for the next bracketed paste. It can only
+  be armed deliberately, which is what makes outranking them safe. Cmd+V
+  feeds it from the internal clipboard; Esc disarms it as a side effect,
+  like clearing the ghost.
+- **⟳ re-reads the file side, and re-diffs a pasted one.** A diff is a
+  snapshot and both sides move; `compare.oldPath` is kept for that rather
+  than reconstructing a path from `oldLabel`, which is prose (it carries
+  "(saved)") and wouldn't survive a path outside the project root.
+- Guards mirror fileio's open guards — size checked on the STAT, one NUL
+  in the first 8KB is binary — because a file ced won't open has no lines
+  worth diffing either.
+- Single occupancy with the git panels and a bottom-docked terminal, both
+  directions, via `growBottomPanel`/`shrinkBottomPanel` and each opener
+  closing the others. No leader key: the three verbs are ≡ / palette rows
+  (the flat table is out of mnemonic letters, and this isn't a namespace's
+  worth of surface).
+
 ### Git panel checkboxes + Actions (app/gitpanel.go + gitpanelactions.go)
 The panel's checkbox is a **multi-selection tick, not a stage toggle**.
 It used to stage/unstage on click, which capped the panel at exactly one
@@ -1144,10 +1200,10 @@ the changes panel: commits on the left (● marks ref-decorated rows;
 gitpanel.go's shape rather than sharing code — the house patterns are
 the shared part. House rules:
 
-- **Single-occupancy in every direction**: log, changes panel, and a
-  bottom-docked terminal swap, never stack — each opener closes the
-  other two. `growBottomPanel`/`shrinkBottomPanel` fan out to all
-  three; single occupancy guarantees at most one acts.
+- **Single-occupancy in every direction**: log, changes panel, compare,
+  and a bottom-docked terminal swap, never stack — each opener closes
+  the others. `growBottomPanel`/`shrinkBottomPanel` fan out to all
+  four; single occupancy guarantees at most one acts.
 - **Verbs live behind `Actions ▾`** (openPicker, the house rule):
   cherry-pick, revert, reset, detached checkout, branch/tag creation,
   the two copies. Labels name the branch and hash they'll touch. Reset
@@ -1275,12 +1331,12 @@ scope by design. House rules:
   rows in the View-toggles group near the TOP of the ≡ menu — the menu
   scrolls on short windows and these rows must stay above the fold
   (pinned by `TestMenuLayout_TerminalRowsAboveTheFold`).
-- **Single-occupancy bottom strip**: while BOTTOM-docked, the terminal
-  and the git panel swap, never stack (opening one collapses the
-  other). Two resizable bottom strips would need circular height-clamp
-  math on small windows — keep the exclusivity. A LEFT-docked terminal
-  doesn't compete for the bottom, so it coexists with the git panel;
-  flipping back to bottom evicts the git panel.
+- **Single-occupancy bottom strip**: while BOTTOM-docked, the terminal,
+  the git panels and the compare panel swap, never stack (opening one
+  collapses the others). Two resizable bottom strips would need circular
+  height-clamp math on small windows — keep the exclusivity. A
+  LEFT-docked terminal doesn't compete for the bottom, so it coexists
+  with them; flipping back to bottom evicts whatever is there.
 - **Focus flag, not a modal**: `term.focused` routes plain editing
   keys to the input line; Esc stays global so leaders and the
   double-Esc menu keep working from inside the terminal. Any click
@@ -1449,8 +1505,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 91 group actions + 13 headers (106), height 112,
-dividers `[2, 5, 109]`.
+2 top-zone rows + 95 group actions + 14 headers (111), height 117,
+dividers `[2, 5, 114]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.

@@ -48,8 +48,8 @@ import (
 // accumulated into that surface as a single insert.
 func (a *App) handlePaste(ev *tcell.EventPaste) {
 	if ev.Start() {
-		a.pasting = a.chatPasteTarget() || a.termPasteTarget() ||
-			a.editorPasteTarget() != nil
+		a.pasting = a.comparePasteTarget() || a.chatPasteTarget() ||
+			a.termPasteTarget() || a.editorPasteTarget() != nil
 		a.pasteBuf = a.pasteBuf[:0]
 		return
 	}
@@ -67,6 +67,11 @@ func (a *App) handlePaste(ev *tcell.EventPaste) {
 	// matching handleKey's focus tiebreak; all three predicates exclude
 	// each other anyway, so the order is only a formality.
 	switch {
+	// An armed compare panel outranks every other surface: arming it was
+	// the user's most recent deliberate act, and it can only be armed by
+	// that act — so it never steals a paste nobody redirected.
+	case a.comparePasteTarget():
+		a.compareInsertPaste(string(a.pasteBuf))
 	case a.chatPasteTarget():
 		a.chatInsertPaste(string(a.pasteBuf))
 	case a.termPasteTarget():
@@ -110,6 +115,9 @@ func (a *App) chatPasteTarget() bool {
 	if a.modal != nil || a.findOpen || a.menuOpen {
 		return false
 	}
+	if a.comparePasteTarget() {
+		return false // an armed compare panel claims the paste
+	}
 	return a.chat.open && a.chat.focused
 }
 
@@ -126,6 +134,9 @@ func (a *App) chatPasteTarget() bool {
 func (a *App) termPasteTarget() bool {
 	if a.modal != nil || a.findOpen || a.menuOpen {
 		return false
+	}
+	if a.comparePasteTarget() {
+		return false // an armed compare panel claims the paste
 	}
 	if a.chat.open && a.chat.focused {
 		return false // chat wins the tiebreak, as in handleKey
@@ -178,6 +189,9 @@ func flattenPaste(text string) string {
 func (a *App) editorPasteTarget() *editor.Tab {
 	if a.modal != nil || a.findOpen || a.menuOpen {
 		return nil
+	}
+	if a.comparePasteTarget() {
+		return nil // an armed compare panel claims the paste
 	}
 	if a.term.open && a.term.focused {
 		return nil

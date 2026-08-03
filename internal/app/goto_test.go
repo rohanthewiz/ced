@@ -45,8 +45,8 @@ func TestParseLineSpec(t *testing.T) {
 		{"42:10", 41, 9, true},
 		{"42,10", 41, 9, true},
 		{"42:", 41, 0, true},
-		{"42:1", 41, 0, true},   // column 1 is the start of the line
-		{"1", 0, 0, true},       // 1-based in, 0-based out
+		{"42:1", 41, 0, true}, // column 1 is the start of the line
+		{"1", 0, 0, true},     // 1-based in, 0-based out
 		{"app.go:314:22", 313, 21, true},
 		{"", 0, 0, false},
 		{"abc", 0, 0, false},

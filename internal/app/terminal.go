@@ -261,6 +261,7 @@ func (a *App) menuToggleTerminal() {
 		if !a.termDockLeft {
 			a.gitPanel.open = false
 			a.gitLog.open = false
+			a.closeComparePanel()
 		} else {
 			// Left-edge single occupancy: a left-docked terminal
 			// reclaims the strip from the chat panel (and vice versa —
@@ -293,6 +294,7 @@ func (a *App) menuToggleTermDock() {
 	if !a.termDockLeft {
 		a.gitPanel.open = false
 		a.gitLog.open = false
+		a.closeComparePanel()
 	} else {
 		// The flip just put the terminal on the left edge — the chat
 		// panel yields it (left-edge single occupancy).
@@ -843,6 +845,7 @@ func (a *App) shrinkTermPanel() {
 func (a *App) growBottomPanel() {
 	a.growGitPanel()
 	a.growGitLog()
+	a.growComparePanel()
 	a.growTermPanel()
 }
 
@@ -851,6 +854,7 @@ func (a *App) growBottomPanel() {
 func (a *App) shrinkBottomPanel() {
 	a.shrinkGitPanel()
 	a.shrinkGitLog()
+	a.shrinkComparePanel()
 	a.shrinkTermPanel()
 }
 

@@ -285,7 +285,7 @@ func TestMenuButtonRect(t *testing.T) {
 // to (0,0) when the window is too small to fit it.
 func TestMenuModalRect_Centered(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	// The menu (106 rows fully expanded) outgrew the 40-row default sim
+	// The menu (111 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
 	a.height = 120
@@ -1913,16 +1913,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 112 {
-		t.Errorf("modalHeight = %d, want 112", h)
+	if h != 117 {
+		t.Errorf("modalHeight = %d, want 117", h)
 	}
-	if got := len(items); got != 106 {
-		t.Errorf("row count = %d, want 106 (2 top-zone + 91 group actions + 13 headers)", got)
+	if got := len(items); got != 111 {
+		t.Errorf("row count = %d, want 111 (2 top-zone + 95 group actions + 14 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
 	// one setting off the headerless Quit group (105) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 109}
+	wantDiv := []int{2, 5, 114}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2250,8 +2250,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 115 { // 112 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 115", h)
+	if h != 120 { // 117 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 120", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

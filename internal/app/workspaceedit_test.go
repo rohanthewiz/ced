@@ -652,3 +652,68 @@ func TestMenuLayout_CarriesTheWorkspaceUndoRow(t *testing.T) {
 		t.Error("the ≡ Code group has no multi-file undo row")
 	}
 }
+
+// TestApplyServerEditWith_ReportsTheOutcomeExactlyOnce pins the primitive's
+// outcome callback directly, rather than only through the verb that needed
+// it. `done` is what a server-initiated edit answers its own request from,
+// so a path that never fires it leaves a request goroutine blocked, and one
+// that fires twice sends a second answer down a channel buffered for one.
+func TestApplyServerEditWith_ReportsTheOutcomeExactlyOnce(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	path := wsTestFile(t, a, "main.go", "package main\n\nvar foo int\n")
+	tab := wsOpenTab(t, a, path)
+
+	var calls []bool
+	var reasons []string
+	done := func(_ *App, ok bool, reason string) {
+		calls = append(calls, ok)
+		reasons = append(reasons, reason)
+	}
+
+	a.applyServerEditWith(wsEdit(path, 2, 4, 7, "bar"), "Test edit", wsRequest{}, done)
+	if len(calls) != 1 || !calls[0] {
+		t.Fatalf("calls = %v, want exactly one true", calls)
+	}
+	if tab.Buffer.Lines[2] != "var bar int" {
+		t.Errorf("buffer line = %q, want the edit applied", tab.Buffer.Lines[2])
+	}
+
+	// Every refusal answers too, with a sentence — failureReason is what the
+	// server shows the user, so an empty one turns a deliberate refusal into
+	// an unexplained failure.
+	for _, c := range []struct {
+		name string
+		edit *lsp.WorkspaceEdit
+	}{
+		{"nil", nil},
+		{"empty", &lsp.WorkspaceEdit{}},
+		{"resource op", &lsp.WorkspaceEdit{Resources: []lsp.ResourceOp{
+			{Kind: lsp.ResourceDelete, Path: "/a.go"},
+		}}},
+	} {
+		calls, reasons = nil, nil
+		a.applyServerEditWith(c.edit, "Test edit", wsRequest{}, done)
+		if len(calls) != 1 || calls[0] {
+			t.Errorf("%s: calls = %v, want exactly one false", c.name, calls)
+		}
+		if len(reasons) == 1 && reasons[0] == "" {
+			t.Errorf("%s: refused with no reason", c.name)
+		}
+	}
+}
+
+// TestApplyServerEdit_StillReportsAcceptance pins that the wrapper every
+// other verb uses is unchanged by the callback: rename asks a question and
+// is told the answer, so "was this accepted" remains the question it has.
+func TestApplyServerEdit_StillReportsAcceptance(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	path := wsTestFile(t, a, "main.go", "package main\n\nvar foo int\n")
+	wsOpenTab(t, a, path)
+
+	if !a.applyServerEdit(wsEdit(path, 2, 4, 7, "bar"), "Test edit", wsRequest{}) {
+		t.Error("an applicable edit reported itself as not accepted")
+	}
+	if a.applyServerEdit(&lsp.WorkspaceEdit{}, "Test edit", wsRequest{}) {
+		t.Error("an empty edit reported itself as accepted")
+	}
+}

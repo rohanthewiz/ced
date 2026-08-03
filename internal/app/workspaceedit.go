@@ -180,8 +180,34 @@ type wsEditPlan struct {
 // result to decide whether they still owe the user a message, which is the
 // question they actually have.
 func (a *App) applyServerEdit(we *lsp.WorkspaceEdit, label string, req wsRequest) bool {
+	return a.applyServerEditWith(we, label, req, nil)
+}
+
+// applyServerEditWith is applyServerEdit for a caller that needs the
+// OUTCOME rather than the acceptance — done fires exactly once, with
+// whether bytes actually changed and, when they didn't, a reason that reads
+// as a sentence.
+//
+// It exists for the one caller that has somebody waiting on the answer: a
+// server-initiated workspace/applyEdit is a REQUEST, and its response field
+// is literally `applied`. Every other verb here asks a question and is told
+// the answer, so "accepted" is all it needs; this one is told the answer and
+// must report back, and the gap between the two is the confirmation prompt —
+// the very case where acceptance and outcome are not the same thing yet.
+//
+// The three exits that make "exactly once" non-obvious are all here rather
+// than in the caller: a refusal answers immediately, the no-confirm path
+// answers after the commit, and the confirmation answers from whichever of
+// its two hooks runs — which is what confirmModal.cancelHook is for.
+func (a *App) applyServerEditWith(we *lsp.WorkspaceEdit, label string, req wsRequest, done func(*App, bool, string)) bool {
+	// A nil done saves every exit below a nil check, and the closure is
+	// dead code the compiler removes for the common caller.
+	if done == nil {
+		done = func(*App, bool, string) {}
+	}
 	if we == nil || we.IsEmpty() {
 		a.flash(label + ": nothing to change")
+		done(a, false, "nothing to change")
 		return false
 	}
 	// Resource operations are refused BY NAME, never skipped. The capability
@@ -191,25 +217,31 @@ func (a *App) applyServerEdit(we *lsp.WorkspaceEdit, label string, req wsRequest
 	// in a package rename and never move the directory — a tree that no
 	// longer builds, with nothing on screen to say why.
 	if len(we.Resources) > 0 {
+		reason := fmt.Sprintf("ced can't perform %s", describeResourceOps(we.Resources))
 		a.flash(fmt.Sprintf("%s also needs %s — ced can't do that yet",
 			label, describeResourceOps(we.Resources)))
+		done(a, false, reason)
 		return false
 	}
 
 	plan, err := a.planWorkspaceEdit(we, label, req)
 	if err != nil {
 		a.flash(label + ": " + err.Error())
+		done(a, false, err.Error())
 		return false
 	}
 	// Nothing has been touched at this point, which is what makes the
 	// confirmation meaningful rather than decorative.
 	if plan.toDisk == 0 {
-		a.commitWorkspaceEdit(plan)
+		ok, reason := a.commitWorkspaceEdit(plan)
+		done(a, ok, reason)
 		return true
 	}
-	a.openConfirm("Apply "+label, plan.confirmMessage(), func(a *App) {
-		a.commitWorkspaceEdit(plan)
+	m := a.openConfirm("Apply "+label, plan.confirmMessage(), func(a *App) {
+		ok, reason := a.commitWorkspaceEdit(plan)
+		done(a, ok, reason)
 	})
+	m.cancelHook = func(a *App) { done(a, false, "the user declined the edit") }
 	return true
 }
 
@@ -431,11 +463,16 @@ func humanSize(n int) string {
 // commitWorkspaceEdit applies a plan and reports, on the main loop. Split
 // from applyServerEdit so the confirmation callback and the no-confirm path
 // run exactly the same code.
-func (a *App) commitWorkspaceEdit(p *wsEditPlan) {
+//
+// It returns whether bytes changed, and the reason when they didn't, so a
+// server-initiated edit can answer its own request truthfully (see
+// applyServerEditWith). The flash is unconditional either way — the user
+// hears about it whether or not anybody else is listening.
+func (a *App) commitWorkspaceEdit(p *wsEditPlan) (bool, string) {
 	results, err := a.applyWorkspaceEdit(p)
 	if err != nil {
 		a.flash(p.label + ": " + err.Error())
-		return
+		return false, err.Error()
 	}
 	// Shell out to the ordinary reconciliation rather than teaching this
 	// path about the tree, git status and the finder index — the chat
@@ -451,6 +488,7 @@ func (a *App) commitWorkspaceEdit(p *wsEditPlan) {
 		msg += " (unsaved)"
 	}
 	a.flash(msg)
+	return true, ""
 }
 
 // applyWorkspaceEdit applies a validated plan and arms the undo journal.

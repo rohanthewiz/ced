@@ -245,6 +245,17 @@ func leaderBindings() []leaderBinding {
 		// eat before tcell ever sees it, the same trap that keeps '[' and
 		// ']' off the tab-switching keys.
 		{key: 'E', action: (*App).menuRenameSymbol},
+		// 'c' is code actions — the letter its own name offers, and the
+		// only obvious one still free in this table. It collides with the
+		// AI namespace's Esc-a-c (chat), which is exactly what a namespace
+		// is for: the prefix already said which world you're in.
+		//
+		// The other writing verb, and the broader of the two: 'E' renames
+		// one symbol you have already decided about, 'c' asks the server
+		// what it can do here at all. It is deliberately not bound to
+		// anything resembling VS Code's Ctrl-. — '.' is next-tab, and the
+		// no-Ctrl rule rules out the original (lspcodeaction.go).
+		{key: 'c', action: (*App).menuCodeActions},
 		// Navigation history: 'o' back "out" of a jump — 'b' was
 		// tempting but reads as "buffer" to vim hands. Shifted variant
 		// walks forward again, mirroring the h/H hunk convention.

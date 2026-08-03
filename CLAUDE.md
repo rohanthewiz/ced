@@ -79,11 +79,13 @@ internal/app/wordhl.go        Word-highlight ≡ toggle + per-tab flag plumbing
 internal/app/findall.go       Find-all peek list: compacted rows, preview, Esc-restore
 internal/lsp/client.go        Minimal JSON-RPC-over-stdio LSP client (stdlib only)
 internal/lsp/workspaceedit.go WorkspaceEdit's two wire shapes → one normal form
+internal/lsp/codeaction.go    Code actions: the response union + applyEdit's params
 internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition, hover
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
 internal/app/lspreferences.go References → the Find-all panel's project mode
 internal/app/lspsignature.go  Signature help → the hover tooltip, active param lit
 internal/app/lsprename.go     Rename symbol: prompt → server edit → the primitive
+internal/app/lspcodeaction.go Code actions: picker, executeCommand, server applyEdit
 internal/app/hovermodal.go    Caret-anchored tooltip (hover + signature help)
 internal/app/workspaceedit.go Cross-file apply: validate, write, one-gesture undo
 internal/app/termdiag.go      Terminal output → clickable path:line:col jumps
@@ -644,10 +646,21 @@ framework dependency. House rules it must keep obeying:
   a server learns ced can apply text edits but cannot create, rename or
   delete files on its behalf — see the workspace-edit section.
 - Leaders: Esc-d definition, Esc-i hover, Esc-I signature help, Esc-D
-  the file's symbol outline, Esc-R references. The ≡ Code group also
-  carries the multi-file undo row, which has no leader (see that section). Definition jumps record
-  into the app-wide navigation history (nav.go) — there is no
-  LSP-private jump stack.
+  the file's symbol outline, Esc-R references, Esc-c code actions, Esc-E
+  rename. The ≡ Code group also carries the multi-file undo row, which
+  has no leader (see that section). Definition jumps record into the
+  app-wide navigation history (nav.go) — there is no LSP-private jump
+  stack.
+- **The handshake's `onRequest` hook is NARROW, and that is enforced by a
+  sentinel.** ced's gopls connection is the only LSP client here that
+  answers server→client REQUESTS (workspace/applyEdit — see code
+  actions), and a hook that owned the whole surface would inherit
+  `workspace/configuration`, which gopls BLOCKS on while type-checking.
+  `lsp.ErrRequestUnhandled` is how a hook declines one method and leaves
+  the built-in auto-responder in charge of the rest. `StartWithRequests`
+  is a separate constructor because the hook must be installed BEFORE the
+  read loop starts (the NewClientACP rule) — assigning it afterwards
+  races the goroutine that reads it.
 - **Absolute paths only**: `New()` absolutizes rootDir and `openFile`
   absolutizes tab paths. A relative root produces a malformed rootUri
   and gopls then publishes diagnostics keyed by absolute paths that
@@ -888,6 +901,18 @@ properly rather than special-casing rename. House rules:
   catches a keystroke plus a fired debounce that would leave the first
   test true again), and the server's own `textDocument.version` against
   ced's didChange counter when it makes one.
+- **`applyServerEdit` reports ACCEPTANCE; `applyServerEditWith` reports
+  the OUTCOME**, and the gap between them is the confirmation prompt. The
+  callback exists for exactly one caller — a server-initiated
+  `workspace/applyEdit` is a REQUEST whose response field is literally
+  `applied`, so it is the one edit here ced must report on rather than
+  merely perform. Every other verb asks a question and is told the
+  answer; "accepted" is all those need. `done` fires EXACTLY ONCE on
+  every path (refusal, no-confirm commit, and whichever of the
+  confirmation's two hooks runs — which is what `confirmModal.cancelHook`
+  is for), because a caller is blocked on it. This was the one addition
+  the primitive needed when code actions were built on it, and it is the
+  shape a third verb should reach for rather than a new one.
 - No leader key — the flat table is out of mnemonic letters and plain undo
   covers the common case. The ≡ **Code** row (`wsEditUndoLabel`, dynamic)
   is the path for the two cases plain undo can't serve: the active tab
@@ -945,6 +970,84 @@ Code. House rules:
   pairs a terminal can eat before tcell sees it. The ≡ row sits directly
   above the multi-file undo row — the one write in a group of reads, next
   to the thing that takes it back.
+
+### Code actions (lsp/codeaction.go + app/lspcodeaction.go)
+What the server can do to the cursor or the selection — fix this error,
+organize these imports, extract that block — listed in the palette
+(Esc-c, ≡ Code). It is the second verb on the workspace-edit primitive
+and the one that was queued to PROVE it: rename asks a question and
+applies the answer, while this arrives by two routes, one of which isn't
+a response at all. House rules:
+
+- **THE SECOND ROUTE IS A SERVER REQUEST**, and everything unusual here
+  follows from it. An action carrying no edit of its own is run through
+  `workspace/executeCommand`, and what it CHANGES comes back unprompted
+  as `workspace/applyEdit` — with a JSON-RPC id waiting on a field called
+  `applied`. Hence `applyServerEditWith` (see the primitive), hence the
+  narrow `onRequest` hook plus `lsp.ErrRequestUnhandled` (see the LSP
+  section), and hence a `wsRequest` that is EMPTY: nobody asked a
+  question, so there is no origin revision to claim. The per-participant
+  sync checks still run and are the ones that matter.
+- **An unprompted edit REFUSES while a dialog owns the screen.**
+  `openModal` replaces rather than refuses, so applying under a prompt
+  the user is mid-answer on would pop a confirmation over it and silently
+  drop that modal's own pending reply. Unlike a chat permission request —
+  where an agent is stuck, so the prompt queues — a server can simply be
+  told no, with a reason, and the user re-runs the action.
+- **The handler BLOCKS the serving goroutine** — the ACP
+  permission-request shape, for the same reason: the answer is a decision
+  the main loop makes, possibly with a confirmation dialog in the middle
+  of it. `wsApplyTimeout` (90s) is deliberately SHORTER than the client's
+  `executeCommandTimeout` (2 min), so a user who walks away releases the
+  server rather than the other way round. That budget is the longest in
+  the client because THE USER IS INSIDE IT: the server is blocked in
+  executeCommand while ced's confirmation sits on screen.
+- **The range is the SELECTION when there is one, the cursor otherwise**,
+  and that distinction is the whole interface. "Extract to function" only
+  exists for a span, so a verb that always asked about a point would
+  silently never offer half of what the server has; a quick fix only
+  exists where a diagnostic is, so a verb that always asked about a
+  selection would need one before it could offer anything. The ≡ row's
+  label is dynamic and says which span it will cover.
+- **Diagnostics are echoed back VERBATIM**, which is how a quick fix
+  finds the problem it fixes. `lsp.Diagnostic` round-trips its raw JSON
+  (`UnmarshalJSON`/`MarshalJSON`) because the fields doing the matching —
+  `data`, `code`, server-private extensions — are exactly the ones this
+  client has no reason to model. Same argument the Copilot layer makes
+  for echoing a completion item's raw JSON, and the same reason a
+  command's `Arguments` stay `json.RawMessage`. Overlap is generous: a
+  zero-width cursor range must match a diagnostic that CONTAINS it.
+- **The response union collapses in `internal/lsp`** (the
+  ParseDocumentSymbols rule), and the discriminator is the JSON TYPE of
+  the `command` field — a string on a bare Command, an object on a
+  CodeAction literal. Never a failed unmarshal: a bare Command decodes
+  cleanly as a CodeAction with everything zeroed, so an error-based sniff
+  would turn "run this command" into a row that does nothing at all.
+- **No `resolveSupport`, the `prepareSupport` trade.** Declaring it tells
+  the server to send actions with NO edit and wait for a
+  `codeAction/resolve` round trip; not declaring it makes the server
+  compute edits up front, so a picked row applies immediately. The cost
+  is work the server does for actions nobody picks, which is its own
+  cheapest work. `codeActionLiteralSupport` IS declared, or a server
+  sends only bare Commands the editor could execute blind.
+- **DISABLED actions are dropped, not dimmed.** The surface is the fuzzy
+  picker, in which every row is a verb that runs; a row answering Enter
+  with "you can't do that here" is worse than one never offered, and the
+  palette has no disabled state to borrow. An action with neither an edit
+  nor a command is dropped for the same reason.
+- **Edit before command**, per the spec, and a REFUSED edit skips the
+  command — running the follow-up to something that never happened is the
+  one way this verb could do half a thing silently.
+- Generation-checked (`actionSeq`) for rename's reason — a picked row
+  WRITES FILES — plus the symbols verb's path check. The picker sits
+  between the response and the apply the way rename's prompt sits between
+  the ask and the request, so the contract is captured at ask time (after
+  the flush) and validated when a row FIRES.
+- Leader is **Esc-c**, the letter the verb's own name offers and the last
+  obvious one free in the flat table. It collides with the AI
+  namespace's `Esc a c`, which is what a namespace is for. Not VS Code's
+  `Ctrl-.` in any form: `.` is next-tab and Ctrl is out by the project's
+  founding rule.
 
 ### Copilot sidecar (app/copilot.go) — phase 1 of the AI integration
 Runs GitHub's official `copilot-language-server` (native binary, found
@@ -2038,8 +2141,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 105 group actions + 14 headers (121), height 127,
-dividers `[2, 5, 124]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 106 group actions + 14 headers (122), height 128,
+dividers `[2, 5, 125]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

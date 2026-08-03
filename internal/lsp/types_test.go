@@ -9,6 +9,7 @@ package lsp
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -329,5 +330,58 @@ func TestMarkupText(t *testing.T) {
 		if got := markupText(json.RawMessage(body)); got != want {
 			t.Errorf("markupText(%q) = %q, want %q", body, got, want)
 		}
+	}
+}
+
+// TestDiagnosticRoundTripsRawJSON pins the reason Diagnostic carries its
+// original bytes: its second life is as INPUT. A codeAction request echoes
+// diagnostics back so the server can match a quick fix to the problem it
+// fixes, and the fields doing that matching — data, code, server-private
+// extensions — are exactly the ones this client never modelled. Re-encoding
+// from the four modelled fields would drop them and the fixes with them.
+func TestDiagnosticRoundTripsRawJSON(t *testing.T) {
+	src := `{"range":{"start":{"line":2,"character":4},"end":{"line":2,"character":9}},` +
+		`"severity":2,"source":"vet","message":"unused","code":"U1000",` +
+		`"data":{"quickfix":"remove"},"tags":[1]}`
+	var d Diagnostic
+	if err := json.Unmarshal([]byte(src), &d); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// The modelled fields still decode — the raw copy is in addition, not
+	// instead.
+	if d.Severity != SeverityWarning || d.Message != "unused" || d.Range.Start.Line != 2 {
+		t.Errorf("decoded = %+v, want the modelled fields populated", d)
+	}
+	out, err := json.Marshal(d)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(out) != src {
+		t.Errorf("re-encoded =\n%s\nwant byte-identical:\n%s", out, src)
+	}
+}
+
+// TestDiagnosticMarshalsWithoutRaw pins the fallback: a diagnostic ced built
+// itself (tests, and any future locally-generated one) has no original bytes
+// and encodes from the modelled fields instead of vanishing.
+func TestDiagnosticMarshalsWithoutRaw(t *testing.T) {
+	d := Diagnostic{
+		Range:    Range{Start: Position{Line: 1}, End: Position{Line: 1, Character: 3}},
+		Severity: SeverityError,
+		Message:  "boom",
+	}
+	out, err := json.Marshal(d)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back Diagnostic
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.Message != "boom" || back.Severity != SeverityError {
+		t.Errorf("round trip = %+v, want the modelled fields preserved", back)
+	}
+	if strings.Contains(string(out), `"Raw"`) {
+		t.Errorf("encoded = %s, want no Raw field on the wire", out)
 	}
 }

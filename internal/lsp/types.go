@@ -64,11 +64,48 @@ const (
 )
 
 // Diagnostic is one server-reported problem in a document.
+//
+// The four modelled fields are everything the editor draws with. The rest of
+// the object — `code`, `data`, `tags`, `relatedInformation`, and whatever a
+// given server adds — is kept in Raw and re-emitted verbatim, because a
+// diagnostic's second life is as INPUT: a codeAction request echoes the
+// diagnostics back so the server can match a quick fix to the problem it
+// fixes, and the fields that do that matching are precisely the ones this
+// client has no reason to model. Same argument the Copilot layer makes for
+// echoing a completion item's raw JSON in its telemetry.
 type Diagnostic struct {
 	Range    Range  `json:"range"`
 	Severity int    `json:"severity,omitempty"`
 	Source   string `json:"source,omitempty"`
 	Message  string `json:"message"`
+
+	// Raw is the object exactly as it arrived, or nil for a diagnostic this
+	// client built itself (tests, and any future locally-generated one).
+	Raw json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON decodes the modelled fields and keeps the original bytes.
+// The alias type is what stops the custom method recursing into itself.
+func (d *Diagnostic) UnmarshalJSON(b []byte) error {
+	type alias Diagnostic
+	var a alias
+	if err := json.Unmarshal(b, &a); err != nil {
+		return err
+	}
+	*d = Diagnostic(a)
+	d.Raw = append(json.RawMessage(nil), b...)
+	return nil
+}
+
+// MarshalJSON re-emits the original object when there is one, so a
+// round-tripped diagnostic is byte-identical to what the server sent. A
+// locally-built one falls back to the modelled fields.
+func (d Diagnostic) MarshalJSON() ([]byte, error) {
+	if len(d.Raw) > 0 {
+		return d.Raw, nil
+	}
+	type alias Diagnostic
+	return json.Marshal(alias(d))
 }
 
 // PublishDiagnosticsParams is the payload of the

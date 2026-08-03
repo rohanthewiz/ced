@@ -71,6 +71,8 @@ type lspConn interface {
 	Definition(path string, pos lsp.Position) ([]lsp.Location, error)
 	References(path string, pos lsp.Position, includeDecl bool) ([]lsp.Location, error)
 	Rename(path string, pos lsp.Position, newName string) (*lsp.WorkspaceEdit, error)
+	CodeActions(path string, rng lsp.Range, diags []lsp.Diagnostic) ([]lsp.CodeAction, error)
+	ExecuteCommand(cmd string, args []json.RawMessage) error
 	HoverAt(path string, pos lsp.Position) (*lsp.Hover, error)
 	SignatureHelpAt(path string, pos lsp.Position) (*lsp.Signature, error)
 	DocumentSymbols(path string) ([]lsp.Symbol, error)
@@ -101,6 +103,12 @@ type lspState struct {
 	// older one's edit planned against a buffer the newer one has already
 	// rewritten.
 	renameSeq int
+
+	// actionSeq generations the code-action lookups (lspcodeaction.go).
+	// Same reason as renameSeq: a picked row can write files, so a list
+	// from an older ask must not outlive a newer one and hand back ranges
+	// measured against a document that has since been rewritten.
+	actionSeq int
 
 	// diags is keyed by absolute path. gopls publishes for any file in
 	// the workspace, not just open ones; keeping them all costs little
@@ -225,10 +233,26 @@ func (a *App) lspEnsureStarted() {
 			}
 			_ = scr.PostEvent(&lspDiagsEvent{when: time.Now(), path: path, diags: p.Diagnostics})
 		}
+		// onRequest answers server→client REQUESTS, and it answers exactly
+		// one: workspace/applyEdit, the route a command-only code action
+		// uses to deliver what it computed. Everything else declines with
+		// ErrRequestUnhandled and falls through to the client's built-in
+		// auto-responder — which is not a formality, because
+		// workspace/configuration is in that set and gopls BLOCKS on it
+		// while type-checking. Each invocation gets its own goroutine, so
+		// blocking here for a user's confirmation is safe.
+		onRequest := func(method string, params json.RawMessage) (any, error) {
+			if method != "workspace/applyEdit" {
+				return nil, lsp.ErrRequestUnhandled
+			}
+			// scr, not a — the App must not be touched off-loop, and the
+			// screen is the only thing this needs to post an event.
+			return lspServeApplyEdit(scr, params)
+		}
 		onExit := func(error) {
 			_ = scr.PostEvent(&lspExitEvent{when: time.Now()})
 		}
-		client, err := lsp.Start(root, lspServerBinary, nil, onNotify, onExit)
+		client, err := lsp.StartWithRequests(root, lspServerBinary, nil, onNotify, onRequest, onExit)
 		if err != nil {
 			_ = scr.PostEvent(&lspExitEvent{when: time.Now()})
 			return

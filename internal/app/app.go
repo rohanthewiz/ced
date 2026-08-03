@@ -336,11 +336,17 @@ func builtinMenuGroups() []menuGroup {
 			// language server at all: `go build` and `grep -n` are the
 			// providers.
 			{label: "Go to terminal output location…", shortcut: "esc ~", action: (*App).menuTermLocations, enabled: (*App).hasTermOutput},
-			// The one row in this group that WRITES, placed directly above
-			// the row that undoes it: rename is the verb the workspace-edit
-			// primitive was built for, and its cross-file undo is the thing
-			// a user reaches for next when a rename went somewhere they
-			// didn't expect (lsprename.go).
+			// The two rows that WRITE, placed directly above the row that
+			// undoes them: rename is the verb the workspace-edit primitive
+			// was built for, code actions are the verb that proved it, and
+			// the cross-file undo is what a user reaches for next when
+			// either went somewhere they didn't expect.
+			//
+			// Code actions comes first because it is the broader question —
+			// "what can you do here?" — and its label says which span it
+			// will ask about, since a selection changes the answer
+			// completely (lspcodeaction.go).
+			{labelFor: (*App).codeActionMenuLabel, shortcut: "esc c", action: (*App).menuCodeActions, enabled: (*App).hasCodeActions},
 			{label: "Rename symbol…", shortcut: "esc E", action: (*App).menuRenameSymbol, enabled: (*App).hasLSPActions},
 			// Undo a server-authored multi-file edit as one gesture
 			// (workspaceedit.go). Plain undo already claims the press when
@@ -1385,6 +1391,12 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPReferences(e)
 	case *lspRenameEvent:
 		a.handleLSPRename(e)
+	case *lspCodeActionsEvent:
+		a.handleLSPCodeActions(e)
+	case *lspApplyEditEvent:
+		a.handleLSPApplyEdit(e)
+	case *lspCommandEvent:
+		a.handleLSPCommand(e)
 	case *lspSignatureEvent:
 		a.handleLSPSignature(e)
 	case *copilotReadyEvent:

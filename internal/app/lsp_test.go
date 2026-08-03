@@ -8,6 +8,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -48,6 +49,18 @@ type fakeLSPConn struct {
 	renameEdit *lsp.WorkspaceEdit
 	renameErr  error
 	renameName string
+	// actions is what textDocument/codeAction answers with; actionDiags
+	// and actionRange record what the request carried, so a test can prove
+	// the range and the echoed diagnostics that reached the wire are the
+	// ones the editor meant to send.
+	actions     []lsp.CodeAction
+	actionErr   error
+	actionRange lsp.Range
+	actionDiags []lsp.Diagnostic
+	// execCmd / execArgs record the last workspace/executeCommand.
+	execCmd  string
+	execArgs []json.RawMessage
+	execErr  error
 }
 
 func (f *fakeLSPConn) record(s string) {
@@ -99,6 +112,25 @@ func (f *fakeLSPConn) Rename(path string, _ lsp.Position, newName string) (*lsp.
 	f.mu.Unlock()
 	f.record(fmt.Sprintf("rename:%s:%s", filepath.Base(path), newName))
 	return f.renameEdit, f.renameErr
+}
+
+func (f *fakeLSPConn) CodeActions(path string, rng lsp.Range, diags []lsp.Diagnostic) ([]lsp.CodeAction, error) {
+	f.mu.Lock()
+	f.actionRange = rng
+	f.actionDiags = diags
+	f.mu.Unlock()
+	f.record(fmt.Sprintf("codeAction:%s:%d:%d-%d:%d", filepath.Base(path),
+		rng.Start.Line, rng.Start.Character, rng.End.Line, rng.End.Character))
+	return f.actions, f.actionErr
+}
+
+func (f *fakeLSPConn) ExecuteCommand(cmd string, args []json.RawMessage) error {
+	f.mu.Lock()
+	f.execCmd = cmd
+	f.execArgs = args
+	f.mu.Unlock()
+	f.record("executeCommand:" + cmd)
+	return f.execErr
 }
 
 func (f *fakeLSPConn) HoverAt(string, lsp.Position) (*lsp.Hover, error) {

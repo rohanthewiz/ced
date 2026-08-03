@@ -740,3 +740,223 @@ func TestRenameCapabilityDeclared(t *testing.T) {
 		t.Fatalf("Initialize: %v", err)
 	}
 }
+
+// codeActionResult pairs the two returns so a goroutine can hand both back.
+type codeActionResult struct {
+	acts []CodeAction
+	err  error
+}
+
+// TestCodeActionsRequest pins the wire payload. The range and the echoed
+// diagnostics are the whole question — the server matches a quick fix to the
+// problem it fixes by the diagnostic it is handed back, so a request that
+// dropped them would silently offer refactorings and no fixes.
+func TestCodeActionsRequest(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	// A diagnostic that arrived from a server keeps its raw bytes, which is
+	// what has to go back out — `data` here stands for every server-private
+	// field this client never modelled.
+	var diag Diagnostic
+	if err := json.Unmarshal([]byte(
+		`{"range":{"start":{"line":4,"character":2},"end":{"line":4,"character":9}},`+
+			`"severity":1,"source":"compiler","message":"undefined: foo","data":{"fix":"import"}}`), &diag); err != nil {
+		t.Fatalf("seed diagnostic: %v", err)
+	}
+
+	resCh := make(chan codeActionResult, 1)
+	go func() {
+		acts, err := c.CodeActions("/tmp/proj/main.go",
+			Range{Start: Position{Line: 4, Character: 0}, End: Position{Line: 6, Character: 1}},
+			[]Diagnostic{diag})
+		resCh <- codeActionResult{acts, err}
+	}()
+
+	m := srv.read(t)
+	if m.Method != "textDocument/codeAction" {
+		t.Fatalf("method = %q, want textDocument/codeAction", m.Method)
+	}
+	var params struct {
+		TextDocument TextDocumentIdentifier `json:"textDocument"`
+		Range        Range                  `json:"range"`
+		Context      struct {
+			Diagnostics []json.RawMessage `json:"diagnostics"`
+		} `json:"context"`
+	}
+	if err := json.Unmarshal(m.Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if params.TextDocument.URI != PathToURI("/tmp/proj/main.go") {
+		t.Errorf("uri = %q", params.TextDocument.URI)
+	}
+	if params.Range.Start.Line != 4 || params.Range.End.Line != 6 || params.Range.End.Character != 1 {
+		t.Errorf("range = %+v, want 4:0-6:1", params.Range)
+	}
+	if len(params.Context.Diagnostics) != 1 {
+		t.Fatalf("context diagnostics = %d, want 1", len(params.Context.Diagnostics))
+	}
+	// Byte-for-byte: the fields that match a fix to its problem are exactly
+	// the ones a modelled round trip would have dropped.
+	if !strings.Contains(string(params.Context.Diagnostics[0]), `"data":{"fix":"import"}`) {
+		t.Errorf("diagnostic = %s, want the server's own object verbatim", params.Context.Diagnostics[0])
+	}
+
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":[
+		{"title":"Add import","kind":"quickfix","edit":{"changes":{"file:///tmp/proj/main.go":[
+			{"range":{"start":{"line":0,"character":0},"end":{"line":0,"character":0}},"newText":"import x\n"}]}}}
+	]}`, *m.ID))
+
+	got := <-resCh
+	if got.err != nil {
+		t.Fatalf("CodeActions: %v", got.err)
+	}
+	if len(got.acts) != 1 || got.acts[0].Title != "Add import" || got.acts[0].Edit == nil {
+		t.Errorf("actions = %+v, want one quickfix carrying an edit", got.acts)
+	}
+}
+
+// TestCodeActionsEmptyContext pins that "no diagnostics" goes out as an
+// empty ARRAY rather than null. The spec makes context.diagnostics required,
+// and a server is entitled to refuse a null — which would make every code
+// action on a clean file fail for a reason nobody could see.
+func TestCodeActionsEmptyContext(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	go func() { _, _ = c.CodeActions("/tmp/proj/main.go", Range{}, nil) }()
+
+	m := srv.read(t)
+	if !strings.Contains(string(m.Params), `"diagnostics":[]`) {
+		t.Errorf("params = %s, want an empty diagnostics array", m.Params)
+	}
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":null}`, *m.ID))
+}
+
+// TestExecuteCommandWireFormat pins that a command's arguments reach the
+// server exactly as they arrived. They are the server's own private payload
+// — modelling them would drop every field this client doesn't know about,
+// and the command would then fail on data it originally sent itself.
+func TestExecuteCommandWireFormat(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	args := []json.RawMessage{json.RawMessage(`{"URI":"file:///p","Fix":"stubMethods","Extra":[1,2]}`)}
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.ExecuteCommand("gopls.apply_fix", args) }()
+
+	m := srv.read(t)
+	if m.Method != "workspace/executeCommand" {
+		t.Fatalf("method = %q, want workspace/executeCommand", m.Method)
+	}
+	var params ExecuteCommandParams
+	if err := json.Unmarshal(m.Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if params.Command != "gopls.apply_fix" {
+		t.Errorf("command = %q", params.Command)
+	}
+	if len(params.Arguments) != 1 || string(params.Arguments[0]) != string(args[0]) {
+		t.Errorf("arguments = %v, want the raw payload verbatim", params.Arguments)
+	}
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":null}`, *m.ID))
+	if err := <-errCh; err != nil {
+		t.Fatalf("ExecuteCommand: %v", err)
+	}
+}
+
+// TestCodeActionCapabilitiesDeclared pins the handshake half. Three claims
+// have to be on the wire or the feature is dead in different ways:
+// codeActionLiteralSupport (else the server sends only bare Commands),
+// workspace.applyEdit (else a command-only action has no route back), and
+// workspace.executeCommand (else those commands aren't runnable at all).
+func TestCodeActionCapabilitiesDeclared(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Initialize("/tmp/proj") }()
+
+	m := srv.read(t)
+	var params struct {
+		Capabilities struct {
+			TextDocument map[string]json.RawMessage `json:"textDocument"`
+			Workspace    map[string]json.RawMessage `json:"workspace"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(m.Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	ca, ok := params.Capabilities.TextDocument["codeAction"]
+	if !ok {
+		t.Fatal("initialize did not declare textDocument.codeAction")
+	}
+	if !strings.Contains(string(ca), "codeActionLiteralSupport") {
+		t.Errorf("codeAction = %s, want codeActionLiteralSupport", ca)
+	}
+	// resolveSupport is deliberately absent — declaring it makes the server
+	// withhold edits and wait for a second round trip (see Initialize).
+	if strings.Contains(string(ca), "resolveSupport") {
+		t.Errorf("codeAction = %s, want no resolveSupport", ca)
+	}
+	if got := string(params.Capabilities.Workspace["applyEdit"]); got != "true" {
+		t.Errorf("workspace.applyEdit = %q, want true", got)
+	}
+	if _, ok := params.Capabilities.Workspace["executeCommand"]; !ok {
+		t.Error("initialize did not declare workspace.executeCommand")
+	}
+
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"capabilities":{}}}`, *m.ID))
+	if n := srv.read(t); n.Method != "initialized" {
+		t.Errorf("second message = %q, want the initialized notification", n.Method)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+}
+
+// TestRequestHookFallthrough pins the narrow-hook contract. A hook installed
+// to answer workspace/applyEdit must NOT inherit workspace/configuration:
+// gopls blocks on that one while type-checking, and answering it with the
+// honest "I don't handle this" null wedges the server on the first file
+// opened. ErrRequestUnhandled is what keeps the auto-responder in charge of
+// everything the hook didn't claim.
+func TestRequestHookFallthrough(t *testing.T) {
+	cliR, srvW := io.Pipe()
+	srvR, cliW := io.Pipe()
+	var seen []string
+	c := &Client{
+		w: cliW, r: bufio.NewReader(cliR), pending: map[int64]chan *message{},
+		onRequest: func(method string, _ json.RawMessage) (any, error) {
+			seen = append(seen, method)
+			if method != "workspace/applyEdit" {
+				return nil, ErrRequestUnhandled
+			}
+			return ApplyEditResult{Applied: true}, nil
+		},
+	}
+	go c.readLoop()
+	srv := &fakeServer{in: bufio.NewReader(srvR), out: srvW}
+	defer func() { _ = srvW.Close(); _ = cliW.Close() }()
+
+	// The declined method still gets the auto-responder's one-per-item echo.
+	srv.write(t, `{"jsonrpc":"2.0","id":1,"method":"workspace/configuration","params":{"items":[{},{}]}}`)
+	resp := srv.read(t)
+	if string(resp.Result) != "[{},{}]" {
+		t.Errorf("configuration result = %s, want one empty object per item", resp.Result)
+	}
+
+	// The claimed method is answered by the hook.
+	srv.write(t, `{"jsonrpc":"2.0","id":2,"method":"workspace/applyEdit","params":{"label":"x","edit":{}}}`)
+	resp = srv.read(t)
+	var got ApplyEditResult
+	if err := json.Unmarshal(resp.Result, &got); err != nil {
+		t.Fatalf("applyEdit result: %v", err)
+	}
+	if !got.Applied {
+		t.Errorf("applyEdit result = %+v, want the hook's answer", got)
+	}
+	if len(seen) != 2 {
+		t.Errorf("hook saw %v, want first refusal on both methods", seen)
+	}
+}

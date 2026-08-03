@@ -27,6 +27,7 @@ package lsp
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -96,6 +97,12 @@ type Client struct {
 	// workspace/configuration, null for the rest); ACP sets it because
 	// its server requests (permission prompts, fs access) carry real
 	// semantics a null can't answer.
+	//
+	// A hook may DECLINE one method and keep the auto-responder for the
+	// rest by returning ErrRequestUnhandled — see that sentinel. ACP
+	// hooks never do; the LSP hook does, because it exists to answer
+	// exactly one request (workspace/applyEdit) and the auto-responder's
+	// workspace/configuration answer is load-bearing.
 	onRequest func(method string, params json.RawMessage) (any, error)
 
 	// onExit fires once when the read loop ends (server exited, pipe
@@ -129,6 +136,23 @@ func NewClient(r io.Reader, w io.Writer, onNotify func(string, json.RawMessage),
 // but checking first keeps "gopls not installed" a silent no-op
 // instead of a surfaced failure.
 func Start(dir, bin string, args []string, onNotify func(string, json.RawMessage), onExit func(error)) (*Client, error) {
+	return StartWithRequests(dir, bin, args, onNotify, nil, onExit)
+}
+
+// StartWithRequests is Start for a client that must answer server→client
+// REQUESTS as well as notifications — ced's gopls connection does, because
+// workspace/applyEdit is how a command-only code action delivers its edit.
+//
+// It is a separate constructor rather than a parameter on Start for the
+// reason NewClientACP is: the hook has to be in place BEFORE the read loop
+// starts, so it cannot be assigned afterwards without racing the very
+// goroutine that reads it. A hook that declines a method with
+// ErrRequestUnhandled leaves the built-in auto-responder in charge of it.
+func StartWithRequests(dir, bin string, args []string,
+	onNotify func(string, json.RawMessage),
+	onRequest func(string, json.RawMessage) (any, error),
+	onExit func(error),
+) (*Client, error) {
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
 	// The server's stderr goes to our stderr, which tcell has taken
@@ -146,8 +170,16 @@ func Start(dir, bin string, args []string, onNotify func(string, json.RawMessage
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	c := NewClient(stdout, stdin, onNotify, onExit)
-	c.cmd = cmd
+	c := &Client{
+		w:         stdin,
+		r:         bufio.NewReader(stdout),
+		pending:   map[int64]chan *message{},
+		onNotify:  onNotify,
+		onRequest: onRequest,
+		onExit:    onExit,
+		cmd:       cmd,
+	}
+	go c.readLoop()
 	return c, nil
 }
 
@@ -345,10 +377,23 @@ func (c *Client) read() (*message, error) {
 	return readMessage(c.r)
 }
 
-// respondToServer answers a server→client request. When an onRequest
-// hook is installed (ACP), it owns the answer entirely — result on
-// success, a JSON-RPC error object on failure. Otherwise the built-in
-// LSP auto-responder applies: the emptiest legal payload.
+// ErrRequestUnhandled is what an onRequest hook returns to say "not my
+// method" — the request then falls through to the built-in auto-responder
+// as though no hook were installed.
+//
+// It exists because the LSP hook is NARROW. A client that installs a hook
+// to answer workspace/applyEdit would otherwise also inherit
+// workspace/configuration, which gopls BLOCKS on while type-checking:
+// answering it with a null (the honest default for a method a handler
+// doesn't know) wedges the server on the first file opened. Declining is
+// the difference between adding one capability and taking over the whole
+// server-request surface.
+var ErrRequestUnhandled = errors.New("lsp: request not handled")
+
+// respondToServer answers a server→client request. An installed onRequest
+// hook gets first refusal — result on success, a JSON-RPC error object on
+// failure, or ErrRequestUnhandled to fall through. The built-in LSP
+// auto-responder then applies: the emptiest legal payload.
 // workspace/configuration must echo one element per requested item
 // (gopls waits on it); everything else — registration, progress-token
 // creation, message requests — accepts a null result.
@@ -363,19 +408,28 @@ func (c *Client) respondToServer(m *message) {
 		// concurrent replies can't interleave bytes.
 		go func() {
 			res, err := c.onRequest(m.Method, m.Params)
-			if err != nil {
+			switch {
+			case errors.Is(err, ErrRequestUnhandled):
+				c.autoRespond(m)
+			case err != nil:
 				// -32601 (method not found) is the honest default for a
 				// request this client declines to handle; the message
 				// says why.
 				_ = c.send(&message{JSONRPC: "2.0", ID: m.ID,
 					Error: &respError{Code: -32601, Message: err.Error()}})
-				return
+			default:
+				raw, _ := json.Marshal(res)
+				_ = c.send(&message{JSONRPC: "2.0", ID: m.ID, Result: raw})
 			}
-			raw, _ := json.Marshal(res)
-			_ = c.send(&message{JSONRPC: "2.0", ID: m.ID, Result: raw})
 		}()
 		return
 	}
+	c.autoRespond(m)
+}
+
+// autoRespond is the built-in answer for a server request nothing else
+// handles: the emptiest payload the spec allows.
+func (c *Client) autoRespond(m *message) {
 	var result any
 	if m.Method == "workspace/configuration" {
 		var p struct {
@@ -457,6 +511,31 @@ func (c *Client) Initialize(rootDir string) error {
 				// handling the request's three response shapes for a check
 				// the rename itself repeats.
 				"rename": map[string]any{},
+				// codeActionLiteralSupport is what makes a server send
+				// CodeAction objects (title + kind + a ready-made edit)
+				// instead of the 3.8 bare-Command shape, which could only
+				// ever be executed blind. The valueSet is the families ced
+				// asks about; it is a HINT, not a filter — a server may
+				// still answer with kinds outside it, and ParseCodeActions
+				// takes whatever arrives.
+				//
+				// resolveSupport and dataSupport are deliberately absent,
+				// the same trade rename makes with prepareSupport. Declaring
+				// them tells the server to send actions with NO edit and
+				// wait for a codeAction/resolve round trip; not declaring
+				// them makes it compute the edits up front, so a picked row
+				// applies immediately instead of asking again. The cost is
+				// that the server does more work for actions nobody picks —
+				// which is its own cheapest work, and it buys away a whole
+				// second request shape plus the "the row did nothing"
+				// failure it would introduce.
+				"codeAction": map[string]any{
+					"codeActionLiteralSupport": map[string]any{
+						"codeActionKind": map[string]any{
+							"valueSet": []string{"quickfix", "refactor", "source"},
+						},
+					},
+				},
 				// Hierarchical symbols are the shape worth asking for:
 				// gopls nests a type's methods under it, which is what
 				// makes the "go to symbol" picker read like an outline
@@ -494,6 +573,17 @@ func (c *Client) Initialize(rootDir string) error {
 					"documentChanges":    true,
 					"resourceOperations": []string{},
 				},
+				// applyEdit says this client will answer a
+				// workspace/applyEdit REQUEST, which is the only way a
+				// command-only code action can change anything: the command
+				// runs server-side and the edit comes back unprompted.
+				// Without it a conforming server has no route to apply what
+				// it just computed, and those actions become rows that
+				// quietly do nothing.
+				"applyEdit": true,
+				// executeCommand needs no options; declaring it is how the
+				// server learns those commands are runnable at all.
+				"executeCommand": map[string]any{},
 			},
 		},
 	}
@@ -629,6 +719,58 @@ func (c *Client) Rename(path string, pos Position, newName string) (*WorkspaceEd
 		return nil, err
 	}
 	return ParseWorkspaceEdit(raw), nil
+}
+
+// executeCommandTimeout is the response deadline for
+// workspace/executeCommand, and it is the longest in this client by a wide
+// margin for a reason no other call has: THE USER IS INSIDE IT.
+//
+// A command-only code action runs server-side and then sends
+// workspace/applyEdit back — a request ced answers by planning the edit and,
+// when it reaches files the user never opened, asking them to confirm. The
+// server is still blocked in executeCommand while that confirmation sits on
+// screen, so the budget has to cover a human reading a dialog, not a
+// type-check. Commands that shell out (a dependency upgrade, a code
+// generator) spend real time too. The app layer's own wait on the applyEdit
+// answer is deliberately shorter, so a user who walks away releases the
+// server rather than the other way round.
+const executeCommandTimeout = 2 * time.Minute
+
+// CodeActions asks what the server can do to the given range: quick fixes
+// for the diagnostics on it, refactorings, source-level transformations.
+//
+// diags are the client's copy of the server's diagnostics for that range,
+// echoed back verbatim — that is how a quick fix is matched to the problem
+// it fixes. The 5s default budget applies: unlike references and rename,
+// this question is scoped to one file's own package.
+func (c *Client) CodeActions(path string, rng Range, diags []Diagnostic) ([]CodeAction, error) {
+	params := CodeActionParams{
+		TextDocument: TextDocumentIdentifier{URI: PathToURI(path)},
+		Range:        rng,
+		Context:      CodeActionContext{Diagnostics: diags},
+	}
+	// The spec makes context.diagnostics required, and "none" is an empty
+	// array rather than null — a server is entitled to refuse the latter.
+	if params.Context.Diagnostics == nil {
+		params.Context.Diagnostics = []Diagnostic{}
+	}
+	var raw json.RawMessage
+	if err := c.Call("textDocument/codeAction", params, &raw); err != nil {
+		return nil, err
+	}
+	return ParseCodeActions(raw), nil
+}
+
+// ExecuteCommand runs one of the server's own commands — the second half of
+// a code action that carried no edit of its own.
+//
+// The result is discarded deliberately: a command's return value is
+// server-private, and the part that concerns the editor arrives separately
+// as a workspace/applyEdit request DURING this call. What this reports is
+// only whether the command itself failed.
+func (c *Client) ExecuteCommand(cmd string, args []json.RawMessage) error {
+	return c.CallWithTimeout("workspace/executeCommand",
+		ExecuteCommandParams{Command: cmd, Arguments: args}, nil, executeCommandTimeout)
 }
 
 // SignatureHelpAt asks which callable the position sits inside and which

@@ -220,8 +220,8 @@ commit, with tests, per the project's testing convention.
 | 2 | Load/save durability | §2, §3, §4 | **done** — see the note below |
 | 3 | Tab switching + overflow | §5 | **done** — see the leader-key note |
 | 4 | Project search | §6 (find in project) | **done** — see the preview note |
-| 5 | Find verbs | replace, case/whole-word, go to line | pending |
-| 6 | Compare | file↔file, compare with pasted text | pending |
+| 5 | Find verbs | replace, case/whole-word, go to line | **done** |
+| 6 | Compare | file↔file, compare with pasted text | **done** — pure-Go differ, see the note below |
 | 7 | Open folder | recent folders, bare-`ced` restore | pending |
 | 8 | Session restore | open tabs + cursors per root | pending |
 | 9 | LSP verbs | document symbols first, then references/rename/actions | pending |
@@ -230,6 +230,32 @@ commit, with tests, per the project's testing convention.
 | 12 | Undo memory cap | byte-budget the snapshot stack | pending |
 
 Stages 1–4 were the explicitly requested starting order.
+
+### Note from stage 6: the differ is ced's own, and it is patience
+
+`git diff --no-index` was the plan's suggestion and it lost on two counts.
+The sources a comparison actually has are BUFFERS — unsaved text, a
+pasted block — so handing them to git means temp files, and git itself
+isn't guaranteed present (it refuses the job outside a repo anyway, which
+would have made the feature repo-only for no reason). `internal/diff` is
+~350 lines with no dependency.
+
+Patience rather than Myers or a plain LCS, for readability first: anchors
+are lines appearing exactly ONCE on each side, which in code means
+signatures and distinct braces, and that is what stops an added function
+rendering as "every closing brace moved". A full LCS table is used only
+inside small unanchorable regions; the output is byte-compatible with
+git's, so `gitPanelDiffStyle` and `diffTargetLine` were both reused as-is.
+
+### Note from stage 5: the find bar owns the keyboard, which buys Alt
+
+`alt+c` / `alt+w` / `alt+a` are safe chords INSIDE the find bar and would
+not be anywhere else: handleFindKey runs before handleKey's Alt+rune
+leader branch, so tmux's folded "Esc c" lands in the bar rather than
+firing a leader. That's what made in-bar option toggles possible at all,
+since the ≡ menu is unreachable while a keyboard-owning surface is up.
+The toggles still get menu rows (a terminal that eats clicks) and
+clickable `Aa` / `|W|` buttons (this project is mouse-first).
 
 ### Note from stage 4: project mode does not live-preview
 

@@ -56,7 +56,13 @@ main.go                       Entry — parses optional rootDir arg
 internal/app/app.go           Event loop, layout, menu modal, splitter, all rendering
 internal/editor/buffer.go     Position + Buffer ([]string lines), edit primitives
 internal/editor/tab.go        Tab: path, buffer, cursor, anchor, scroll, dirty state
+internal/editor/fileio.go     Open guards, line-ending/BOM round-trip, atomic save
 internal/editor/highlight.go  Chroma → []tcell.Style per line
+internal/editor/syntax.go     Re-lex settle policy + the style-grid patch
+internal/app/syntax.go        The settle timer that wakes the loop for the re-lex
+internal/app/tabbar.go        Tab strip: scroll, overflow button, switching
+internal/search/search.go     Project-wide text search over the finder's index
+internal/app/projectsearch.go Find in project: search → the find-all panel
 internal/editor/decoration.go Span/GutterMark overlay system merged in Tab.Render
 internal/editor/multicaret.go Secondary carets + the bottom-up edit fan-out
 internal/editor/wordhl.go     Word scanner, occurrence matcher, word-highlight source
@@ -177,6 +183,90 @@ the cursor. Every cursor mutator sets `t.cursorMoved = true`; `Render`
 consumes the flag and clears it. **Do not** call `EnsureVisible`
 unconditionally — that re-introduces the "scroll yanks back to cursor
 on every tick" bug.
+
+### Deferred syntax highlighting (editor/syntax.go + app/syntax.go)
+`Highlight` is O(file) — it tokenises the whole buffer and allocates a
+per-rune style grid. Render used to call it whenever `StyleStale` was
+set, which every mutation sets, so one typed rune re-lexed the file:
+70ms and 36MB of garbage per keystroke in `internal/app/app.go`. Chroma
+has no incremental API, so the answer is asking less often. House rules:
+
+- **Intra-line edits DEFER; structural edits re-lex NOW.** Typing,
+  backspace, delete and a same-line selection replace patch the edited
+  row's style slice and wait out `SyntaxSettle`. Enter, a multi-line
+  paste, undo, line ops, comment toggle, reload and a theme switch go
+  through `InvalidateStyles` and re-lex on the next render. That boundary
+  is free — it's the same "structural" cut the undo grouping makes — and
+  it's load-bearing: a grid whose ROWS no longer align with the buffer's
+  would repaint the whole screen below the edit in the wrong colors.
+- **A deferred edit must PATCH the grid** (`stylesAfterInsert` /
+  `stylesAfterDelete`). Without it everything right of the caret smears
+  one column for the length of the settle window. Typed runes inherit
+  their left neighbour's style, so a character typed inside a string
+  stays string-colored until the real lex confirms it.
+- **`InvalidateStyles` is the DEFAULT contract** for any new mutation
+  path; deferral is the opt-in, and only for edits that provably keep
+  the rows aligned. A new mutator that just sets `StyleStale = true`
+  inherits whatever `styleDefer` the last edit left — that's the bug
+  this shape exists to prevent.
+- The settle timer lives in the app (the editor has no loop to wake
+  itself from) and is armed **only while a tab is waiting on it** — the
+  caret-blink constraint.
+- Over `MaxHighlightBytes` (512KB) a tab opens with `SyntaxOff` and says
+  so in the status bar. At ~0.5ms/KB even one pass per pause is a freeze.
+- `SyntaxSettle` is a package var **only** so tests can collapse the
+  window instead of sleeping. It is not a user setting.
+
+### File IO guards and round-trip (editor/fileio.go)
+The two edges of a Tab's life, grouped because they're the same question
+asked twice: can we faithfully round-trip this file, and did we?
+
+- **Guards run BEFORE the read.** `MaxOpenBytes` is checked on the stat;
+  a limit checked afterwards has already paid for the damage. The binary
+  sniff is one NUL in the first 8KB — that catches executables, archives,
+  images and UTF-16 without a content-type table, and UTF-16 is a file
+  ced genuinely cannot round-trip, so refusing is right rather than
+  merely convenient. Both refusals name the reason; the tree opens
+  whatever gets clicked, so the message is the whole UI.
+- **The buffer always holds bare LF.** `LineEnding` and `BOM` are
+  detected on load and re-emitted on write, so nothing above this layer
+  thinks about CRLF. Normalisation is whole-file, not per-line: a file's
+  ending is a property of the FILE, and re-emitting it uniformly is what
+  stops a mixed-ending file getting more mixed on every save. (Classic
+  Mac CR-only is deliberately not detected — guessing wrong joins the
+  whole file into one line.)
+- **Saves are temp-file + rename**, and three details are load-bearing:
+  the temp lives in the TARGET's directory (rename is only atomic within
+  a filesystem), symlinks are resolved first (renaming onto a link
+  replaces the LINK with a regular file), and mode is copied from the
+  existing file (`os.WriteFile`'s perm only applies at creation, so the
+  old in-place write preserved it for free). A read-only directory falls
+  back to an in-place write — degrading beats refusing to save.
+- Not preserved: hard links and root-owned ownership. Standard trade for
+  atomicity; vim does the same.
+- **External formatters still win.** gofmt/goimports always emit LF, so
+  format-on-save normalises a CRLF Go file regardless of any of this.
+
+### Tab strip scrolling and switching (app/tabbar.go)
+- **`tabScroll` is DERIVED, never a preference.** `layoutTabs` re-derives
+  it every frame via `ensureActiveTabVisible`, which pushes forward until
+  the active tab fits and **pulls back** when closing tabs leaves dead
+  space. Omitting the pull-back is invisible in any test that only opens
+  files.
+- **A tab that doesn't fit is not laid out at all.** `lastTabRects` is
+  what hit-testing reads, so a rect past the edge would make a click land
+  on a tab the user can't see. The active tab is the one exception, on a
+  strip too narrow for even one.
+- **`switchToTab` is the single place a switch records nav history.** The
+  click path used to do it inline, so every new surface would have had to
+  remember; the keyboard ones would have quietly not.
+- The `+N` overflow button counts undrawn tabs and opens the switcher —
+  the only mouse path to a hidden tab. One rect for draw and hit-test.
+- **`Esc [` and `Esc ]` CANNOT be bound.** `\x1b[` is the CSI introducer
+  and `\x1b]` is OSC, so the terminal eats the pair before the leader
+  table sees it — the binding tests green and does nothing in a real
+  terminal. Same trap for `P`, `N`, `\`, `^`, `_`, `#`. Tab switching is
+  `Esc ,` / `Esc .` (`<` and `>` live on those keys) and `Esc b`.
 
 ### Scroll clamping with overscroll
 `tab.clampScroll(viewH)` allows the last line to scroll roughly to the
@@ -376,6 +466,44 @@ Search group, or ↓ from the find bar. House rules:
   not lines.
 - Seeding is a ladder: find bar → single-line selection → word under the
   cursor → a prompt. No match flashes rather than opening an empty box.
+
+### Find in project (internal/search + app/projectsearch.go)
+The same panel, a second scope: every occurrence across the tree, rows
+carrying a path. Extending the list beat building one — it already had
+the two-column row, the displacing strip, the right dock, scrolling, the
+Esc contract and the mouse story. House rules:
+
+- **Pure Go, not ripgrep.** Neither rg nor grep is on every machine and
+  the promise is one static binary that works when it lands. Cost is
+  bounded three other ways: the file list is the FINDER'S index (so the
+  project's own gitignore rules already excluded node_modules, vendor and
+  build output), files too big or binary are skipped, and results are
+  capped — **with the cap reported in the title**, because a silently
+  short list reads as "that's all of them", the one wrong answer a search
+  can give.
+- **One matcher.** Matching delegates to `editor.FindAll`, so an in-file
+  search and a project search can never disagree about what a hit is. A
+  second implementation would drift. Row compaction is shared with
+  `compactLine` for the same reason.
+- **Project mode does NOT preview.** Walking rows in the in-file list
+  moves the cursor live; across files that would mean opening a file per
+  keystroke — firing the LSP's didOpen, Copilot's didOpen, every plugin's
+  open hook and a syntax pass, and leaving a tab behind for every row
+  merely scrolled past. The row IS the preview (it carries the whole line
+  with the hit lit); Enter or a double-click opens. Esc therefore
+  restores nothing, and `restoreFind` returns early — project mode never
+  borrowed the tab's find state and writing it would clobber what the
+  active tab legitimately holds. A preview mode, if ever wanted, needs a
+  real preview-TAB concept (one reusable slot), not a special case here.
+- **Labels truncate from the FRONT.** The distinguishing part of a path
+  is its tail; twenty rows reading `internal/app/…` say nothing. The
+  column caps at a share of the panel, not a constant — the two docks
+  differ by a factor of three in width.
+- Results arrive as a generation-stamped event and are dropped if stale
+  or if a modal/menu took the slot meanwhile. Seeding reuses
+  `findAllSeedQuery` exactly: the two features are one question at two
+  scopes, and seeding them differently would be a trap. Leader is
+  `Esc P`, the shifted twin of `Esc p` (names vs. contents).
 
 ### LSP integration (internal/lsp + app/lsp.go)
 The client is a hand-rolled JSON-RPC subset — do NOT add an LSP
@@ -1257,8 +1385,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 83 group actions + 13 headers (98), height 104,
-dividers `[2, 5, 101]`.
+2 top-zone rows + 87 group actions + 13 headers (102), height 108,
+dividers `[2, 5, 105]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.

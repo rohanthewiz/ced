@@ -1177,3 +1177,61 @@ func TestStatePathSitsBesideConfig(t *testing.T) {
 		t.Fatalf("StatePath() fallback = %q, want %q", got, want)
 	}
 }
+
+// TestRemote_LoadAndSave pins the remote key: default on (one instance
+// per project inside tmux is the whole premise, and without the socket
+// $EDITOR nests a second editor inside the first), "off" honoured, an
+// unknown value reported rather than silently ignored, and SaveRemote
+// round-tripping alongside hand-set keys like every other SaveX.
+func TestRemote_LoadAndSave(t *testing.T) {
+	if !Defaults().Remote {
+		t.Fatal("Defaults().Remote = false, want true")
+	}
+	cases := map[string]bool{
+		`{"remote":"on"}`:    true,
+		`{"remote":"off"}`:   false,
+		`{"remote":" OFF "}`: false,
+		`{}`:                 true,
+	}
+	for body, want := range cases {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", body, err)
+		}
+		if cfg.Remote != want {
+			t.Errorf("Load(%s).Remote = %v, want %v", body, cfg.Remote, want)
+		}
+	}
+
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"remote":"sometimes"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("invalid remote value should error")
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"icons\": \"on\",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveRemote(path, false); err != nil {
+		t.Fatalf("SaveRemote: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.Remote || cfg.Icons != IconsOn {
+		t.Fatalf("round trip lost values: remote=%v icons=%q", cfg.Remote, cfg.Icons)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}

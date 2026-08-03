@@ -408,6 +408,12 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Open folder…", action: (*App).menuOpenFolder, enabled: alwaysTrue},
 			{label: "Recent folders…", action: (*App).menuRecentFolders, enabled: (*App).hasRecentFolders},
 			{action: (*App).menuToggleSession, enabled: alwaysTrue, labelFor: (*App).sessionToggleLabel},
+			// Whether another pane's `ced --remote` / `ced --wait` can
+			// hand this instance a file (remote.go). A workspace row, not
+			// a View one: what it scopes is which files this ROOT accepts.
+			// The label doubles as the feature's only status surface —
+			// "unavailable" is how a user learns the socket never bound.
+			{action: (*App).menuToggleRemote, enabled: alwaysTrue, labelFor: (*App).remoteToggleLabel},
 			{shortcut: "esc n", action: (*App).menuNewFile, enabled: alwaysTrue, labelFor: (*App).newFileLabel},
 			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
 			{label: "Delete file", action: (*App).menuDelete, enabled: (*App).hasFileTab},
@@ -968,6 +974,11 @@ type App struct {
 	// recent list is a separate feature reading the same file.
 	sessionEnabled bool
 
+	// remote is the `ced --remote` / `ced --wait` listener: the socket
+	// another ced hands a file to, plus the clients blocked waiting for
+	// a tab to close. See remote.go.
+	remote remoteState
+
 	// nextRoot is the folder the user asked to switch to. Setting it
 	// alongside quit asks the process to tear this App down and build a
 	// fresh one rooted there; main reads it via NextRoot after Run
@@ -1057,6 +1068,11 @@ func New(rootDir string) (*App, error) {
 	a.seedMenuFoldDefault()
 	a.flash("Welcome — click a file to open · click  ≡  for the menu")
 	a.startTreeRefresh()
+	// Bind the remote-open socket before any file is opened, so a
+	// `ced --wait` racing this startup finds a listener rather than
+	// falling back to a second editor. Nothing is spawned and nothing
+	// connects out — see remote.go for the silent-degradation contract.
+	a.startRemote()
 	// Start the Copilot sidecar eagerly (async, no-op when disabled or
 	// not installed) rather than on first file open: its only phase-1
 	// job is auth state, and knowing it at startup makes the ≡ labels
@@ -1127,6 +1143,7 @@ func (a *App) loadUserConfig() {
 	a.chat.writeEnabled = cfg.ChatWrite
 	a.plugins.enabled = cfg.Plugins
 	a.sessionEnabled = cfg.Session
+	a.remote.enabled = cfg.Remote
 	// Themes last: loadThemes and applyThemeName both flash on failure,
 	// and a color problem is the least urgent thing in this function —
 	// letting it land last keeps a more important message visible.
@@ -1208,6 +1225,10 @@ func (a *App) Close() {
 	// both exits (a plain quit and a folder switch), so recording here
 	// means neither path has to remember to. See folder.go.
 	a.recordSession()
+	// Release any `ced --wait` client first: each one is a shell prompt
+	// in another pane that will not come back until we say so, and a
+	// folder switch runs this path too.
+	a.stopRemote()
 	a.stopTreeRefresh()
 	a.stopAutoScroll()
 	a.stopAutoSave()
@@ -1263,6 +1284,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleProjectSearch(e)
 	case *treeRefreshEvent:
 		a.refreshTreeNow()
+	case *remoteOpenEvent:
+		a.handleRemoteOpen(e)
 	case *caretBlinkEvent:
 		a.handleCaretBlink()
 	case *gitDiffEvent:
@@ -2952,6 +2975,11 @@ func (a *App) closeTab(idx int) {
 	delete(a.fileDiffs, a.tabs[idx].Path)
 	a.lspCloseDoc(a.tabs[idx].Path)
 	a.copilotCloseDoc(a.tabs[idx].Path)
+	// Closing the tab is the gesture that means "I'm done with this
+	// file", so it is what releases a `ced --wait` client blocked on it
+	// (remote.go). A save deliberately doesn't: $EDITOR callers expect
+	// the editor to be finished, not merely to have written once.
+	a.releaseRemote(a.tabs[idx].Path)
 	a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
 	if a.activeTab >= len(a.tabs) {
 		a.activeTab = len(a.tabs) - 1

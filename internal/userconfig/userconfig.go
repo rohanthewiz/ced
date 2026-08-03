@@ -50,6 +50,11 @@
 //	                        // (each change still asks permission first)
 //	{"chatwrite": "off"}    // read-only chat: ced declares no write
 //	                        // capability and refuses every edit
+//	{"remote": "on"}        // default; listen on a unix socket so
+//	                        // `ced --remote` / `ced --wait` in another
+//	                        // pane can hand this instance a file
+//	{"remote": "off"}       // never create the socket; a remote open
+//	                        // then falls back to its own editor
 //	{"session": "on"}       // default; opening a folder reopens the tabs
 //	                        // and cursor positions it had last time
 //	{"session": "off"}      // folders are still remembered (for the
@@ -205,6 +210,17 @@ type Config struct {
 	// the terminal to somebody else). Persisted by the ≡ toggle.
 	Plugins bool
 
+	// Remote controls whether the editor listens on a unix socket so a
+	// `ced --remote` / `ced --wait` in another pane can hand it a file
+	// instead of starting a second editor. Defaults to on: the whole
+	// premise of this editor is one instance per project inside tmux,
+	// and without the socket `EDITOR=ced` nests a full-screen TUI inside
+	// the first instance's terminal strip. Off is for a shared or
+	// hardened machine where an extra listening socket — even one in a
+	// 0700 per-user runtime directory — is one more thing to reason
+	// about. Persisted by the ≡ toggle, same as AutoSave.
+	Remote bool
+
 	// Session controls whether opening a folder reopens the tabs and
 	// cursor positions it had when it was last closed. Defaults to on —
 	// an editor you point at a project should give you back the project,
@@ -230,7 +246,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Session: true}
+	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -253,6 +269,7 @@ type fileFormat struct {
 	ChatContext string `json:"chatcontext,omitempty"`
 	ChatWrite   string `json:"chatwrite,omitempty"`
 	Plugins     string `json:"plugins,omitempty"`
+	Remote      string `json:"remote,omitempty"`
 	Session     string `json:"session,omitempty"`
 	Theme       string `json:"theme,omitempty"`
 }
@@ -548,6 +565,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(ff.Remote)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.Remote = true
+	case "off":
+		cfg.Remote = false
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: remote must be \"on\" or \"off\" (got %q)",
+			path, ff.Remote,
+		)
+	}
+
 	switch strings.ToLower(strings.TrimSpace(ff.Session)) {
 	case "":
 		// field omitted — keep default
@@ -674,6 +705,16 @@ func SavePlugins(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "plugins", val)
+}
+
+// SaveRemote persists the remote-open listener preference into the
+// config file at path. See saveKey for the round-trip guarantees.
+func SaveRemote(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "remote", val)
 }
 
 // SaveSession persists the restore-tabs-on-open preference into the

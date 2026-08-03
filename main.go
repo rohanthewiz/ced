@@ -14,11 +14,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/rohanthewiz/ced/internal/app"
+	"github.com/rohanthewiz/ced/internal/remote"
 	"github.com/rohanthewiz/ced/internal/session"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 	"github.com/rohanthewiz/ced/internal/version"
@@ -44,6 +46,8 @@ type cliResult struct {
 	RootDir  string
 	OpenFile string // empty when no file was named (or for non-edit actions)
 	Last     bool   // --last: root at the most recently opened folder
+	Remote   bool   // --remote: hand the file to a running instance if there is one
+	Wait     bool   // --wait: don't return until the editor is done with the file
 	Err      error
 }
 
@@ -51,10 +55,22 @@ type cliResult struct {
 //
 //   - a flag (--version / -v / --help / -h) → print-and-exit action
 //   - --last / -l → reopen the most recently edited folder
+//   - --remote / --wait, then a file → hand the file to a running
+//     instance instead of starting a second editor (see below)
 //   - a directory path → use as the editor's root
 //   - a file path → root at the file's parent dir, open the file in a tab
 //   - a missing path → assume "ced foo.go" means "create foo.go" —
 //     same intuition as `vim foo.go` on a non-existent file.
+//
+// --remote and --wait are the $EDITOR flags, and they COMPOSE rather
+// than being two modes: --remote asks a running instance to open the
+// file, --wait says don't return until the editor is finished with it.
+// `EDITOR="ced --wait"` is the pairing that matters — a bare --wait
+// still hands off when an instance is there, and blocks the way any
+// terminal editor does when it isn't, so git commit behaves identically
+// either way. Both fall back to a normal local editor rather than
+// failing when nothing is listening: a $EDITOR that errors out is worse
+// than one that opens the wrong window.
 //
 // Bare `ced` opens the CURRENT directory, and deliberately does not
 // reopen the last folder: `cd myproj && ced` is the gesture this editor
@@ -77,6 +93,45 @@ func resolveArgs(args []string) cliResult {
 		return cliResult{Action: actionHelp}
 	case "--last", "-l", "last":
 		return cliResult{Action: actionEdit, RootDir: ".", Last: true}
+	}
+
+	// The handoff flags are the only ones that stack, so they're peeled
+	// off in a loop rather than folded into the switch above. Order
+	// doesn't matter and repeats are harmless — `git config core.editor`
+	// values get copied around and edited by hand, and rejecting
+	// "--wait --wait" would be pedantry with a broken commit behind it.
+	var remoteFlag, waitFlag bool
+flags:
+	for len(args) > 0 {
+		switch args[0] {
+		case "--remote", "-r":
+			remoteFlag = true
+		case "--wait", "-w":
+			waitFlag = true
+		case "--remote-wait":
+			// nvim's spelling of the pair; accepting it costs one case
+			// and saves anyone porting an $EDITOR line.
+			remoteFlag, waitFlag = true, true
+		default:
+			break flags
+		}
+		args = args[1:]
+	}
+	if remoteFlag || waitFlag {
+		if len(args) == 0 {
+			return cliResult{Err: errors.New("--remote / --wait need a file to open")}
+		}
+		res := resolveArgs(args)
+		if res.Err != nil || res.Action != actionEdit {
+			return res
+		}
+		if res.OpenFile == "" {
+			// A directory can be opened, but there is nothing to wait on
+			// and nothing a running instance could usefully be handed.
+			return cliResult{Err: errors.New("--remote / --wait need a file, not a directory")}
+		}
+		res.Remote, res.Wait = remoteFlag, waitFlag
+		return res
 	}
 
 	target := args[0]
@@ -118,6 +173,12 @@ Usage:
   ced <directory>         Open a project directory.
   ced <file>              Open a file (its parent becomes the project root).
   ced --last              Reopen the most recently edited folder.
+  ced --remote <file>     Open the file in a ced already running on that
+                          project, then exit. Starts a normal editor when
+                          nothing is running.
+  ced --wait <file>       The same handoff, but block until the editor is
+                          done with the file. Use it as $EDITOR:
+                            git config --global core.editor "ced --wait"
   ced --version           Print the version and exit.
   ced --help              Print this help and exit.
 
@@ -147,6 +208,23 @@ func main() {
 	case actionHelp:
 		printHelp()
 		return
+	}
+
+	// The handoff is tried BEFORE any screen is initialised: if a running
+	// instance takes the file, this process never becomes an editor at
+	// all, it just waits (or exits). remote.ErrNoInstance is the ordinary
+	// case, not a failure — nothing is listening for this project, so we
+	// fall through and start a normal editor below.
+	if res.Remote || res.Wait {
+		switch err := remote.Open(res.OpenFile, res.Wait); {
+		case err == nil:
+			return
+		case errors.Is(err, remote.ErrNoInstance):
+			// fall through to a local editor
+		default:
+			fmt.Fprintln(os.Stderr, "ced:", err)
+			os.Exit(1)
+		}
 	}
 
 	root := res.RootDir

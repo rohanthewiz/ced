@@ -56,6 +56,7 @@ main.go                       Entry — parses optional rootDir arg
 internal/app/app.go           Event loop, layout, menu modal, splitter, all rendering
 internal/editor/buffer.go     Position + Buffer ([]string lines), edit primitives
 internal/editor/tab.go        Tab: path, buffer, cursor, anchor, scroll, dirty state
+internal/editor/undo.go       Snapshot stack: coalescing, the byte budget, revert
 internal/editor/fileio.go     Open guards, line-ending/BOM round-trip, atomic save
 internal/editor/highlight.go  Chroma → []tcell.Style per line
 internal/editor/syntax.go     Re-lex settle policy + the style-grid patch
@@ -104,6 +105,8 @@ internal/app/format.go        Format-on-save bridge: project config, builtin Go,
 internal/app/nav.go           Back/forward file-navigation history (Esc-o/O, Alt+←/→)
 internal/session/session.go   state.json: recent folders + per-folder tab sessions
 internal/app/folder.go        Open folder (restart), recent list, session record/restore
+internal/remote/remote.go     `ced --remote` / `--wait`: socket, root-based discovery
+internal/app/remote.go        The listener, the wait registry, the root guard, the ≡ row
 internal/app/gitcommitmsg.go  Commit the panel's selection + agent-drafted messages
 internal/app/gitlog.go        Git log panel: commit list + `git show` detail (Esc-L)
 internal/app/gitlogactions.go Git log verbs: cherry-pick, revert, reset, branch/tag, copies
@@ -226,6 +229,37 @@ has no incremental API, so the answer is asking less often. House rules:
   so in the status bar. At ~0.5ms/KB even one pass per pause is a freeze.
 - `SyntaxSettle` is a package var **only** so tests can collapse the
   window instead of sleeping. It is not a user setting.
+
+### Undo history and its byte budget (editor/undo.go)
+Full-buffer snapshots with typing/backspace/delete coalescing, capped by
+BYTES rather than by entry count. House rules:
+
+- **The entry cap is the backstop; the byte budget is the real limit.**
+  A snapshot of a 25k-line file costs 400KB in slice headers alone, so
+  500 of them is ~200MB per tab and a user with eight big files open pays
+  it eight times. `maxUndoBytes` (32MB, shared by BOTH stacks because
+  entries move between them) is what makes the depth scale to the file.
+- **`snapshotCost` charges headers plus only the lines that CHANGED.**
+  Copying a `[]string` copies headers, not characters: every untouched
+  line is the same string the live buffer and the neighbouring snapshots
+  already hold, so charging each entry for the whole file would over-count
+  by the depth of the stack and amputate a 1MB file's history for no
+  reason. The header term alone would miss the opposite case — editing
+  very long lines (minified JS, a data blob), where each step strands a
+  multi-megabyte string nothing else references. Both terms are needed.
+- **Every entry is measured against the one it will sit ON**
+  (`undoTop`, or the popped entry in Undo), because those two are exactly
+  one edit apart, which is the comparison the estimate is built for. The
+  cost is stamped once and stored, so eviction is O(1) — re-measuring the
+  bottom of the stack on every push would make it quadratic in line count.
+- **Trimming never empties the stack.** "Undo the thing I just did" has
+  to work even for a single step big enough to blow the whole budget (a
+  multi-megabyte paste), and a history of zero is indistinguishable from
+  undo being broken.
+- `pushUndoEntry` is the single write path for the undo stack, and the
+  running sums are maintained on every path (push, Undo, Redo, redo
+  invalidation, `initUndo`). A sum that drifts up silently shrinks the
+  history until the budget falsely binds.
 
 ### File IO guards and round-trip (editor/fileio.go)
 The two edges of a Tab's life, grouped because they're the same question
@@ -1267,6 +1301,68 @@ the shared part. House rules:
   confined to rootDir). Best-effort: history may have moved on, so a
   line past EOF clamps.
 
+### Remote open (internal/remote + app/remote.go)
+`ced --remote <file>` hands a file to an instance already running on that
+project; `ced --wait <file>` does the same and blocks until the editor is
+finished with it, which is what makes `EDITOR="ced --wait"` work for
+`git commit`. Without it, `$EDITOR=ced` in another tmux pane starts a
+SECOND full-screen editor nested inside the first one's terminal strip.
+House rules:
+
+- **DISCOVERY IS BY PROJECT ROOT, not "the" instance.** Everything here
+  is rooted — the tree, the finder index, gopls's rootUri, the terminal's
+  cwd — so a file delivered to an instance rooted elsewhere lands in a
+  workspace where none of that applies. A client probes every socket,
+  picks the instance whose root CONTAINS the file (longest root wins),
+  and reports `ErrNoInstance` when none does. `contains` requires a
+  separator at the boundary, or `/a/proj` claims `/a/project-notes`.
+- **ErrNoInstance is a FALLBACK, not a failure.** Both flags start a
+  normal local editor when nothing is listening — a `$EDITOR` that errors
+  out is worse than one that opens the wrong window, and a bare `--wait`
+  then blocks the way any terminal editor does, so git behaves the same
+  either way. A handler REFUSAL is the opposite and must never be
+  confused with it: that returns a real error, because falling back there
+  would silently start a second editor on a file the first one declined.
+- **Sockets are named per PROCESS** (`<root-hash>-<pid>.sock`), not per
+  root. A deterministic per-root name forces every second instance on one
+  project to decide whether to take the socket over, and the honest
+  answer is that it can't — the first one is still running and still
+  wants it. Per-process names let both listen; a client unlinks the ones
+  nobody answers, so a crashed instance needs no reaper. They live under
+  `$XDG_RUNTIME_DIR/ced` (else a per-uid folder in the system temp dir),
+  0700 — **never `~/.config/ced`**: a socket is runtime state that must
+  not survive a reboot. Keep the names short: the kernel caps a unix
+  socket path at ~104 bytes, which is also why the tests can't use
+  `t.TempDir()` on macOS.
+- **Events only, and every waiter is released exactly once.**
+  `serveRemoteOpen` runs on the connection's goroutine, posts an event
+  carrying a buffered reply channel and blocks for the main loop — the
+  ACP permission-request shape, for the same reason (the handler has to
+  block on a decision the loop makes). `releaseRemote` is the single
+  write path and deletes as it closes, so a double release can't panic.
+  Exactly three things release: the tab closing, `Close` (a quit AND a
+  folder switch), and the ≡ toggle going off. A `--wait` client left
+  hanging is a shell prompt in another pane that never comes back.
+- **Closing the tab is the gesture, not saving.** `$EDITOR` callers
+  expect the editor to be FINISHED, not merely to have written once.
+- **The root guard is re-checked on arrival.** A client already refuses a
+  mismatched instance, so `handleRemoteOpen`'s check only fires for a
+  request that didn't come from ced's CLI — and the answer is the chat
+  filesystem's: an error the caller can read, never a file opened outside
+  the workspace.
+- Silent degradation, with one twist: a socket that won't bind costs the
+  handoff, not the editor, and the reason is HELD on the state for the ≡
+  label rather than flashed (a startup flash scrolls past). The label
+  therefore has three states — `on` / `off` / `unavailable` — because a
+  choice and a problem are different answers to "will `ced --remote` find
+  me?", and collapsing them leaves a user toggling a preference that was
+  already on. `"remote"` is the persisted key (default on), the row lives
+  with the workspace rows at the top of ≡ **File**, and there is no
+  leader key (a once-a-day action, and the flat table is out of letters).
+- `remoteListenFn` is a package var; newTestApp leaves `remote.enabled`
+  false and the transport tests stub `socketDirFn`, so no test can bind a
+  socket a real client would then find.
+
 ### Navigation history (app/nav.go)
 Browser-style Go back / Go forward across files (≡ menu, Esc-o / Esc-O,
 Alt+Left / Alt+Right). Recording happens CENTRALLY: openFile records the
@@ -1669,8 +1765,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 100 group actions + 14 headers (116), height 122,
-dividers `[2, 5, 119]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 101 group actions + 14 headers (117), height 123,
+dividers `[2, 5, 120]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

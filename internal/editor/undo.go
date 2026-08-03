@@ -15,6 +15,15 @@
 // terminal editor opens. The stack is FIFO-capped so a runaway typing
 // session can't grow it forever.
 //
+// THE CAP IS BYTES, NOT ENTRIES — the entry count is only the backstop.
+// A snapshot of a 25k-line file costs 400KB in slice headers alone
+// before a single character of content, so 500 of them is ~200MB per
+// tab, and a user with eight big files open pays it eight times. Every
+// entry therefore carries an estimate of what it actually keeps alive
+// and pushUndo evicts from the bottom until the tab is back inside
+// maxUndoBytes. See snapshotCost for what that estimate counts and, more
+// importantly, what it deliberately doesn't.
+//
 // Coalescing — every typed rune doesn't get its own entry. Consecutive
 // inserts of the same kind (typing, backspace, delete) inside a 500ms
 // window collapse into a single undo step, so undoing a 50-character
@@ -30,7 +39,31 @@ import "time"
 // that typical editing sessions never hit the wall; once we do, the
 // oldest entry is dropped (FIFO) so the user can still undo a long
 // way back without unbounded memory growth.
+//
+// On a small file this is the only limit that ever binds — 500 snapshots
+// of a 400-line source file is under 4MB. maxUndoBytes is what takes
+// over once the file is big enough for the count to be the wrong unit.
 const maxUndoEntries = 500
+
+// maxUndoBytes is the per-tab budget for the undo and redo stacks
+// combined. 32MB is deliberately generous against real editing costs
+// (a typing step on a 25k-line file estimates at ~400KB, so ~80 steps
+// survive there; a 400-line file never comes close and keeps all 500),
+// while still bounding a session that edits several large files to
+// something a laptop doesn't notice.
+//
+// The two stacks share one budget because entries MOVE between them:
+// Undo pops one side and pushes the other, so budgeting them separately
+// would let the total drift to twice the number either one allows.
+const maxUndoBytes = 32 << 20
+
+// lineHeaderBytes is the size of a string header (data pointer + length)
+// on a 64-bit build — the per-line cost of a snapshot's []string that is
+// paid whether or not any content is shared. Hardcoded rather than taken
+// from unsafe.Sizeof so this file needs no unsafe import; on a 32-bit
+// build it over-counts by 2x, which errs toward a smaller history rather
+// than a larger one.
+const lineHeaderBytes = 16
 
 // undoCoalesceWindow is the inactivity gap that closes a coalescing
 // group. 500ms feels right — pause-and-think between words almost
@@ -60,6 +93,47 @@ type snapshot struct {
 	Lines  []string
 	Cursor Position
 	Anchor Position
+
+	// cost is snapshotCost's estimate of the memory this entry keeps
+	// alive, stamped once when the entry is pushed. Stored rather than
+	// recomputed so eviction is O(1) — the byte budget is checked on
+	// every push, and re-measuring the bottom of the stack each time
+	// would make a capped stack quadratic in the file's line count.
+	cost int
+}
+
+// snapshotCost estimates how much memory keeping s on a history stack
+// actually costs, given that prev is the entry it will sit on top of.
+//
+// Two terms, and the second one is where the thinking is:
+//
+//   - The []string header array (len * lineHeaderBytes). This is
+//     unshared by construction — captureSnapshot allocates a fresh slice
+//     every time — so it is real, per-entry, and on a large file it
+//     dominates everything else. It is the 200MB the entry cap missed.
+//   - The bytes of the lines that DIFFER from prev. Copying a []string
+//     copies headers, not characters: every line the edit didn't touch
+//     is the same string the live buffer and the neighbouring snapshots
+//     already hold, so charging this entry for it would over-count by
+//     the depth of the stack. Counting only what changed is what keeps
+//     a 1MB file's 500-step history honest at a few MB instead of
+//     reporting 500MB and amputating the history for no reason — while
+//     still catching the case the header term alone would miss: editing
+//     a file of very long lines (minified JS, a data blob), where each
+//     step strands a multi-megabyte string nothing else references.
+//
+// The comparison walks both slices, but a shared line compares equal on
+// its data pointer, so the common case is a pointer check per line —
+// cheap next to the header copy captureSnapshot already paid for.
+func snapshotCost(s, prev snapshot) int {
+	cost := len(s.Lines) * lineHeaderBytes
+	for i, ln := range s.Lines {
+		if i < len(prev.Lines) && prev.Lines[i] == ln {
+			continue
+		}
+		cost += len(ln)
+	}
+	return cost
 }
 
 // captureSnapshot returns a deep copy of the current buffer state so a
@@ -102,7 +176,51 @@ func (t *Tab) initUndo() {
 	t.undoOriginal = t.captureSnapshot()
 	t.undoStack = nil
 	t.redoStack = nil
+	t.undoBytes = 0
+	t.redoBytes = 0
 	t.lastUndoGroup = undoGroupNone
+}
+
+// undoTop returns the entry a newly-pushed undo snapshot will sit on
+// top of — the current top of the stack, or the on-open original when
+// the stack is empty. It is the baseline snapshotCost measures against,
+// and the two are always exactly one edit step apart, which is what
+// makes "count only the lines that changed" the right estimate.
+func (t *Tab) undoTop() snapshot {
+	if n := len(t.undoStack); n > 0 {
+		return t.undoStack[n-1]
+	}
+	return t.undoOriginal
+}
+
+// pushUndoEntry appends s to the undo stack, charges its cost to the
+// tab's budget, and evicts from the bottom until the tab is back inside
+// its limits. The single write path for the undo stack — pushUndo,
+// Redo, and RevertFile all go through it so none of them can forget the
+// bookkeeping.
+func (t *Tab) pushUndoEntry(s snapshot, prev snapshot) {
+	s.cost = snapshotCost(s, prev)
+	t.undoStack = append(t.undoStack, s)
+	t.undoBytes += s.cost
+	t.trimUndo()
+}
+
+// trimUndo drops the oldest undo entries until the stack fits both
+// caps. The last entry is never evicted: "undo the thing I just did"
+// has to keep working even for a single step big enough to blow the
+// whole budget on its own (a multi-megabyte paste), and a history of
+// zero is indistinguishable from undo being broken.
+func (t *Tab) trimUndo() {
+	for len(t.undoStack) > 1 &&
+		(len(t.undoStack) > maxUndoEntries || t.undoBytes+t.redoBytes > maxUndoBytes) {
+		t.undoBytes -= t.undoStack[0].cost
+		// Keep the original snapshot intact — it lives in undoOriginal,
+		// not the stack, so RevertFile is unaffected by any of this.
+		t.undoStack = t.undoStack[1:]
+	}
+	if t.undoBytes < 0 {
+		t.undoBytes = 0
+	}
 }
 
 // pushUndo records the *current* state on the undo stack so the caller
@@ -122,14 +240,9 @@ func (t *Tab) pushUndo(group undoGroup) {
 		t.lastUndoAt = time.Now() // extend the window
 		return
 	}
-	snap := t.captureSnapshot()
-	t.undoStack = append(t.undoStack, snap)
-	if len(t.undoStack) > maxUndoEntries {
-		// Drop the oldest entry. Keep the original snapshot intact —
-		// it lives in undoOriginal, not the stack.
-		t.undoStack = t.undoStack[1:]
-	}
+	t.pushUndoEntry(t.captureSnapshot(), t.undoTop())
 	t.redoStack = nil
+	t.redoBytes = 0
 	t.lastUndoGroup = group
 	t.lastUndoAt = time.Now()
 }
@@ -191,12 +304,19 @@ func (t *Tab) Undo() bool {
 	if len(t.undoStack) == 0 {
 		return false
 	}
-	current := t.captureSnapshot()
-	t.redoStack = append(t.redoStack, current)
-
 	last := len(t.undoStack) - 1
 	prev := t.undoStack[last]
 	t.undoStack = t.undoStack[:last]
+	t.undoBytes -= prev.cost
+
+	// Measure the redo entry against the state we're about to restore:
+	// the two are one edit apart, which is the comparison snapshotCost
+	// is built for. Popping first is what makes prev available to it.
+	current := t.captureSnapshot()
+	current.cost = snapshotCost(current, prev)
+	t.redoStack = append(t.redoStack, current)
+	t.redoBytes += current.cost
+	t.trimUndo()
 
 	t.applySnapshot(prev)
 	t.Dirty = t.CanRevert()
@@ -210,12 +330,15 @@ func (t *Tab) Redo() bool {
 	if len(t.redoStack) == 0 {
 		return false
 	}
-	current := t.captureSnapshot()
-	t.undoStack = append(t.undoStack, current)
+	t.pushUndoEntry(t.captureSnapshot(), t.undoTop())
 
 	last := len(t.redoStack) - 1
 	next := t.redoStack[last]
 	t.redoStack = t.redoStack[:last]
+	t.redoBytes -= next.cost
+	if t.redoBytes < 0 {
+		t.redoBytes = 0
+	}
 
 	t.applySnapshot(next)
 	t.Dirty = t.CanRevert()
@@ -232,12 +355,9 @@ func (t *Tab) RevertFile() bool {
 	if !t.CanRevert() {
 		return false
 	}
-	current := t.captureSnapshot()
-	t.undoStack = append(t.undoStack, current)
-	if len(t.undoStack) > maxUndoEntries {
-		t.undoStack = t.undoStack[1:]
-	}
+	t.pushUndoEntry(t.captureSnapshot(), t.undoTop())
 	t.redoStack = nil
+	t.redoBytes = 0
 	t.applySnapshot(t.undoOriginal)
 	t.Dirty = t.CanRevert() // false now — buffer matches original
 	t.breakUndoGroup()

@@ -201,3 +201,78 @@ func TestLastFolder_ReadsTheStateFile(t *testing.T) {
 		t.Fatalf("lastFolder() on a broken state file = %q, want empty", got)
 	}
 }
+
+// TestResolveArgs_RemoteAndWaitFlags pins the $EDITOR surface: both
+// flags parse, they compose in either order, and the file behind them is
+// resolved exactly as a bare `ced <file>` would be — the handoff must
+// not become a second way to interpret a path.
+func TestResolveArgs_RemoteAndWaitFlags(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "COMMIT_EDITMSG")
+	if err := os.WriteFile(file, []byte("msg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name       string
+		args       []string
+		wantRemote bool
+		wantWait   bool
+	}{
+		{"remote only", []string{"--remote", file}, true, false},
+		{"wait only", []string{"--wait", file}, false, true},
+		{"both", []string{"--remote", "--wait", file}, true, true},
+		{"both reversed", []string{"--wait", "--remote", file}, true, true},
+		{"nvim spelling", []string{"--remote-wait", file}, true, true},
+		{"short forms", []string{"-r", "-w", file}, true, true},
+		{"repeated", []string{"--wait", "--wait", file}, false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res := resolveArgs(c.args)
+			if res.Err != nil {
+				t.Fatalf("Err = %v", res.Err)
+			}
+			if res.Action != actionEdit {
+				t.Fatalf("Action = %q, want edit", res.Action)
+			}
+			if res.Remote != c.wantRemote || res.Wait != c.wantWait {
+				t.Fatalf("Remote/Wait = %v/%v, want %v/%v",
+					res.Remote, res.Wait, c.wantRemote, c.wantWait)
+			}
+			if res.OpenFile != file {
+				t.Fatalf("OpenFile = %q, want %q", res.OpenFile, file)
+			}
+			if res.RootDir != dir {
+				t.Fatalf("RootDir = %q, want %q", res.RootDir, dir)
+			}
+		})
+	}
+}
+
+// TestResolveArgs_RemoteWaitNeedAFile pins the two refusals. Neither has
+// anything to hand over or wait on, and a $EDITOR that silently opened
+// the wrong thing would be worse than one that says so.
+func TestResolveArgs_RemoteWaitNeedAFile(t *testing.T) {
+	if res := resolveArgs([]string{"--wait"}); res.Err == nil {
+		t.Error("--wait with no argument should be an error")
+	}
+	if res := resolveArgs([]string{"--remote", t.TempDir()}); res.Err == nil {
+		t.Error("--remote on a directory should be an error")
+	}
+}
+
+// TestResolveArgs_MissingFileWithWait covers `ced --wait notes.md` on a
+// path that doesn't exist yet: the new-file intent survives the flags,
+// because $EDITOR callers routinely name a file they are about to
+// create.
+func TestResolveArgs_MissingFileWithWait(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "fresh.md")
+	res := resolveArgs([]string{"--wait", target})
+	if res.Err != nil {
+		t.Fatalf("Err = %v", res.Err)
+	}
+	if !res.Wait || res.OpenFile != target {
+		t.Fatalf("res = %+v, want Wait with OpenFile %q", res, target)
+	}
+}

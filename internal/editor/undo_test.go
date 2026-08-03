@@ -513,3 +513,133 @@ func TestBufferContentsAfterMixedHistory(t *testing.T) {
 		t.Fatal("trailing junk crept into restored buffer")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// The byte budget (maxUndoBytes)
+// -----------------------------------------------------------------------------
+
+// TestSnapshotCost_ChargesHeadersNotSharedContent pins the central claim
+// of the cost model: two snapshots that share every line differ only by
+// the header array, so a long history over an unedited region must not
+// be charged for the same characters over and over.
+func TestSnapshotCost_ChargesHeadersNotSharedContent(t *testing.T) {
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = strings.Repeat("x", 1000)
+	}
+	a := snapshot{Lines: lines}
+	b := snapshot{Lines: append([]string(nil), lines...)}
+
+	if got, want := snapshotCost(b, a), 100*lineHeaderBytes; got != want {
+		t.Fatalf("cost of an identical snapshot = %d, want %d (headers only)", got, want)
+	}
+	// A changed line IS charged — that's the case the header term misses.
+	b.Lines[3] = strings.Repeat("y", 1000)
+	if got, want := snapshotCost(b, a), 100*lineHeaderBytes+1000; got != want {
+		t.Fatalf("cost after one changed line = %d, want %d", got, want)
+	}
+}
+
+// TestSnapshotCost_ChargesTheFirstSnapshotAgainstAnEmptyBaseline proves a
+// snapshot with no predecessor pays for its content: nothing else is
+// holding those strings, so the estimate has to notice them.
+func TestSnapshotCost_ChargesTheFirstSnapshotAgainstAnEmptyBaseline(t *testing.T) {
+	s := snapshot{Lines: []string{"abcde", "fg"}}
+	if got, want := snapshotCost(s, snapshot{}), 2*lineHeaderBytes+7; got != want {
+		t.Fatalf("cost against an empty baseline = %d, want %d", got, want)
+	}
+}
+
+// TestUndoStack_CapsAtMaxBytes edits a file whose lines are large enough
+// that the byte budget binds long before the 500-entry cap does. Without
+// the budget this stack would grow to 500 entries holding ~500MB; with
+// it, the history is trimmed to whatever fits.
+func TestUndoStack_CapsAtMaxBytes(t *testing.T) {
+	// One 4MB line: every structural edit strands the previous copy, so
+	// each entry costs ~4MB and only a handful fit in the 32MB budget.
+	tab := newScratchTab(strings.Repeat("z", 4<<20))
+	for i := 0; i < 40; i++ {
+		tab.Cursor = Position{Line: 0, Col: 0}
+		tab.Anchor = tab.Cursor
+		tab.InsertString("a") // structural — never coalesces
+	}
+	if len(tab.undoStack) >= maxUndoEntries {
+		t.Fatalf("undo stack reached the entry cap (%d) — the byte budget never bound",
+			len(tab.undoStack))
+	}
+	if tab.undoBytes+tab.redoBytes > maxUndoBytes {
+		t.Fatalf("undo budget exceeded: %d bytes > %d", tab.undoBytes+tab.redoBytes, maxUndoBytes)
+	}
+	if len(tab.undoStack) == 0 {
+		t.Fatal("trimming must never empty the stack — the last step has to stay undoable")
+	}
+}
+
+// TestTrimUndo_KeepsTheLastStep pins the floor: a single edit big enough
+// to blow the entire budget on its own still leaves one undoable step.
+// A history of zero is indistinguishable from undo being broken.
+func TestTrimUndo_KeepsTheLastStep(t *testing.T) {
+	tab := newScratchTab("seed")
+	tab.undoStack = []snapshot{{Lines: []string{"a"}, cost: maxUndoBytes * 4}}
+	tab.undoBytes = maxUndoBytes * 4
+	tab.trimUndo()
+	if len(tab.undoStack) != 1 {
+		t.Fatalf("stack length after trim = %d, want the single entry kept", len(tab.undoStack))
+	}
+}
+
+// TestUndoBytes_ReturnToZeroWhenTheHistoryUnwinds proves the running
+// sums are maintained on every path, not just on push: undoing back to
+// the start and redoing forward again must leave the accounting where it
+// began rather than drifting up until the budget falsely binds.
+func TestUndoBytes_ReturnToZeroWhenTheHistoryUnwinds(t *testing.T) {
+	tab := newScratchTab("one\ntwo")
+	for i := 0; i < 5; i++ {
+		tab.InsertString("x")
+	}
+	if tab.undoBytes == 0 {
+		t.Fatal("undoBytes should have accumulated after five structural edits")
+	}
+	for tab.Undo() {
+	}
+	if tab.undoBytes != 0 {
+		t.Fatalf("undoBytes = %d after fully unwinding, want 0", tab.undoBytes)
+	}
+	for tab.Redo() {
+	}
+	if tab.redoBytes != 0 {
+		t.Fatalf("redoBytes = %d after fully replaying, want 0", tab.redoBytes)
+	}
+	if tab.undoBytes <= 0 {
+		t.Fatalf("undoBytes = %d after replaying, want the history charged again", tab.undoBytes)
+	}
+}
+
+// TestUndoBytes_ClearedByRedoInvalidation confirms a fresh edit that
+// throws the redo stack away also releases its bytes — otherwise the
+// budget would leak on every "undo a few steps, then type".
+func TestUndoBytes_ClearedByRedoInvalidation(t *testing.T) {
+	tab := newScratchTab("one\ntwo")
+	tab.InsertString("x")
+	tab.InsertString("y")
+	tab.Undo()
+	if tab.redoBytes == 0 {
+		t.Fatal("redoBytes should be non-zero with an entry on the redo stack")
+	}
+	tab.InsertString("z") // invalidates redo
+	if tab.redoBytes != 0 {
+		t.Fatalf("redoBytes = %d after a new edit, want 0", tab.redoBytes)
+	}
+}
+
+// TestInitUndo_ResetsTheBudget pins that a reload zeroes the accounting
+// along with the stacks — a stale non-zero sum would silently shrink the
+// history of every file opened into a reused Tab.
+func TestInitUndo_ResetsTheBudget(t *testing.T) {
+	tab := newScratchTab("one")
+	tab.InsertString("x")
+	tab.initUndo()
+	if tab.undoBytes != 0 || tab.redoBytes != 0 {
+		t.Fatalf("budget after initUndo = %d/%d, want 0/0", tab.undoBytes, tab.redoBytes)
+	}
+}

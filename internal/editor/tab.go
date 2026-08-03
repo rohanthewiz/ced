@@ -86,6 +86,14 @@ type Tab struct {
 	lastUndoGroup undoGroup
 	lastUndoAt    time.Time
 
+	// undoBytes / redoBytes are the running sums of the two stacks'
+	// per-entry cost estimates. They share one budget (maxUndoBytes)
+	// because entries move between the stacks, and they're maintained
+	// incrementally so a push never has to re-measure the history it's
+	// appending to. See snapshotCost / trimUndo in undo.go.
+	undoBytes int
+	redoBytes int
+
 	// Mode is "" for a normal text tab and imageMode (= "image") for a
 	// read-only image preview. Image tabs reuse the Tab type so the
 	// app's tab list, switcher, and modal-routing all just work — the

@@ -226,10 +226,24 @@ commit, with tests, per the project's testing convention.
 | 8 | Session restore | open tabs + cursors per root | **done** — same change |
 | 9 | LSP verbs | document symbols first, then references/rename/actions | **done (symbols)** — see the note below |
 | 10 | Terminal diagnostics | scrollback → `diag.go` → clickable jumps | **done** — same change |
-| 11 | `--wait` / `--remote` | `$EDITOR` integration, single-instance open | pending |
-| 12 | Undo memory cap | byte-budget the snapshot stack | pending |
+| 11 | `--wait` / `--remote` | `$EDITOR` integration, single-instance open | **done** — see the note below |
+| 12 | Undo memory cap | byte-budget the snapshot stack | **done** — same change |
 
 Stages 1–4 were the explicitly requested starting order.
+
+### Note from stages 11+12: what the cap actually measures
+
+Discovery for `--remote` / `--wait` is by PROJECT ROOT, and sockets are
+named per process rather than per root — see the CLAUDE.md section for
+why both of those are load-bearing. `ErrNoInstance` is a fallback to a
+local editor, never a failure; a handler REFUSAL is the opposite.
+
+The undo cap charges each snapshot for its `[]string` header array plus
+only the lines that CHANGED since the entry below it. Charging whole-file
+content would over-count by the depth of the stack (lines are shared with
+the live buffer), and charging headers alone would miss a file of very
+long lines, where one edit strands a multi-megabyte string. Both terms
+are needed, and trimming always leaves one step undoable.
 
 ### Note from stages 9+10: the two halves of "take me to the problem"
 

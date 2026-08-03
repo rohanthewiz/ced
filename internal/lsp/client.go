@@ -446,6 +446,7 @@ func (c *Client) Initialize(rootDir string) error {
 				"synchronization":    map[string]any{"didSave": true},
 				"publishDiagnostics": map[string]any{},
 				"definition":         map[string]any{},
+				"references":         map[string]any{},
 				// Hierarchical symbols are the shape worth asking for:
 				// gopls nests a type's methods under it, which is what
 				// makes the "go to symbol" picker read like an outline
@@ -528,6 +529,40 @@ func (c *Client) Definition(path string, pos Position) ([]Location, error) {
 		return []Location{one}, nil
 	}
 	return nil, nil
+}
+
+// referencesTimeout is the response deadline for textDocument/references.
+// Longer than the 5s general budget because this is the one verb whose
+// cost scales with the PROJECT rather than the file: gopls has to type-
+// check every package that could import the symbol, and on a cold server
+// in a large module that legitimately runs past five seconds. Definition
+// and hover answer from the file's own package and keep the default.
+const referencesTimeout = 30 * time.Second
+
+// References asks for every use of the symbol at pos. includeDecl adds
+// the declaration itself to the list.
+//
+// Unlike Definition, there is no shape normalisation to do: the spec
+// allows only an array or null here, so a single object would be a
+// server bug rather than a variant worth tolerating.
+func (c *Client) References(path string, pos Position, includeDecl bool) ([]Location, error) {
+	params := ReferenceParams{
+		TextDocument: TextDocumentIdentifier{URI: PathToURI(path)},
+		Position:     pos,
+		Context:      ReferenceContext{IncludeDeclaration: includeDecl},
+	}
+	var raw json.RawMessage
+	if err := c.CallWithTimeout("textDocument/references", params, &raw, referencesTimeout); err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var locs []Location
+	if err := json.Unmarshal(raw, &locs); err != nil {
+		return nil, err
+	}
+	return locs, nil
 }
 
 // DocumentSymbols asks for every symbol declared in path, normalised to

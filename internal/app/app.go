@@ -311,6 +311,12 @@ func builtinMenuGroups() []menuGroup {
 		// Code intelligence (LSP-backed; rows dim when no server)
 		{title: "Code", collapsible: true, items: []menuItemDef{
 			{label: "Go to definition", shortcut: "esc d", action: (*App).menuGoToDefinition, enabled: (*App).hasLSPActions},
+			// The inverse question, one row down from the one it inverts:
+			// 'd' asks where a symbol comes FROM, this asks who uses it.
+			// Results land in the Find-all panel's project mode, so the
+			// three cross-file lists read as one instrument
+			// (lspreferences.go).
+			{label: "Find references…", shortcut: "esc R", action: (*App).menuFindReferences, enabled: (*App).hasLSPActions},
 			{label: "Hover info", shortcut: "esc i", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},
 			// The file's outline as a fuzzy picker (lspsymbols.go). Sits
 			// under its lowercase twin because it answers the same
@@ -1346,6 +1352,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPHover(e)
 	case *lspSymbolsEvent:
 		a.handleLSPSymbols(e)
+	case *lspReferencesEvent:
+		a.handleLSPReferences(e)
 	case *copilotReadyEvent:
 		a.handleCopilotReady(e)
 	case *copilotExitEvent:

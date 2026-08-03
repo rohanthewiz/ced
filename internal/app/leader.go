@@ -218,6 +218,13 @@ func leaderBindings() []leaderBinding {
 		{key: 'd', action: (*App).menuGoToDefinition},
 		{key: 'i', action: (*App).menuHoverInfo},
 		{key: 'D', action: (*App).menuGoToSymbol},
+		// 'R' for References — the letter the verb's own name offers once
+		// 'r' is spoken for by redo, which is the same argument that put
+		// rEplace on 'e'. It is deliberately NOT a shifted twin of redo:
+		// redo's twin is 'Z' (beside its own 'z' alias), so the pair
+		// convention was already spent and 'R' is free to mean what it
+		// says. Results open in the Find-all panel (lspreferences.go).
+		{key: 'R', action: (*App).menuFindReferences},
 		// Navigation history: 'o' back "out" of a jump — 'b' was
 		// tempting but reads as "buffer" to vim hands. Shifted variant
 		// walks forward again, mirroring the h/H hunk convention.

@@ -7,7 +7,9 @@
 
 // lsp.go bridges the minimal LSP client (internal/lsp) into the editor:
 // server lifecycle, document sync, diagnostics, go-to-definition, and
-// hover. It follows the same house rules as every other subsystem:
+// hover. The other two verbs built on this plumbing live next door —
+// document symbols in lspsymbols.go, references in lspreferences.go.
+// It follows the same house rules as every other subsystem:
 //
 //   - Silent degradation (format.go's rule): no gopls on PATH, server
 //     crash, request failure — the editor keeps working, nothing nags.
@@ -66,6 +68,7 @@ type lspConn interface {
 	DidSave(path string) error
 	DidClose(path string) error
 	Definition(path string, pos lsp.Position) ([]lsp.Location, error)
+	References(path string, pos lsp.Position, includeDecl bool) ([]lsp.Location, error)
 	HoverAt(path string, pos lsp.Position) (*lsp.Hover, error)
 	DocumentSymbols(path string) ([]lsp.Symbol, error)
 	Close()
@@ -82,6 +85,12 @@ type lspState struct {
 	versions  map[string]int // per-path didChange version counter
 	syncedRev map[string]int // per-path Tab.EditRev last sent to the server
 	timers    map[string]*time.Timer
+
+	// refSeq generations the references lookups (lspreferences.go). That
+	// verb is the only one whose answer OPENS A PANEL, so unlike
+	// definition and hover — which are content with a path check — it
+	// needs to know which request it belongs to.
+	refSeq int
 
 	// diags is keyed by absolute path. gopls publishes for any file in
 	// the workspace, not just open ones; keeping them all costs little

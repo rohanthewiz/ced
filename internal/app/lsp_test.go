@@ -34,6 +34,8 @@ type fakeLSPConn struct {
 
 	defLocs  []lsp.Location
 	defErr   error
+	refLocs  []lsp.Location
+	refErr   error
 	hoverRes *lsp.Hover
 	hoverErr error
 	symbols  []lsp.Symbol
@@ -76,6 +78,11 @@ func (f *fakeLSPConn) DidClose(path string) error {
 
 func (f *fakeLSPConn) Definition(string, lsp.Position) ([]lsp.Location, error) {
 	return f.defLocs, f.defErr
+}
+
+func (f *fakeLSPConn) References(path string, _ lsp.Position, includeDecl bool) ([]lsp.Location, error) {
+	f.record(fmt.Sprintf("references:%s:%t", filepath.Base(path), includeDecl))
+	return f.refLocs, f.refErr
 }
 
 func (f *fakeLSPConn) HoverAt(string, lsp.Position) (*lsp.Hover, error) {

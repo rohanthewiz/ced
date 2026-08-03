@@ -375,6 +375,81 @@ func TestGoplsEndToEnd(t *testing.T) {
 	}
 }
 
+// TestReferencesRequest pins the one thing this request has that
+// definition and hover don't: the context object. A server given no
+// context is entitled to refuse, and includeDeclaration decides whether
+// the declaration itself shows up in the list — so both have to be on
+// the wire, not merely in the struct.
+func TestReferencesRequest(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	type result struct {
+		locs []Location
+		err  error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		locs, err := c.References("/tmp/proj/main.go", Position{Line: 3, Character: 5}, true)
+		resCh <- result{locs, err}
+	}()
+
+	m := srv.read(t)
+	if m.Method != "textDocument/references" {
+		t.Fatalf("method = %q, want textDocument/references", m.Method)
+	}
+	var params ReferenceParams
+	if err := json.Unmarshal(m.Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if params.TextDocument.URI != PathToURI("/tmp/proj/main.go") {
+		t.Errorf("uri = %q, want %q", params.TextDocument.URI, PathToURI("/tmp/proj/main.go"))
+	}
+	if params.Position.Line != 3 || params.Position.Character != 5 {
+		t.Errorf("position = %+v, want 3:5", params.Position)
+	}
+	if !params.Context.IncludeDeclaration {
+		t.Error("context.includeDeclaration missing from the wire payload")
+	}
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":[
+		{"uri":"file:///tmp/proj/a.go","range":{"start":{"line":1,"character":2},"end":{"line":1,"character":9}}},
+		{"uri":"file:///tmp/proj/b.go","range":{"start":{"line":7,"character":0},"end":{"line":7,"character":7}}}
+	]}`, *m.ID))
+
+	got := <-resCh
+	if got.err != nil {
+		t.Fatalf("References: %v", got.err)
+	}
+	if len(got.locs) != 2 || got.locs[1].Range.Start.Line != 7 {
+		t.Errorf("locations = %+v, want two, the second at line 7", got.locs)
+	}
+}
+
+// TestReferencesNullResult pins the empty answer: a symbol nothing uses
+// is a real answer, not a failure.
+func TestReferencesNullResult(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	type result struct {
+		locs []Location
+		err  error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		locs, err := c.References("/tmp/proj/main.go", Position{}, false)
+		resCh <- result{locs, err}
+	}()
+
+	m := srv.read(t)
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":null}`, *m.ID))
+
+	got := <-resCh
+	if got.err != nil || got.locs != nil {
+		t.Errorf("null result = (%+v, %v), want (nil, nil)", got.locs, got.err)
+	}
+}
+
 // TestDocumentSymbolsRequest pins the request wrapper end to end: the
 // right method and document URI go out, and the response comes back
 // already normalised — the app layer never learns that the protocol has

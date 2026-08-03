@@ -227,14 +227,24 @@ func (m *findAllModal) openSelected(a *App) {
 // titleText names the list and, in project mode, admits when the result
 // cap cut it short. A silently truncated list reads as "that's all of
 // them", which is the one wrong answer a search tool can give.
+//
+// The heading is what a project-mode producer that is NOT a text search
+// substitutes for "Find in project" — references, today
+// (lspreferences.go). The truncation clause stays shared rather than
+// duplicated per producer, because the honesty it buys is the part
+// neither of them may skip.
 func (m *findAllModal) titleText() string {
 	if !m.project {
 		return fmt.Sprintf("Find all %q", m.query)
 	}
-	if m.truncated {
-		return fmt.Sprintf("Find in project %q — first %d", m.query, len(m.rows))
+	verb := "Find in project"
+	if m.heading != "" {
+		verb = m.heading
 	}
-	return fmt.Sprintf("Find in project %q", m.query)
+	if m.truncated {
+		return fmt.Sprintf("%s %q — first %d", verb, m.query, len(m.rows))
+	}
+	return fmt.Sprintf("%s %q", verb, m.query)
 }
 
 // footerHints returns the key hints in decreasing width; draw takes the

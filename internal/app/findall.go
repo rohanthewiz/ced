@@ -150,6 +150,12 @@ type findAllModal struct {
 	// title can say so — a silently short list reads as "that's all of
 	// them", the one wrong answer a search can give.
 	truncated bool
+	// heading renames the list for a project-mode producer that is not a
+	// text search — "References to" (lspreferences.go). It is the ONLY
+	// thing such a producer is allowed to change: a second cross-file
+	// list that behaved differently row-for-row would be a second feature
+	// wearing this one's face. Empty means "Find in project".
+	heading string
 }
 
 // -----------------------------------------------------------------------------

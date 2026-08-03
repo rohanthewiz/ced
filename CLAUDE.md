@@ -79,6 +79,7 @@ internal/app/findall.go       Find-all peek list: compacted rows, preview, Esc-r
 internal/lsp/client.go        Minimal JSON-RPC-over-stdio LSP client (stdlib only)
 internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition, hover
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
+internal/app/lspreferences.go References → the Find-all panel's project mode
 internal/app/termdiag.go      Terminal output → clickable path:line:col jumps
 internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
 internal/app/copilot_ghost.go Copilot phase 2: doc sync + inline completions (ghost text)
@@ -626,8 +627,8 @@ framework dependency. House rules it must keep obeying:
 - Diagnostics are just another `DecorationSource` (registered after
   the git source so the diag gutter dot outranks the git mark).
 - Leaders: Esc-d definition, Esc-i hover, Esc-D the file's symbol
-  outline. Definition jumps record into the app-wide navigation
-  history (nav.go) — there is no LSP-private jump stack anymore.
+  outline, Esc-R references. Definition jumps record into the app-wide
+  navigation history (nav.go) — there is no LSP-private jump stack.
 - **Absolute paths only**: `New()` absolutizes rootDir and `openFile`
   absolutizes tab paths. A relative root produces a malformed rootUri
   and gopls then publishes diagnostics keyed by absolute paths that
@@ -672,6 +673,48 @@ Enter (Esc-D, ≡ Code). House rules:
   verb, wider scope — 'd' goes to the definition of what's under the
   cursor, 'D' lists every definition in the file. The f/F, p/P, h/H
   convention.
+
+### Find references (lsp/client.go + app/lspreferences.go)
+Every use of the symbol under the cursor, listed in the Find-all panel's
+PROJECT mode (Esc-R, ≡ Code). House rules:
+
+- **It reuses the panel; it does not build one.** findall.go's project
+  mode already answers every question a cross-file result list raises —
+  path-carrying rows, a strip that displaces the editor, the right dock,
+  scrolling, the Esc contract, the mouse story, the truncation notice. A
+  second list would drift from this one exactly where a user would
+  notice. The ONLY thing a non-search producer may change is
+  `findAllModal.heading` (the title verb); if a second thing ever needs
+  changing, that's the signal the two really are different features.
+- **The result OPENS A PANEL, so it is generation-checked**
+  (`lsp.refSeq`) — unlike definition and hover, which are content with a
+  path check because they only move a cursor or pop a modal. Same guards
+  as project search besides: an empty answer flashes rather than opening
+  a blank list, and a result landing while a modal or the menu owns the
+  screen reports its count instead of stealing the slot.
+- **Context text is fetched off-loop and reconciled ON it.** A Location
+  carries no text, so `collectRefLines` (on the request goroutine) reads
+  each file ONCE however many hits it holds, and `referenceHits` (main
+  loop) then prefers an OPEN TAB's buffer line over the disk copy. That
+  order is load-bearing: gopls answered from the text ced synced to it,
+  so rendering those columns against a stale on-disk line would light up
+  the wrong cells of the wrong text. Which is also why columns stay in
+  UTF-16 across the hop and convert once, against the text that will
+  actually be drawn (`refEndOfLine` is the multi-line-range sentinel
+  that survives it).
+- **Sorted before capped**, so the truncation is a prefix of what the
+  user sees, in search.Project's order so the two lists read alike. An
+  unreadable file costs its rows their CONTEXT, not their existence —
+  the location is the answer, the line is decoration.
+- **The word under the cursor is resolved first and a miss refuses.**
+  It isn't just the title: the panel tints that word in whatever file a
+  row opens. `includeDeclaration` is always true — a "who uses this?"
+  list that omits the thing being used reads as a hole.
+- `referencesTimeout` is 30s, not the client's 5s default: this is the
+  one verb whose cost scales with the PROJECT rather than the file.
+- Leader is **Esc-R** — the letter References' own name offers once `r`
+  is spoken for by redo (the rEplace argument). Deliberately not a
+  shifted twin of redo: redo's twin is `Z`, beside its own `z` alias.
 
 ### Copilot sidecar (app/copilot.go) — phase 1 of the AI integration
 Runs GitHub's official `copilot-language-server` (native binary, found
@@ -1765,8 +1808,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 101 group actions + 14 headers (117), height 123,
-dividers `[2, 5, 120]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 102 group actions + 14 headers (118), height 124,
+dividers `[2, 5, 121]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

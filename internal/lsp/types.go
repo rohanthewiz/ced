@@ -8,8 +8,8 @@
 // Package lsp is a minimal Language Server Protocol client, hand-rolled
 // over JSON-RPC 2.0 on stdio with nothing beyond the standard library.
 // The editor needs a tiny protocol subset — initialize, document sync,
-// publishDiagnostics, definition, hover, document symbols — so a
-// dependency-free client is
+// publishDiagnostics, definition, references, hover, document symbols —
+// so a dependency-free client is
 // both smaller and easier to reason about than pulling in a full LSP
 // framework (which would also fight the project's no-CGO / few-deps
 // philosophy).
@@ -133,6 +133,24 @@ type DidCloseParams struct {
 type TextDocumentPositionParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 	Position     Position               `json:"position"`
+}
+
+// ReferenceContext is the one option textDocument/references takes.
+// IncludeDeclaration decides whether the declaration itself counts as a
+// reference; the editor always asks for it, because a "who uses this?"
+// list that omits the thing being used reads as a hole.
+type ReferenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}
+
+// ReferenceParams is the payload of textDocument/references — a position
+// (like definition and hover) plus that context object. It can't reuse
+// TextDocumentPositionParams because the context field is required: a
+// server given no context is entitled to refuse the request.
+type ReferenceParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      ReferenceContext       `json:"context"`
 }
 
 // Hover is the response payload of textDocument/hover. Contents is

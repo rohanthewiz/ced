@@ -8,8 +8,8 @@
 // Package lsp is a minimal Language Server Protocol client, hand-rolled
 // over JSON-RPC 2.0 on stdio with nothing beyond the standard library.
 // The editor needs a tiny protocol subset — initialize, document sync,
-// publishDiagnostics, definition, references, hover, document symbols —
-// so a dependency-free client is
+// publishDiagnostics, definition, references, hover, signature help,
+// document symbols — so a dependency-free client is
 // both smaller and easier to reason about than pulling in a full LSP
 // framework (which would also fight the project's no-CGO / few-deps
 // philosophy).
@@ -29,7 +29,9 @@ package lsp
 import (
 	"encoding/json"
 	"net/url"
+	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // Position is an LSP text position: zero-based line, zero-based
@@ -162,10 +164,31 @@ type Hover struct {
 	Range    *Range          `json:"range,omitempty"`
 }
 
-// markupContent is the modern hover payload: {kind, value}.
+// markupContent is the modern documentation payload: {kind, value}. The
+// protocol uses it for hover, signature documentation and parameter
+// documentation alike, each of which also allows a bare string.
 type markupContent struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
+}
+
+// markupText flattens the `string | MarkupContent` union the protocol
+// uses everywhere it attaches documentation to something. "" means the
+// payload was empty or a shape this client doesn't model, which every
+// caller treats as "nothing to show".
+func markupText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var mc markupContent
+	if err := json.Unmarshal(raw, &mc); err == nil && mc.Value != "" {
+		return mc.Value
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	return ""
 }
 
 // HoverText flattens a hover's Contents into its text value. It
@@ -177,17 +200,14 @@ func (h Hover) HoverText() string {
 	if len(h.Contents) == 0 {
 		return ""
 	}
-	// MarkupContent — what gopls sends when the client advertises it.
-	var mc markupContent
-	if err := json.Unmarshal(h.Contents, &mc); err == nil && mc.Value != "" {
-		return mc.Value
-	}
-	// Bare MarkedString.
-	var s string
-	if err := json.Unmarshal(h.Contents, &s); err == nil {
+	// MarkupContent (what gopls sends when the client advertises it), or
+	// a bare MarkedString — the shared union both signature help and
+	// parameter documentation also use.
+	if s := markupText(h.Contents); s != "" {
 		return s
 	}
-	// Array of MarkedStrings (each a string or {language, value}).
+	// Array of MarkedStrings (each a string or {language, value}) — the
+	// one shape unique to hover, so it stays here.
 	var arr []json.RawMessage
 	if err := json.Unmarshal(h.Contents, &arr); err == nil {
 		out := ""
@@ -211,6 +231,161 @@ func (h Hover) HoverText() string {
 		return out
 	}
 	return ""
+}
+
+// -----------------------------------------------------------------------------
+// Signature help
+// -----------------------------------------------------------------------------
+
+// SignatureHelp is the response payload of textDocument/signatureHelp:
+// the callable's overloads plus which one, and which of its parameters,
+// applies at the requested position.
+//
+// Both active* fields are POINTERS because the protocol distinguishes
+// "absent" from zero, and zero is the first signature and the first
+// parameter — the overwhelmingly common answer. A plain int would make a
+// server that omitted the field indistinguishable from one saying "the
+// first parameter", which is the difference between an accurate hint and
+// a confidently wrong one.
+type SignatureHelp struct {
+	Signatures      []SignatureInformation `json:"signatures"`
+	ActiveSignature *int                   `json:"activeSignature"`
+	ActiveParameter *int                   `json:"activeParameter"`
+}
+
+// SignatureInformation is one overload. Its own ActiveParameter, when
+// present, overrides the enclosing help's — the spec's precedence, and
+// the only way a server can say different things about different
+// overloads in one response.
+type SignatureInformation struct {
+	Label           string                 `json:"label"`
+	Documentation   json.RawMessage        `json:"documentation"`
+	Parameters      []ParameterInformation `json:"parameters"`
+	ActiveParameter *int                   `json:"activeParameter"`
+}
+
+// ParameterInformation names one parameter inside its signature's label.
+// Label is raw because the protocol allows two shapes for it (see
+// paramRange): a substring of the signature label, or a [start, end)
+// pair of UTF-16 offsets into it.
+type ParameterInformation struct {
+	Label         json.RawMessage `json:"label"`
+	Documentation json.RawMessage `json:"documentation"`
+}
+
+// Signature is the editor-facing normal form the whole response collapses
+// into: ONE signature (the active one), its documentation, and where the
+// active parameter sits inside its label as RUNE offsets.
+//
+// Flat and pre-resolved for the same reason Symbol is: the consumer is a
+// tooltip, so the protocol's unions, pointer-optionals, precedence rules
+// and UTF-16 offsets are all resolved once here rather than in the app
+// layer, which never learns that any of them existed.
+type Signature struct {
+	Label string
+	Doc   string
+	// ParamStart / ParamEnd bound the active parameter within Label, in
+	// runes, half-open. Both are -1 when no parameter is active or the
+	// server's label shape couldn't be resolved — the tooltip then shows
+	// the signature with nothing emphasised, which is still useful.
+	ParamStart int
+	ParamEnd   int
+	ParamDoc   string
+	// Index / Count describe the overload set, so a tooltip can say
+	// "2 of 3". Count is 1 for a language like Go that has no overloads.
+	Index int
+	Count int
+}
+
+// ParseSignatureHelp normalises a signatureHelp response, returning nil
+// when the server has nothing to say — a legitimate answer for a cursor
+// that isn't inside a call.
+func ParseSignatureHelp(raw json.RawMessage) *Signature {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var help SignatureHelp
+	if err := json.Unmarshal(raw, &help); err != nil {
+		return nil
+	}
+	if len(help.Signatures) == 0 {
+		return nil
+	}
+	idx := 0
+	if help.ActiveSignature != nil {
+		idx = *help.ActiveSignature
+	}
+	// Clamped rather than trusted: an out-of-range index is a server bug
+	// that would otherwise panic, and showing the first overload beats
+	// showing nothing.
+	if idx < 0 || idx >= len(help.Signatures) {
+		idx = 0
+	}
+	si := help.Signatures[idx]
+
+	out := &Signature{
+		Label:      si.Label,
+		Doc:        markupText(si.Documentation),
+		ParamStart: -1,
+		ParamEnd:   -1,
+		Index:      idx,
+		Count:      len(help.Signatures),
+	}
+
+	// Signature-level active parameter wins over the help-level one.
+	active := -1
+	if help.ActiveParameter != nil {
+		active = *help.ActiveParameter
+	}
+	if si.ActiveParameter != nil {
+		active = *si.ActiveParameter
+	}
+	// LSP 3.17 lets a server send -1 to mean "no parameter is active"
+	// explicitly, which falls out of the same bounds check.
+	if active < 0 || active >= len(si.Parameters) {
+		return out
+	}
+	p := si.Parameters[active]
+	out.ParamDoc = markupText(p.Documentation)
+	out.ParamStart, out.ParamEnd = paramRange(si.Label, p.Label)
+	return out
+}
+
+// paramRange resolves a ParameterInformation label to rune offsets into
+// its signature's label, returning (-1, -1) when it can't.
+//
+// The offset form is tried FIRST and is the one to trust: it is exact.
+// The string form is the protocol's older, looser option — "a substring
+// of its containing signature label" — and resolving it means searching,
+// which can land on the wrong occurrence when a parameter's text repeats
+// (a signature of `f(int, int)` has no way to tell the two apart). Real
+// labels are usually `name type`, so first-occurrence is right in
+// practice; when it isn't, the emphasis is misplaced by a few columns
+// rather than the tooltip being wrong.
+func paramRange(label string, raw json.RawMessage) (start, end int) {
+	if len(raw) == 0 {
+		return -1, -1
+	}
+	labelRunes := []rune(label)
+	var pair []int
+	if err := json.Unmarshal(raw, &pair); err == nil && len(pair) == 2 {
+		s := RuneCol(labelRunes, pair[0])
+		e := RuneCol(labelRunes, pair[1])
+		if s < 0 || e < s {
+			return -1, -1
+		}
+		return s, e
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil || text == "" {
+		return -1, -1
+	}
+	i := strings.Index(label, text)
+	if i < 0 {
+		return -1, -1
+	}
+	s := utf8.RuneCountInString(label[:i])
+	return s, s + utf8.RuneCountInString(text)
 }
 
 // -----------------------------------------------------------------------------

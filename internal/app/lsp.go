@@ -7,9 +7,10 @@
 
 // lsp.go bridges the minimal LSP client (internal/lsp) into the editor:
 // server lifecycle, document sync, diagnostics, go-to-definition, and
-// hover. The other two verbs built on this plumbing live next door —
-// document symbols in lspsymbols.go, references in lspreferences.go.
-// It follows the same house rules as every other subsystem:
+// hover. The other verbs built on this plumbing live next door —
+// document symbols in lspsymbols.go, references in lspreferences.go,
+// signature help in lspsignature.go. It follows the same house rules as
+// every other subsystem:
 //
 //   - Silent degradation (format.go's rule): no gopls on PATH, server
 //     crash, request failure — the editor keeps working, nothing nags.
@@ -70,6 +71,7 @@ type lspConn interface {
 	Definition(path string, pos lsp.Position) ([]lsp.Location, error)
 	References(path string, pos lsp.Position, includeDecl bool) ([]lsp.Location, error)
 	HoverAt(path string, pos lsp.Position) (*lsp.Hover, error)
+	SignatureHelpAt(path string, pos lsp.Position) (*lsp.Signature, error)
 	DocumentSymbols(path string) ([]lsp.Symbol, error)
 	Close()
 }

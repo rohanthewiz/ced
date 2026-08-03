@@ -158,3 +158,52 @@ func TestHoverModalDrawContent(t *testing.T) {
 		t.Error("over-wide line bled past the popup border")
 	}
 }
+
+// TestHoverModalDrawEmphasis pins signature help's whole contribution to
+// this modal: the marked run is painted in the accent, bold, while the
+// rest of the line stays body-styled. A run that rendered identically to
+// its surroundings would make the verb indistinguishable from hover.
+func TestHoverModalDrawEmphasis(t *testing.T) {
+	a := hoverTestApp(t)
+	m := &hoverModal{
+		lines: []string{"f(a int, b string)"},
+		emph:  []hoverEmph{{line: 0, start: 9, end: 17}}, // "b string"
+	}
+	a.openModal(m)
+	a.draw()
+	a.screen.Show()
+
+	mx, my, _, _ := m.rect(a)
+	scr := a.screen.(tcell.SimulationScreen)
+	cells, w, _ := scr.GetContents()
+	at := func(col int) tcell.Style { return cells[(my+1)*w+mx+2+col].Style }
+
+	plainFG, _, _ := at(0).Decompose()
+	emphFG, _, emphAttrs := at(9).Decompose()
+	if emphFG == plainFG {
+		t.Errorf("emphasised cell has the body foreground %v — nothing marks the parameter", emphFG)
+	}
+	if emphAttrs&tcell.AttrBold == 0 {
+		t.Error("emphasised cell is not bold")
+	}
+	// The cell just past the run must be back to normal, or the emphasis
+	// would run to end of line and mark the wrong parameter too.
+	if afterFG, _, _ := at(17).Decompose(); afterFG == emphFG {
+		t.Error("emphasis leaked past the parameter's end")
+	}
+}
+
+// TestHoverModalEmphasisClampsToTruncation pins the interaction between
+// the two: a line cut short by the width cap must clamp its emphasis
+// rather than indexing past the runes that survived.
+func TestHoverModalEmphasisClampsToTruncation(t *testing.T) {
+	a := hoverTestApp(t)
+	long := strings.Repeat("w", hoverModalMaxWidth*2)
+	m := &hoverModal{
+		lines: []string{long},
+		emph:  []hoverEmph{{line: 0, start: 0, end: len(long)}},
+	}
+	a.openModal(m)
+	a.draw() // must not panic
+	a.screen.Show()
+}

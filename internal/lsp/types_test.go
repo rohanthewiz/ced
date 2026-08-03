@@ -189,3 +189,145 @@ func TestSymbolKindName(t *testing.T) {
 		}
 	}
 }
+
+// TestParseSignatureHelp_ActiveParameter pins the common answer: the
+// active signature's label, the active parameter resolved to rune
+// offsets into it, and the overload position.
+func TestParseSignatureHelp_ActiveParameter(t *testing.T) {
+	raw := json.RawMessage(`{
+		"signatures":[
+			{"label":"f(a int, b string)",
+			 "documentation":"does a thing",
+			 "parameters":[{"label":"a int"},{"label":"b string","documentation":"the name"}]}
+		],
+		"activeSignature":0,
+		"activeParameter":1
+	}`)
+	sig := ParseSignatureHelp(raw)
+	if sig == nil {
+		t.Fatal("ParseSignatureHelp returned nil")
+	}
+	if sig.Label != "f(a int, b string)" {
+		t.Errorf("label = %q", sig.Label)
+	}
+	if got := sig.Label[sig.ParamStart:sig.ParamEnd]; got != "b string" {
+		t.Errorf("active parameter = %q, want %q", got, "b string")
+	}
+	if sig.ParamDoc != "the name" || sig.Doc != "does a thing" {
+		t.Errorf("docs = (%q, %q)", sig.ParamDoc, sig.Doc)
+	}
+	if sig.Index != 0 || sig.Count != 1 {
+		t.Errorf("overload position = %d of %d, want 0 of 1", sig.Index, sig.Count)
+	}
+}
+
+// TestParseSignatureHelp_OffsetLabelForm pins the exact shape of the
+// parameter label — a [start, end) pair of UTF-16 offsets — and its
+// conversion to runes. A non-BMP rune in the label is where the two
+// coordinate systems disagree, and where a naive cast would emphasise
+// the wrong text.
+func TestParseSignatureHelp_OffsetLabelForm(t *testing.T) {
+	// "f(🙂 int)": the emoji is one rune but two UTF-16 units, so "int"
+	// starts at UTF-16 offset 5 and rune offset 4.
+	raw := json.RawMessage(`{
+		"signatures":[{"label":"f(🙂 int)","parameters":[{"label":[5,8]}]}],
+		"activeParameter":0
+	}`)
+	sig := ParseSignatureHelp(raw)
+	if sig == nil {
+		t.Fatal("ParseSignatureHelp returned nil")
+	}
+	runes := []rune(sig.Label)
+	if got := string(runes[sig.ParamStart:sig.ParamEnd]); got != "int" {
+		t.Errorf("active parameter = %q (offsets %d..%d), want %q",
+			got, sig.ParamStart, sig.ParamEnd, "int")
+	}
+}
+
+// TestParseSignatureHelp_SignatureLevelOverrides pins the spec's
+// precedence: a signature's own activeParameter beats the enclosing
+// help's. It is the only way a server can say different things about
+// different overloads in one response.
+func TestParseSignatureHelp_SignatureLevelOverrides(t *testing.T) {
+	raw := json.RawMessage(`{
+		"signatures":[
+			{"label":"g()"},
+			{"label":"f(a int, b string)",
+			 "parameters":[{"label":"a int"},{"label":"b string"}],
+			 "activeParameter":0}
+		],
+		"activeSignature":1,
+		"activeParameter":1
+	}`)
+	sig := ParseSignatureHelp(raw)
+	if sig == nil {
+		t.Fatal("ParseSignatureHelp returned nil")
+	}
+	if got := sig.Label[sig.ParamStart:sig.ParamEnd]; got != "a int" {
+		t.Errorf("active parameter = %q, want the signature-level %q", got, "a int")
+	}
+	if sig.Index != 1 || sig.Count != 2 {
+		t.Errorf("overload position = %d of %d, want 1 of 2", sig.Index, sig.Count)
+	}
+}
+
+// TestParseSignatureHelp_NoActiveParameter pins the three ways a server
+// says "no parameter applies" — absent, explicit -1, and out of range —
+// all of which must leave the signature showable with nothing marked
+// rather than producing an offset into thin air.
+func TestParseSignatureHelp_NoActiveParameter(t *testing.T) {
+	for name, body := range map[string]string{
+		"absent":       `{"signatures":[{"label":"f(a int)","parameters":[{"label":"a int"}]}]}`,
+		"explicit -1":  `{"signatures":[{"label":"f(a int)","parameters":[{"label":"a int"}]}],"activeParameter":-1}`,
+		"out of range": `{"signatures":[{"label":"f(a int)","parameters":[{"label":"a int"}]}],"activeParameter":7}`,
+	} {
+		sig := ParseSignatureHelp(json.RawMessage(body))
+		if sig == nil {
+			t.Fatalf("%s: ParseSignatureHelp returned nil", name)
+		}
+		if sig.ParamStart != -1 || sig.ParamEnd != -1 {
+			t.Errorf("%s: offsets = %d..%d, want -1..-1", name, sig.ParamStart, sig.ParamEnd)
+		}
+		if sig.Label != "f(a int)" {
+			t.Errorf("%s: label = %q, want it shown anyway", name, sig.Label)
+		}
+	}
+}
+
+// TestParseSignatureHelp_ClampsBadSignatureIndex pins the server-bug
+// guard: an out-of-range activeSignature shows the first overload rather
+// than panicking on the slice.
+func TestParseSignatureHelp_ClampsBadSignatureIndex(t *testing.T) {
+	raw := json.RawMessage(`{"signatures":[{"label":"f()"}],"activeSignature":9}`)
+	sig := ParseSignatureHelp(raw)
+	if sig == nil || sig.Label != "f()" || sig.Index != 0 {
+		t.Errorf("clamped result = %+v, want the first signature", sig)
+	}
+}
+
+// TestParseSignatureHelp_Empty pins the non-answers: a cursor outside a
+// call is a real answer, not a failure, and must read as nil.
+func TestParseSignatureHelp_Empty(t *testing.T) {
+	for _, body := range []string{``, `null`, `{"signatures":[]}`, `{"garbage":1}`, `[1,2]`} {
+		if sig := ParseSignatureHelp(json.RawMessage(body)); sig != nil {
+			t.Errorf("ParseSignatureHelp(%q) = %+v, want nil", body, sig)
+		}
+	}
+}
+
+// TestMarkupText pins the shared `string | MarkupContent` flattening
+// that hover, signature docs and parameter docs all lean on.
+func TestMarkupText(t *testing.T) {
+	cases := map[string]string{
+		`{"kind":"plaintext","value":"hi"}`: "hi",
+		`"bare"`:                            "bare",
+		`{"kind":"plaintext","value":""}`:   "",
+		`12`:                                "",
+		``:                                  "",
+	}
+	for body, want := range cases {
+		if got := markupText(json.RawMessage(body)); got != want {
+			t.Errorf("markupText(%q) = %q, want %q", body, got, want)
+		}
+	}
+}

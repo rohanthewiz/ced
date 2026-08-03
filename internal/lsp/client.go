@@ -456,6 +456,13 @@ func (c *Client) Initialize(rootDir string) error {
 				"documentSymbol": map[string]any{
 					"hierarchicalDocumentSymbolSupport": true,
 				},
+				// Plaintext first here too: the tooltip that renders this
+				// is the hover modal, which is a dumb text box.
+				"signatureHelp": map[string]any{
+					"signatureInformation": map[string]any{
+						"documentationFormat": []string{"plaintext", "markdown"},
+					},
+				},
 				"hover": map[string]any{
 					// Plaintext first: the hover modal is a dumb text
 					// box, and gopls honours the preference order.
@@ -563,6 +570,22 @@ func (c *Client) References(path string, pos Position, includeDecl bool) ([]Loca
 		return nil, err
 	}
 	return locs, nil
+}
+
+// SignatureHelpAt asks which callable the position sits inside and which
+// of its parameters is being typed, normalised to the flat editor-facing
+// form (see ParseSignatureHelp). A nil result with a nil error means the
+// position is not inside a call — a real answer, not a failure.
+func (c *Client) SignatureHelpAt(path string, pos Position) (*Signature, error) {
+	params := TextDocumentPositionParams{
+		TextDocument: TextDocumentIdentifier{URI: PathToURI(path)},
+		Position:     pos,
+	}
+	var raw json.RawMessage
+	if err := c.Call("textDocument/signatureHelp", params, &raw); err != nil {
+		return nil, err
+	}
+	return ParseSignatureHelp(raw), nil
 }
 
 // DocumentSymbols asks for every symbol declared in path, normalised to

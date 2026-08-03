@@ -318,6 +318,11 @@ func builtinMenuGroups() []menuGroup {
 			// (lspreferences.go).
 			{label: "Find references…", shortcut: "esc R", action: (*App).menuFindReferences, enabled: (*App).hasLSPActions},
 			{label: "Hover info", shortcut: "esc i", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},
+			// The same tooltip asked a different question: 'i' says what
+			// the symbol under the cursor IS, 'I' says where you are in
+			// the call you're typing (lspsignature.go). Manual, not
+			// automatic — a modal owns the keyboard here.
+			{label: "Signature help", shortcut: "esc I", action: (*App).menuSignatureHelp, enabled: (*App).hasLSPActions},
 			// The file's outline as a fuzzy picker (lspsymbols.go). Sits
 			// under its lowercase twin because it answers the same
 			// question at a wider scope: 'd' jumps to the definition of
@@ -1354,6 +1359,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPSymbols(e)
 	case *lspReferencesEvent:
 		a.handleLSPReferences(e)
+	case *lspSignatureEvent:
+		a.handleLSPSignature(e)
 	case *copilotReadyEvent:
 		a.handleCopilotReady(e)
 	case *copilotExitEvent:

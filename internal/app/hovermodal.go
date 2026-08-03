@@ -27,9 +27,30 @@ import (
 // instead of wrapping, because hover text is a preview, not a reader.
 const hoverModalMaxWidth = 66
 
-// hoverModal shows flattened hover text near the cursor.
+// hoverModalTextWidth is how many columns of content fit inside the box
+// at its widest: the cap minus the border and one cell of padding on
+// each side. A producer that wraps its own text (signature help) wraps
+// to this, so the box never has to truncate what it was handed.
+const hoverModalTextWidth = hoverModalMaxWidth - 4
+
+// hoverEmph marks a run of one line to paint with emphasis — rune
+// offsets, half-open. It exists for signature help, whose whole point is
+// saying WHICH parameter you are typing; without it that verb would be
+// hover on the enclosing function, which the user could already get.
+type hoverEmph struct {
+	line  int
+	start int
+	end   int
+}
+
+// hoverModal shows flattened text in a caret-anchored tooltip. Two verbs
+// share it — hover and signature help (lspsignature.go) — because the
+// geometry, the trigger-happy dismissal and the "this is a glance" framing
+// are identical; only the emphasis is new, which is the findAllModal.heading
+// arrangement one floor down. Producers hand it finished lines.
 type hoverModal struct {
 	lines []string
+	emph  []hoverEmph
 }
 
 // handleKey dismisses on any key — see the file comment for why.
@@ -102,11 +123,27 @@ func (m *hoverModal) draw(a *App) {
 	fillRect(a.screen, mx, my, mw, mh, c.bgSt)
 	drawBorder(a.screen, mx, my, mw, mh, c.border)
 
+	emphSt := tcell.StyleDefault.Background(c.bg).Foreground(a.theme.Accent).Bold(true)
 	for i, ln := range m.lines {
-		if runeLen(ln) > mw-4 {
-			ln = string([]rune(ln)[:mw-5]) + "…"
+		runes := []rune(ln)
+		if len(runes) > mw-4 {
+			runes = append(runes[:mw-5:mw-5], '…')
 		}
-		drawAt(a.screen, mx+2, my+1+i, ln, c.body)
+		drawAt(a.screen, mx+2, my+1+i, string(runes), c.body)
+		// Emphasis is repainted OVER the plain line rather than the line
+		// being drawn in segments: the truncation above can cut a span
+		// short (or away entirely), and clamping one range is simpler to
+		// get right than three interlocking substrings.
+		for _, e := range m.emph {
+			if e.line != i {
+				continue
+			}
+			s, en := max(e.start, 0), min(e.end, len(runes))
+			if s >= en {
+				continue
+			}
+			drawAt(a.screen, mx+2+s, my+1+i, string(runes[s:en]), emphSt)
+		}
 	}
 	a.screen.HideCursor()
 }

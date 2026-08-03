@@ -225,6 +225,12 @@ func leaderBindings() []leaderBinding {
 		// convention was already spent and 'R' is free to mean what it
 		// says. Results open in the Find-all panel (lspreferences.go).
 		{key: 'R', action: (*App).menuFindReferences},
+		// 'I' is signature help — the shifted twin of hover's 'i', and a
+		// true one this time: same tooltip, same glance, one question
+		// over. 'i' describes the symbol under the cursor; 'I' describes
+		// the CALL the cursor is standing inside, which is the thing you
+		// want while your hands are between the parentheses.
+		{key: 'I', action: (*App).menuSignatureHelp},
 		// Navigation history: 'o' back "out" of a jump — 'b' was
 		// tempting but reads as "buffer" to vim hands. Shifted variant
 		// walks forward again, mirroring the h/H hunk convention.

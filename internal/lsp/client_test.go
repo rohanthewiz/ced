@@ -375,6 +375,80 @@ func TestGoplsEndToEnd(t *testing.T) {
 	}
 }
 
+// TestSignatureHelpRequest pins the wrapper end to end: the right
+// method and position go out, and the response comes back already
+// collapsed — the app layer never learns the protocol had pointer
+// optionals, a precedence rule and two label shapes to resolve.
+func TestSignatureHelpRequest(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	type result struct {
+		sig *Signature
+		err error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		sig, err := c.SignatureHelpAt("/tmp/proj/main.go", Position{Line: 9, Character: 12})
+		resCh <- result{sig, err}
+	}()
+
+	m := srv.read(t)
+	if m.Method != "textDocument/signatureHelp" {
+		t.Fatalf("method = %q, want textDocument/signatureHelp", m.Method)
+	}
+	var params TextDocumentPositionParams
+	if err := json.Unmarshal(m.Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if params.TextDocument.URI != PathToURI("/tmp/proj/main.go") {
+		t.Errorf("uri = %q", params.TextDocument.URI)
+	}
+	if params.Position.Line != 9 || params.Position.Character != 12 {
+		t.Errorf("position = %+v, want 9:12", params.Position)
+	}
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{
+		"signatures":[{"label":"Join(elems []string, sep string) string",
+		               "parameters":[{"label":"elems []string"},{"label":"sep string"}]}],
+		"activeSignature":0,"activeParameter":1}}`, *m.ID))
+
+	got := <-resCh
+	if got.err != nil {
+		t.Fatalf("SignatureHelpAt: %v", got.err)
+	}
+	if got.sig == nil {
+		t.Fatal("SignatureHelpAt returned nil")
+	}
+	if p := got.sig.Label[got.sig.ParamStart:got.sig.ParamEnd]; p != "sep string" {
+		t.Errorf("active parameter = %q, want %q", p, "sep string")
+	}
+}
+
+// TestSignatureHelpNullResult pins the empty answer: a cursor that isn't
+// inside a call is a real answer, not a failure.
+func TestSignatureHelpNullResult(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	type result struct {
+		sig *Signature
+		err error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		sig, err := c.SignatureHelpAt("/tmp/proj/main.go", Position{})
+		resCh <- result{sig, err}
+	}()
+
+	m := srv.read(t)
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":null}`, *m.ID))
+
+	got := <-resCh
+	if got.err != nil || got.sig != nil {
+		t.Errorf("null result = (%+v, %v), want (nil, nil)", got.sig, got.err)
+	}
+}
+
 // TestReferencesRequest pins the one thing this request has that
 // definition and hover don't: the context object. A server given no
 // context is entitled to refuse, and includeDeclaration decides whether

@@ -38,6 +38,8 @@ type fakeLSPConn struct {
 	refErr   error
 	hoverRes *lsp.Hover
 	hoverErr error
+	sigRes   *lsp.Signature
+	sigErr   error
 	symbols  []lsp.Symbol
 	symErr   error
 }
@@ -87,6 +89,11 @@ func (f *fakeLSPConn) References(path string, _ lsp.Position, includeDecl bool) 
 
 func (f *fakeLSPConn) HoverAt(string, lsp.Position) (*lsp.Hover, error) {
 	return f.hoverRes, f.hoverErr
+}
+
+func (f *fakeLSPConn) SignatureHelpAt(path string, _ lsp.Position) (*lsp.Signature, error) {
+	f.record("signatureHelp:" + filepath.Base(path))
+	return f.sigRes, f.sigErr
 }
 
 func (f *fakeLSPConn) DocumentSymbols(path string) ([]lsp.Symbol, error) {

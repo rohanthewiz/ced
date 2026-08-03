@@ -80,6 +80,8 @@ internal/lsp/client.go        Minimal JSON-RPC-over-stdio LSP client (stdlib onl
 internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition, hover
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
 internal/app/lspreferences.go References → the Find-all panel's project mode
+internal/app/lspsignature.go  Signature help → the hover tooltip, active param lit
+internal/app/hovermodal.go    Caret-anchored tooltip (hover + signature help)
 internal/app/termdiag.go      Terminal output → clickable path:line:col jumps
 internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
 internal/app/copilot_ghost.go Copilot phase 2: doc sync + inline completions (ghost text)
@@ -626,9 +628,10 @@ framework dependency. House rules it must keep obeying:
   silently diagnoses stale text.
 - Diagnostics are just another `DecorationSource` (registered after
   the git source so the diag gutter dot outranks the git mark).
-- Leaders: Esc-d definition, Esc-i hover, Esc-D the file's symbol
-  outline, Esc-R references. Definition jumps record into the app-wide
-  navigation history (nav.go) — there is no LSP-private jump stack.
+- Leaders: Esc-d definition, Esc-i hover, Esc-I signature help, Esc-D
+  the file's symbol outline, Esc-R references. Definition jumps record
+  into the app-wide navigation history (nav.go) — there is no
+  LSP-private jump stack.
 - **Absolute paths only**: `New()` absolutizes rootDir and `openFile`
   absolutizes tab paths. A relative root produces a malformed rootUri
   and gopls then publishes diagnostics keyed by absolute paths that
@@ -715,6 +718,56 @@ PROJECT mode (Esc-R, ≡ Code). House rules:
 - Leader is **Esc-R** — the letter References' own name offers once `r`
   is spoken for by redo (the rEplace argument). Deliberately not a
   shifted twin of redo: redo's twin is `Z`, beside its own `z` alias.
+
+### Signature help (lsp/types.go + app/lspsignature.go)
+The parameter list of the call the cursor is inside, with the parameter
+you're typing lit (Esc-I, ≡ Code). House rules:
+
+- **IT IS MANUAL, AND THAT IS STRUCTURAL.** Every other editor pops this
+  automatically on `(` and `,`; ced cannot, because a modal here OWNS
+  THE KEYBOARD (the single-slot modal interface) — a tooltip that
+  appeared while you typed would swallow the very next keystroke it
+  exists to help you write. The live version of this feature needs a
+  NON-modal overlay, and ced already has exactly one of those: ghost
+  text (editor/ghost.go). If signature help ever goes live-while-typing,
+  that is the layer it goes through. Don't bolt an auto-trigger onto
+  this one.
+- **The emphasis IS the feature.** Without it this is hover on the
+  enclosing function, which the user could already get by moving the
+  cursor. So `hoverModal` grew one field (`emph []hoverEmph`) — the
+  findAllModal.heading arrangement one floor down: two verbs, one
+  tooltip, because the geometry, the trigger-happy dismissal and the
+  "this is a glance" framing are identical.
+- **The label is HARD-wrapped, the prose WORD-wrapped** — the chat
+  transcript's code/text split, and here it is load-bearing twice: a
+  signature is code, so collapsing its whitespace misrepresents it, and
+  only an exact rune-per-column mapping lets an offset become a
+  (row, col) by division. A word wrapper drops and merges spaces, so
+  every offset past the first break would be a guess. A parameter
+  straddling a break gets one emphasis run per row.
+- **The protocol's optionals collapse in `internal/lsp`, not the app**
+  (the ParseDocumentSymbols rule). `activeSignature`/`activeParameter`
+  are POINTERS on the wire because absent must be distinguishable from
+  zero — and zero is the first signature and the first parameter, the
+  common answer. A signature's own `activeParameter` overrides the
+  help's (spec precedence). `paramRange` resolves the label's two shapes,
+  offsets FIRST because they're exact; the string form is a substring
+  search that can land on the wrong occurrence in `f(int, int)`, which
+  costs a few columns of misplaced emphasis, not a wrong tooltip.
+- **A cursor outside a call is a real answer**, so nil-with-nil-error
+  reads as "nothing here" and the flash says "No signature help **here**"
+  — the usual cause is the position, not the server, and a bare "no
+  signature help" reads as the latter. (gopls also declines inside a
+  string literal argument; that's its call, and the message is right for
+  it too.)
+- The active parameter's OWN documentation precedes the signature's: it
+  answers the question that made the user press the key, and the tooltip
+  is capped, so it must not be what gets cut. `firstParagraph` trims a Go
+  doc comment to its opening statement rather than truncating
+  mid-sentence.
+- Leader is **Esc-I**, a true shifted twin of hover's Esc-i: same
+  tooltip, same glance, one question over — 'i' describes the symbol
+  under the cursor, 'I' describes the call the cursor stands inside.
 
 ### Copilot sidecar (app/copilot.go) — phase 1 of the AI integration
 Runs GitHub's official `copilot-language-server` (native binary, found
@@ -1808,8 +1861,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 102 group actions + 14 headers (118), height 124,
-dividers `[2, 5, 121]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 103 group actions + 14 headers (119), height 125,
+dividers `[2, 5, 122]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

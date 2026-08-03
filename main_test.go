@@ -11,6 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/rohanthewiz/ced/internal/session"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // TestResolveArgs_NoArgsRootsCurrentDir keeps the no-arg path simple:
@@ -131,5 +134,70 @@ func TestResolveArgs_HelpFlag(t *testing.T) {
 		if got.Action != actionHelp {
 			t.Errorf("flag %q: action = %q, want help", flag, got.Action)
 		}
+	}
+}
+
+// TestResolveArgs_LastFlag covers every spelling of --last: the action
+// is still edit and RootDir stays the safe "." fallback, with Last set
+// so main can look the folder up. Resolution happens in main, not here,
+// because resolveArgs is deliberately IO-free beyond os.Stat.
+func TestResolveArgs_LastFlag(t *testing.T) {
+	for _, flag := range []string{"--last", "-l", "last"} {
+		got := resolveArgs([]string{flag})
+		if got.Action != actionEdit {
+			t.Errorf("flag %q: action = %q, want edit", flag, got.Action)
+		}
+		if !got.Last {
+			t.Errorf("flag %q: Last = false, want true", flag)
+		}
+		if got.RootDir != "." {
+			t.Errorf("flag %q: RootDir = %q, want the . fallback", flag, got.RootDir)
+		}
+	}
+}
+
+// TestResolveArgs_BareCedDoesNotRestoreLast is the pin on the deliberate
+// choice behind --last existing at all: bare `ced` opens the CURRENT
+// directory. `cd myproj && ced` is the gesture this editor is launched
+// with, and silently landing in a different project would make that
+// reflex a lie — the folder's TABS come back instead (session restore).
+func TestResolveArgs_BareCedDoesNotRestoreLast(t *testing.T) {
+	got := resolveArgs(nil)
+	if got.Last {
+		t.Fatal("bare ced must not resolve to the last folder")
+	}
+	if got.RootDir != "." {
+		t.Fatalf("RootDir = %q, want .", got.RootDir)
+	}
+}
+
+// TestLastFolder_ReadsTheStateFile pins the --last lookup end to end
+// against a real state file, and its two silent fallbacks: nothing
+// recorded, and an unreadable file. Both must yield "" so main opens the
+// current directory rather than refusing to start over a convenience
+// file.
+func TestLastFolder_ReadsTheStateFile(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+
+	if got := lastFolder(); got != "" {
+		t.Fatalf("lastFolder() with no state file = %q, want empty", got)
+	}
+
+	st := &session.Store{}
+	st.Touch(filepath.Join(cfg, "older"))
+	st.Touch(filepath.Join(cfg, "newest"))
+	if err := st.Save(userconfig.StatePath()); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got, want := lastFolder(), filepath.Join(cfg, "newest"); got != want {
+		t.Fatalf("lastFolder() = %q, want %q", got, want)
+	}
+
+	if err := os.WriteFile(userconfig.StatePath(), []byte("{{{"), 0644); err != nil {
+		t.Fatalf("corrupt: %v", err)
+	}
+	if got := lastFolder(); got != "" {
+		t.Fatalf("lastFolder() on a broken state file = %q, want empty", got)
 	}
 }

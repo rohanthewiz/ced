@@ -35,6 +35,7 @@ import (
 	"github.com/rohanthewiz/ced/internal/finder"
 	"github.com/rohanthewiz/ced/internal/icons"
 	"github.com/rohanthewiz/ced/internal/plugins"
+	"github.com/rohanthewiz/ced/internal/session"
 	"github.com/rohanthewiz/ced/internal/theme"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 	"github.com/rohanthewiz/ced/internal/version"
@@ -386,6 +387,14 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuTogglePlugins, enabled: alwaysTrue, labelFor: (*App).pluginsToggleLabel},
 		}},
 		{title: "File", collapsible: true, items: []menuItemDef{
+			// Workspace rows first — the File>Open Folder convention every
+			// editor teaches, and the only surface for a root switch (it
+			// gets no leader key: the flat table is out of mnemonic
+			// letters and this is a once-an-hour action, not a once-a-
+			// minute one). See folder.go for why a switch is a restart.
+			{label: "Open folder…", action: (*App).menuOpenFolder, enabled: alwaysTrue},
+			{label: "Recent folders…", action: (*App).menuRecentFolders, enabled: (*App).hasRecentFolders},
+			{action: (*App).menuToggleSession, enabled: alwaysTrue, labelFor: (*App).sessionToggleLabel},
 			{shortcut: "esc n", action: (*App).menuNewFile, enabled: alwaysTrue, labelFor: (*App).newFileLabel},
 			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
 			{label: "Delete file", action: (*App).menuDelete, enabled: (*App).hasFileTab},
@@ -934,6 +943,26 @@ type App struct {
 	// transient UI state of an open finder lives in finderModal.
 	finder *finder.Finder
 
+	// sessionStore is the workspace state read from state.json: the
+	// recent-folders queue and, per folder, the tabs it had open. Held
+	// as a live value so the recent list can be pruned and re-saved
+	// without a re-read; written at startup, on a prune, and on Close.
+	// See folder.go.
+	sessionStore *session.Store
+
+	// sessionEnabled is the "session" config preference: whether opening
+	// a folder reopens its tabs. Folders are recorded either way — the
+	// recent list is a separate feature reading the same file.
+	sessionEnabled bool
+
+	// nextRoot is the folder the user asked to switch to. Setting it
+	// alongside quit asks the process to tear this App down and build a
+	// fresh one rooted there; main reads it via NextRoot after Run
+	// returns. A root switch is a restart because everything derived
+	// from rootDir would otherwise have to be re-derived by hand — see
+	// the header comment in folder.go.
+	nextRoot string
+
 	quit bool
 }
 
@@ -988,6 +1017,11 @@ func New(rootDir string) (*App, error) {
 	}
 	a.setActiveFolder(tree.Root.Path)
 	a.loadUserConfig()
+	// Record the visit before anything else can fail: this is what makes
+	// `ced --last` and the recent-folders list correct even for a run
+	// that ends in a crash. The tab list is written at Close; being HERE
+	// at all is written now. See folder.go.
+	a.loadSessionStore()
 	// The MCP inventory is read at startup but nothing is SPAWNED here:
 	// the chat agent needs the declaration at its own start, and ced's
 	// own connections wait for a deliberate ≡ action. See mcp.go.
@@ -1015,6 +1049,12 @@ func New(rootDir string) (*App, error) {
 	// job is auth state, and knowing it at startup makes the ≡ labels
 	// and Sign in flow honest from the first click.
 	a.copilotEnsureStarted()
+	// Reopen the tabs this folder had last time (folder.go). After the
+	// integrations are up so restored tabs get the same didOpen / hook
+	// treatment a clicked one would, and BEFORE main opens any file
+	// named on the command line — an explicit `ced foo.go` must end up
+	// on foo.go, not on whatever tab was active a week ago.
+	a.restoreSession()
 	// Kick off the project file index in the background so that by
 	// the time the user hits Esc-p (or ≡ → Find file) the modal can
 	// open with results already in hand. On a 50k-file repo this
@@ -1073,6 +1113,7 @@ func (a *App) loadUserConfig() {
 	a.chat.autoContext = cfg.ChatContext
 	a.chat.writeEnabled = cfg.ChatWrite
 	a.plugins.enabled = cfg.Plugins
+	a.sessionEnabled = cfg.Session
 	// Themes last: loadThemes and applyThemeName both flash on failure,
 	// and a color problem is the least urgent thing in this function —
 	// letting it land last keeps a more important message visible.
@@ -1150,6 +1191,10 @@ func (a *App) stopTreeRefresh() {
 
 // Close releases the terminal back to the user. Always call this before exit.
 func (a *App) Close() {
+	// Capture the workspace before anything is torn down — Close runs on
+	// both exits (a plain quit and a folder switch), so recording here
+	// means neither path has to remember to. See folder.go.
+	a.recordSession()
 	a.stopTreeRefresh()
 	a.stopAutoScroll()
 	a.stopAutoSave()
@@ -2728,6 +2773,23 @@ func (a *App) openFile(path string) {
 	if hasFrom {
 		a.recordNav(from)
 	}
+	a.wireTab(t)
+	a.tabs = append(a.tabs, t)
+	a.activeTab = len(a.tabs) - 1
+	a.announceTab(t)
+	a.flash(fmt.Sprintf("Opened %s", filepath.Base(path)))
+}
+
+// wireTab attaches the app-owned decoration sources and per-tab
+// preferences to a freshly-created Tab and kicks off its first diff.
+// Everything a tab needs BEFORE it joins a.tabs.
+//
+// It exists because openFile is no longer the only way a tab is born —
+// session restore (folder.go) creates them too — and a second copy of
+// this wiring would drift: a tab opened one way would quietly lack the
+// git gutter, or the word highlight, or a plugin's marks. One writer,
+// two callers.
+func (a *App) wireTab(t *editor.Tab) {
 	// Wire the diff gutter in and kick off the first diff so marks
 	// appear as soon as the async result lands, not at the next tick.
 	// The diagnostics source registers after git so on a line that is
@@ -2741,16 +2803,20 @@ func (a *App) openFile(path string) {
 	// The matching-word highlight is a built-in source gated by a per-tab
 	// flag, so the preference has to ride along at open time (wordhl.go).
 	t.WordHighlight = a.wordHLEnabled
-	a.requestFileDiff(path)
-	a.tabs = append(a.tabs, t)
-	a.activeTab = len(a.tabs) - 1
+	a.requestFileDiff(t.Path)
+}
+
+// announceTab tells the integrations a document is now open. The other
+// half of wireTab, split off because these three all want a tab that is
+// already IN a.tabs — a provider's marks arrive asynchronously and must
+// land on a tab the render walk can find.
+func (a *App) announceTab(t *editor.Tab) {
 	a.lspOpenDoc(t)
 	a.copilotOpenDoc(t)
 	// Fire the plugin "open" event last, once the tab is fully wired:
 	// a provider's marks arrive asynchronously and land on a tab that
 	// already has its decoration source attached.
 	a.pluginsOnEvent(plugins.EventOpen, t)
-	a.flash(fmt.Sprintf("Opened %s", filepath.Base(path)))
 }
 
 // saveActiveTab writes the active tab's buffer to disk.

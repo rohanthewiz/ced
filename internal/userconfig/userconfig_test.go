@@ -1099,3 +1099,81 @@ func TestSaveFindAllDock_RoundTripsUnknownKeys(t *testing.T) {
 		t.Errorf("reloaded FindAllDock = %q, want right", cfg.FindAllDock)
 	}
 }
+
+// TestSession_LoadAndSave pins the session key: default on (an editor
+// pointed at a project should give the project back), "off" honoured,
+// an unknown value reported rather than silently ignored, and SaveSession
+// round-tripping alongside hand-set keys like every other SaveX.
+func TestSession_LoadAndSave(t *testing.T) {
+	if !Defaults().Session {
+		t.Fatal("Defaults().Session = false, want true")
+	}
+	cases := map[string]bool{
+		`{"session":"on"}`:    true,
+		`{"session":"off"}`:   false,
+		`{"session":" OFF "}`: false,
+		`{}`:                  true,
+	}
+	for body, want := range cases {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", body, err)
+		}
+		if cfg.Session != want {
+			t.Errorf("Load(%s).Session = %v, want %v", body, cfg.Session, want)
+		}
+	}
+
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"session":"maybe"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("invalid session value should error")
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"icons\": \"on\",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveSession(path, false); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.Session || cfg.Icons != IconsOn {
+		t.Fatalf("round trip lost values: session=%v icons=%q", cfg.Session, cfg.Icons)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}
+
+// TestStatePathSitsBesideConfig pins state.json into the same directory
+// as config.json, under XDG and the home fallback both. The two files are
+// deliberately separate — machine churn vs. hand-edited preferences — but
+// they must never end up in different DIRECTORIES, or a user who moves
+// their config would leave half the editor's state behind.
+func TestStatePathSitsBesideConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got, want := StatePath(), filepath.Join("/xdg", "ced", "state.json"); got != want {
+		t.Fatalf("StatePath() = %q, want %q", got, want)
+	}
+	if got, want := filepath.Dir(StatePath()), filepath.Dir(DefaultPath()); got != want {
+		t.Fatalf("state.json lives in %q but config.json lives in %q", got, want)
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "/tmp/home-test")
+	if got, want := StatePath(), filepath.Join("/tmp/home-test", ".config", "ced", "state.json"); got != want {
+		t.Fatalf("StatePath() fallback = %q, want %q", got, want)
+	}
+}

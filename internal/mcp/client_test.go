@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rohanthewiz/ced/internal/lsp"
 )
@@ -86,6 +87,27 @@ func (f *fakeServer) methods() []string {
 	return out
 }
 
+// waitForMethods blocks until the fake has recorded at least n requests,
+// or the test's patience runs out. The initialized NOTIFICATION is
+// fire-and-forget — Connect writes it and returns without waiting for a
+// reply, because there is no reply — so a test that reads methods()
+// immediately is racing the fake's own reader goroutine. Waiting for the
+// count is the fix; sleeping would only make the race rarer.
+func (f *fakeServer) waitForMethods(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		f.mu.Lock()
+		got := len(f.calls)
+		f.mu.Unlock()
+		if got >= n {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d requests, saw %v", n, f.methods())
+}
+
 // paramsFor returns the params of the first call to method.
 func (f *fakeServer) paramsFor(method string) json.RawMessage {
 	f.mu.Lock()
@@ -150,6 +172,7 @@ func TestConnect_Handshake(t *testing.T) {
 		return map[string]any{}, nil
 	})
 
+	f.waitForMethods(t, 2)
 	got := f.methods()
 	if len(got) < 2 || got[0] != "initialize" || got[1] != "notifications/initialized" {
 		t.Fatalf("handshake sequence = %v, want initialize then notifications/initialized", got)

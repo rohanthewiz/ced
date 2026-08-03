@@ -73,6 +73,21 @@ func newTestApp(t *testing.T, root string) *App {
 	themeDirFn = func() string { return filepath.Join(themeHome, "themes") }
 	themeConfigPathFn = func() string { return filepath.Join(themeHome, "config.json") }
 	t.Cleanup(func() { themeDirFn, themeConfigPathFn = prevThemeDir, prevThemeCfg })
+	// Point the workspace state at a throwaway directory. This one is
+	// load-bearing rather than merely tidy: Close() records the session
+	// and menuToggleSession writes config.json, so without the seam a
+	// test run would rewrite the developer's real recent-folders list and
+	// their session-restore preference. Tests that exercise the feature
+	// write into sessionHome.
+	sessionHome := t.TempDir()
+	prevStatePath, prevSessionCfg := sessionStatePathFn, sessionConfigPathFn
+	sessionStatePathFn = func() string { return filepath.Join(sessionHome, "state.json") }
+	sessionConfigPathFn = func() string { return filepath.Join(sessionHome, "config.json") }
+	t.Cleanup(func() { sessionStatePathFn, sessionConfigPathFn = prevStatePath, prevSessionCfg })
+	// Match the shipped default (config "session" is on): the App is
+	// built by hand here, so the zero value would put every test in a
+	// state the product never ships in.
+	a.sessionEnabled = true
 	a.setActiveFolder(tree.Root.Path)
 	a.width, a.height = scr.Size()
 	// Kill the LSP integration for tests: openFile would otherwise
@@ -1903,9 +1918,9 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 
 // TestMenuLayout_NoCustomActions pins down the baseline geometry with
 // every section expanded: the pinned top zone contributes two rows (the
-// command palette + the expand/collapse-all toggle), thirteen collapsible
-// groups each contribute a header row (13) plus their 87 action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 102 total. The
+// command palette + the expand/collapse-all toggle), fourteen collapsible
+// groups each contribute a header row (14) plus their action rows, and
+// Quit renders headerless behind a divider (its 1 row) — 114 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1913,16 +1928,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 117 {
-		t.Errorf("modalHeight = %d, want 117", h)
+	if h != 120 {
+		t.Errorf("modalHeight = %d, want 120", h)
 	}
-	if got := len(items); got != 111 {
-		t.Errorf("row count = %d, want 111 (2 top-zone + 95 group actions + 14 headers)", got)
+	if got := len(items); got != 114 {
+		t.Errorf("row count = %d, want 114 (2 top-zone + 98 group actions + 14 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
 	// one setting off the headerless Quit group (105) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 114}
+	wantDiv := []int{2, 5, 117}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2250,8 +2265,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 120 { // 117 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 120", h)
+	if h != 123 { // 120 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 123", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

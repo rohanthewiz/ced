@@ -222,14 +222,47 @@ commit, with tests, per the project's testing convention.
 | 4 | Project search | §6 (find in project) | **done** — see the preview note |
 | 5 | Find verbs | replace, case/whole-word, go to line | **done** |
 | 6 | Compare | file↔file, compare with pasted text | **done** — pure-Go differ, see the note below |
-| 7 | Open folder | recent folders, bare-`ced` restore | pending |
-| 8 | Session restore | open tabs + cursors per root | pending |
+| 7 | Open folder | recent folders, `--last` | **done** — see the note below |
+| 8 | Session restore | open tabs + cursors per root | **done** — same change |
 | 9 | LSP verbs | document symbols first, then references/rename/actions | pending |
 | 10 | Terminal diagnostics | scrollback → `diag.go` → clickable jumps | pending |
 | 11 | `--wait` / `--remote` | `$EDITOR` integration, single-instance open | pending |
 | 12 | Undo memory cap | byte-budget the snapshot stack | pending |
 
 Stages 1–4 were the explicitly requested starting order.
+
+### Note from stages 7+8: bare `ced` still opens the cwd
+
+The plan sketched "bare `ced` opening the last folder". That lost on
+contact with the gesture the editor is actually launched with: `cd
+myproj && ced`. Silently landing in a different project would make that
+reflex a lie, and `ced .` as the way to say "here" is a tax on the
+common case to serve the rare one. What shipped instead:
+
+- bare `ced` opens the current directory, exactly as before;
+- the folder's **tabs and cursors** come back (stage 8), so `cd myproj &&
+  ced` does restore your session — the half of "restore" that was
+  actually worth having;
+- `ced --last` is the explicit form, and ≡ → File → Recent folders… is
+  the in-editor twin.
+
+Two other things settled here that the plan didn't anticipate:
+
+**The root switch is a restart, and it lives in `main`.** The plan said
+teardown → `New(newRoot)`, and that is right, but the App cannot rebuild
+itself — so `requestOpenFolder` parks the root on `App.nextRoot`, sets
+`quit`, and main's loop does the teardown. Close is called explicitly
+there rather than deferred; a deferred Close fires when main returns,
+which would leave the old screen, goroutines and language servers alive
+underneath the new App.
+
+**State lives in its own file** (`~/.config/ced/state.json`), separate
+from config.json for the inverse of mcp.json's reason: mcp.json is
+separate because the user writes it, this one because ced rewrites it on
+every exit. It also resolves symlinks when keying a folder — `ced
+/tmp/proj` and `cd /tmp/proj && ced` produce different `rootDir`
+spellings on macOS, and without normalisation one directory keeps two
+half-sessions that overwrite each other in turn.
 
 ### Note from stage 6: the differ is ced's own, and it is patience
 

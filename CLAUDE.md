@@ -100,6 +100,8 @@ internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → au
 internal/app/zipops.go        Zip file/folder — stdlib archive/zip, async zipDoneEvent
 internal/app/format.go        Format-on-save bridge: project config, builtin Go, prompts
 internal/app/nav.go           Back/forward file-navigation history (Esc-o/O, Alt+←/→)
+internal/session/session.go   state.json: recent folders + per-folder tab sessions
+internal/app/folder.go        Open folder (restart), recent list, session record/restore
 internal/app/gitcommitmsg.go  Commit the panel's selection + agent-drafted messages
 internal/app/gitlog.go        Git log panel: commit list + `git show` detail (Esc-L)
 internal/app/gitlogactions.go Git log verbs: cherry-pick, revert, reset, branch/tag, copies
@@ -107,7 +109,7 @@ internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PT
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, chat*, theme) + mcp.json / themes / skills dir paths
+internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
 internal/theme/theme.go       Theme struct (tcell colors) + Default() fallback
 internal/theme/palette.go     Canonical color keys + the 8-core derivation table
@@ -1238,6 +1240,78 @@ rule as a browser. LSP definition jumps record explicitly with the
 request's origin position (a same-file jump moves only the cursor, which
 path-change-only recording would miss) and open with suppress on.
 
+### Open folder + session restore (internal/session + app/folder.go)
+Switching projects without leaving the editor, a recent-folders list, and
+each folder's tabs and cursors coming back when you return. House rules:
+
+- **A ROOT SWITCH IS A RESTART.** `rootDir` itself is touched in a handful
+  of places; everything DERIVED from it is the cost — the tree, the
+  finder index, git status, both git panels, gopls's `rootUri` (fixed at
+  initialize), the ACP session cwd, MCP's `roots/list`, plugin working
+  directories, the compare panel's two sides. So `requestOpenFolder`
+  parks the new root on `App.nextRoot`, sets `quit`, and **main** tears
+  the App down and calls `New(newRoot)` in a loop. One code path builds a
+  workspace and it's the one that runs on every launch; a second
+  re-derivation path would be exercised by nobody. Close is called
+  EXPLICITLY there, not deferred — a deferred one fires when main
+  returns, leaving the old screen, goroutines and language servers alive
+  under the new App. The screen blinks once; that is the whole price.
+- **The state file is `~/.config/ced/state.json`, and it is separate from
+  config.json for the INVERSE of mcp.json's reason.** mcp.json is
+  separate because the user hand-writes it; this one is separate because
+  ced rewrites it on every folder switch and every exit. Machine churn
+  has no business in a file somebody hand-edits, and a corrupt state file
+  must cost a tab list rather than a settings file. `userconfig` owns
+  only the PATH (`StatePath`); the schema lives in `internal/session`.
+- **Order IS the recency** — the entry list is stored most-recent-first
+  rather than carrying timestamps that would have to be sorted on load.
+  Nothing shows "opened 2 hours ago", so a timestamp would be a field
+  with no reader and one more thing to get wrong across clock skew.
+- **The visit is recorded at STARTUP, the tabs at Close.** That split is
+  what makes `--last` and the recent list correct after a crash: a run
+  that dies costs its tab list, never the fact that you were there.
+- **`session.Normalize` resolves symlinks, and the app compares through
+  it.** `ced /tmp/proj` roots at the path as typed; `cd /tmp/proj && ced`
+  roots at what the kernel reports, which on macOS is `/private/tmp/proj`.
+  Without it one directory keeps two half-sessions that overwrite each
+  other in turn. Best-effort: a path that no longer exists keeps its
+  absolute form, or `Remove` could never prune it.
+- **Restore checks the file EXISTS itself** rather than leaning on
+  `editor.NewTab`, which deliberately succeeds on a missing path — that's
+  the `ced foo.go` new-file intent, right for an explicit open and wrong
+  here. Nobody asked to resurrect a file they deleted, and an empty
+  buffer wearing its name is the worst way to say it's gone. Everything
+  else degrades in silence too (too big, binary, unreadable): the user
+  asked to open a FOLDER, so a wall of messages about files they may not
+  remember having open is noise. Cursor and scroll come back through
+  `Tab.RestoreView` — the stored scroll is part of what's being put back,
+  so this must NOT set `cursorMoved` (the Find-all Esc argument).
+- **Tabs are wired by `wireTab` / `announceTab`, shared with openFile.**
+  Restore is the second way a tab is born; a second copy of the wiring
+  would drift and a restored tab would quietly lack the git gutter, the
+  word highlight, or a plugin's marks.
+- **Bare `ced` opens the CURRENT directory** and deliberately does not
+  reopen the last folder — `cd myproj && ced` is the gesture this editor
+  is launched with, and landing somewhere else would make that reflex a
+  lie. You get the folder's TABS back instead, and `ced --last` for the
+  times you really did mean "wherever I was".
+- **A folder switch owes the same unsaved-changes modal an exit does**
+  (it discards the whole workspace), and a Save that FAILS must not
+  switch — same short-circuit as `menuQuit`.
+- The recent picker is `openPicker` (house rule) and EXCLUDES the current
+  root rather than annotating it, unlike the theme picker: re-picking a
+  theme is how you revert a preview, but re-picking your own folder
+  rebuilds an identical workspace. Deleted folders are PRUNED during the
+  walk — a row you can't open is worse than a shorter list.
+- Rows live at the top of the ≡ **File** group (the File>Open Folder
+  convention) with **no leader key**: the flat table is out of mnemonic
+  letters and this is a once-an-hour action. `"session"` is the persisted
+  toggle; folders are recorded with it off, because the recent list is a
+  different feature reading the same file.
+- `sessionStatePathFn` / `sessionConfigPathFn` are package vars;
+  newTestApp pins both at temp dirs so no test can rewrite the
+  developer's real recent-folders list or their restore preference.
+
 ### Menu shortcut hints
 `menuItemDef.shortcut` is a display-only accelerator column rendered
 right-aligned and muted in the ≡ menu ("esc s", "alt+←"). Dispatch
@@ -1604,7 +1678,10 @@ loops forever.
   ced never runs one. A SKILL.md is markdown handed to the chat agent,
   so the skills directories — including the `~/.claude/skills` and
   `<project>/.claude/skills` ced reads but doesn't own — extend the
-  AGENT, not the editor.)
+  AGENT, not the editor. `state.json` is the odd one out and earns its
+  place differently again: it holds no preferences at all, only what the
+  editor did — which folders you opened and where your cursor was — so
+  deleting it costs convenience and changes no behavior.)
 - **A HOST plugin system** — anything ced loads and runs *as code*: Go
   `plugin` .so files (they'd cost the static binary and CGO), an
   embedded interpreter, or an editor API that has to stay stable across

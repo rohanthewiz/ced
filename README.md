@@ -176,9 +176,18 @@ ced              # opens the current directory
 ced ~/code/app   # opens a specific project root
 ced main.go      # opens a file (project root = its parent dir)
 ced new-file.go  # creates the file on first save (vim-style)
+ced --last       # reopen the most recently edited folder
 ced --version    # print version and exit
 ced --help       # print short usage
 ```
+
+Bare `ced` always opens the current directory — `cd myproj && ced` means
+what it says. What comes back with you is the **tabs**: each folder
+remembers which files were open and where the cursors were, and reopening
+it restores them. `≡` → File → **Open folder…** / **Recent folders…**
+switches projects without leaving the editor; **Disable session restore**
+in the same group turns the tab restore off (folders are still
+remembered, so the recent list keeps working).
 
 Then:
 

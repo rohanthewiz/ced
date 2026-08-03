@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 
 	"github.com/rohanthewiz/ced/internal/app"
+	"github.com/rohanthewiz/ced/internal/session"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 	"github.com/rohanthewiz/ced/internal/version"
 )
 
@@ -41,16 +43,25 @@ type cliResult struct {
 	Action   cliAction
 	RootDir  string
 	OpenFile string // empty when no file was named (or for non-edit actions)
+	Last     bool   // --last: root at the most recently opened folder
 	Err      error
 }
 
 // resolveArgs parses the editor's tiny CLI surface. The argument can be:
 //
 //   - a flag (--version / -v / --help / -h) → print-and-exit action
+//   - --last / -l → reopen the most recently edited folder
 //   - a directory path → use as the editor's root
 //   - a file path → root at the file's parent dir, open the file in a tab
 //   - a missing path → assume "ced foo.go" means "create foo.go" —
 //     same intuition as `vim foo.go` on a non-existent file.
+//
+// Bare `ced` opens the CURRENT directory, and deliberately does not
+// reopen the last folder: `cd myproj && ced` is the gesture this editor
+// is launched with, and silently landing somewhere else would make that
+// reflex a lie. What you get instead is the same folder's TABS back
+// (session restore, see internal/app/folder.go), and --last for the
+// times you really did mean "wherever I was".
 //
 // Pure function; no IO beyond os.Stat. Returns a result the caller acts
 // on — keeps main() short and lets tests pin behavior without launching
@@ -64,6 +75,8 @@ func resolveArgs(args []string) cliResult {
 		return cliResult{Action: actionVersion}
 	case "--help", "-h", "help":
 		return cliResult{Action: actionHelp}
+	case "--last", "-l", "last":
+		return cliResult{Action: actionEdit, RootDir: ".", Last: true}
 	}
 
 	target := args[0]
@@ -104,8 +117,12 @@ Usage:
   ced                     Open the current directory.
   ced <directory>         Open a project directory.
   ced <file>              Open a file (its parent becomes the project root).
+  ced --last              Reopen the most recently edited folder.
   ced --version           Print the version and exit.
   ced --help              Print this help and exit.
+
+Folders remember the tabs you had open; ≡ → File → Open folder switches
+projects without leaving the editor.
 
 Once running, click ≡ (top-left), right-click anywhere, or double-tap Esc
 for the action menu. See https://github.com/rohanthewiz/ced for
@@ -132,19 +149,59 @@ func main() {
 		return
 	}
 
-	a, err := app.New(res.RootDir)
+	root := res.RootDir
+	if res.Last {
+		if last := lastFolder(); last != "" {
+			root = last
+		} else {
+			fmt.Fprintln(os.Stderr, "ced: no recent folder recorded — opening the current directory")
+		}
+	}
+
+	// The editor runs in a loop rather than once because "Open folder"
+	// is implemented as a restart: the App parks the new root on
+	// NextRoot and asks Run to return, and we build a fresh one. Every
+	// subsystem derived from rootDir — tree, finder index, git, gopls's
+	// rootUri, the ACP session cwd, MCP roots, plugin working dirs — is
+	// then constructed by the same code that constructs it at startup,
+	// instead of by a second re-derivation path nobody exercises. See
+	// internal/app/folder.go.
+	for openFile := res.OpenFile; ; openFile = "" {
+		a, err := app.New(root)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ced: failed to start:", err)
+			os.Exit(1)
+		}
+		if openFile != "" {
+			a.OpenFile(openFile)
+		}
+		runErr := a.Run()
+		next := a.NextRoot()
+		// Close explicitly, not deferred: a deferred Close would only
+		// fire when main returns, so a folder switch would leave the old
+		// screen, its goroutines and its language servers alive
+		// underneath the new App.
+		a.Close()
+		if runErr != nil {
+			fmt.Fprintln(os.Stderr, "ced:", runErr)
+			os.Exit(1)
+		}
+		if next == "" {
+			return
+		}
+		root = next
+	}
+}
+
+// lastFolder resolves --last: the most recently opened folder from the
+// workspace state file, or "" when there is none (first run, or an
+// unreadable state file). Errors are swallowed on purpose — the caller
+// falls back to the current directory, which is a better answer than
+// refusing to start over a convenience file.
+func lastFolder() string {
+	st, err := session.Load(userconfig.StatePath())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "ced: failed to start:", err)
-		os.Exit(1)
+		return ""
 	}
-	defer a.Close()
-
-	if res.OpenFile != "" {
-		a.OpenFile(res.OpenFile)
-	}
-
-	if err := a.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "ced:", err)
-		os.Exit(1)
-	}
+	return st.Last()
 }

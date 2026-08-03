@@ -50,6 +50,10 @@
 //	                        // (each change still asks permission first)
 //	{"chatwrite": "off"}    // read-only chat: ced declares no write
 //	                        // capability and refuses every edit
+//	{"session": "on"}       // default; opening a folder reopens the tabs
+//	                        // and cursor positions it had last time
+//	{"session": "off"}      // folders are still remembered (for the
+//	                        // recent list), but tabs are never reopened
 //	{"theme": "<name>"}     // named color theme ("tokyo-night" — the
 //	                        // default — "darcula", "solarized-light", …,
 //	                        // or a user theme from themes/*.json). Not
@@ -201,6 +205,16 @@ type Config struct {
 	// the terminal to somebody else). Persisted by the ≡ toggle.
 	Plugins bool
 
+	// Session controls whether opening a folder reopens the tabs and
+	// cursor positions it had when it was last closed. Defaults to on —
+	// an editor you point at a project should give you back the project,
+	// which is what every graphical editor already does. Off is for
+	// people who want a deliberate blank slate each time; the folder is
+	// still RECORDED either way, because the recent-folders list is a
+	// different feature reading the same file. Persisted by the ≡ toggle,
+	// same as AutoSave.
+	Session bool
+
 	// Theme is the named color theme's registry id ("tokyo-night",
 	// "darcula", a user theme's filename stem, …). Empty (the default)
 	// means the shipped default. Deliberately not validated here for
@@ -216,7 +230,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true}
+	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Session: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -239,6 +253,7 @@ type fileFormat struct {
 	ChatContext string `json:"chatcontext,omitempty"`
 	ChatWrite   string `json:"chatwrite,omitempty"`
 	Plugins     string `json:"plugins,omitempty"`
+	Session     string `json:"session,omitempty"`
 	Theme       string `json:"theme,omitempty"`
 }
 
@@ -289,6 +304,20 @@ func RcPath() string { return configFilePath("rc.grsh") }
 // lives in internal/mcp; this package only knows where the file is, so
 // the two config locations can never drift apart.
 func MCPPath() string { return configFilePath("mcp.json") }
+
+// StatePath returns the canonical workspace-state location:
+// $XDG_CONFIG_HOME/ced/state.json, falling back to
+// ~/.config/ced/state.json (or "" when no config location resolves).
+//
+// A file of its own, and the reasoning is the inverse of mcp.json's.
+// That one is separate because the user hand-writes it; this one is
+// separate because ced REWRITES it constantly — every folder switch and
+// every exit — and machine churn has no business landing in the same
+// file as preferences somebody edited by hand. It also means a corrupt
+// state file costs a tab list, not a settings file. The schema lives in
+// internal/session; this package only knows where the file is, so the
+// config locations can never drift apart.
+func StatePath() string { return configFilePath("state.json") }
 
 // ThemesDir returns the canonical user-themes directory:
 // $XDG_CONFIG_HOME/ced/themes, falling back to ~/.config/ced/themes
@@ -519,6 +548,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(ff.Session)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.Session = true
+	case "off":
+		cfg.Session = false
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: session must be \"on\" or \"off\" (got %q)",
+			path, ff.Session,
+		)
+	}
+
 	// Any non-blank value is accepted as-is — see Config.ChatModel,
 	// Config.ChatAgent, and Config.Theme for why there's no allowlist to
 	// check against.
@@ -631,6 +674,16 @@ func SavePlugins(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "plugins", val)
+}
+
+// SaveSession persists the restore-tabs-on-open preference into the
+// config file at path. See saveKey for the round-trip guarantees.
+func SaveSession(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "session", val)
 }
 
 // SaveTheme persists the named color theme into the config file at

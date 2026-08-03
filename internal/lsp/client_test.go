@@ -593,3 +593,150 @@ func TestDocumentSymbolsNullResult(t *testing.T) {
 		t.Errorf("null result = (%+v, %v), want (nil, nil)", got.syms, got.err)
 	}
 }
+
+// renameResult is the (edit, err) pair a Rename call answers with, ferried
+// off the request goroutine so the test can drive the fake server in
+// between.
+type renameResult struct {
+	edit *WorkspaceEdit
+	err  error
+}
+
+// TestRenameRequest pins the wire payload. The old name is deliberately NOT
+// on it — the position is the symbol's identity, which is the whole reason
+// this differs from a textual replace-all — so the test asserts the three
+// fields that are, and that the answer comes back through
+// ParseWorkspaceEdit rather than a second decoder.
+func TestRenameRequest(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	resCh := make(chan renameResult, 1)
+	go func() {
+		edit, err := c.Rename("/tmp/proj/main.go", Position{Line: 2, Character: 8}, "bar")
+		resCh <- renameResult{edit, err}
+	}()
+
+	m := srv.read(t)
+	if m.Method != "textDocument/rename" {
+		t.Fatalf("method = %q, want textDocument/rename", m.Method)
+	}
+	var params RenameParams
+	if err := json.Unmarshal(m.Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if params.TextDocument.URI != PathToURI("/tmp/proj/main.go") {
+		t.Errorf("uri = %q, want %q", params.TextDocument.URI, PathToURI("/tmp/proj/main.go"))
+	}
+	if params.Position.Line != 2 || params.Position.Character != 8 {
+		t.Errorf("position = %+v, want 2:8", params.Position)
+	}
+	if params.NewName != "bar" {
+		t.Errorf("newName = %q, want %q", params.NewName, "bar")
+	}
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"documentChanges":[
+		{"textDocument":{"uri":"file:///tmp/proj/a.go","version":3},"edits":[
+			{"range":{"start":{"line":1,"character":4},"end":{"line":1,"character":7}},"newText":"bar"}
+		]}
+	]}}`, *m.ID))
+
+	got := <-resCh
+	if got.err != nil {
+		t.Fatalf("Rename: %v", got.err)
+	}
+	if got.edit == nil || len(got.edit.Documents) != 1 {
+		t.Fatalf("edit = %+v, want one document", got.edit)
+	}
+	doc := got.edit.Documents[0]
+	if doc.Path != "/tmp/proj/a.go" || len(doc.Edits) != 1 || doc.Edits[0].NewText != "bar" {
+		t.Errorf("document = %+v, want a.go with one edit to \"bar\"", doc)
+	}
+	if doc.Version == nil || *doc.Version != 3 {
+		t.Errorf("version = %v, want a claim of 3 — the staleness check needs it", doc.Version)
+	}
+}
+
+// TestRenameNullResult pins the answer a server gives when the rename is
+// legal but changes nothing: nil with a nil error, NOT an error. The app
+// layer reports that as "nothing to change", which is a different sentence
+// from a refusal and has to stay one.
+func TestRenameNullResult(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	resCh := make(chan renameResult, 1)
+	go func() {
+		edit, err := c.Rename("/tmp/proj/main.go", Position{}, "bar")
+		resCh <- renameResult{edit, err}
+	}()
+
+	m := srv.read(t)
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":null}`, *m.ID))
+
+	got := <-resCh
+	if got.err != nil || got.edit != nil {
+		t.Errorf("null result = (%+v, %v), want (nil, nil)", got.edit, got.err)
+	}
+}
+
+// TestRenameServerRefusal pins that a server's own reason survives the hop.
+// gopls names the rule it enforced ("cannot rename package"), and that
+// message is better than anything ced could synthesise — so the client must
+// return it rather than flattening every failure to "rename failed".
+func TestRenameServerRefusal(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	resCh := make(chan renameResult, 1)
+	go func() {
+		edit, err := c.Rename("/tmp/proj/main.go", Position{}, "bar")
+		resCh <- renameResult{edit, err}
+	}()
+
+	m := srv.read(t)
+	srv.write(t, fmt.Sprintf(
+		`{"jsonrpc":"2.0","id":%d,"error":{"code":-32602,"message":"can't rename package: not supported"}}`,
+		*m.ID))
+
+	got := <-resCh
+	if got.err == nil {
+		t.Fatal("a server refusal came back as success")
+	}
+	if !strings.Contains(got.err.Error(), "can't rename package") {
+		t.Errorf("error = %v, want the server's own reason", got.err)
+	}
+}
+
+// TestRenameCapabilityDeclared pins the handshake half. A server that isn't
+// told the client speaks textDocument/rename is entitled to answer that it
+// has no rename provider, which would make the verb dead on arrival with
+// nothing on screen to explain it.
+func TestRenameCapabilityDeclared(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Initialize("/tmp/proj") }()
+
+	m := srv.read(t)
+	var params struct {
+		Capabilities struct {
+			TextDocument map[string]json.RawMessage `json:"textDocument"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(m.Params, &params); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if _, ok := params.Capabilities.TextDocument["rename"]; !ok {
+		t.Error("initialize did not declare textDocument.rename")
+	}
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"capabilities":{}}}`, *m.ID))
+	// The pipes are unbuffered, so the trailing "initialized" notification
+	// has to be drained here or Initialize never returns.
+	if n := srv.read(t); n.Method != "initialized" {
+		t.Errorf("second message = %q, want the initialized notification", n.Method)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+}

@@ -447,6 +447,16 @@ func (c *Client) Initialize(rootDir string) error {
 				"publishDiagnostics": map[string]any{},
 				"definition":         map[string]any{},
 				"references":         map[string]any{},
+				// Rename is declared bare, without prepareSupport. That
+				// option asks the server to validate a position and hand
+				// back a placeholder BEFORE the user types a new name, and
+				// it buys a round trip ced doesn't need: the word under the
+				// cursor already seeds the prompt (cursorWord), and gopls
+				// refuses an illegal rename with a better message than a
+				// prepare step's silence. Declaring it would also mean
+				// handling the request's three response shapes for a check
+				// the rename itself repeats.
+				"rename": map[string]any{},
 				// Hierarchical symbols are the shape worth asking for:
 				// gopls nests a type's methods under it, which is what
 				// makes the "go to symbol" picker read like an outline
@@ -586,6 +596,39 @@ func (c *Client) References(path string, pos Position, includeDecl bool) ([]Loca
 		return nil, err
 	}
 	return locs, nil
+}
+
+// renameTimeout is the response deadline for textDocument/rename.
+//
+// It borrows references' 30s budget for references' reason and then some:
+// a rename IS a project-wide reference search — gopls has to type-check
+// every package that could import the symbol — plus the work of building
+// an edit for every file that search turned up. If any verb in this client
+// deserves more than the 5s default, it is this one, and a timeout here is
+// especially expensive to the user, who has already typed the new name.
+const renameTimeout = 30 * time.Second
+
+// Rename asks the server to rewrite every binding of the symbol at pos to
+// newName, and returns the workspace edit it wants applied. Applying it is
+// the caller's business (see app/workspaceedit.go); this only asks.
+//
+// A nil edit with a nil error is a REAL ANSWER, not a failure — it is what
+// a server sends when the rename is legal but changes nothing. The two
+// ways a server refuses are an RPC error, whose message carries the reason
+// ("renaming this package is not supported"), and an edit that also names
+// resource operations, which the app layer refuses by name because ced
+// declared at initialize that it cannot perform them.
+func (c *Client) Rename(path string, pos Position, newName string) (*WorkspaceEdit, error) {
+	params := RenameParams{
+		TextDocument: TextDocumentIdentifier{URI: PathToURI(path)},
+		Position:     pos,
+		NewName:      newName,
+	}
+	var raw json.RawMessage
+	if err := c.CallWithTimeout("textDocument/rename", params, &raw, renameTimeout); err != nil {
+		return nil, err
+	}
+	return ParseWorkspaceEdit(raw), nil
 }
 
 // SignatureHelpAt asks which callable the position sits inside and which

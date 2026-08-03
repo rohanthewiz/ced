@@ -336,6 +336,12 @@ func builtinMenuGroups() []menuGroup {
 			// language server at all: `go build` and `grep -n` are the
 			// providers.
 			{label: "Go to terminal output location…", shortcut: "esc ~", action: (*App).menuTermLocations, enabled: (*App).hasTermOutput},
+			// The one row in this group that WRITES, placed directly above
+			// the row that undoes it: rename is the verb the workspace-edit
+			// primitive was built for, and its cross-file undo is the thing
+			// a user reaches for next when a rename went somewhere they
+			// didn't expect (lsprename.go).
+			{label: "Rename symbol…", shortcut: "esc E", action: (*App).menuRenameSymbol, enabled: (*App).hasLSPActions},
 			// Undo a server-authored multi-file edit as one gesture
 			// (workspaceedit.go). Plain undo already claims the press when
 			// the cursor is in one of the touched files; this row is the
@@ -1377,6 +1383,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPSymbols(e)
 	case *lspReferencesEvent:
 		a.handleLSPReferences(e)
+	case *lspRenameEvent:
+		a.handleLSPRename(e)
 	case *lspSignatureEvent:
 		a.handleLSPSignature(e)
 	case *copilotReadyEvent:

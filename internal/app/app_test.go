@@ -300,7 +300,7 @@ func TestMenuButtonRect(t *testing.T) {
 // to (0,0) when the window is too small to fit it.
 func TestMenuModalRect_Centered(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	// The menu (120 rows fully expanded) outgrew the 40-row default sim
+	// The menu (121 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
 	a.height = 130
@@ -1920,7 +1920,7 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 // every section expanded: the pinned top zone contributes two rows (the
 // command palette + the expand/collapse-all toggle), fourteen collapsible
 // groups each contribute a header row (14) plus their action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 120 total. The
+// Quit renders headerless behind a divider (its 1 row) — 121 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1928,16 +1928,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 126 {
-		t.Errorf("modalHeight = %d, want 126", h)
+	if h != 127 {
+		t.Errorf("modalHeight = %d, want 127", h)
 	}
-	if got := len(items); got != 120 {
-		t.Errorf("row count = %d, want 120 (2 top-zone + 104 group actions + 14 headers)", got)
+	if got := len(items); got != 121 {
+		t.Errorf("row count = %d, want 121 (2 top-zone + 105 group actions + 14 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
 	// one setting off the headerless Quit group (105) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 123}
+	wantDiv := []int{2, 5, 124}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2265,8 +2265,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 129 { // 126 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 129", h)
+	if h != 130 { // 127 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 130", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

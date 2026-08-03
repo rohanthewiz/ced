@@ -70,6 +70,7 @@ type lspConn interface {
 	DidClose(path string) error
 	Definition(path string, pos lsp.Position) ([]lsp.Location, error)
 	References(path string, pos lsp.Position, includeDecl bool) ([]lsp.Location, error)
+	Rename(path string, pos lsp.Position, newName string) (*lsp.WorkspaceEdit, error)
 	HoverAt(path string, pos lsp.Position) (*lsp.Hover, error)
 	SignatureHelpAt(path string, pos lsp.Position) (*lsp.Signature, error)
 	DocumentSymbols(path string) ([]lsp.Symbol, error)
@@ -93,6 +94,13 @@ type lspState struct {
 	// definition and hover — which are content with a path check — it
 	// needs to know which request it belongs to.
 	refSeq int
+
+	// renameSeq generations the rename requests (lsprename.go), for a
+	// harder version of refSeq's reason: that answer opens a panel, this
+	// one WRITES FILES. Two renames in flight together must not have the
+	// older one's edit planned against a buffer the newer one has already
+	// rewritten.
+	renameSeq int
 
 	// diags is keyed by absolute path. gopls publishes for any file in
 	// the workspace, not just open ones; keeping them all costs little

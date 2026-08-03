@@ -83,6 +83,7 @@ internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
 internal/app/lspreferences.go References → the Find-all panel's project mode
 internal/app/lspsignature.go  Signature help → the hover tooltip, active param lit
+internal/app/lsprename.go     Rename symbol: prompt → server edit → the primitive
 internal/app/hovermodal.go    Caret-anchored tooltip (hover + signature help)
 internal/app/workspaceedit.go Cross-file apply: validate, write, one-gesture undo
 internal/app/termdiag.go      Terminal output → clickable path:line:col jumps
@@ -891,6 +892,59 @@ properly rather than special-casing rename. House rules:
   covers the common case. The ≡ **Code** row (`wsEditUndoLabel`, dynamic)
   is the path for the two cases plain undo can't serve: the active tab
   isn't a participant, or every touched file went straight to disk.
+
+### Rename symbol (lsp/client.go + app/lsprename.go)
+The first verb built on the workspace-edit primitive, and the proof that
+building the primitive first was right: prompt, ask, hand over. Esc-E, ≡
+Code. House rules:
+
+- **It owns almost nothing.** Everything a cross-file rewrite raises —
+  which files to open (none), which text the coordinates were measured
+  against, rollback, the one-gesture undo, the receipt — belongs to
+  `applyServerEdit`. What this file owes on top is the LABEL
+  (`renameLabel`, one spelling), because it becomes the confirmation
+  title, the flash, the ≡ undo row and the receipt heading, and four
+  hand-built strings would drift. A future verb that needs more than a
+  label from the primitive is the signal something is wrong with the
+  primitive, not with the verb.
+- **THE PROMPT SITS BETWEEN THE ASK AND THE REQUEST**, which is why
+  `startRename` is split out of `menuRenameSymbol`. The modal owns the
+  keyboard, so the user can't type into the buffer — but the LSP debounce,
+  auto-save, a chat agent's write and the disk reconciliation are all
+  still running. So the position is captured when the prompt OPENS,
+  re-verified against `EditRev` when it SUBMITS, and `captureWSRequest` is
+  taken at submit time AFTER the flush, so the contract describes the text
+  the server is about to answer from rather than what was on screen when
+  the user reached for the key. Capturing before the flush records the
+  pre-sync revision and makes the plan refuse its own request.
+- **Generation-checked, because this one WRITES FILES.** Stronger than the
+  references rule (that answer only opens a panel) and stronger than
+  definition/hover's path check: a superseded rename's edit planned against
+  a buffer the newer one already rewrote corrupts it plausibly.
+- **The old name never goes on the wire** — the POSITION is the symbol's
+  identity, which is exactly what separates this from a textual
+  replace-all. `cursorWord` is a UI affordance only: it seeds the prompt so
+  a small correction is a keystroke, and it refuses a cursor on nothing
+  BEFORE the user is asked to think of a name for it.
+- **Two client-side refusals, deliberately narrow**: an unchanged name
+  (the round trip is guaranteed to come back with "nothing to change",
+  which is a confusing way to say "you didn't change it") and whitespace
+  (no language ced will speak allows it). Everything else — a keyword, a
+  leading digit, a collision — is the SERVER's judgment, and its message
+  names the actual rule. Don't grow this list into an identifier validator.
+- **No `prepareSupport`.** That option buys a round trip to validate a
+  position and hand back a placeholder ced already has, and gopls refuses
+  an illegal rename with a better message than a prepare step's silence.
+  `renameTimeout` is 30s for references' reason and then some — a rename
+  IS a project-wide reference search plus the edit built from it.
+- Leader is **Esc-E**, the shifted twin of rEplace's `Esc e` under the
+  f/F, p/P, d/D convention: same verb, wider and smarter scope — 'e'
+  replaces text you name in this file by matching characters, 'E' replaces
+  a SYMBOL the compiler names, everywhere it is bound. It is not 'n'
+  (new file) and deliberately not 'N': `\x1bN` is SS2, one of the ESC
+  pairs a terminal can eat before tcell sees it. The ≡ row sits directly
+  above the multi-file undo row — the one write in a group of reads, next
+  to the thing that takes it back.
 
 ### Copilot sidecar (app/copilot.go) — phase 1 of the AI integration
 Runs GitHub's official `copilot-language-server` (native binary, found
@@ -1984,8 +2038,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 104 group actions + 14 headers (120), height 126,
-dividers `[2, 5, 123]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 105 group actions + 14 headers (121), height 127,
+dividers `[2, 5, 124]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

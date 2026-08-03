@@ -42,6 +42,12 @@ type fakeLSPConn struct {
 	sigErr   error
 	symbols  []lsp.Symbol
 	symErr   error
+	// renameEdit is what textDocument/rename answers with. renameName
+	// records the last name asked for, so a test can prove the value that
+	// reached the wire is the one the prompt collected.
+	renameEdit *lsp.WorkspaceEdit
+	renameErr  error
+	renameName string
 }
 
 func (f *fakeLSPConn) record(s string) {
@@ -85,6 +91,14 @@ func (f *fakeLSPConn) Definition(string, lsp.Position) ([]lsp.Location, error) {
 func (f *fakeLSPConn) References(path string, _ lsp.Position, includeDecl bool) ([]lsp.Location, error) {
 	f.record(fmt.Sprintf("references:%s:%t", filepath.Base(path), includeDecl))
 	return f.refLocs, f.refErr
+}
+
+func (f *fakeLSPConn) Rename(path string, _ lsp.Position, newName string) (*lsp.WorkspaceEdit, error) {
+	f.mu.Lock()
+	f.renameName = newName
+	f.mu.Unlock()
+	f.record(fmt.Sprintf("rename:%s:%s", filepath.Base(path), newName))
+	return f.renameEdit, f.renameErr
 }
 
 func (f *fakeLSPConn) HoverAt(string, lsp.Position) (*lsp.Hover, error) {

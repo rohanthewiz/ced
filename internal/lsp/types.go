@@ -155,6 +155,22 @@ type ReferenceParams struct {
 	Context      ReferenceContext       `json:"context"`
 }
 
+// RenameParams is the payload of textDocument/rename — the position of the
+// symbol to rename plus what to call it. Like ReferenceParams it can't
+// reuse TextDocumentPositionParams, because newName is required and sits
+// beside the position rather than inside a nested options object.
+//
+// Note there is no old name on the wire, and that is not an omission: the
+// POSITION is the identity of the thing being renamed. The server resolves
+// it to a symbol and rewrites every binding of that symbol, which is
+// exactly what makes this different from a textual replace-all — and why
+// the answer can reach files the user has never opened.
+type RenameParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	NewName      string                 `json:"newName"`
+}
+
 // Hover is the response payload of textDocument/hover. Contents is
 // left raw because servers are allowed to send several shapes
 // (MarkupContent, MarkedString, arrays of either); HoverText flattens

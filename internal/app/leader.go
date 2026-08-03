@@ -231,6 +231,20 @@ func leaderBindings() []leaderBinding {
 		// the CALL the cursor is standing inside, which is the thing you
 		// want while your hands are between the parentheses.
 		{key: 'I', action: (*App).menuSignatureHelp},
+		// 'E' is rename — the shifted twin of rEplace's 'e', and the pair
+		// says exactly what it should under the f/F, p/P, d/D convention:
+		// same verb, wider and smarter scope. 'e' replaces text you name,
+		// in this file, by matching characters; 'E' replaces a SYMBOL the
+		// compiler names, everywhere it is bound, in files you may never
+		// have opened. The mutating pair also sits apart from the reading
+		// verbs beside it, which is the honest signal for the one leader
+		// here that rewrites the project (lsprename.go).
+		//
+		// It is 'E' and not 'n' for reName because 'n' is new-file, and not
+		// 'N' because "\x1bN" is SS2 — one of the ESC pairs a terminal can
+		// eat before tcell ever sees it, the same trap that keeps '[' and
+		// ']' off the tab-switching keys.
+		{key: 'E', action: (*App).menuRenameSymbol},
 		// Navigation history: 'o' back "out" of a jump — 'b' was
 		// tempting but reads as "buffer" to vim hands. Shifted variant
 		// walks forward again, mirroring the h/H hunk convention.

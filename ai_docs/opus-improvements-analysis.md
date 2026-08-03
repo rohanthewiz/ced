@@ -216,7 +216,7 @@ commit, with tests, per the project's testing convention.
 | # | Stage | Items | Status |
 |---|---|---|---|
 | 0 | Analysis + plan | this document | done |
-| 1 | Highlight debounce | §1 | pending |
+| 1 | Highlight debounce | §1 | **done** — 70.17 ms → 0.0015 ms per keystroke |
 | 2 | Load/save durability | §2, §3, §4 | pending |
 | 3 | Tab switching + overflow | §5 | pending |
 | 4 | Project search | §6 (find in project) | pending |

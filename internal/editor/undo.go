@@ -91,7 +91,7 @@ func (t *Tab) applySnapshot(s snapshot) {
 	// the user still lands where the step happened.
 	t.Carets = nil
 	t.cursorMoved = true
-	t.StyleStale = true
+	t.InvalidateStyles()
 	t.EditRev++
 }
 

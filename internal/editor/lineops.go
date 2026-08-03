@@ -51,7 +51,7 @@ func (t *Tab) DuplicateLines() {
 	t.Cursor.Line += n
 	t.Anchor.Line += n
 	t.Dirty = true
-	t.StyleStale = true
+	t.InvalidateStyles()
 	t.cursorMoved = true
 	t.EditRev++
 }
@@ -93,7 +93,7 @@ func (t *Tab) MoveLines(delta int) bool {
 	t.Cursor.Line += delta
 	t.Anchor.Line += delta
 	t.Dirty = true
-	t.StyleStale = true
+	t.InvalidateStyles()
 	t.cursorMoved = true
 	t.EditRev++
 	return true

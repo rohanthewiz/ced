@@ -772,6 +772,12 @@ type App struct {
 	autoSaveTimer   *time.Timer
 	autoSaveSig     int
 
+	// syntaxTimer is the pending re-highlight countdown: a typing burst
+	// defers the O(file) Chroma pass, and this is what wakes the loop up
+	// once the burst ends so the colors land without further input.
+	// Armed only while a tab is waiting on it. See syntax.go.
+	syntaxTimer *time.Timer
+
 	// gitBranch is the current branch name for the project root (or a
 	// short commit SHA when HEAD is detached). Empty when the root isn't
 	// a git repo. Updated on the same 10-second tick as refreshGitStatus.
@@ -1085,6 +1091,7 @@ func (a *App) Close() {
 	a.stopTreeRefresh()
 	a.stopAutoScroll()
 	a.stopAutoSave()
+	a.stopSyntaxSettle()
 	a.stopCaretBlink()
 	a.lspShutdown()
 	a.copilotShutdown()
@@ -1130,6 +1137,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleAutoScroll()
 	case *autoSaveEvent:
 		a.handleAutoSave()
+	case *syntaxSettleEvent:
+		a.handleSyntaxSettle()
 	case *treeRefreshEvent:
 		a.refreshTreeNow()
 	case *caretBlinkEvent:
@@ -1240,6 +1249,11 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// Same trick for auto-save: any event that mutated a buffer
 	// re-arms the idle countdown. See autosave.go.
 	a.autoSaveAfterEvent()
+	// And for syntax highlighting: an intra-line edit defers the re-lex,
+	// so something has to wake the loop when the typing stops or the new
+	// text would keep the old colors until the next unrelated event.
+	// See syntax.go.
+	a.syntaxAfterEvent()
 	// And for chat permissions: a queued session/request_permission
 	// resurfaces as soon as the modal slot frees up. See
 	// copilot_chat_perm.go.
@@ -3592,9 +3606,9 @@ func (a *App) drawStatusBar() {
 			if tab.Dirty {
 				dirty = " · ●"
 			}
-			left = fmt.Sprintf(" %s · Ln %d, Col %d · %d lines%s%s%s",
+			left = fmt.Sprintf(" %s · Ln %d, Col %d · %d lines%s%s%s%s",
 				lang, tab.Cursor.Line+1, tab.Cursor.Col+1, tab.Buffer.LineCount(), dirty,
-				a.caretStatusSuffix(), a.diagStatusSuffix())
+				a.caretStatusSuffix(), a.diagStatusSuffix(), a.syntaxStatusSuffix())
 		}
 	} else {
 		left = " " + filepath.Base(a.rootDir)

@@ -112,7 +112,10 @@ func (a *App) setTheme(th theme.Theme, name string) {
 // feature could look broken.
 func (a *App) restyleTabs() {
 	for _, t := range a.tabs {
-		t.StyleStale = true
+		// A full invalidation, not the deferred kind: the cached grid
+		// carries the OLD palette's colors, so painting from it while a
+		// settle window runs would show the previous theme for a beat.
+		t.InvalidateStyles()
 	}
 }
 

@@ -38,6 +38,19 @@ type Tab struct {
 	Styles     [][]tcell.Style
 	StyleStale bool
 
+	// SyntaxOff kills highlighting for this tab outright. Set at open (and
+	// re-evaluated on reload) for files over MaxHighlightBytes, where even
+	// one re-lex per typing pause is a visible freeze. See syntax.go.
+	SyntaxOff bool
+
+	// styleDefer marks the staleness above as "the grid is still aligned
+	// with the buffer, keep painting it" — the intra-line edit case, which
+	// waits out syntaxSettle instead of re-lexing per keystroke.
+	// lastEditAt is when that window last restarted. Both are owned by
+	// syntax.go; nothing else should write them.
+	styleDefer bool
+	lastEditAt time.Time
+
 	// Mtime is the file's modification time as of the last successful
 	// read or write. The app's periodic disk-reconcile loop compares it
 	// against the live mtime to detect external edits.
@@ -165,6 +178,9 @@ func NewTab(path string) (*Tab, error) {
 		Buffer:     NewBuffer(string(data)),
 		StyleStale: true,
 		Mtime:      mtime,
+		// Highlighting cost scales with file size, so past a point it is
+		// cheaper — and much better to use — with no colors at all.
+		SyntaxOff: len(data) > MaxHighlightBytes,
 	}
 	t.IndentUnit = DetectIndent(t.Buffer.Lines, path)
 	// Record the on-open buffer state so RevertFile has somewhere to
@@ -282,7 +298,11 @@ func (t *Tab) Reload() error {
 	t.Dirty = false
 	t.DiskGone = false
 	t.Mtime = info.ModTime()
-	t.StyleStale = true
+	// Re-evaluated, not sticky: a file that grew past the limit while we
+	// held it open should stop highlighting, and one that shrank should
+	// start again.
+	t.SyntaxOff = len(data) > MaxHighlightBytes
+	t.InvalidateStyles()
 	t.cursorMoved = true
 	t.EditRev++
 	// Reload re-establishes "what's on disk" as the new baseline. Any
@@ -332,11 +352,16 @@ func (t *Tab) deleteSelectionAt() {
 	// would make the next undo recover content the user thought was
 	// just-deleted.
 	t.pushUndo(undoGroupStructural)
+	// Captured (and ordered) before the mutation: the style patch below
+	// needs the range as it was, and DeleteRange returns only the merge
+	// point. Clamped for the same reason DeleteRange clamps — an
+	// out-of-range column would simply fail the patch and cost a re-lex.
+	from, to := PosOrdered(t.Buffer.Clamp(t.Anchor), t.Buffer.Clamp(t.Cursor))
 	pos := t.Buffer.DeleteRange(t.Anchor, t.Cursor)
 	t.Cursor = pos
 	t.Anchor = pos
 	t.Dirty = true
-	t.StyleStale = true
+	t.stylesAfterDelete(from, to)
 	t.cursorMoved = true
 	t.EditRev++
 }
@@ -362,10 +387,11 @@ func (t *Tab) insertStringAt(s string) {
 	} else {
 		t.pushUndo(undoGroupStructural)
 	}
+	at := t.Cursor
 	t.Cursor = t.Buffer.InsertString(t.Cursor, s)
 	t.Anchor = t.Cursor
 	t.Dirty = true
-	t.StyleStale = true
+	t.stylesAfterInsert(at, s)
 	t.cursorMoved = true
 	t.EditRev++
 }
@@ -390,10 +416,11 @@ func (t *Tab) insertRuneAt(r rune) {
 	} else {
 		t.pushUndo(undoGroupTyping)
 	}
+	at := t.Cursor
 	t.Cursor = t.Buffer.InsertString(t.Cursor, string(r))
 	t.Anchor = t.Cursor
 	t.Dirty = true
-	t.StyleStale = true
+	t.stylesAfterInsert(at, string(r))
 	t.cursorMoved = true
 	t.EditRev++
 }
@@ -425,10 +452,11 @@ func (t *Tab) backspaceAt() {
 	} else {
 		prev = Position{Line: t.Cursor.Line, Col: t.Cursor.Col - 1}
 	}
+	end := t.Cursor
 	t.Cursor = t.Buffer.DeleteRange(prev, t.Cursor)
 	t.Anchor = t.Cursor
 	t.Dirty = true
-	t.StyleStale = true
+	t.stylesAfterDelete(prev, end)
 	t.cursorMoved = true
 	t.EditRev++
 }
@@ -461,10 +489,11 @@ func (t *Tab) deleteAt() {
 	} else {
 		next = Position{Line: t.Cursor.Line, Col: t.Cursor.Col + 1}
 	}
+	start := t.Cursor
 	t.Cursor = t.Buffer.DeleteRange(t.Cursor, next)
 	t.Anchor = t.Cursor
 	t.Dirty = true
-	t.StyleStale = true
+	t.stylesAfterDelete(start, next)
 	t.cursorMoved = true
 	t.EditRev++
 }
@@ -680,9 +709,13 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		t.renderImage(scr, th, x, y, w, h)
 		return
 	}
-	if t.StyleStale {
+	// Re-lex only when it's actually due — syntax.go's settle policy keeps
+	// a typing burst from paying the O(file) Chroma cost per keystroke,
+	// and paints from a patched grid until the buffer goes quiet.
+	if t.needsRelex() {
 		t.Styles = Highlight(t.Path, t.Buffer.String(), th)
 		t.StyleStale = false
+		t.styleDefer = false
 	}
 	// Only re-center on the cursor if the cursor moved this tick. Doing it
 	// every render fights the user when they scroll with the wheel.

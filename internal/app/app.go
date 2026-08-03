@@ -34,6 +34,7 @@ import (
 	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/finder"
 	"github.com/rohanthewiz/ced/internal/icons"
+	"github.com/rohanthewiz/ced/internal/plugins"
 	"github.com/rohanthewiz/ced/internal/theme"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 	"github.com/rohanthewiz/ced/internal/version"
@@ -335,6 +336,22 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Open skill…", action: (*App).menuOpenSkill, enabled: (*App).hasSkills},
 			{label: "Reload skills", action: (*App).menuReloadSkills, enabled: alwaysTrue},
 		}},
+		// Declarative plugins (plugins.go) — the user's own shell
+		// commands bound to menu rows, leader keys, editor events and a
+		// decoration overlay. Its own group next to MCP and Skills for
+		// the same reason those have one: it's an inventory the user
+		// installs, not a feature of any other subsystem. The rows here
+		// are MANAGEMENT (what's loaded, reload, kill switch); the
+		// plugins' actual commands are spliced in as their own group by
+		// visibleMenuGroups, so they reach the palette too. The first
+		// row stays clickable with nothing installed — the empty case
+		// opens the setup help, which is the answer to the question a
+		// user with no plugins is actually asking.
+		{title: "Plugins", collapsible: true, items: []menuItemDef{
+			{action: (*App).menuPluginsInfo, enabled: alwaysTrue, labelFor: (*App).pluginsMenuLabel},
+			{label: "Reload plugins", action: (*App).menuReloadPlugins, enabled: alwaysTrue},
+			{action: (*App).menuTogglePlugins, enabled: alwaysTrue, labelFor: (*App).pluginsToggleLabel},
+		}},
 		{title: "File", collapsible: true, items: []menuItemDef{
 			{shortcut: "esc n", action: (*App).menuNewFile, enabled: alwaysTrue, labelFor: (*App).newFileLabel},
 			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
@@ -377,16 +394,31 @@ func builtinMenuGroups() []menuGroup {
 // (currently just Quit — which has no preconditions).
 func alwaysTrue(*App) bool { return true }
 
-// visibleMenuGroups returns the built-in groups with any configured
-// custom actions spliced in as their own collapsible group right before
-// Quit, so they sit at the bottom of the menu where the user reaches for
-// "what do I do with this file" actions. Recomputed on every call —
-// cheap, and lets the layout react when actions.json is reloaded
-// mid-session.
+// visibleMenuGroups returns the built-in groups with the user's own
+// actions spliced in as their own collapsible groups right before Quit,
+// so they sit at the bottom of the menu where the user reaches for
+// "what do I do with this file" actions. Two sources feed it: plugin
+// commands (plugins.go) and actions.json custom actions. Recomputed on
+// every call — cheap, and it's what lets the layout react when either
+// inventory is reloaded mid-session.
+//
+// Splicing them here rather than into builtinMenuGroups is what gets
+// them into the command palette for free: paletteActionItems flattens
+// this function, not the static table.
 func (a *App) visibleMenuGroups() []menuGroup {
 	groups := builtinMenuGroups()
+	// builtinMenuGroups guarantees Quit is last; the tests pinning
+	// placement catch anyone who reorders that.
+	quit := groups[len(groups)-1]
+	groups = groups[: len(groups)-1 : len(groups)-1]
+
+	if pc := a.pluginMenuItems(); len(pc) > 0 {
+		groups = append(groups, menuGroup{
+			title: "Plugin commands", collapsible: true, items: pc,
+		})
+	}
 	if len(a.customActions) == 0 {
-		return groups
+		return append(groups, quit)
 	}
 	ca := make([]menuItemDef, 0, len(a.customActions))
 	for i := range a.customActions {
@@ -404,12 +436,8 @@ func (a *App) visibleMenuGroups() []menuGroup {
 			enabled: alwaysTrue,
 		})
 	}
-	// Splice in just before the final group (Quit). builtinMenuGroups
-	// guarantees Quit is last; if anyone reorders that, the test pinning
-	// custom-actions placement catches it.
-	quit := groups[len(groups)-1]
 	custom := menuGroup{title: "Custom", collapsible: true, items: ca}
-	return append(groups[:len(groups)-1:len(groups)-1], custom, quit)
+	return append(groups, custom, quit)
 }
 
 // menuLayout flattens the visible menu groups into a single ordered
@@ -675,6 +703,12 @@ type App struct {
 	// no chord pending — the overwhelmingly common state. See leader.go.
 	leaderChord   []leaderBinding
 	leaderChordAt time.Time
+	// leaderChordName labels the pending namespace ("AI", "Plugin") so a
+	// missed second rune can say which one it missed. Stamped at arm
+	// time rather than looked up later: a dynamic namespace's table is
+	// resolved once, and re-deriving the name from the table would mean
+	// matching bindings by identity.
+	leaderChordName string
 	// menuScroll is how many content rows the action menu is scrolled
 	// when its layout is taller than the window (the menu outgrew short
 	// terminals at ~40 rows). 0 whenever everything fits; reset on every
@@ -814,6 +848,13 @@ type App struct {
 	// the same trail. See nav.go.
 	nav navState
 
+	// plugins is the declarative plugin inventory read from
+	// ~/.config/ced/plugins, plus the decorations its providers have
+	// painted. Nothing in it runs until a file opens, a file saves, or
+	// the user picks a row — see plugins.go for the house rules,
+	// plugincmd.go and plugindeco.go for the two execution paths.
+	plugins pluginState
+
 	// customActions is the list of user-configured shell-out actions
 	// loaded from ~/.config/ced/actions.json at startup. When
 	// non-empty they prepend a new group to the action menu — see
@@ -889,6 +930,11 @@ func New(rootDir string) (*App, error) {
 	a.loadSkills()
 	a.refreshGitStatus()
 	a.loadCustomActions()
+	// Plugin manifests are read at startup, but — like the MCP
+	// inventory — nothing in them is RUN here. The first command fires
+	// when a file opens, a file saves, or the user picks a row. See
+	// plugins.go.
+	a.loadPlugins()
 	// Seed the fold default AFTER custom actions load so the synthetic
 	// "Custom" section is folded too. Every section starts contracted; the
 	// pinned command palette and the expand-all button keep everything one
@@ -958,6 +1004,7 @@ func (a *App) loadUserConfig() {
 	a.chat.agent = chatAgentByID(cfg.ChatAgent)
 	a.chat.autoContext = cfg.ChatContext
 	a.chat.writeEnabled = cfg.ChatWrite
+	a.plugins.enabled = cfg.Plugins
 	// Themes last: loadThemes and applyThemeName both flash on failure,
 	// and a color problem is the least urgent thing in this function —
 	// letting it land last keeps a more important message visible.
@@ -1091,6 +1138,14 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleGitDiff(e)
 	case *customActionDoneEvent:
 		a.handleCustomActionDone(e)
+	case *pluginCmdDoneEvent:
+		a.handlePluginCmdDone(e)
+	case *pluginHookDoneEvent:
+		a.handlePluginHookDone(e)
+	case *pluginDecoEvent:
+		a.handlePluginDeco(e)
+	case *pluginEditEvent:
+		a.handlePluginEditTick(e)
 	case *zipDoneEvent:
 		a.handleZipDone(e)
 	case *pasteDoneEvent:
@@ -1189,6 +1244,12 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// resurfaces as soon as the modal slot frees up. See
 	// copilot_chat_perm.go.
 	a.chatPermAfterEvent()
+	// And plugins: an edit re-arms the debounce that re-runs whatever
+	// linters and scanners the user hung on the "edit" event. Returns
+	// immediately unless a plugin actually listens for it, so an editor
+	// with no edit-triggered plugins never wakes on a timer. See
+	// plugindeco.go.
+	a.pluginsAfterEvent()
 	// And the secondary carets' blink: armed while they exist, disarmed
 	// the moment they don't, so an idle single-caret editor never wakes
 	// on a timer. See multicaret.go.
@@ -2593,7 +2654,12 @@ func (a *App) openFile(path string) {
 	// appear as soon as the async result lands, not at the next tick.
 	// The diagnostics source registers after git so on a line that is
 	// both changed and broken, the diagnostic dot wins the mark cell.
-	t.DecoSources = append(t.DecoSources, gitDiffSource{app: a}, lspDiagSource{app: a})
+	// Precedence in the single gutter cell runs git < plugin < LSP: a
+	// plugin's mark outranks the ambient git change bar because the
+	// user installed it deliberately, and loses to gopls because a
+	// compile error is the more urgent thing to say. See plugindeco.go.
+	t.DecoSources = append(t.DecoSources,
+		gitDiffSource{app: a}, pluginDecoSource{app: a}, lspDiagSource{app: a})
 	// The matching-word highlight is a built-in source gated by a per-tab
 	// flag, so the preference has to ride along at open time (wordhl.go).
 	t.WordHighlight = a.wordHLEnabled
@@ -2602,6 +2668,10 @@ func (a *App) openFile(path string) {
 	a.activeTab = len(a.tabs) - 1
 	a.lspOpenDoc(t)
 	a.copilotOpenDoc(t)
+	// Fire the plugin "open" event last, once the tab is fully wired:
+	// a provider's marks arrive asynchronously and land on a tab that
+	// already has its decoration source attached.
+	a.pluginsOnEvent(plugins.EventOpen, t)
 	a.flash(fmt.Sprintf("Opened %s", filepath.Base(path)))
 }
 
@@ -2643,6 +2713,10 @@ func (a *App) saveTabAt(idx int) bool {
 	// reloads the buffer asynchronously via formatDoneEvent — see
 	// format.go. Explicit saves are loud: prompts and flashes allowed.
 	a.runFormatOnSave(idx, false)
+	// Plugin save hooks run after the write lands, same reasoning as
+	// format-on-save: a broken hook must never stop the user's save
+	// from reaching disk.
+	a.pluginsOnEvent(plugins.EventSave, tab)
 	return true
 }
 

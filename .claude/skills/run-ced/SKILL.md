@@ -54,6 +54,23 @@ read or write the developer's own `~/.config/ced`. The default config is
 `{"copilot":"off","autosave":"off"}` — no sidecar, and no background
 writes into the project being photographed. Pass `-config` to change it.
 
+`-seed <dir>` copies a directory into that throwaway `<config>/ced`
+before launch — the way to photograph anything that lives beside
+config.json rather than inside it: a `plugins/` inventory, a `themes/`
+folder, an `mcp.json`. It's a copy, not a symlink, so the run still
+can't write back into your source.
+
+```sh
+mkdir -p /tmp/seed/plugins/demo && cp my-plugin.json /tmp/seed/plugins/demo/plugin.json
+/tmp/capture -bin "$PWD/bin/ced" -dir /tmp/proj -seed /tmp/seed -text \
+  -script '1800@;300@{esc}p;500@notes;700@{enter};1500@SNAP;300@{esc}q'
+```
+
+Note `-bin` there: `run` sets the child's working directory to `-dir`,
+so a relative `./bin/ced` resolves against the project being opened, not
+against ced's own checkout. Pass an absolute path whenever `-dir` isn't
+the repo.
+
 ## Scripting keystrokes
 
 Steps are `;`-separated; each is `[delayMs]@[payload]` (default 500ms),

@@ -192,6 +192,15 @@ type Config struct {
 	// the ≡ toggle.
 	ChatWrite bool
 
+	// Plugins controls whether declarative plugins under
+	// ~/.config/ced/plugins are loaded and allowed to run. Defaults to
+	// on: like the Copilot binary, having written a manifest is itself
+	// the opt-in — nothing exists to run until the user creates one.
+	// This key is the kill switch for the times you want the editor to
+	// touch nothing of yours (bisecting a misbehaving hook, or handing
+	// the terminal to somebody else). Persisted by the ≡ toggle.
+	Plugins bool
+
 	// Theme is the named color theme's registry id ("tokyo-night",
 	// "darcula", a user theme's filename stem, …). Empty (the default)
 	// means the shipped default. Deliberately not validated here for
@@ -207,7 +216,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true}
+	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -229,6 +238,7 @@ type fileFormat struct {
 	ChatAgent   string `json:"chatagent,omitempty"`
 	ChatContext string `json:"chatcontext,omitempty"`
 	ChatWrite   string `json:"chatwrite,omitempty"`
+	Plugins     string `json:"plugins,omitempty"`
 	Theme       string `json:"theme,omitempty"`
 }
 
@@ -305,6 +315,19 @@ func ThemesDir() string { return configFilePath("themes") }
 // the scan order and the shadowing rule; this package only knows where
 // the directory is, so the config locations can never drift apart.
 func SkillsDir() string { return configFilePath("skills") }
+
+// PluginsDir returns the canonical plugins directory:
+// $XDG_CONFIG_HOME/ced/plugins, falling back to ~/.config/ced/plugins
+// (or "" when no config location resolves).
+//
+// A directory of directories, for the themes reason: one folder per
+// plugin is what makes "this plugin ships a script beside its manifest"
+// and "delete this plugin" both obvious operations, and it gives every
+// command a $PLUGIN_DIR to resolve its own files against. The parser
+// and the validation rules live in internal/plugins; this package only
+// knows where the directory is, so the config locations can never drift
+// apart.
+func PluginsDir() string { return configFilePath("plugins") }
 
 // Load reads and parses the config file at path, returning a Config
 // with defaults filled in for any missing or blank fields.
@@ -454,6 +477,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(ff.Plugins)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.Plugins = true
+	case "off":
+		cfg.Plugins = false
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: plugins must be \"on\" or \"off\" (got %q)",
+			path, ff.Plugins,
+		)
+	}
+
 	switch strings.ToLower(strings.TrimSpace(ff.ChatContext)) {
 	case "":
 		// field omitted — keep default
@@ -584,6 +621,16 @@ func SaveChatWrite(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "chatwrite", val)
+}
+
+// SavePlugins persists the plugin kill switch into the config file at
+// path. See saveKey for the round-trip guarantees.
+func SavePlugins(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "plugins", val)
 }
 
 // SaveTheme persists the named color theme into the config file at

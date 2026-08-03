@@ -489,6 +489,88 @@ func TestSaveWordHL_RoundTripsAndPreserves(t *testing.T) {
 	}
 }
 
+// TestPluginsDefaultsOn pins the shipped default. Having written a
+// manifest is itself the opt-in — nothing exists to run until the user
+// creates one — so this key is a kill switch, not a feature gate.
+func TestPluginsDefaultsOn(t *testing.T) {
+	if !Defaults().Plugins {
+		t.Fatal("Defaults().Plugins = false, want true")
+	}
+}
+
+// TestLoadPluginsValues exercises the recognised plugins values and the
+// absent-field default, mirroring the wordhl table.
+func TestLoadPluginsValues(t *testing.T) {
+	cases := map[string]bool{
+		`{"plugins":"on"}`:    true,
+		`{"plugins":"off"}`:   false,
+		`{"plugins":" OFF "}`: false, // case/whitespace tolerant
+		`{}`:                  true,  // omitted field keeps the default
+	}
+	for body, want := range cases {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", body, err)
+		}
+		if cfg.Plugins != want {
+			t.Errorf("Load(%s).Plugins = %v, want %v", body, cfg.Plugins, want)
+		}
+	}
+}
+
+// TestSavePlugins_RoundTripsAndPreserves makes the same unknown-key
+// guarantee for the new key that every other Save* helper makes.
+func TestSavePlugins_RoundTripsAndPreserves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"icons\": \"on\",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SavePlugins(path, false); err != nil {
+		t.Fatalf("SavePlugins: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.Plugins || cfg.Icons != IconsOn {
+		t.Fatalf("round trip lost values: plugins=%v icons=%q", cfg.Plugins, cfg.Icons)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}
+
+// TestLoadPluginsInvalid mirrors the wordhl rule: a typo'd value is an
+// error the caller can flash, not a silent fallback.
+func TestLoadPluginsInvalid(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"plugins":"maybe"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("invalid plugins value should error")
+	}
+}
+
+// TestPluginsDir_SharesTheConfigDirectory pins that the plugins
+// directory resolves beside every other ced config file — the whole
+// point of routing it through configFilePath.
+func TestPluginsDir_SharesTheConfigDirectory(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got, want := PluginsDir(), filepath.Join("/xdg", "ced", "plugins"); got != want {
+		t.Errorf("PluginsDir() = %q, want %q", got, want)
+	}
+	if filepath.Dir(PluginsDir()) != filepath.Dir(DefaultPath()) {
+		t.Error("plugins dir drifted out of the config directory")
+	}
+}
+
 // TestLoadWordHLInvalid mirrors the execmarks rule: a typo'd value is an
 // error the caller can flash, not a silent fallback.
 func TestLoadWordHLInvalid(t *testing.T) {

@@ -34,7 +34,9 @@ import (
 	"flag"
 	"fmt"
 	"html"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -61,6 +63,7 @@ func main() {
 		script   = flag.String("script", defaultScript, "keystroke script (see -help-script)")
 		config   = flag.String("config", "", "config.json contents for a throwaway XDG_CONFIG_HOME")
 		theme    = flag.String("theme", "", `shorthand for -config '{"theme":"NAME"}'`)
+		seed     = flag.String("seed", "", "directory copied into the throwaway <XDG_CONFIG_HOME>/ced before launch")
 		cols     = flag.Int("cols", 150, "terminal columns")
 		rows     = flag.Int("rows", 44, "terminal rows")
 		helpScr  = flag.Bool("help-script", false, "explain the script syntax and exit")
@@ -93,6 +96,14 @@ func main() {
 	}
 	if err := os.WriteFile(home+"/ced/config.json", []byte(body+"\n"), 0o644); err != nil {
 		fail(err)
+	}
+	// Anything else the run needs under ~/.config/ced — a plugins/
+	// directory, themes/, an mcp.json. Copied rather than symlinked so
+	// the capture still can't write back into the source.
+	if *seed != "" {
+		if err := copyTree(*seed, home+"/ced"); err != nil {
+			fail(err)
+		}
 	}
 
 	steps, err := parseScript(*script)
@@ -705,4 +716,30 @@ body{margin:0;background:#0d0e12;color:#ccc;
 </style>
 <div class="well">` + s.htmlFrag() + `</div>
 `
+}
+
+// copyTree recursively copies src into dst, creating dst as needed.
+// Used by -seed to furnish the throwaway config home with whatever a
+// run needs to find there (a plugins/ directory, say). Copies rather
+// than symlinks so the captured ced still cannot write back into the
+// source tree.
+func copyTree(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
 }

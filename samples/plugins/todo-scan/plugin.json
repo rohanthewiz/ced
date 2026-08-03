@@ -1,0 +1,36 @@
+{
+  "name": "todo-scan",
+  "description": "Mark TODO/FIXME lines, and sort a selection",
+  "commands": [
+    {
+      "id": "sort-selection",
+      "label": "Sort selection",
+      "leader": "s",
+      "input": "selection",
+      "output": "replace",
+      "command": "sort"
+    },
+    {
+      "id": "count-todos",
+      "label": "Count TODOs in file",
+      "leader": "c",
+      "output": "flash",
+      "command": "grep -c TODO \"$FILE\" || echo 0"
+    }
+  ],
+  "hooks": [
+    {
+      "on": ["save"],
+      "glob": "*.go",
+      "command": "gofmt -w \"$FILE\"",
+      "output": "reload"
+    }
+  ],
+  "decorations": [
+    {
+      "id": "todo",
+      "on": ["open", "save", "edit"],
+      "command": "grep -n -E 'TODO|FIXME' \"$FILE\" || true"
+    }
+  ]
+}

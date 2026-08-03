@@ -77,6 +77,12 @@ The goals, in order:
   `~/.config/ced/mcp.json` (the same format Claude Desktop uses) and
   they're handed to whichever chat agent you run, plus browsable and
   runnable from the menu. See [MCP servers](#8-mcp-servers-more-tools-for-your-agent).
+- **Plugins** — one JSON file per plugin in `~/.config/ced/plugins`,
+  describing shell commands ced runs for you: filters that pipe your
+  selection through `sort` or `prettier` and put the result back, hooks
+  that fire on open/save/pause, and linters whose output is painted into
+  the gutter. Nothing is compiled, loaded, or interpreted. See
+  [Plugins](#plugins).
 - **Skills** — the `SKILL.md` folders you already keep in
   `~/.claude/skills` (and `.claude/skills` in a repo) show up in the
   menu; pick one and its instructions ride along with your next chat
@@ -233,6 +239,11 @@ seconds to pick one.
 | `Esc a m`   | Chat model                      |
 | `Esc a b`   | Chat backend (agent)            |
 | `Esc a t`   | Tools — MCP servers             |
+
+**`Esc x` is the plugin prefix** — whatever keys your own plugins asked
+for. Tap `Esc x` and the status bar lists them; with no plugins
+installed it says so and stays out of your way. See
+[Plugins](#plugins).
 
 Unlike a lone `Esc`, a chord that misses **is** swallowed: `Esc a` is two
 deliberate keys, so a mistyped second key tells you what's bound instead of
@@ -468,6 +479,148 @@ line, you can put it in `actions.json`:
 { "label": "Lint with eslint", "command": "cd $(dirname \"$FILE\") && eslint \"$FILENAME\"" }
 { "label": "Run formatter",    "command": "gofmt -w \"$FILE\"" }
 ```
+
+## Plugins
+
+Custom actions give you a menu row that shells out. Plugins are the same
+idea one octave up: they can put a command's output **back into your
+file**, run **without being clicked**, and **paint over your code**.
+
+A plugin is one JSON file. Nothing is compiled, loaded, or interpreted —
+ced just decides *when* to run a shell command you wrote and *where* its
+output goes.
+
+### File location
+
+```
+~/.config/ced/plugins/<name>/plugin.json
+```
+
+(or `$XDG_CONFIG_HOME/ced/plugins/...`). One directory per plugin, so a
+plugin can ship scripts beside its manifest — `$PLUGIN_DIR` points at
+that directory.
+
+After editing a manifest: **≡ → Plugins → Reload plugins**. Nothing
+watches the directory, and nothing from a manifest runs until you open a
+file, save one, or pick a row.
+
+### A worked example
+
+```json
+{
+  "name": "todo-scan",
+  "description": "Mark TODO/FIXME lines, and sort a selection",
+  "commands": [
+    {
+      "label": "Sort selection",
+      "leader": "s",
+      "input": "selection",
+      "output": "replace",
+      "command": "sort"
+    },
+    {
+      "label": "Count TODOs in file",
+      "leader": "c",
+      "output": "flash",
+      "command": "grep -c TODO \"$FILE\" || echo 0"
+    }
+  ],
+  "hooks": [
+    { "on": ["save"], "glob": "*.go", "command": "gofmt -w \"$FILE\"", "output": "reload" }
+  ],
+  "decorations": [
+    { "id": "todo", "on": ["open", "save", "edit"], "command": "grep -n -E 'TODO|FIXME' \"$FILE\" || true" }
+  ]
+}
+```
+
+That's the whole feature. Three sections, all optional. A copy of this
+one lives in [`samples/plugins/todo-scan`](samples/plugins/todo-scan).
+
+### `commands` — things you run
+
+They appear in the **≡ → Plugin commands** group, in the command palette,
+and — if they claim a `leader` — under **`Esc x`**. Press `Esc x` on its
+own and the status bar lists every plugin key you've bound.
+
+| field | meaning |
+|---|---|
+| `label` | what you read in the menu (shown as `<plugin>: <label>`) |
+| `command` | the shell line, run through `sh -c` |
+| `leader` | one character, reachable as `Esc x <char>` |
+| `input` | `none` (default) · `selection` · `file` — what goes to **stdin** |
+| `output` | `none` (default) · `replace` · `insert` · `info` · `flash` |
+| `prompts` | same form fields as `actions.json`, asked before running |
+
+`replace` overwrites whatever `input` named — the selection, or the
+whole buffer — and lands as **one undo step**. `input: "file"` sends the
+buffer you're looking at, including unsaved edits, not the copy on disk.
+
+So a formatter for any language is three lines:
+
+```json
+{"label": "Prettier", "input": "file", "output": "replace", "command": "prettier --parser typescript"}
+```
+
+### `hooks` — things that run themselves
+
+| field | meaning |
+|---|---|
+| `on` | any of `open`, `save`, `edit` (an idle pause after typing) |
+| `glob` | matched against the file name, e.g. `*.go`; omit for all files |
+| `command` | the shell line |
+| `output` | `none` (default) · `flash` · `info` · `reload` |
+
+`reload` re-reads the file after a command rewrote it in place — that's
+how `eslint --fix "$FILE"` gets back onto your screen. A hook will never
+overwrite a buffer with unsaved changes.
+
+### `decorations` — things you see
+
+A decoration provider is a command whose output is read as diagnostics
+and painted as gutter marks (`◆`) plus underlines, colored by severity.
+The format is the one your tools already print:
+
+```
+path:line:col: severity: message
+path:line: message
+line:col: message
+line: message
+```
+
+which means these all work as-is:
+
+```json
+{"id": "vet",   "on": ["save"], "glob": "*.go", "command": "go vet \"$FILE\" 2>&1"}
+{"id": "shell", "on": ["save"], "glob": "*.sh", "command": "shellcheck -f gcc \"$FILE\" || true"}
+{"id": "todo",  "on": ["edit"], "command": "grep -n TODO \"$FILE\" || true"}
+```
+
+Lines that don't parse are ignored, so a linter's summary output is
+harmless. Exit status is ignored too — linters exit non-zero exactly
+when they have something to say.
+
+### Environment
+
+Every plugin command runs through `sh -c` from your project root with:
+
+```
+FILE  FILENAME  PROJECT_ROOT  ACTIVE_FOLDER  ACTIVE_FOLDER_REL
+CURRENT_FILE  CURRENT_FILE_REL  PLUGIN_DIR  PLUGIN_NAME
+```
+
+plus one variable per `prompts` entry.
+
+### Safety
+
+Plugins are **yours** — read only from your own config directory, never
+from a repo you cloned. A checked-out project cannot ship a plugin that
+runs when you open it. A command failing opens a modal with its stderr;
+one broken manifest costs you that plugin and nothing else.
+
+**≡ → Plugins → Disable plugins** is the kill switch: no commands, no
+hooks, no marks, until you turn it back on. It persists as
+`"plugins": "off"` in `config.json`.
 
 ## Format on save
 

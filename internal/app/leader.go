@@ -47,11 +47,25 @@ type leaderBinding struct {
 	// same justification: a chord is a real cost, paid by everyone who
 	// has to remember which letters are prefixes.
 	sub []leaderBinding
+	// subFor is the DYNAMIC form of sub, for a namespace whose contents
+	// aren't known until they're asked for. Exactly one namespace needs
+	// it — Esc-x, whose sub-table is built from the user's installed
+	// plugins and changes the moment they hit Reload. Resolved on every
+	// arm rather than cached, because a table baked at startup would go
+	// stale exactly when the user was iterating on a manifest. When both
+	// are set subFor wins; a nil result means "nothing bound", which
+	// arms nothing (see fireLeader).
+	subFor func(*App) []leaderBinding
 	// hint is the one-line menu of a prefix's sub-bindings, flashed the
 	// moment the prefix arms. A namespace nobody can enumerate from the
 	// keyboard is a namespace nobody uses; this is the flat table's ≡
 	// hint column, compressed into a status line.
 	hint string
+	// hintFor is hint's dynamic twin, for the same reason subFor exists.
+	hintFor func(*App) string
+	// name labels the namespace in the "no action bound to x" message a
+	// missed chord flashes. Empty reads as a generic "leader".
+	name string
 	// repeat marks actions that make sense in rapid succession (undo,
 	// hunk-walking, panel resize). Firing one keeps the leader window
 	// armed in "chain" mode: the next repeatable rune within
@@ -108,8 +122,21 @@ func leaderBindings() []leaderBinding {
 		// 'a' for AI — a PREFIX, not an action. Everything the chat agent
 		// touches lives one rune deeper: the panel itself, context, the
 		// model and backend pickers, skills, and MCP tools.
-		{key: 'a', sub: aiLeaderBindings(),
+		{key: 'a', sub: aiLeaderBindings(), name: "AI",
 			hint: "AI  c chat · s skills · a attach · f file · m model · b backend · t tools"},
+		// 'x' for eXtensions — the plugin namespace, and the codebase's
+		// only DYNAMIC prefix: its sub-table is whatever leader keys the
+		// user's installed plugins asked for (plugins.go).
+		//
+		// It clears the same bar the AI namespace did, from the other
+		// direction. That one existed because a fixed surface outgrew
+		// the flat table; this one exists because plugin commands are
+		// UNBOUNDED and belong to the user, so they can never go in the
+		// flat table at all — every letter they took would be one ced
+		// could no longer bind, and any letter ced later bound would
+		// silently break somebody's plugin. A namespace is the only
+		// place a user-owned key can live without fighting the editor's.
+		{key: 'x', subFor: pluginLeaderBindings, hintFor: pluginLeaderHint, name: "Plugin"},
 		// Multi-line editing (multicaret.go). 'm' grows the caret column
 		// downward, 'M' upward — the same "shift means the other
 		// direction" convention as h/H and o/O. Both repeat, so
@@ -230,12 +257,32 @@ func leaderActionFor(r rune) func(*App) {
 // namespace works identically inside tmux (where "Esc a" arrives folded
 // as one Alt+a event) and outside it.
 func (a *App) fireLeader(b *leaderBinding) {
-	if b.sub != nil {
-		a.leaderChord = b.sub
+	if b.sub != nil || b.subFor != nil {
+		sub, hint := b.sub, b.hint
+		if b.subFor != nil {
+			sub = b.subFor(a)
+		}
+		if b.hintFor != nil {
+			hint = b.hintFor(a)
+		}
+		// An empty dynamic namespace arms NOTHING: with no plugin
+		// bound, "Esc x" then a letter should leave that letter alone
+		// rather than swallow it into a namespace that has no answers.
+		// The hint still flashes — it's what tells the user the
+		// namespace exists and is currently empty.
+		if len(sub) == 0 {
+			a.clearChord()
+			a.lastEscape = time.Time{}
+			a.leaderChained = false
+			a.flash(hint)
+			return
+		}
+		a.leaderChord = sub
+		a.leaderChordName = b.name
 		a.leaderChordAt = time.Now()
 		a.lastEscape = time.Time{}
 		a.leaderChained = false
-		a.flash(b.hint)
+		a.flash(hint)
 		return
 	}
 	a.clearChord()
@@ -275,6 +322,11 @@ func (a *App) handleChordKey(ev *tcell.EventKey) bool {
 		return false
 	}
 	sub := a.leaderChord
+	name := a.leaderChordName
+	if name == "" {
+		name = "leader"
+	}
+	prefix := chordPrefixFor(a.leaderChordName)
 	a.clearChord()
 	for i := range sub {
 		if sub[i].key == ev.Rune() {
@@ -282,12 +334,27 @@ func (a *App) handleChordKey(ev *tcell.EventKey) bool {
 			return true
 		}
 	}
-	a.flash("No AI action bound to " + string(ev.Rune()) + " — esc a again for the list")
+	a.flash("No " + name + " action bound to " + string(ev.Rune()) +
+		" — esc " + string(prefix) + " again for the list")
 	return true
 }
 
 // clearChord disarms a pending chord.
 func (a *App) clearChord() {
 	a.leaderChord = nil
+	a.leaderChordName = ""
 	a.leaderChordAt = time.Time{}
+}
+
+// chordPrefixFor finds the leader rune that arms the namespace called
+// name, so the miss message can tell the user which prefix to press
+// again. Falls back to 'a' — the only namespace that predates the
+// lookup — rather than printing an empty key.
+func chordPrefixFor(name string) rune {
+	for _, b := range leaderBindings() {
+		if (b.sub != nil || b.subFor != nil) && b.name == name {
+			return b.key
+		}
+	}
+	return 'a'
 }

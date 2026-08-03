@@ -78,6 +78,11 @@ internal/mcp/client.go        MCP client: handshake, tools/list, tools/call, roo
 internal/app/mcp.go           MCP state, ≡ server/tool pickers, and the chat-agent declaration
 internal/skills/skills.go     SKILL.md inventory: three dirs scanned, frontmatter, shadowing
 internal/app/skills.go        Skills state, ≡ pickers, skill → chat attachment + directive
+internal/plugins/plugins.go   plugin.json manifests: commands / hooks / decorations + validation
+internal/plugins/diag.go      Compiler-style output → Diagnostic (path:line:col: sev: msg)
+internal/app/plugins.go       Plugin state, ≡ group, dynamic command splice, Esc-x namespace
+internal/app/plugincmd.go     Command runs: stdin modes, stdout application, the sh -c helper
+internal/app/plugindeco.go    Hooks, decoration providers, edit debounce, pluginDecoSource
 internal/editor/ghost.go      GhostText display form + the render-row splice overlay
 internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → autoSaveEvent)
 internal/app/zipops.go        Zip file/folder — stdlib archive/zip, async zipDoneEvent
@@ -775,6 +780,101 @@ here. House rules:
   surface. (It was briefly a top-level `Esc S` — the flat table having
   nothing better left is what argued for the namespace.)
 
+### Declarative plugins (internal/plugins + app/plugin*.go)
+`~/.config/ced/plugins/<name>/plugin.json` — shell commands the user
+already had permission to type, bound to menu rows, leader keys, editor
+events, and a decoration overlay. **It is actions.json one octave up**,
+which is the frame to keep: actions.json answered "give me a menu row
+that shells out", and this answers the three things that row could never
+do — put output back in the buffer, run without being clicked, and paint
+over the code. Prompt collection is imported wholesale from
+`customactions` (same schema, same form modal, same env-var contract) so
+there is one dialect, not two. House rules:
+
+- **A plugin is DATA, and ced never becomes a host.** Nothing is loaded,
+  compiled, or interpreted; a manifest can only say WHEN to run a
+  command and WHERE its stdout goes. That is what keeps `plugins/` on
+  the themes-and-skills side of the What-NOT-to-add line rather than
+  making it the plugin system that entry rules out. The test of a
+  proposed field is whether it still reduces to "a command line plus a
+  place to put its output" — `input`/`output`/`on`/`glob` do; a callback
+  into editor internals would not.
+- **Nothing runs at startup.** `New` reads manifests; the first command
+  fires on a file open, a save, or a deliberate pick. The MCP promise,
+  for the same reason — "I wrote a manifest" must never mean "the editor
+  ran three commands while I wasn't looking". The `"plugins"` config key
+  (default on, `SavePlugins`, ≡ toggle) is the kill switch, and it is
+  honoured at EVERY surface — menu, palette, leader, hooks, and the
+  decoration source — not just at load. Off means the marks leave the
+  screen too.
+- **stdout is the answer, stderr is the complaint**, captured separately
+  and never merged on the command path. A formatter that prints a
+  deprecation warning to stderr must not have it spliced into the user's
+  source — which is exactly what one `CombinedOutput` here would do. The
+  DECORATION path deliberately reads both, because `go vet` and half the
+  Go toolchain report findings on stderr, and it ignores exit status
+  because a linter exits non-zero precisely when it has something to say.
+- **Nothing is written back over a buffer that moved.** Every run
+  captures (path, EditRev) and the range it may overwrite BEFORE the
+  goroutine starts; a mismatch discards the output with a flash. Same
+  staleness discipline as ghost text and the chat results, and for the
+  same reason: by the time the command exits, the tab, the selection and
+  the cursor may all be somewhere else. A replace is ONE undo step
+  (`InsertString` over a selection already records exactly one), and a
+  whole-file replace captures and restores the view through
+  `RestoreView` — which is the right primitive because it does NOT set
+  `cursorMoved`.
+- **Decorations are a DecorationSource, keyed by (file, provider)**, so
+  a re-run replaces its own marks and nobody else's, and an EMPTY result
+  still replaces — that's how findings disappear when the user fixes
+  them. Precedence is **git < plugin < LSP**: a plugin mark outranks the
+  ambient git change bar because the user installed it deliberately, and
+  loses to gopls because a compile error is the more urgent thing to say
+  in the one gutter cell. Its glyph is `◆`, deliberately not the LSP's
+  `●` — when both have something to say, telling them apart is the point.
+- **The output format is the compiler/grep convention**
+  (`path:line:col: severity: message`), parsed by hand in diag.go. That
+  choice is the whole reason decorations are worth having: a useful
+  provider is a one-liner the user already knows how to write (`grep -n
+  TODO`, `go vet`, `shellcheck -f gcc`, `eslint -f unix`). A format ced
+  invented would have made the feature theoretical. Unparseable lines
+  are DROPPED, never reported — real tools interleave summaries and
+  progress with their findings. Findings naming a DIFFERENT file are
+  dropped too: the decoration layer is strictly per-file.
+- **Esc-x is the plugin namespace, and the codebase's only DYNAMIC
+  prefix** (`leaderBinding.subFor` / `hintFor`, resolved on every arm
+  because a table baked at startup goes stale the moment the user hits
+  Reload). It clears the second-namespace bar from the opposite
+  direction to Esc-a: that one existed because a fixed surface outgrew
+  the flat table, this one because plugin keys are UNBOUNDED and belong
+  to the user — every letter they took would be one ced could no longer
+  bind, and any letter ced later bound would silently break somebody's
+  plugin. An EMPTY namespace arms nothing (it would otherwise swallow
+  the next keystroke on the overwhelmingly common plugin-free machine).
+  Leader collisions are first-declared-wins over the name-sorted
+  inventory, and the loser is named in the ≡ Plugins report.
+- **The edit event is debounced at 800ms and armed only while something
+  listens** — longer than the LSP's 300ms because this spawns a PROCESS,
+  and gated because a standing timer in an event-driven loop wakes an
+  idle editor forever (the caret-blink constraint).
+- **Degradation is per plugin** (the theme registry's rule): one broken
+  manifest names itself in the ≡ label and costs that plugin only.
+  Startup is silent — load errors are HELD on the state, not flashed,
+  because a startup flash scrolls past before anyone looks.
+- **The inventory is USER-scoped, deliberately.** There is no
+  `<project>/.ced/plugins`: a checked-out repo that could run shell on
+  open would be a supply-chain hole, and the honest version of that
+  feature is format.json's trust store (`format.LoadTrust` /
+  `CheckTrust`, hash-pinned per project). If project plugins are ever
+  added, they go through that gate — not on their own.
+- `pluginsDirFn` / `pluginConfigPathFn` / `pluginShell` are package vars;
+  newTestApp pins the first two at temp dirs and the third at a stub that
+  refuses, so no test can read the developer's real plugins or execute
+  one. This matters more here than anywhere else in the harness, because
+  a plugin IS an arbitrary shell command and open/save fire hooks by
+  themselves. `TestRunPluginShell_RealShell` is the one exception and is
+  restricted to `cat`/`echo`.
+
 ### Git panel checkboxes + Actions (app/gitpanel.go + gitpanelactions.go)
 The panel's checkbox is a **multi-selection tick, not a stage toggle**.
 It used to stage/unstage on click, which capped the panel at exactly one
@@ -898,18 +998,23 @@ a key, update both or the menu lies. Rows without a binding leave it
 empty; drawMenu skips the hint when a long label would collide.
 
 ### The Esc-a AI namespace (leader.go)
-The leader table is flat with ONE exception: a `leaderBinding` carrying a
-`sub` table is a PREFIX. Firing it runs no action — it stores the
-sub-table on `App.leaderChord`, stamps `leaderChordAt`, and flashes the
-binding's `hint`; the next rune resolves against that table in
-`handleChordKey`, which handleKey calls before everything else. House
-rules:
+The leader table is flat with TWO exceptions: a `leaderBinding` carrying
+a `sub` table (or a `subFor` resolver) is a PREFIX. Firing it runs no
+action — it stores the sub-table on `App.leaderChord`, stamps
+`leaderChordAt` and `leaderChordName`, and flashes the binding's `hint`;
+the next rune resolves against that table in `handleChordKey`, which
+handleKey calls before everything else. House rules:
 
 - **It exists because the AI surface outgrew the flat table.** Fifteen
   menu rows, and the letters had run out — skills briefly lived on a
-  shifted `Esc S` for exactly that reason. That's the bar for a second
+  shifted `Esc S` for exactly that reason. That's the bar for a new
   namespace; don't add one without it. A chord is a real cost, paid by
-  everyone who has to remember which letters are prefixes.
+  everyone who has to remember which letters are prefixes. `Esc x`
+  (plugins) is the only other one that has cleared it, and it did so
+  from the opposite direction — see the plugin section: its keys belong
+  to the USER and are unbounded, so they can't live in the flat table at
+  all. That entry is also the only DYNAMIC prefix (`subFor`/`hintFor`),
+  and the only one allowed to arm nothing when its table is empty.
 - **`Esc a` took the palette's alias.** The palette is `Esc k` (plus the
   ≡ menu's pinned headline row) — owner's call, on the grounds that the
   namespace is the higher-traffic use of the letter.
@@ -1152,8 +1257,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 78 group actions + 12 headers (92), height 98, dividers
-`[2, 5, 95]`.
+2 top-zone rows + 83 group actions + 13 headers (98), height 104,
+dividers `[2, 5, 101]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.
@@ -1241,19 +1346,26 @@ loops forever.
 
 - `Ctrl+` editor shortcuts (they fight tmux/terminals — that's the
   whole reason the action menu exists).
-- A config file / dotfile / plugin system. ced is opinionated. (The
-  files under `~/.config/ced/` are the deliberate exceptions, and each
-  earned it by being something ced cannot know for you: which shell
-  aliases you use, which formatters your repo trusts, which MCP servers
-  and credentials you have, which colors you can actually read. None of
-  them add extension POINTS to the editor itself — that's still the
-  line. Themes in particular are DATA, not code: a theme file can only
-  set colors from a fixed key list, which is why it doesn't count as a
-  plugin system. Skills sit on the same side of that line for a
-  different reason: ced never runs one. A SKILL.md is markdown handed
-  to the chat agent, so the skills directories — including the
-  `~/.claude/skills` and `<project>/.claude/skills` ced reads but
-  doesn't own — extend the AGENT, not the editor.)
+- A config file / dotfile. ced is opinionated. (The files under
+  `~/.config/ced/` are the deliberate exceptions, and each earned it by
+  being something ced cannot know for you: which shell aliases you use,
+  which formatters your repo trusts, which MCP servers and credentials
+  you have, which colors you can actually read. Themes in particular are
+  DATA, not code: a theme file can only set colors from a fixed key
+  list. Skills sit on the same side of that line for a different reason:
+  ced never runs one. A SKILL.md is markdown handed to the chat agent,
+  so the skills directories — including the `~/.claude/skills` and
+  `<project>/.claude/skills` ced reads but doesn't own — extend the
+  AGENT, not the editor.)
+- **A HOST plugin system** — anything ced loads and runs *as code*: Go
+  `plugin` .so files (they'd cost the static binary and CGO), an
+  embedded interpreter, or an editor API that has to stay stable across
+  releases. That line held even when `plugins/` landed, because a ced
+  plugin is a JSON manifest of SHELL COMMANDS the user already had
+  permission to type — the editor's contribution is *when* to run one
+  and where the output goes, not a runtime to run it in. See the plugin
+  section below; the moment a manifest can express something that isn't
+  "a command line plus a place to put its stdout", that line has moved.
 - CGO dependencies. The whole point is one static binary.
 - Tree-sitter. We use Chroma intentionally — pure Go, no setup.
 - A separate `homebrew-tap` repo. The formula lives here under

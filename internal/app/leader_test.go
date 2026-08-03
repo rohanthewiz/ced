@@ -25,9 +25,23 @@ import (
 // the table is reshuffled.
 func TestLeaderActionFor_AllBindingsResolve(t *testing.T) {
 	for _, b := range leaderBindings() {
-		if b.sub != nil {
+		if b.sub != nil || b.subFor != nil {
 			if b.action != nil {
 				t.Errorf("prefix %q also carries an action — it can only do one", b.key)
+			}
+			if b.name == "" {
+				t.Errorf("prefix %q has no name — a missed chord can't say which namespace it missed", b.key)
+			}
+			// A DYNAMIC prefix (Esc-x, the plugin namespace) resolves
+			// its table from App state, so there is nothing to count
+			// here — legitimately empty on a machine with no plugins.
+			// It must still carry a resolver for both halves, or the
+			// namespace arms with no bindings and no way to see that.
+			if b.subFor != nil {
+				if b.hintFor == nil {
+					t.Errorf("dynamic prefix %q has no hintFor — its namespace would be undiscoverable", b.key)
+				}
+				continue
 			}
 			if len(b.sub) == 0 || b.hint == "" {
 				t.Errorf("prefix %q has %d sub-bindings and hint %q", b.key, len(b.sub), b.hint)
@@ -506,5 +520,111 @@ func TestHandleKey_EscDoubleTapStillOpensMenu(t *testing.T) {
 	a.handleKey(keyEv(tcell.KeyEsc, 0))
 	if !a.menuOpen {
 		t.Fatal("double-Esc should still open the menu after leader was added")
+	}
+}
+
+// TestPluginChord_ArmsAndFires pins the Esc-x namespace end to end: the
+// prefix arms from the user's installed plugins, and the second rune
+// runs the command that claimed it.
+func TestPluginChord_ArmsAndFires(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	sh := (&fakeShell{stdout: "done"}).install(t)
+	installPlugin(t, a, "tools", `{"commands":[
+		{"label":"Build","leader":"b","command":"make","output":"flash"}
+	]}`)
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'x'))
+	if a.leaderChord == nil {
+		t.Fatal("Esc-x should arm the plugin namespace")
+	}
+	if a.leaderChordName != "Plugin" {
+		t.Errorf("chord name = %q, want Plugin", a.leaderChordName)
+	}
+	a.handleKey(keyEv(tcell.KeyRune, 'b'))
+	pumpAppEvents(t, a, func() bool { return sh.count() > 0 })
+
+	if got := sh.last(t).command; got != "make" {
+		t.Errorf("Esc-x b ran %q, want make", got)
+	}
+}
+
+// TestPluginChord_EmptyNamespaceArmsNothing pins the dynamic prefix's
+// one real difference from a static one. With no plugin bound there is
+// nothing for a second rune to resolve against, so the namespace must
+// NOT arm — otherwise "Esc x" would swallow the next keystroke on the
+// overwhelmingly common machine that has no plugins installed.
+func TestPluginChord_EmptyNamespaceArmsNothing(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte(""), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'x'))
+	if a.leaderChord != nil {
+		t.Fatal("an empty plugin namespace must not arm a chord")
+	}
+	if !strings.Contains(a.statusMsg, "no leader keys bound") {
+		t.Errorf("flash = %q, want it to say the namespace is empty", a.statusMsg)
+	}
+
+	// And the next keystroke must reach the buffer, not vanish.
+	a.handleKey(keyEv(tcell.KeyRune, 'z'))
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "z" {
+		t.Errorf("buffer = %q, want the swallowed-nothing 'z'", got)
+	}
+}
+
+// TestPluginChord_TmuxAltPath pins the namespace inside tmux, where
+// "Esc x" arrives folded as one Alt+x event. Both entry paths funnel
+// through fireLeader, so this is what proves the dynamic prefix didn't
+// break that.
+func TestPluginChord_TmuxAltPath(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	sh := (&fakeShell{stdout: "done"}).install(t)
+	installPlugin(t, a, "tools", `{"commands":[
+		{"label":"Build","leader":"b","command":"make","output":"flash"}
+	]}`)
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'x', tcell.ModAlt))
+	if a.leaderChord == nil {
+		t.Fatal("Alt+x should arm the plugin namespace (tmux-folded Esc-x)")
+	}
+	a.handleKey(keyEv(tcell.KeyRune, 'b'))
+	pumpAppEvents(t, a, func() bool { return sh.count() > 0 })
+	if got := sh.last(t).command; got != "make" {
+		t.Errorf("Alt+x then b ran %q, want make", got)
+	}
+}
+
+// TestChordMissNamesItsNamespace pins the generalized miss message. With
+// two namespaces the old hardcoded "No AI action bound to…" would lie
+// about which one the user was in.
+func TestChordMissNamesItsNamespace(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	installPlugin(t, a, "tools", `{"commands":[
+		{"label":"Build","leader":"b","command":"make"}
+	]}`)
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'x'))
+	a.handleKey(keyEv(tcell.KeyRune, 'j')) // not bound by any plugin
+	if !strings.Contains(a.statusMsg, "No Plugin action") {
+		t.Errorf("flash = %q, want it to name the Plugin namespace", a.statusMsg)
+	}
+	if !strings.Contains(a.statusMsg, "esc x") {
+		t.Errorf("flash = %q, want it to name the prefix to press again", a.statusMsg)
+	}
+
+	// The AI namespace keeps its own wording.
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'a'))
+	a.handleKey(keyEv(tcell.KeyRune, 'j'))
+	if !strings.Contains(a.statusMsg, "No AI action") {
+		t.Errorf("flash = %q, want the AI namespace named", a.statusMsg)
 	}
 }

@@ -184,7 +184,7 @@ func Load(path string) ([]Action, error) {
 		if a.Label == "" || a.Command == "" {
 			continue
 		}
-		if err := validatePrompts(a.Label, a.Prompts); err != nil {
+		if err := ValidatePrompts(a.Label, a.Prompts); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -195,7 +195,7 @@ func Load(path string) ([]Action, error) {
 	return out, nil
 }
 
-// validatePrompts checks an action's prompt list for the rules the
+// ValidatePrompts checks an action's prompt list for the rules the
 // form modal and the env-var injection layer rely on:
 //
 //   - Every Key must match validKeyRE so the shell can read it back
@@ -209,7 +209,10 @@ func Load(path string) ([]Action, error) {
 //     has nothing to pick and the form can never submit.
 //
 // Errors quote the action's Label so the user can grep their config.
-func validatePrompts(actionLabel string, prompts []Prompt) error {
+// Exported because internal/plugins reuses the whole prompt mechanism
+// verbatim — same schema, same form modal, same env-var contract — and
+// re-specifying it there would give users two dialects for one idea.
+func ValidatePrompts(actionLabel string, prompts []Prompt) error {
 	if len(prompts) == 0 {
 		return nil
 	}

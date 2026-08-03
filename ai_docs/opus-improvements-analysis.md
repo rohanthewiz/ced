@@ -219,7 +219,7 @@ commit, with tests, per the project's testing convention.
 | 1 | Highlight debounce | §1 | **done** — 70.17 ms → 0.0015 ms per keystroke |
 | 2 | Load/save durability | §2, §3, §4 | **done** — see the note below |
 | 3 | Tab switching + overflow | §5 | **done** — see the leader-key note |
-| 4 | Project search | §6 (find in project) | pending |
+| 4 | Project search | §6 (find in project) | **done** — see the preview note |
 | 5 | Find verbs | replace, case/whole-word, go to line | pending |
 | 6 | Compare | file↔file, compare with pasted text | pending |
 | 7 | Open folder | recent folders, bare-`ced` restore | pending |
@@ -230,6 +230,23 @@ commit, with tests, per the project's testing convention.
 | 12 | Undo memory cap | byte-budget the snapshot stack | pending |
 
 Stages 1–4 were the explicitly requested starting order.
+
+### Note from stage 4: project mode does not live-preview
+
+The in-file list previews as you walk it — the highlight moves the
+editor's cursor, and Esc puts it back. Project mode deliberately does not,
+and this was the one real design decision in the stage.
+
+Previewing across files means opening a file per keystroke. An open is not
+free: it fires the LSP's `didOpen`, Copilot's `didOpen`, every plugin's
+`open` hook, and a syntax pass — and leaves a tab behind for every row the
+user merely scrolled past. So the row is the preview (it already carries
+the whole line with the hit lit), and Enter or a double-click opens. Esc
+then restores nothing, because nothing moved.
+
+If a preview mode is ever wanted, the honest way in is a real
+preview-tab concept (one reusable slot, replaced rather than accumulated),
+not a special case inside this modal.
 
 ### Note from stage 3: `Esc [` and `Esc ]` are unbindable
 

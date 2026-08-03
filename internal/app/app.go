@@ -251,6 +251,11 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Find in file", shortcut: "esc f", action: (*App).menuFind, enabled: (*App).hasFindable},
 			{label: "Find all in file", shortcut: "esc F", action: (*App).menuFindAll, enabled: (*App).hasFindAll},
 			{label: "Find file in project", shortcut: "esc p", action: (*App).menuFindFile, enabled: (*App).hasFinder},
+			// Text across the whole tree, listed in the same panel the
+			// in-file list uses (projectsearch.go). Sits under its
+			// filename twin because they answer the same question at two
+			// scopes, and the shifted leader says so.
+			{label: "Find in project", shortcut: "esc P", action: (*App).menuFindInProject, enabled: (*App).hasProjectSearch},
 		}},
 		// Navigation — browser-style back/forward through the file
 		// history (tree, tabs, finder, and definition jumps all feed it).
@@ -685,6 +690,11 @@ type App struct {
 	dragMode     string // "editor" while a drag-select is active.
 	lastClick    clickRecord
 	lastTabRects []tabRect
+
+	// projectSearchSeq generation-stamps "Find in project" runs so a
+	// result launched before the user changed their mind can't open a
+	// list over whatever they're doing now. See projectsearch.go.
+	projectSearchSeq int
 
 	// tabScroll is the index of the leftmost tab DRAWN in the tab strip.
 	// Derived state, never a preference: layoutTabs re-derives it from
@@ -1152,6 +1162,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleAutoSave()
 	case *syntaxSettleEvent:
 		a.handleSyntaxSettle()
+	case *projectSearchEvent:
+		a.handleProjectSearch(e)
 	case *treeRefreshEvent:
 		a.refreshTreeNow()
 	case *caretBlinkEvent:

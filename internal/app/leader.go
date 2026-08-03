@@ -111,6 +111,11 @@ func leaderBindings() []leaderBinding {
 		// gesture from anywhere in the file.
 		{key: 'F', action: (*App).menuFindAll},
 		{key: 'p', action: (*App).openFinder},
+		// 'P' searches the project's CONTENTS rather than its filenames —
+		// the shifted variant of the same verb, following the f/F and o/O
+		// convention. Results land in the Find-all panel, so the two
+		// scopes of "find" read as one instrument (projectsearch.go).
+		{key: 'P', action: (*App).menuFindInProject},
 		// Tab switching. ',' / '.' rather than the '[' / ']' every editor
 		// with buffers uses, because those two CANNOT work here: "\x1b["
 		// is the CSI introducer and "\x1b]" is OSC, so the terminal (and

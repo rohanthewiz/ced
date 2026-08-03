@@ -97,6 +97,14 @@ type findAllRow struct {
 	text  string
 	hit   int // rune index of the match within text
 	hitW  int // runes of text the match covers (0 = nothing to light up)
+
+	// path is the file the hit lives in, set only in project mode
+	// (projectsearch.go). Empty means "the tab this list was opened
+	// against", which is every row of an in-file search. label is the
+	// left column's text — the line number alone in file mode, the
+	// relative path and line together in project mode.
+	path  string
+	label string
 }
 
 // findAllModal is one Find-all session: the resolved result list, where
@@ -130,6 +138,18 @@ type findAllModal struct {
 	// put back if we didn't, and restoring anyway would fight a
 	// background reload that clamped the cursor for a good reason.
 	previewed bool
+
+	// project switches the list from "occurrences in this buffer" to
+	// "occurrences in the project" (projectsearch.go). It changes three
+	// things and nothing else: rows carry a path, walking the list does
+	// NOT preview, and accept opens the file the row names. See the
+	// project-mode note at the top of projectsearch.go for why the peek
+	// contract deliberately stops at the file boundary.
+	project bool
+	// truncated marks a project search that hit the result cap, so the
+	// title can say so — a silently short list reads as "that's all of
+	// them", the one wrong answer a search can give.
+	truncated bool
 }
 
 // -----------------------------------------------------------------------------
@@ -282,6 +302,7 @@ func findAllRowsFor(buf *editor.Buffer, matches []editor.Match) []findAllRow {
 		rows = append(rows, findAllRow{
 			line: mt.Line, col: mt.Col, width: mt.Width,
 			text: text, hit: hit, hitW: hitW,
+			label: strconv.Itoa(mt.Line + 1),
 		})
 	}
 	return rows
@@ -343,6 +364,12 @@ func (m *findAllModal) tab(a *App) *editor.Tab {
 // band re-centers once. The band is read AFTER the popup is installed,
 // so it's the shortened one.
 func (m *findAllModal) preview(a *App) {
+	// Project mode walks rows without touching any buffer — the row
+	// itself is the preview. See projectsearch.go for why.
+	if m.project {
+		m.ensureRowVisible(a)
+		return
+	}
 	tab := m.tab(a)
 	if tab == nil || m.selected < 0 || m.selected >= len(m.rows) {
 		return
@@ -366,6 +393,10 @@ func (m *findAllModal) preview(a *App) {
 // dismissal except Esc lands here — a click in the editor, like an Enter,
 // reads as "this is the place I wanted".
 func (m *findAllModal) accept(a *App) {
+	if m.project {
+		m.openSelected(a)
+		return
+	}
 	m.restoreFind(a)
 	a.closeModal()
 }
@@ -388,6 +419,12 @@ func (m *findAllModal) abort(a *App) {
 // to tint the occurrences it was listing, so the tint has to leave with
 // the list — same contract as closing the find bar.
 func (m *findAllModal) restoreFind(a *App) {
+	// Project mode never borrowed anything: it has no single tab behind
+	// it to tint, and writing these fields would clobber whatever find
+	// state the active tab legitimately holds.
+	if m.project {
+		return
+	}
 	tab := m.tab(a)
 	if tab == nil {
 		return
@@ -663,21 +700,39 @@ func (m *findAllModal) rowIndexAt(a *App, x, y int) int {
 	return idx
 }
 
-// lineDigits is the width of the line-number column: enough for the
-// largest line number in the list, floored so short files don't get a
-// cramped gutter.
-func (m *findAllModal) lineDigits() int {
-	max := 0
+// labelWidth is the width of the left column: enough for the widest row
+// label in the list, floored so short files don't get a cramped gutter
+// and capped in project mode, where a "path:line" label can otherwise run
+// longer than the code it is supposed to be introducing.
+//
+// The cap is a share of the panel rather than a constant because the two
+// docks differ by a factor of three in width — a column that leaves the
+// top strip readable would leave the right dock with nothing but paths.
+func (m *findAllModal) labelWidth(a *App) int {
+	widest := 0
 	for _, r := range m.rows {
-		if r.line+1 > max {
-			max = r.line + 1
-		}
+		widest = max(widest, runeLen(r.label))
 	}
-	d := len(strconv.Itoa(max))
-	if d < findAllMinLineDigits {
-		d = findAllMinLineDigits
+	w := max(widest, findAllMinLineDigits)
+	if m.project {
+		w = min(w, max(m.width(a)*2/5, findAllMinLineDigits))
 	}
-	return d
+	return w
+}
+
+// rowLabelText renders a row's left column, truncated to width. Project
+// labels are cut from the FRONT (with a leading ellipsis) because the
+// distinguishing part of a path is its tail — twenty rows all reading
+// "internal/app/…" would say nothing at all.
+func rowLabelText(label string, width int) string {
+	runes := []rune(label)
+	if len(runes) <= width {
+		return label
+	}
+	if width <= 1 {
+		return "…"
+	}
+	return "…" + string(runes[len(runes)-(width-1):])
 }
 
 // -----------------------------------------------------------------------------
@@ -798,7 +853,7 @@ func (m *findAllModal) draw(a *App) {
 	dock := m.dockRect(a)
 	count := fmt.Sprintf("%d/%d ", m.selected+1, len(m.rows))
 	countX := dock.x - runeLen(count)
-	title := fmt.Sprintf("Find all %q", m.query)
+	title := m.titleText()
 	// Clip the title against everything to its right — the count, the
 	// dock button, and drawFrame's "esc" — so a long query on a narrow
 	// column can never overwrite them.
@@ -814,7 +869,7 @@ func (m *findAllModal) draw(a *App) {
 	drawAt(a.screen, dock.x, dock.y, a.findAllDockGlyph(), c.title)
 
 	vis := m.visibleRows(a)
-	digits := m.lineDigits()
+	digits := m.labelWidth(a)
 	for i := 0; i < vis; i++ {
 		ry := my + 3 + i
 		idx := m.scroll + i
@@ -832,12 +887,7 @@ func (m *findAllModal) draw(a *App) {
 	// Footer hint, widest form that fits — the right-docked column has
 	// less than half the room the top strip does, and a hint clipped
 	// mid-word reads worse than a shorter one.
-	for _, hint := range []string{
-		" ↑↓ preview · enter accept · esc back · d dock ",
-		" ↑↓ preview · enter accept · esc back ",
-		" enter accept · esc back ",
-		" esc back ",
-	} {
+	for _, hint := range m.footerHints() {
 		if mw > runeLen(hint)+6 {
 			drawAt(a.screen, mx+2, my+mh-1, hint, c.muted)
 			break
@@ -866,8 +916,15 @@ func (m *findAllModal) drawRow(a *App, mx, ry, mw, digits int, r findAllRow, sel
 		a.screen.SetContent(cx, ry, ' ', nil, rowStyle)
 	}
 
-	num := strconv.Itoa(r.line + 1)
-	numStart := mx + 2 + (digits - runeLen(num))
+	// Right-aligned in file mode (numbers line up on their units digit),
+	// LEFT-aligned in project mode: the paths are already truncated to a
+	// common width from the front, and right-aligning them would put the
+	// ellipses in a ragged column.
+	num := rowLabelText(r.label, digits)
+	numStart := mx + 2
+	if !m.project {
+		numStart += digits - runeLen(num)
+	}
 	drawAt(a.screen, numStart, ry, num, numStyle)
 	a.screen.SetContent(mx+2+digits+1, ry, '│', nil, ruleStyle)
 

@@ -204,6 +204,13 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Save", shortcut: "esc s", action: (*App).menuSave, enabled: (*App).hasSavableTab},
 			{label: "Save & close tab", action: (*App).menuSaveAndClose, enabled: (*App).hasSavableTab},
 			{label: "Close tab", shortcut: "esc w", action: (*App).menuClose, enabled: (*App).hasTab},
+			// Tab switching (tabbar.go). These are the ONLY keyboard path
+			// to another open file — the strip is mouse-driven, and on a
+			// narrow window or with a dozen files open the tab you want
+			// may not be drawn at all.
+			{label: "Next tab", shortcut: "esc .", action: (*App).menuNextTab, enabled: (*App).hasMultipleTabs},
+			{label: "Previous tab", shortcut: "esc ,", action: (*App).menuPrevTab, enabled: (*App).hasMultipleTabs},
+			{label: "Switch tab…", shortcut: "esc b", action: (*App).menuSwitchTab, enabled: (*App).hasMultipleTabs},
 			{action: (*App).menuToggleAutoSave, enabled: alwaysTrue, labelFor: (*App).autoSaveToggleLabel},
 		}},
 		// View toggles. Deliberately the second group: the menu outgrows
@@ -678,6 +685,12 @@ type App struct {
 	dragMode     string // "editor" while a drag-select is active.
 	lastClick    clickRecord
 	lastTabRects []tabRect
+
+	// tabScroll is the index of the leftmost tab DRAWN in the tab strip.
+	// Derived state, never a preference: layoutTabs re-derives it from
+	// the active tab and the available width on every frame. See
+	// tabbar.go.
+	tabScroll int
 
 	// lastShiftAt is the wall-clock time we last saw any mouse event
 	// carrying the Shift modifier. Some terminals (notably Zellij over
@@ -2387,35 +2400,6 @@ func (a *App) setActiveFolder(path string) {
 	}
 }
 
-// tabBarClick dispatches clicks in the tab bar: the leftmost menuButtonWidth
-// cells open the action menu; remaining cells switch or close tabs based on
-// where the click landed within their rendered geometry.
-func (a *App) tabBarClick(x, _ int) {
-	mx, _, mw, _ := a.menuButtonRect()
-	if x >= mx && x < mx+mw {
-		a.openMenu()
-		return
-	}
-	for _, r := range a.lastTabRects {
-		if x >= r.X && x < r.X+r.Width {
-			if x == r.CloseX {
-				a.requestCloseTab(r.Index)
-				return
-			}
-			// A tab-bar switch is a navigation, but it bypasses
-			// openFile (the tab is already open), so it records into
-			// the history itself. Same-tab clicks aren't navigation.
-			if r.Index != a.activeTab && r.Index < len(a.tabs) {
-				if from, ok := a.currentNavLoc(); ok && from.path != a.tabs[r.Index].Path {
-					a.recordNav(from)
-				}
-			}
-			a.activeTab = r.Index
-			return
-		}
-	}
-}
-
 // editorPress handles the initial mouse press inside the editor — placing
 // the caret, optionally selecting a word on double-click. Image tabs
 // have no caret, so the press is dropped.
@@ -3374,110 +3358,6 @@ func (a *App) iconsOn() bool {
 	return a.tree != nil && a.tree.IconsEnabled
 }
 
-// layoutTabs computes the tabRect geometry for every tab. Tabs are rendered
-// to the right of the menu button, in the format:
-//
-//	" <dirty><icon? ><name> × " — a single space pad, two-cell dirty slot
-//	(dot+space, or two spaces), an optional Nerd Font glyph + 1-space
-//	separator (only when icons are enabled), the file name, a separator
-//	space, the close ×, and a trailing space.
-func (a *App) layoutTabs() []tabRect {
-	out := make([]tabRect, 0, len(a.tabs))
-	cursor := a.leftBlockW() + menuButtonWidth
-	iconW := 0
-	if a.iconsOn() {
-		iconW = 2 // glyph + space
-	}
-	for i, t := range a.tabs {
-		nameLen := len([]rune(t.DisplayName()))
-		w := 1 + 2 + iconW + nameLen + 1 + 1 + 1 // pad+dirty+icon?+name+space+×+pad
-		out = append(out, tabRect{
-			Index:  i,
-			X:      cursor,
-			Width:  w,
-			CloseX: cursor + 1 + 2 + iconW + nameLen + 1,
-		})
-		cursor += w
-	}
-	return out
-}
-
-// drawTabBar paints the tab bar across the top of the editor area: first
-// the menu button (≡), then any open tabs.
-func (a *App) drawTabBar() {
-	tx, ty, tw, _ := a.tabBarRect()
-	barStyle := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(a.theme.Muted)
-	for cx := tx; cx < tx+tw; cx++ {
-		a.screen.SetContent(cx, ty, ' ', nil, barStyle)
-	}
-
-	a.drawMenuButton()
-
-	rects := a.layoutTabs()
-	a.lastTabRects = rects
-	for _, r := range rects {
-		active := r.Index == a.activeTab
-		bg := a.theme.SidebarBG
-		fg := a.theme.Muted
-		if active {
-			bg = a.theme.BG
-			fg = a.theme.Text
-		}
-		st := tcell.StyleDefault.Background(bg).Foreground(fg)
-		if active {
-			st = st.Bold(true)
-		}
-		// Background.
-		for cx := r.X; cx < r.X+r.Width; cx++ {
-			if cx >= tx+tw {
-				break
-			}
-			a.screen.SetContent(cx, ty, ' ', nil, st)
-		}
-		tab := a.tabs[r.Index]
-		col := r.X + 1
-		if tab.Dirty {
-			a.screen.SetContent(col, ty, '●', nil, st.Foreground(a.theme.Modified))
-		}
-		col += 2 // skip dirty slot.
-		// Per-language Nerd Font glyph between the dirty dot and the
-		// filename — only when icons are enabled. Coloured the same
-		// way the file tree glyphs are (icons.ColorFor) so the eye
-		// connects "this tab" to "that row in the tree" instantly.
-		if a.iconsOn() {
-			name := tab.DisplayName()
-			glyph := icons.For(name, false, false)
-			gfg := icons.ColorFor(name, false, fg)
-			gst := tcell.StyleDefault.Background(bg).Foreground(gfg)
-			if active {
-				gst = gst.Bold(true)
-			}
-			for _, gr := range glyph {
-				if col >= tx+tw {
-					break
-				}
-				a.screen.SetContent(col, ty, gr, nil, gst)
-				col++
-			}
-			col++ // separator space after glyph
-		}
-		for _, ru := range tab.DisplayName() {
-			if col >= tx+tw {
-				break
-			}
-			a.screen.SetContent(col, ty, ru, nil, st)
-			col++
-		}
-		col++ // separator space before ×
-		if col < tx+tw {
-			closeStyle := st.Foreground(a.theme.Muted)
-			if active {
-				closeStyle = st.Foreground(a.theme.Subtle)
-			}
-			a.screen.SetContent(col, ty, '×', nil, closeStyle)
-		}
-	}
-}
 
 // drawSplitter paints a 1-column vertical line at the editor-facing edge
 // of the sidebar. Idle it sits in Subtle grey; while the user is dragging

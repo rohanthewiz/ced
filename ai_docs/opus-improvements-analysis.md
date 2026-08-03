@@ -218,7 +218,7 @@ commit, with tests, per the project's testing convention.
 | 0 | Analysis + plan | this document | done |
 | 1 | Highlight debounce | §1 | **done** — 70.17 ms → 0.0015 ms per keystroke |
 | 2 | Load/save durability | §2, §3, §4 | **done** — see the note below |
-| 3 | Tab switching + overflow | §5 | pending |
+| 3 | Tab switching + overflow | §5 | **done** — see the leader-key note |
 | 4 | Project search | §6 (find in project) | pending |
 | 5 | Find verbs | replace, case/whole-word, go to line | pending |
 | 6 | Compare | file↔file, compare with pasted text | pending |
@@ -230,6 +230,22 @@ commit, with tests, per the project's testing convention.
 | 12 | Undo memory cap | byte-budget the snapshot stack | pending |
 
 Stages 1–4 were the explicitly requested starting order.
+
+### Note from stage 3: `Esc [` and `Esc ]` are unbindable
+
+The obvious keys for prev/next tab are `[` and `]` — what every editor
+with buffers uses. They cannot work here, and the failure is silent:
+`\x1b[` is the CSI introducer and `\x1b]` is OSC, so the terminal's own
+parser (and tcell's) consumes the pair before the leader table ever sees
+it. The binding built, tested green against a synthetic key event, and
+did nothing at all in a real terminal.
+
+The shipped bindings are `Esc ,` / `Esc .` — `<` and `>` live on those
+keys, so the left/right mnemonic survives, and neither introduces
+anything. Worth remembering before adding any future punctuation leader:
+`O`, `P`, `N`, `\`, `^`, `_` and `#` are all escape-sequence introducers
+too. (`Esc O` is already bound to Go forward and appears to survive,
+which is luck rather than design.)
 
 ### Note from stage 2: format-on-save still normalises endings
 

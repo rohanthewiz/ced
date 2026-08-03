@@ -111,6 +111,18 @@ func leaderBindings() []leaderBinding {
 		// gesture from anywhere in the file.
 		{key: 'F', action: (*App).menuFindAll},
 		{key: 'p', action: (*App).openFinder},
+		// Tab switching. ',' / '.' rather than the '[' / ']' every editor
+		// with buffers uses, because those two CANNOT work here: "\x1b["
+		// is the CSI introducer and "\x1b]" is OSC, so the terminal (and
+		// tcell's parser) swallows the pair before it can ever reach the
+		// leader table. ',' and '.' carry '<' and '>' on the same keys,
+		// which is the same left/right mnemonic, and neither introduces
+		// anything. 'b' opens the switcher as a picker — "buffer", and
+		// the surface that still works once the strip is scrolled and
+		// the tab you want isn't drawn at all. See tabbar.go.
+		{key: ',', action: (*App).menuPrevTab, repeat: true},
+		{key: '.', action: (*App).menuNextTab, repeat: true},
+		{key: 'b', action: (*App).menuSwitchTab},
 		// 'k' for the palette — the Cmd+K muscle memory every editor and
 		// chat app teaches (the real Cmd+K never reaches a terminal app,
 		// so Esc-k is the closest stand-in). It used to share the binding

@@ -1904,8 +1904,8 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 // TestMenuLayout_NoCustomActions pins down the baseline geometry with
 // every section expanded: the pinned top zone contributes two rows (the
 // command palette + the expand/collapse-all toggle), thirteen collapsible
-// groups each contribute a header row (13) plus their 83 action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 98 total. The
+// groups each contribute a header row (13) plus their 86 action rows, and
+// Quit renders headerless behind a divider (its 1 row) — 101 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1913,16 +1913,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 104 {
-		t.Errorf("modalHeight = %d, want 104", h)
+	if h != 107 {
+		t.Errorf("modalHeight = %d, want 107", h)
 	}
-	if got := len(items); got != 98 {
-		t.Errorf("row count = %d, want 98 (2 top-zone + 83 group actions + 13 headers)", got)
+	if got := len(items); got != 101 {
+		t.Errorf("row count = %d, want 101 (2 top-zone + 86 group actions + 13 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (101) — headers separate the
+	// one setting off the headerless Quit group (104) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 101}
+	wantDiv := []int{2, 5, 104}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2250,8 +2250,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 107 { // 104 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 107", h)
+	if h != 110 { // 107 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 110", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

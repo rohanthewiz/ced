@@ -203,3 +203,85 @@ func TestTab_ClearFind(t *testing.T) {
 		t.Fatalf("ClearFind left residue: %+v", tab)
 	}
 }
+
+// TestFindAllOpts_CaseSensitive pins the toggle that makes find usable
+// on code: with it on, `Cursor` and `cursor` stop being the same word.
+func TestFindAllOpts_CaseSensitive(t *testing.T) {
+	buf := NewBuffer("Foo FOO foo")
+	got := FindAllOpts(buf, "foo", FindOptions{CaseSensitive: true})
+	want := []Match{{Line: 0, Col: 8, Width: 3}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("case-sensitive mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+// TestFindAllOpts_WholeWord rejects hits inside a longer identifier —
+// the "err must not match errors" rule, borrowed from the word
+// highlighter so both features agree on where a word ends.
+func TestFindAllOpts_WholeWord(t *testing.T) {
+	buf := NewBuffer("err errors err_x (err)")
+	got := FindAllOpts(buf, "err", FindOptions{WholeWord: true})
+	want := []Match{
+		{Line: 0, Col: 0, Width: 3},
+		{Line: 0, Col: 18, Width: 3},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("whole-word mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+// TestFindAllOpts_BothToggles proves the two modifiers compose rather
+// than one silently winning.
+func TestFindAllOpts_BothToggles(t *testing.T) {
+	buf := NewBuffer("Err err errs Err")
+	got := FindAllOpts(buf, "Err", FindOptions{CaseSensitive: true, WholeWord: true})
+	want := []Match{
+		{Line: 0, Col: 0, Width: 3},
+		{Line: 0, Col: 13, Width: 3},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("combined mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+// TestFindAllOpts_CaseFoldPreservesColumns is the regression guard for
+// the fold: U+0130 lowercases to TWO runes under strings.ToLower, which
+// would shift every column reported after it. Per-rune folding keeps the
+// column of the hit honest.
+func TestFindAllOpts_CaseFoldPreservesColumns(t *testing.T) {
+	buf := NewBuffer("İx foo")
+	got := FindAll(buf, "foo")
+	want := []Match{{Line: 0, Col: 3, Width: 3}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("fold shifted columns:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+// TestTab_SetFindOptions_RerunsQuery pins the reason options live behind
+// a setter: flipping one must re-derive the match list, or the bar would
+// show a count the toggles say is impossible.
+func TestTab_SetFindOptions_RerunsQuery(t *testing.T) {
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer("Foo foo FOO")
+	tab.SetFindQuery("foo")
+	if len(tab.FindMatches) != 3 {
+		t.Fatalf("insensitive search should find 3, got %d", len(tab.FindMatches))
+	}
+	tab.SetFindOptions(FindOptions{CaseSensitive: true})
+	if len(tab.FindMatches) != 1 {
+		t.Fatalf("case-sensitive re-run should find 1, got %d", len(tab.FindMatches))
+	}
+}
+
+// TestMatchOccurrences_MatchesFindScanner pins the shared-scanner claim:
+// the word highlighter and a case-sensitive whole-word find must return
+// the same hits on the same text, or the user gets two different answers
+// to one question.
+func TestMatchOccurrences_MatchesFindScanner(t *testing.T) {
+	buf := NewBuffer("err errors\nErr err")
+	viaWordHL := MatchOccurrences(buf, "err", true, 0, buf.LineCount()-1)
+	viaFind := FindAllOpts(buf, "err", FindOptions{CaseSensitive: true, WholeWord: true})
+	if !reflect.DeepEqual(viaWordHL, viaFind) {
+		t.Fatalf("scanners disagree:\n wordhl=%v\n   find=%v", viaWordHL, viaFind)
+	}
+}

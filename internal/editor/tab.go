@@ -103,6 +103,13 @@ type Tab struct {
 	FindQuery   string
 	FindMatches []Match
 	FindIndex   int // -1 = no current match; otherwise an index into FindMatches.
+	// FindOpts are the modifiers the match list above was produced under
+	// (match case, whole word). It lives on the Tab beside the query for
+	// the same reason the query does: the bar can be closed and re-opened,
+	// and a match list that outlived the options that built it would paint
+	// hits the toggles say are impossible. Write it through
+	// SetFindOptions, never directly.
+	FindOpts FindOptions
 
 	// IndentUnit is the string the editor inserts when the user presses
 	// Tab. Detected on file open (DetectIndent) so the editor matches

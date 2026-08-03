@@ -110,6 +110,17 @@ func leaderBindings() []leaderBinding {
 		// selection, or the word under the cursor, so it's a one-key
 		// gesture from anywhere in the file.
 		{key: 'F', action: (*App).menuFindAll},
+		// 'e' for rEplace — the letter the verb's own name offers once
+		// 'r' is spoken for (redo, with 'Z' as its shifted twin). It
+		// deliberately isn't 'F's neighbour on a shift: replace is a
+		// MUTATING verb, not another way to read, so pairing it with
+		// find under the shift convention would have said the wrong
+		// thing about what pressing it does.
+		{key: 'e', action: (*App).menuReplace},
+		// 'j' for Jump to line. Not 'l' — a lone 'l' is one stray Esc
+		// away from every word with an L in it, which is the same
+		// argument that put the git Log on a shifted 'L'.
+		{key: 'j', action: (*App).menuGoToLine},
 		{key: 'p', action: (*App).openFinder},
 		// 'P' searches the project's CONTENTS rather than its filenames —
 		// the shifted variant of the same verb, following the f/F and o/O

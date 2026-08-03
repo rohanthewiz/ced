@@ -44,9 +44,10 @@ func (a *App) closeAllModals() {
 	a.menuOpen = false
 	a.modal = nil
 	a.findOpen = false
-	a.findValue = nil
-	a.findCursor = 0
-	a.findScroll = 0
+	a.findReplaceOpen = false
+	a.findFocus = findFocusQuery
+	a.findField = textField{}
+	a.replField = textField{}
 	a.hoveredMenuRow = -1
 	a.dragMode = ""
 	a.stopAutoScroll()

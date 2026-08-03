@@ -61,6 +61,10 @@ internal/editor/highlight.go  Chroma → []tcell.Style per line
 internal/editor/syntax.go     Re-lex settle policy + the style-grid patch
 internal/app/syntax.go        The settle timer that wakes the loop for the re-lex
 internal/app/tabbar.go        Tab strip: scroll, overflow button, switching
+internal/editor/find.go       Match model + the one scanner (options: case, whole word)
+internal/editor/replace.go    Replace current / replace all — one undo step, bottom-up
+internal/app/find.go          The find bar: two rows, option toggles, replace buttons
+internal/app/goto.go          Go to line — line, line:col, or a pasted compiler ref
 internal/search/search.go     Project-wide text search over the finder's index
 internal/app/projectsearch.go Find in project: search → the find-all panel
 internal/editor/decoration.go Span/GutterMark overlay system merged in Tab.Render
@@ -387,6 +391,66 @@ House rules:
   one scanner, two consumers. `Tab.WordHighlight` gates it per tab
   because sources are asked per-tab; `App.wordHLEnabled` is the
   authoritative copy and `applyWordHighlight` the single write path.
+
+### Find verbs — options, replace, go to line (editor/find.go,
+### editor/replace.go, app/find.go, app/goto.go)
+The bar grew from "type and jump" into the three verbs a search surface
+owes you. House rules:
+
+- **ONE scanner decides what a hit is** (`matchCols` in editor/find.go).
+  `FindAllOpts` (whole buffer, optionally case-folded), `FindAll` (the
+  zero-options entry point project search and the seeding ladder use),
+  and `MatchOccurrences` (the word highlighter's line window) all come
+  through it. Two implementations would drift, and the user would have
+  no way to tell which one answered. Case folding is per-RUNE
+  (`foldRunes`), not `strings.ToLower`: a few runes lowercase to more
+  than one rune, and a fold that changes the rune count shifts every
+  column reported after it, painting the highlight over the wrong cells.
+- **Options live on the App, are PUSHED to the tab, and are not
+  persisted.** `App.findCase` / `findWord` are authoritative because
+  they describe how the USER searches — flipping "match case" then
+  switching tabs must not silently switch it back — and
+  `applyFindOptions` is the single write path (the applyWordHighlight
+  shape). `Tab.SetFindOptions` re-runs the query, so a match list can
+  never outlive the options that produced it. No config key, unlike the
+  Find-all dock: a saved "match case" would silently narrow the first
+  search of every future session, with no bar on screen to explain the
+  hit that didn't appear.
+- **The bar is 1 row for find, 2 for replace, and everything pinned
+  above the status bar asks `findBarRows()`** — never the
+  `findBarHeight` constant, which is now just the per-row unit. A
+  replace row that floated over the editor would cover the line it is
+  about to rewrite (the Find-all displacement argument).
+- **Both inputs are the shared `textField`** (the house rule for every
+  single-line input). It already knows caret motion, scroll, click-to-
+  position and paste; the hand-rolled copy that used to live here is
+  what this replaced.
+- **Alt is safe INSIDE the bar** and nowhere else in the editor body:
+  the bar owns the keyboard, so handleKey's Alt+rune leader branch never
+  sees `alt+c` / `alt+w` / `alt+a` — including in tmux, where "Esc c"
+  arrives folded as Alt+c. That's what makes in-bar chords possible at
+  all when the ≡ menu is unreachable from a keyboard-owning surface. The
+  two toggles ALSO get ≡ rows for the same reason the Find-all dock
+  does, and clickable `Aa` / `|W|` buttons because clicks come first here.
+- **A replace is ONE undo step, and replace-all goes bottom-up.**
+  `ReplaceCurrent` selects the match and calls `InsertString` — that path
+  already records exactly one structural step. `ReplaceAll` files one
+  snapshot itself and then edits the **Buffer** directly: Buffer
+  primitives record no history, which is how it stays one step WITHOUT
+  touching `undoSuppress` (that flag belongs to the caret fan-out alone —
+  an unbalanced `true` silently disables undo). Descending document
+  order is load-bearing: a replacement of a different width shifts every
+  later column on the line, so a top-down pass corrupts the tail.
+- `ReplaceAll` **re-scans** rather than trusting `FindMatches`, and
+  `ReplaceCurrent` advances PAST what it wrote, so `s/a/aa/` terminates.
+- **Go to line clamps, and parses a pasted compiler reference**
+  (`app.go:314:22` → line 314, col 22). The number usually comes from a
+  build log that may be a few edits stale; landing on the last line beats
+  a modal that says no. Leader is `Esc j` — not `l`, which is one stray
+  Esc away from every word with an L in it (the same argument that put
+  the git Log on a shifted `L`). Replace is `Esc e`: `r` is redo, and
+  pairing a MUTATING verb with find under the shift convention would say
+  the wrong thing about what pressing it does.
 
 ### Find all in file (app/findall.go)
 Every occurrence of a query listed as one compacted row each — line
@@ -1385,8 +1449,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 87 group actions + 13 headers (102), height 108,
-dividers `[2, 5, 105]`.
+2 top-zone rows + 91 group actions + 13 headers (106), height 112,
+dividers `[2, 5, 109]`.
 
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.

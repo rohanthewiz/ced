@@ -34,7 +34,7 @@ func TestCloseAllModals_ClearsEverything(t *testing.T) {
 	a.modal = &contextModal{node: a.tree.Root, items: []contextItem{{label: "x"}}}
 	a.hoveredMenuRow = 3
 	a.findOpen = true
-	a.findValue = []rune("q")
+	a.findField = newTextField("q")
 	a.dragMode = "editor"
 	a.autoScrollDir = 1
 
@@ -43,7 +43,7 @@ func TestCloseAllModals_ClearsEverything(t *testing.T) {
 	if a.menuOpen || a.modal != nil {
 		t.Fatal("expected menu and modal slot cleared")
 	}
-	if a.findOpen || a.findValue != nil {
+	if a.findOpen || a.findField.String() != "" {
 		t.Fatal("find bar state not cleared")
 	}
 	if a.hoveredMenuRow != -1 {

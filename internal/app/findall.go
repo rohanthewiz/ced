@@ -187,10 +187,10 @@ func (a *App) openFindAll() {
 // closeAllModals does it), which is why the query is captured first —
 // the list is the same search in another shape, not a second one.
 func (a *App) openFindAllFromBar() {
-	if len(a.findValue) == 0 {
+	if len(a.findField.value) == 0 {
 		return
 	}
-	a.showFindAll(string(a.findValue))
+	a.showFindAll(a.findField.String())
 }
 
 // findAllSeedQuery is what "find all" means with no query typed, in
@@ -199,8 +199,8 @@ func (a *App) openFindAllFromBar() {
 // attachments follow), then the word under the cursor. Empty means the
 // caller should ask.
 func (a *App) findAllSeedQuery() string {
-	if a.findOpen && len(a.findValue) > 0 {
-		return string(a.findValue)
+	if a.findOpen && len(a.findField.value) > 0 {
+		return a.findField.String()
 	}
 	tab := a.activeTabPtr()
 	if tab == nil || tab.Buffer == nil {

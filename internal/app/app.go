@@ -250,6 +250,16 @@ func builtinMenuGroups() []menuGroup {
 		{title: "Search", collapsible: true, items: []menuItemDef{
 			{label: "Find in file", shortcut: "esc f", action: (*App).menuFind, enabled: (*App).hasFindable},
 			{label: "Find all in file", shortcut: "esc F", action: (*App).menuFindAll, enabled: (*App).hasFindAll},
+			// Replace opens the same bar with its second row showing —
+			// one surface, two rows, rather than a separate dialog.
+			{label: "Replace in file", shortcut: "esc e", action: (*App).menuReplace, enabled: (*App).hasReplaceable},
+			// The two search modifiers. They have buttons in the bar, but
+			// the bar OWNS the keyboard while it's open, so these rows are
+			// the only way to set one from the menu — and the only path at
+			// all on a terminal that eats clicks (the macOS-Terminal rule).
+			{action: (*App).menuToggleFindCase, enabled: alwaysTrue, labelFor: (*App).findCaseToggleLabel},
+			{action: (*App).menuToggleFindWord, enabled: alwaysTrue, labelFor: (*App).findWordToggleLabel},
+			{label: "Go to line…", shortcut: "esc j", action: (*App).menuGoToLine, enabled: (*App).hasGoToLine},
 			{label: "Find file in project", shortcut: "esc p", action: (*App).menuFindFile, enabled: (*App).hasFinder},
 			// Text across the whole tree, listed in the same panel the
 			// in-file list uses (projectsearch.go). Sits under its
@@ -756,15 +766,28 @@ type App struct {
 	// each implementation.
 	modal modal
 
-	// Find bar — opened with Esc-f or the "Find in file" menu entry. The
-	// bar is a 1-row strip pinned above the status bar; while it's open
-	// it owns the keyboard. The active tab carries the query and match
-	// list (see editor.Tab.SetFindQuery), so each tab remembers its own
-	// search across closes / reopens.
-	findOpen   bool
-	findValue  []rune
-	findCursor int
-	findScroll int
+	// Find bar — opened with Esc-f (or Esc-e for the replace row, or the
+	// matching ≡ rows). The bar is a 1-row strip pinned above the status
+	// bar, 2 rows once replace is showing; while it's open it owns the
+	// keyboard. The active tab carries the query, options and match list
+	// (see editor.Tab.SetFindQuery), so each tab remembers its own search
+	// across closes / reopens.
+	//
+	// Both inputs are the shared textField — the house rule for every
+	// single-line input. findFocus names which one the keyboard is in.
+	findOpen        bool
+	findReplaceOpen bool
+	findFocus       int
+	findField       textField
+	replField       textField
+
+	// Search modifiers. The App holds the authoritative copy (the tabs
+	// get a pushed copy via applyFindOptions) because they describe how
+	// the USER searches, not a property of one file — flipping "match
+	// case" then switching tabs must not silently switch it back.
+	// Session-only, deliberately not persisted: see applyFindOptions.
+	findCase bool
+	findWord bool
 
 	// Auto-scroll while drag-selecting past the editor's top/bottom edge.
 	// lastDragX/Y is the most recent mouse position so the auto-scroll
@@ -1575,9 +1598,7 @@ func (a *App) tabBarRect() (x, y, w, h int) {
 // already subtracts them.
 func (a *App) editorBandRows() int {
 	h := a.height - 2
-	if a.findOpen {
-		h -= findBarHeight
-	}
+	h -= a.findBarRows()
 	if a.gitPanel.open {
 		h -= a.gitPanelHeight()
 	}
@@ -2263,6 +2284,11 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			a.dragMode = a.gitPanelPress(x, y)
 		case a.gitLog.open && a.gitLogContains(x, y):
 			a.dragMode = a.gitLogPress(x, y)
+		// The find bar sits inside the editor's former y-range too, so
+		// its hit-test runs before the catch-all — otherwise a click on
+		// the Aa toggle would land in the file behind it and move the
+		// cursor there.
+		case a.findBarPress(x, y):
 		case y > 0 && y < a.height-1:
 			// Alt+click drops (or lifts) an extra caret instead of
 			// moving the one you have — the multi-line editing gesture.

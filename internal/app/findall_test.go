@@ -711,7 +711,7 @@ func TestFindAll_SeedQueryPrefersBarThenSelectionThenWord(t *testing.T) {
 
 	// The find bar outranks everything — it's what the user just typed.
 	a.openFind()
-	a.findValue = []rune("int")
+	a.findField = newTextField("int")
 	if got := a.findAllSeedQuery(); got != "int" {
 		t.Errorf("seed from bar = %q, want %q", got, "int")
 	}

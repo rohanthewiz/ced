@@ -87,6 +87,10 @@ func WordRange(runes []rune, col int) (start, end int, ok bool) {
 // never overlap — the scanner advances past a hit — and the line window
 // is clamped to the buffer, so callers can pass a render window
 // straight through.
+//
+// The scan itself is find.go's matchCols, so this and the find bar agree
+// on what a hit is; the window and the always-case-sensitive compare are
+// what make this the code-reading variant.
 func MatchOccurrences(b *Buffer, text string, wholeWord bool, first, last int) []Match {
 	if b == nil || text == "" {
 		return nil
@@ -100,21 +104,8 @@ func MatchOccurrences(b *Buffer, text string, wholeWord bool, first, last int) [
 	}
 	var out []Match
 	for line := first; line <= last; line++ {
-		hay := b.LineRunes(line)
-		for col := 0; col+len(needle) <= len(hay); col++ {
-			if !runesEqual(hay[col:col+len(needle)], needle) {
-				continue
-			}
-			if wholeWord {
-				if col > 0 && IsWordRune(hay[col-1]) {
-					continue
-				}
-				if end := col + len(needle); end < len(hay) && IsWordRune(hay[end]) {
-					continue
-				}
-			}
+		for _, col := range matchCols(b.LineRunes(line), needle, wholeWord) {
 			out = append(out, Match{Line: line, Col: col, Width: len(needle)})
-			col += len(needle) - 1 // loop's ++ carries us past the hit
 		}
 	}
 	return out

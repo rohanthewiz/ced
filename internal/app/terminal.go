@@ -778,9 +778,7 @@ func (a *App) termPanelHeight() int {
 // keeps its minimum working rows.
 func (a *App) maxTermPanelHeight() int {
 	max := a.height - 2 - termPanelMinEditorRows
-	if a.findOpen {
-		max -= findBarHeight
-	}
+	max -= a.findBarRows()
 	if max < termPanelMinHeight {
 		max = termPanelMinHeight
 	}
@@ -808,9 +806,7 @@ func (a *App) resizeTermPanel(target int) {
 // the same glued-to-the-cursor feel as the other splitters.
 func (a *App) dragTermPanelTo(y int) {
 	bottom := a.height - 1
-	if a.findOpen {
-		bottom -= findBarHeight
-	}
+	bottom -= a.findBarRows()
 	a.resizeTermPanel(bottom - y)
 }
 
@@ -936,9 +932,7 @@ func (a *App) termPanelRect() (x, y, w, h int) {
 	sw := a.leftBlockW()
 	h = a.termPanelHeight()
 	y = a.height - 1 - h
-	if a.findOpen {
-		y -= findBarHeight
-	}
+	y -= a.findBarRows()
 	return sw, y, a.width - sw - a.rightBlockW(), h
 }
 

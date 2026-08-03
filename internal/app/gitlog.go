@@ -335,9 +335,7 @@ func (a *App) gitLogHeight() int {
 // respect.
 func (a *App) maxGitLogHeight() int {
 	max := a.height - 2 - gitLogMinEditorRows
-	if a.findOpen {
-		max -= findBarHeight
-	}
+	max -= a.findBarRows()
 	if max < gitLogMinHeight {
 		max = gitLogMinHeight
 	}
@@ -361,9 +359,7 @@ func (a *App) resizeGitLog(target int) {
 // row during a drag.
 func (a *App) dragGitLogTo(y int) {
 	bottom := a.height - 1
-	if a.findOpen {
-		bottom -= findBarHeight
-	}
+	bottom -= a.findBarRows()
 	a.resizeGitLog(bottom - y)
 }
 
@@ -391,9 +387,7 @@ func (a *App) gitLogRect() (x, y, w, h int) {
 	lw := a.leftBlockW()
 	h = a.gitLogHeight()
 	y = a.height - 1 - h
-	if a.findOpen {
-		y -= findBarHeight
-	}
+	y -= a.findBarRows()
 	return lw, y, a.width - lw - a.rightBlockW(), h
 }
 

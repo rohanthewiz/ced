@@ -491,9 +491,7 @@ func (a *App) gitPanelHeight() int {
 // default's restraint — but never this hard limit.
 func (a *App) maxGitPanelHeight() int {
 	max := a.height - 2 - gitPanelMinEditorRows
-	if a.findOpen {
-		max -= findBarHeight
-	}
+	max -= a.findBarRows()
 	if max < gitPanelMinHeight {
 		max = gitPanelMinHeight
 	}
@@ -518,9 +516,7 @@ func (a *App) resizeGitPanel(target int) {
 // splitter.
 func (a *App) dragGitPanelTo(y int) {
 	bottom := a.height - 1
-	if a.findOpen {
-		bottom -= findBarHeight
-	}
+	bottom -= a.findBarRows()
 	a.resizeGitPanel(bottom - y)
 }
 
@@ -552,9 +548,7 @@ func (a *App) gitPanelRect() (x, y, w, h int) {
 	lw := a.leftBlockW()
 	h = a.gitPanelHeight()
 	y = a.height - 1 - h
-	if a.findOpen {
-		y -= findBarHeight
-	}
+	y -= a.findBarRows()
 	return lw, y, a.width - lw - a.rightBlockW(), h
 }
 

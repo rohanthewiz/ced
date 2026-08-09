@@ -162,28 +162,34 @@ type findAllModal struct {
 // Entry points
 // -----------------------------------------------------------------------------
 
-// menuFindAll is the ≡ / Esc-F entry point: list every occurrence of the
-// query the context implies (see findAllSeedQuery), asking for one when
-// context offers nothing.
+// menuFindAll is the ≡ / Esc-F entry point: list every occurrence of a
+// selected region, or ask what to look for (see openFindAll).
 func (a *App) menuFindAll() {
 	a.closeMenu()
 	a.openFindAll()
 }
 
-// openFindAll resolves a query and shows the list, falling back to a
-// prompt when there's nothing to seed from. The prompt path is why this
-// is split from showFindAll: promptModal closes itself before running
-// its callback, so the callback lands in an empty modal slot.
+// openFindAll resolves a query and shows the list. A single-line
+// selection runs straight away; everything else goes through the
+// prompt, pre-filled with the best guess the context offers. The prompt
+// path is why this is split from showFindAll: promptModal closes itself
+// before running its callback, so the callback lands in an empty modal
+// slot.
 func (a *App) openFindAll() {
 	tab := a.activeTabPtr()
 	if tab == nil || tab.IsImage() {
 		return
 	}
-	if q := a.findAllSeedQuery(); q != "" {
+	if q := a.findAllSelectionQuery(); q != "" {
 		a.showFindAll(q)
 		return
 	}
-	a.openPrompt("Find all in file", "lists every occurrence", "", func(app *App, v string) {
+	// Read the seed BEFORE opening the prompt: openModal → closeAllModals
+	// wipes the find bar's field, which is one of the things seeding it.
+	// (Argument evaluation order already guarantees this; the local makes
+	// the dependency visible so a later refactor can't quietly break it.)
+	seed := a.findAllPromptSeed()
+	a.openPrompt("Find all in file", "lists every occurrence", seed, func(app *App, v string) {
 		app.showFindAll(v)
 	})
 }
@@ -199,26 +205,47 @@ func (a *App) openFindAllFromBar() {
 	a.showFindAll(a.findField.String())
 }
 
-// findAllSeedQuery is what "find all" means with no query typed, in
-// priority order: what's in the find bar, then a single-line selection
-// (a highlighted region is a narrower question — the same rule the chat
-// attachments follow), then the word under the cursor. Empty means the
-// caller should ask.
-func (a *App) findAllSeedQuery() string {
+// findAllSelectionQuery is the ONE thing a find verb searches for
+// without asking: a single-line selection. A highlighted region is an
+// explicit gesture — the user pointed at the exact text — so a prompt
+// there could only ever be answered "yes, that", which makes it a
+// keystroke charged for nothing.
+//
+// Everything else the context merely IMPLIES (what's left in the find
+// bar, the word the cursor happens to be sitting in), and an implication
+// is a guess. Guesses belong in the prompt as a pre-fill
+// (findAllPromptSeed), where Enter accepts one and typing replaces it —
+// a search that silently answers a question the user didn't ask costs
+// more than the key it saved, because the result list is indistinguish-
+// able from a correct answer to the wrong query.
+//
+// A multi-line selection is deliberately NOT one of these: FindAll
+// matches within a line, so a blob with newlines in it is not a search
+// term. It falls through to the prompt like every other unclear case.
+func (a *App) findAllSelectionQuery() string {
+	tab := a.activeTabPtr()
+	if tab == nil || tab.Buffer == nil || !tab.HasSelection() {
+		return ""
+	}
+	sel := tab.SelectionText()
+	if sel == "" || strings.ContainsRune(sel, '\n') {
+		return ""
+	}
+	return sel
+}
+
+// findAllPromptSeed is what pre-fills the "what am I looking for?"
+// prompt, in priority order: what's in the find bar (the user typed it,
+// so it beats anything inferred), then the word under the cursor. Empty
+// means the prompt opens blank — a cursor in whitespace has nothing to
+// suggest.
+func (a *App) findAllPromptSeed() string {
 	if a.findOpen && len(a.findField.value) > 0 {
 		return a.findField.String()
 	}
 	tab := a.activeTabPtr()
 	if tab == nil || tab.Buffer == nil {
 		return ""
-	}
-	if tab.HasSelection() {
-		// A multi-line selection isn't a search term; fall through to
-		// the word under the cursor rather than searching for a blob
-		// with newlines in it (FindAll matches within a line).
-		if sel := tab.SelectionText(); sel != "" && !strings.ContainsRune(sel, '\n') {
-			return sel
-		}
 	}
 	if tab.Cursor.Line < 0 || tab.Cursor.Line >= len(tab.Buffer.Lines) {
 		return ""

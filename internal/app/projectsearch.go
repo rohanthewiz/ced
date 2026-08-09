@@ -62,20 +62,24 @@ type projectSearchEvent struct {
 func (e *projectSearchEvent) When() time.Time { return e.when }
 
 // menuFindInProject is the ≡ Search row and the Esc-P leader: search the
-// whole project for the query the context implies, asking for one when
-// context offers nothing.
+// whole project for a selected region, or ask what to look for.
 //
-// Seeding follows findAllSeedQuery exactly — find bar, then a single-line
-// selection, then the word under the cursor — because the two features
-// are the same question at two scopes and answering them differently
-// would be a trap.
+// Seeding follows find-all exactly — a single-line selection runs
+// straight away (findAllSelectionQuery), anything else opens the prompt
+// pre-filled with findAllPromptSeed — because the two features are the
+// same question at two scopes and answering them differently would be a
+// trap. It matters more here, if anything: this one walks the whole
+// tree, so a guessed query spends real time before it can be corrected.
 func (a *App) menuFindInProject() {
 	a.closeMenu()
-	if q := a.findAllSeedQuery(); q != "" {
+	if q := a.findAllSelectionQuery(); q != "" {
 		a.startProjectSearch(q)
 		return
 	}
-	a.openPrompt("Find in project", "searches every file", "", func(app *App, v string) {
+	// Captured before openPrompt for the reason openFindAll documents:
+	// opening a modal clears the find bar that may be seeding this.
+	seed := a.findAllPromptSeed()
+	a.openPrompt("Find in project", "searches every file", seed, func(app *App, v string) {
 		app.startProjectSearch(v)
 	})
 }

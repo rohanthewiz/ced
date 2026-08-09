@@ -584,8 +584,21 @@ Search group, or ↓ from the find bar. House rules:
   display column by subtracting the trim. No width table, nothing to
   drift. Two hits on one line are two rows — the list is occurrences,
   not lines.
-- Seeding is a ladder: find bar → single-line selection → word under the
-  cursor → a prompt. No match flashes rather than opening an empty box.
+- **ONLY A SELECTION SEARCHES SILENTLY** (`findAllSelectionQuery`);
+  everything else asks. A highlighted single-line region is the user
+  pointing at the exact text, so a prompt there could only be answered
+  "yes, that". The find bar's leftovers and the word the cursor happens
+  to sit in are IMPLICATIONS, and a result list is indistinguishable from
+  a correct answer to the wrong query — so those go in the prompt as a
+  PRE-FILL (`findAllPromptSeed`: bar first, then the word), where Enter
+  accepts the guess and any other key replaces it. The old ladder ran the
+  guess. A multi-line selection is not a search term (FindAll matches
+  within a line) and falls through to the prompt like every other unclear
+  case. The seed must be read BEFORE `openPrompt` — `openModal` →
+  `closeAllModals` wipes the find bar that may be seeding it. The bar's
+  own ↓ gesture (`openFindAllFromBar`) is untouched: the user just typed
+  that, so it is not a guess. No match flashes rather than opening an
+  empty box.
 
 ### Find in project (internal/search + app/projectsearch.go)
 The same panel, a second scope: every occurrence across the tree, rows
@@ -620,10 +633,13 @@ Esc contract and the mouse story. House rules:
   column caps at a share of the panel, not a constant — the two docks
   differ by a factor of three in width.
 - Results arrive as a generation-stamped event and are dropped if stale
-  or if a modal/menu took the slot meanwhile. Seeding reuses
-  `findAllSeedQuery` exactly: the two features are one question at two
-  scopes, and seeding them differently would be a trap. Leader is
-  `Esc P`, the shifted twin of `Esc p` (names vs. contents).
+  or if a modal/menu took the slot meanwhile. Seeding reuses the in-file
+  rule exactly — a single-line selection runs, anything else prompts
+  pre-filled: the two features are one question at two scopes, and
+  seeding them differently would be a trap. It matters more here, if
+  anything, since a guessed query spends a whole-tree walk before the
+  user can correct it. Leader is `Esc P`, the shifted twin of `Esc p`
+  (names vs. contents).
 
 ### LSP integration (internal/lsp + app/lsp.go)
 The client is a hand-rolled JSON-RPC subset — do NOT add an LSP

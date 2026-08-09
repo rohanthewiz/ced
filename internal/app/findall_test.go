@@ -691,41 +691,83 @@ func TestFindAll_BorrowsAndReturnsFindState(t *testing.T) {
 	}
 }
 
-// TestFindAll_SeedQueryPrefersBarThenSelectionThenWord pins the "what
-// does find-all mean with nothing typed" ladder.
-func TestFindAll_SeedQueryPrefersBarThenSelectionThenWord(t *testing.T) {
+// TestFindAll_SelectionQueryIsTheOnlySilentSeed pins the one input a
+// find verb acts on without asking: a single-line selection. A word
+// under a bare cursor and a multi-line selection are both guesses, so
+// neither may answer for the user.
+func TestFindAll_SelectionQueryIsTheOnlySilentSeed(t *testing.T) {
 	a, tab := seedFindAllApp(t)
 
-	// Word under the cursor — the bare case.
+	// A bare cursor inside a word is an implication, not a request.
 	tab.MoveCursorTo(editor.Position{Line: 2, Col: 7}, false) // inside "count"
-	if got := a.findAllSeedQuery(); got != "count" {
-		t.Errorf("seed from cursor = %q, want %q", got, "count")
+	if got := a.findAllSelectionQuery(); got != "" {
+		t.Errorf("silent seed from a bare cursor = %q, want none", got)
 	}
 
-	// A single-line selection is a narrower question and wins.
+	// A single-line selection is the user pointing at the exact text.
 	tab.Anchor = editor.Position{Line: 0, Col: 0}
 	tab.Cursor = editor.Position{Line: 0, Col: 7}
-	if got := a.findAllSeedQuery(); got != "package" {
-		t.Errorf("seed from selection = %q, want %q", got, "package")
+	if got := a.findAllSelectionQuery(); got != "package" {
+		t.Errorf("silent seed from selection = %q, want %q", got, "package")
 	}
 
-	// The find bar outranks everything — it's what the user just typed.
+	// A multi-line selection isn't a search term (FindAll is per line).
+	tab.Anchor = editor.Position{Line: 0, Col: 0}
+	tab.Cursor = editor.Position{Line: 2, Col: 3}
+	if got := a.findAllSelectionQuery(); got != "" {
+		t.Errorf("silent seed from a multi-line selection = %q, want none", got)
+	}
+}
+
+// TestFindAll_PromptSeedPrefersBarThenWord pins what pre-fills the
+// prompt when there's nothing selected: the find bar's text first (the
+// user typed it), then the word under the cursor.
+func TestFindAll_PromptSeedPrefersBarThenWord(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+
+	tab.MoveCursorTo(editor.Position{Line: 2, Col: 7}, false) // inside "count"
+	if got := a.findAllPromptSeed(); got != "count" {
+		t.Errorf("prompt seed from cursor = %q, want %q", got, "count")
+	}
+
 	a.openFind()
 	a.findField = newTextField("int")
-	if got := a.findAllSeedQuery(); got != "int" {
-		t.Errorf("seed from bar = %q, want %q", got, "int")
+	if got := a.findAllPromptSeed(); got != "int" {
+		t.Errorf("prompt seed from bar = %q, want %q", got, "int")
+	}
+}
+
+// TestFindAll_AsksWhenNothingIsSelected covers the headline rule: with
+// no selection, find-all opens a prompt rather than searching for the
+// word the cursor happens to be in — and pre-fills it with that word so
+// accepting the guess is still one key.
+func TestFindAll_AsksWhenNothingIsSelected(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.MoveCursorTo(editor.Position{Line: 2, Col: 7}, false) // inside "count"
+	a.openFindAll()
+
+	m, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want a promptModal asking for the query", a.modal)
+	}
+	if got := m.field.String(); got != "count" {
+		t.Errorf("prompt pre-fill = %q, want the word under the cursor %q", got, "count")
 	}
 }
 
 // TestFindAll_SeedFallsBackToPrompt covers the empty ladder: a cursor in
-// whitespace has nothing to search for, so ced asks instead of guessing.
+// whitespace has nothing to suggest, so the prompt opens blank.
 func TestFindAll_SeedFallsBackToPrompt(t *testing.T) {
 	a, tab := seedFindAllApp(t)
 	tab.MoveCursorTo(editor.Position{Line: 1, Col: 0}, false) // the blank line
 	a.openFindAll()
 
-	if _, ok := a.modal.(*promptModal); !ok {
+	m, ok := a.modal.(*promptModal)
+	if !ok {
 		t.Fatalf("modal = %T, want a promptModal asking for the query", a.modal)
+	}
+	if got := m.field.String(); got != "" {
+		t.Errorf("prompt pre-fill = %q, want it blank", got)
 	}
 }
 

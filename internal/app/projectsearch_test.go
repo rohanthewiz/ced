@@ -14,8 +14,42 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/search"
 )
+
+// TestFindInProject_AsksUnlessSomethingIsSelected pins the seeding rule
+// the in-file list also keeps: only a selection searches silently, and
+// everything else opens the prompt with the guess pre-filled rather than
+// spending a whole-tree walk on it.
+func TestFindInProject_AsksUnlessSomethingIsSelected(t *testing.T) {
+	a, root := projectSearchApp(t)
+	a.openFile(filepath.Join(root, "alpha.go"))
+	tab := a.activeTabPtr()
+	if tab == nil {
+		t.Fatal("fixture did not open")
+	}
+
+	// A bare cursor inside "needle" is an implication, so ced asks.
+	tab.MoveCursorTo(editor.Position{Line: 2, Col: 7}, false)
+	a.menuFindInProject()
+	m, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want a promptModal asking for the query", a.modal)
+	}
+	if got := m.field.String(); got != "needle" {
+		t.Errorf("prompt pre-fill = %q, want the word under the cursor %q", got, "needle")
+	}
+	a.closeModal()
+
+	// A single-line selection is the user naming the text: no prompt.
+	tab.Anchor = editor.Position{Line: 2, Col: 5}
+	tab.Cursor = editor.Position{Line: 2, Col: 11}
+	a.menuFindInProject()
+	if _, ok := a.modal.(*promptModal); ok {
+		t.Error("a selection must search without asking first")
+	}
+}
 
 // projectSearchApp seeds a small project with hits in two files and
 // returns the app plus the root.

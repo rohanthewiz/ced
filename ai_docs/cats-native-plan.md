@@ -172,9 +172,25 @@ an armed snapshot (compare.go selPending).*
    - **Re-run** ↻; stale rows (line text no longer matches) render dimmed.
    ~400 LOC delta.
 
-### Phase 2 — Never clobber, never be clobbered (~1 week)
+### Phase 2 — Never clobber, never be clobbered (~1 week) — ✅ done 2026-08-12
 Req in the user's words. Extract `reconcileOpenTabsWithDisk` (app.go ~1572)
 into new `reconcile.go` and extend. Two interception points:
+
+*Landed as specified (reconcile.go + reconcile_test.go, one commit).
+Notes vs. spec: the "undoable reload" needed a new editor primitive —
+`Tab.ReloadUndoable` (reload, then re-file the pre-reload buffer onto
+the fresh history), used by both the clean-tab reload and Take disk.
+Markers are `⚠` (conflict) and `⊘` (deleted) sharing the tab strip's
+dirty-dot slot, worst news winning. Two save paths not in the spec's
+list also got the guard: cross-file edits refuse non-interactively
+(a detached participant that moved aborts the whole group — half a
+rename is worse than none), and format-on-save now adopts its own
+write's mtime when it keeps the user's edits, so ced never blocks a
+save behind a question about a write it made itself. A conflict raised
+during save-all-then-quit blocks the quit (nothing is lost; the user
+re-quits after answering). The Tier-1 `blocked` hook report is the
+Phase 5.3 consumer of the conflict record; nothing here needs to
+change for it.*
 
 **A. Watcher tick (disk changed under an open tab):**
 
@@ -204,6 +220,11 @@ tick — on conflict it silently *suspends autosave for that tab*, sets the
 marker; the modal appears on next interaction. Adopt write-then-stat so
 ced's own saves never trip the watcher. At Tier 1, a suspended conflict
 reports `blocked` via the hook — the flagship phone-push scenario. ~400 LOC.
+
+**Follow-up worth doing (not blocking):** after "Decide later" the only
+route back to the prompt is an explicit save. Clicking the tab's `⚠`
+marker should re-raise it — a small tab-bar hit-test in the Phase-1
+stamped-rect idiom.
 
 ### Phase 3 — IDE smarts (~2–3 weeks; completion is the big rock)
 

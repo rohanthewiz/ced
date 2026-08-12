@@ -1020,6 +1020,18 @@ type App struct {
 	// a tab to close. See remote.go.
 	remote remoteState
 
+	// hostIdentWrite emits an escape sequence on the tty, identifying
+	// this editor to the hosting terminal/mux (OSC 7 cwd + OSC 2 title
+	// — see hostident.go). nil disables the feature entirely: New()
+	// installs the real /dev/tty writer, tests leave it nil or install
+	// a capture. The three lastIdent* fields plus identSent are the
+	// change key that keeps the after-event check allocation-free.
+	hostIdentWrite  func(string) error
+	lastIdentPath   string
+	lastIdentDirty  bool
+	lastIdentHasTab bool
+	identSent       bool
+
 	// nextRoot is the folder the user asked to switch to. Setting it
 	// alongside quit asks the process to tear this App down and build a
 	// fresh one rooted there; main reads it via NextRoot after Run
@@ -1125,6 +1137,11 @@ func New(rootDir string) (*App, error) {
 	// named on the command line — an explicit `ced foo.go` must end up
 	// on foo.go, not on whatever tab was active a week ago.
 	a.restoreSession()
+	// Identify ourselves to the hosting terminal (OSC 7 cwd + OSC 2
+	// title — see hostident.go). After restoreSession so the first
+	// title names the restored active file rather than flashing the
+	// bare folder name for one frame.
+	a.hostIdentInit()
 	// Kick off the project file index in the background so that by
 	// the time the user hits Esc-p (or ≡ → Find file) the modal can
 	// open with results already in hand. On a 50k-file repo this
@@ -1279,6 +1296,9 @@ func (a *App) Close() {
 	a.copilotShutdown()
 	a.chatShutdown()
 	a.mcpShutdown()
+	// Give the terminal its previous title back (the pop matching
+	// hostIdentInit's push) while the tty is still ours.
+	a.hostIdentClose()
 	if a.screen != nil {
 		a.screen.Fini()
 	}
@@ -1468,6 +1488,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// the moment they don't, so an idle single-caret editor never wakes
 	// on a timer. See multicaret.go.
 	a.caretBlinkAfterEvent()
+	// And the host-identity title: the active tab can change through
+	// many paths (clicks, leaders, remote opens, closes), so the title
+	// is reconciled here instead of at each of them. See hostident.go.
+	a.hostIdentAfterEvent()
 }
 
 // workspaceChanged re-syncs every subsystem that mirrors on-disk

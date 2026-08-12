@@ -287,7 +287,61 @@ stamped-rect idiom.
    `textEdit` + `additionalTextEdits` (auto-import!) through
    `workspaceedit.go`. Ghost-text interplay: popup wins while open (one
    boolean gate in copilot_ghost.go). ~800–1000 LOC — the centerpiece.
-2. **Problems panel** — new `problems.go`, docked panel styled after
+2. **Problems panel** — ✅ done 2026-08-12.
+
+   *Landed as `internal/app/problems.go` + tests (~1000 LOC with the
+   suite). The Phase-1 diag status segment is inert no longer: it
+   toggles the panel and lands the highlight on the active file's
+   first problem. Notes vs. spec:*
+
+   - *It docks at the BOTTOM, not in find-all's top/right band. Both
+     of find-all's docks exist to keep a list near the code it points
+     at inside ONE file — the top strip is short, the right column is
+     62 cells. A problem row is `path:line │ message`: wide, prose,
+     and belonging to no particular file. So it takes the bottom
+     strip and mirrors `gitlog.go`'s shape (which itself mirrors
+     gitpanel rather than sharing its code, for the same reason).
+     Single occupancy with the git panels, compare, and a
+     bottom-docked terminal, both directions.*
+   - *It is never a modal, not even briefly. Diagnostics are ambient —
+     you asked no question — so nothing here may own the keyboard.
+     That is the one real difference from find-all, whose list starts
+     as a peek popup and only becomes furniture when pinned.*
+   - *Filters landed as header CHIPS — `✗ 3 ⚠ 5 ℹ 1` plus a scope
+     toggle (`all files` ⇄ `this file`). The scope chip is not in the
+     spec and closes a real gap: the status segment counts the ACTIVE
+     FILE while the panel lists the project, so one click reconciles
+     the number you pressed with the list you got. Counts honor scope
+     but never severity — a hidden bucket's count is the argument for
+     unhiding it. Selection survives every filter toggle and every
+     publish by IDENTITY (path+line+message), not index.*
+   - *Right-click reuses `editorContextModal` rather than growing a
+     third anchored-menu chassis — its rows are already plain
+     `func(*App)` with predicates. Rows: Quick fix… / Go to problem /
+     Copy message. **Quick fix jumps first, and the jump is the
+     mechanism, not a courtesy**: `codeAction` is asked about a range
+     in the ACTIVE document and its handler drops answers for a file
+     the user has left, and moving the caret onto the diagnostic is
+     also what makes `diagsForRange` echo that exact diagnostic back
+     as the request context (which is how a fix finds its problem).*
+   - *Keyboard twins beyond the ≡ toggle: **Next / Previous problem**,
+     which walk the panel's list from wherever the CARET is, treating
+     the whole project as one document (the row order makes each
+     file's problems contiguous). They work with the panel closed,
+     honor the filters, and refuse at the ends with a flash rather
+     than clamping — a key that silently lands you where you already
+     were reads as broken. Without them the panel would be a surface
+     a click-eating terminal could only look at.*
+   - *No filter TEXT box (find-all has one): it would need a focus
+     model in a panel that deliberately has none. The severity chips
+     are the filter the spec asked for; a text filter is cheap to add
+     later if the list ever gets long enough to need it.*
+   - *Leader: `Esc !` — the letters this table would want (`p`, `P`)
+     are long gone, and a bang is what a list of errors looks like.*
+
+   The original spec follows.
+
+   New `problems.go`, docked panel styled after
    find-all's dock machinery: all diagnostics, click row = PEEK-style jump,
    severity filter buttons, right-click → quick-fix (code actions already
    wired). Entry: the Phase-1 diag status segment. ~500 LOC.
@@ -444,10 +498,10 @@ the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords
   cats_glue.go) per the file-per-feature + `_test.go` convention; nothing
   new in app.go beyond dispatch lines. A later `internal/git` extraction is
   its own project — don't relocate mid-roadmap.
-- **Single modal slot:** completion popup, which-key overlay, and pinned
-  find-all all deliberately avoid the modal slot (popup / passive overlay /
-  docked panel) so they compose with modals. The clobber prompt IS modal —
-  correct, it must block the save.
+- **Single modal slot:** completion popup, which-key overlay, pinned
+  find-all and the Problems panel all deliberately avoid the modal slot
+  (popup / passive overlay / docked panel) so they compose with modals.
+  The clobber prompt IS modal — correct, it must block the save.
 - **Two-ced-one-file** (splits) leans hard on the clobber matrix — Phase 2
   strictly before Phase 5.
 - **Redraw cost:** full-redraw is fine — cats diffs cell-level server-side;
@@ -465,10 +519,11 @@ emission pulled forward to week one** (two escape sequences, instant
 cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
-**Progress:** Phases 1, 2 and 3.1 are done (all 2026-08-12). Next is
-**Phase 4 — the git suite**, starting with 4.1's push dialog. Phase 3.2's
-Problems panel is the natural breather: the Phase-1 diag status segment is
-already stamped and inert, waiting for it to claim the click.
+**Progress:** Phases 1, 2, 3.1 and 3.2 are done (all 2026-08-12). Next is
+**Phase 4 — the git suite**, starting with 4.1's push dialog. The two
+remaining Phase-3 items are small and unclaimed: 3.3 (hover on mouse
+dwell) is Tier-1 only and so really belongs with Phase 5, and 3.4
+(recent-files picker) is an hour's work whenever a breather is wanted.
 
 ## 8. Verification
 
@@ -503,6 +558,11 @@ already stamped and inert, waiting for it to claim the click.
 - `internal/app/findall.go`, `gitlog.go`, `gitlogactions.go`, `gitpanel.go`,
   `gitcommitmsg.go`, `compare.go` — git suite + interactive find-all +
   compare targets
+- `internal/app/problems.go` — the bottom-strip worklist. The pattern any
+  future docked list should copy: rows/view indirection with the selection
+  preserved by identity, header chips as the only filter UI, one geometry
+  source per control, and keyboard twins (next/previous) that walk the same
+  list without the panel being open
 - `cats/internal/app/command_vocab.go` + `cats/internal/ctlproto/` +
   `cats/internal/app/events.go` — the wire vocabulary `internal/cats`
   mirrors (hand-copied, never imported)

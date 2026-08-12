@@ -226,10 +226,15 @@ func (a *App) drawTabBar() {
 		}
 		tab := a.tabs[r.Index]
 		col := r.X + 1
-		if tab.Dirty {
-			a.screen.SetContent(col, ty, '●', nil, st.Foreground(a.theme.Modified))
+		// The leading slot carries the tab's worst news: ⊘ deleted on
+		// disk, ⚠ disagreeing with disk, ● merely unsaved. See
+		// reconcile.go for the precedence and for why one slot serves
+		// all three (the strip has no column to spare, and a conflicted
+		// tab is always dirty too — saying so twice adds nothing).
+		if marker, mfg, ok := a.tabMarker(tab); ok {
+			a.screen.SetContent(col, ty, marker, nil, st.Foreground(mfg))
 		}
-		col += 2 // skip dirty slot.
+		col += 2 // skip marker slot.
 		// Per-language Nerd Font glyph between the dirty dot and the
 		// filename — only when icons are enabled. Coloured the same
 		// way the file tree glyphs are (icons.ColorFor) so the eye

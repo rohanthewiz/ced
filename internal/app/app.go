@@ -916,6 +916,16 @@ type App struct {
 	autoSaveTimer   *time.Timer
 	autoSaveSig     int
 
+	// conflicts is the open set of "the file changed under you" records,
+	// keyed by the tab holding the stale buffer. A tab present here has
+	// an unresolved disk conflict: it wears the ⚠ marker in the strip,
+	// auto-save is suspended for it, and every save path refuses to
+	// write until the user answers the prompt. Keyed by pointer rather
+	// than path because the tab IS the thing at risk — a rename would
+	// otherwise orphan the record. Owned by reconcile.go; closeTab drops
+	// the entry.
+	conflicts map[*editor.Tab]*diskConflict
+
 	// syntaxTimer is the pending re-highlight countdown: a typing burst
 	// defers the O(file) Chroma pass, and this is what wakes the loop up
 	// once the burst ends so the colors land without further input.
@@ -1520,6 +1530,11 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// many paths (clicks, leaders, remote opens, closes), so the title
 	// is reconciled here instead of at each of them. See hostident.go.
 	a.hostIdentAfterEvent()
+	// And a deferred disk-conflict prompt: detection happens on a
+	// background tick (or inside a blocked save) for whichever tab it
+	// happens to, and the question is raised here — once that tab is
+	// frontmost and the modal slot is free. See reconcile.go.
+	a.conflictAfterEvent()
 }
 
 // workspaceChanged re-syncs every subsystem that mirrors on-disk
@@ -1610,59 +1625,9 @@ func errorBodyLines(runErr error, out []byte, truncNote string) []string {
 	return body
 }
 
-// reconcileOpenTabsWithDisk runs once per background tick. For every
-// open tab with a real path it stats the file, compares the on-disk
-// mtime to what the tab last knew, and reacts:
-//
-//   - File missing  → flash once, mark the tab dirty so the user knows.
-//   - Disk newer, tab clean → reload the buffer silently, flash success.
-//   - Disk newer, tab dirty → leave the buffer alone, flash a warning
-//     that saving will overwrite.
-//
-// Untitled tabs (Path == "") are skipped because there's no disk file to
-// reconcile against.
-func (a *App) reconcileOpenTabsWithDisk() {
-	for _, tab := range a.tabs {
-		if tab.Path == "" {
-			continue
-		}
-		info, err := os.Stat(tab.Path)
-		if os.IsNotExist(err) {
-			if !tab.DiskGone {
-				tab.DiskGone = true
-				tab.Dirty = true
-				a.flash(fmt.Sprintf("%s deleted on disk", filepath.Base(tab.Path)))
-			}
-			continue
-		}
-		if err != nil {
-			// Permission denied or some other transient stat error — leave
-			// the tab as-is rather than spamming the user with a flash.
-			continue
-		}
-		if tab.DiskGone {
-			// File reappeared. Force the mtime check below to fire so we
-			// either reload or warn about a dirty conflict.
-			tab.DiskGone = false
-			tab.Mtime = time.Time{}
-		}
-		if !info.ModTime().After(tab.Mtime) {
-			continue // unchanged on disk.
-		}
-		if tab.Dirty {
-			a.flash(fmt.Sprintf("%s changed on disk — your edits will overwrite on save",
-				filepath.Base(tab.Path)))
-			// Update Mtime so we don't re-flash every tick for the same change.
-			tab.Mtime = info.ModTime()
-			continue
-		}
-		if err := tab.Reload(); err != nil {
-			a.flash(fmt.Sprintf("%s reload failed: %v", filepath.Base(tab.Path), err))
-			continue
-		}
-		a.flash(fmt.Sprintf("%s reloaded from disk", filepath.Base(tab.Path)))
-	}
-}
+// reconcileOpenTabsWithDisk moved to reconcile.go, where the disk /
+// buffer conflict matrix, the save guard that shares its measurement,
+// and the prompt that resolves both now live together.
 
 // -----------------------------------------------------------------------------
 // Layout helpers
@@ -3068,6 +3033,15 @@ func (a *App) saveTabAt(idx int) bool {
 		a.flash("Saving untitled tabs is not supported yet")
 		return false
 	}
+	// Interception point B (reconcile.go): if the file grew newer than
+	// the copy this tab loaded, the write is aborted and the clobber
+	// prompt is raised instead, with this very save armed to re-run if
+	// the user answers "Keep mine". Reporting failure is correct — the
+	// caller (dirty-close, save-all-and-quit) must not proceed as though
+	// the bytes landed.
+	if !a.saveGuard(tab, func(app *App) { app.saveTabAt(idx) }) {
+		return false
+	}
 	if err := tab.Save(); err != nil {
 		a.flash(fmt.Sprintf("Save failed: %v", err))
 		return false
@@ -3177,6 +3151,9 @@ func (a *App) closeTab(idx int) {
 	// participant is exactly the half-applied refactor it exists to prevent
 	// (workspaceedit.go).
 	a.wsForgetTab(a.tabs[idx])
+	// Likewise the disk-conflict record: keyed by tab pointer, it would
+	// otherwise outlive the buffer it describes (reconcile.go).
+	a.reconcileForgetTab(a.tabs[idx])
 	a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
 	if a.activeTab >= len(a.tabs) {
 		a.activeTab = len(a.tabs) - 1
@@ -3568,6 +3545,13 @@ func (a *App) menuSaveAndClose() {
 	a.closeMenu()
 	tab := a.activeTabPtr()
 	if tab == nil || tab.Path == "" {
+		return
+	}
+	// Guarded like every other write (reconcile.go). The resume re-runs
+	// the whole gesture — save AND close — because that is what the user
+	// asked for; answering the prompt should not leave them with a saved
+	// file and an open tab.
+	if !a.saveGuard(tab, func(app *App) { app.menuSaveAndClose() }) {
 		return
 	}
 	if err := tab.Save(); err != nil {

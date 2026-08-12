@@ -228,6 +228,79 @@ func TestTab_Reload_RereadsAndClampsCursor(t *testing.T) {
 	}
 }
 
+// TestTab_ReloadUndoable_UndoRestoresMine is the whole promise of the
+// undoable reload: after the editor swaps the buffer for the disk copy
+// on its own initiative, ONE undo gets the user's text back — and the
+// tab is honestly dirty again, because it now differs from the file.
+func TestTab_ReloadUndoable_UndoRestoresMine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.txt")
+	if err := os.WriteFile(path, []byte("original\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tab, err := NewTab(path)
+	if err != nil {
+		t.Fatalf("NewTab: %v", err)
+	}
+	tab.InsertString("mine ")
+	mine := tab.Buffer.String()
+
+	if err := os.WriteFile(path, []byte("theirs\n"), 0644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if err := tab.ReloadUndoable(); err != nil {
+		t.Fatalf("ReloadUndoable: %v", err)
+	}
+	if got := tab.Buffer.String(); got != "theirs\n" {
+		t.Fatalf("after reload buffer = %q, want the disk copy", got)
+	}
+	if tab.Dirty {
+		t.Fatal("a fresh reload matches disk, so the tab must be clean")
+	}
+
+	if !tab.Undo() {
+		t.Fatal("undo should have a step to take")
+	}
+	if got := tab.Buffer.String(); got != mine {
+		t.Fatalf("after undo buffer = %q, want %q", got, mine)
+	}
+	if !tab.Dirty {
+		t.Fatal("restored edits differ from disk — the tab must be dirty")
+	}
+	// …and redo returns to the disk copy, so the step is a real
+	// two-way history entry rather than a one-shot escape hatch.
+	if !tab.Redo() || tab.Buffer.String() != "theirs\n" {
+		t.Fatalf("redo should return to the disk copy, got %q", tab.Buffer.String())
+	}
+}
+
+// TestTab_ReloadUndoable_FailureLeavesBufferAlone pins the error path:
+// an unreadable file must not cost the user their edits (the reload
+// never happened, so there is nothing to undo either).
+func TestTab_ReloadUndoable_FailureLeavesBufferAlone(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.txt")
+	if err := os.WriteFile(path, []byte("original\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tab, err := NewTab(path)
+	if err != nil {
+		t.Fatalf("NewTab: %v", err)
+	}
+	tab.InsertString("mine ")
+	mine := tab.Buffer.String()
+
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if err := tab.ReloadUndoable(); err == nil {
+		t.Fatal("expected an error reloading a deleted file")
+	}
+	if got := tab.Buffer.String(); got != mine {
+		t.Fatalf("failed reload changed the buffer: %q", got)
+	}
+}
+
 // TestTab_Reload_NoPath returns an error for untitled tabs.
 func TestTab_Reload_NoPath(t *testing.T) {
 	tab := &Tab{Buffer: NewBuffer("")}

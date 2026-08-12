@@ -127,7 +127,14 @@ func (a *App) handleAutoSave() {
 	}
 	saved := false
 	for i, t := range a.tabs {
-		if !autoSavable(t) || diskChangedSinceLoad(t) {
+		// autoSaveGuard is diskChangedSinceLoad's louder successor: the
+		// same measurement, but a positive answer now RECORDS a conflict
+		// (reconcile.go) instead of merely skipping this tick. The record
+		// suspends auto-save for that tab, marks it ⚠ in the strip, and
+		// queues the prompt for the user's next visit to the file — the
+		// background save stays silent, but the question stops waiting on
+		// a reconcile tick to be asked.
+		if !autoSavable(t) || !a.autoSaveGuard(t) {
 			continue
 		}
 		if a.autoSaveTab(i) {
@@ -175,6 +182,12 @@ func autoSavable(t *editor.Tab) bool {
 // user can explicitly Save to overwrite. Stat errors report true
 // (skip the save) — when we can't see the file's state, guessing
 // "it's fine, overwrite" is the wrong default.
+//
+// The auto-save loop now asks autoSaveGuard (reconcile.go) instead,
+// which makes this same call and additionally records the conflict.
+// This predicate is kept as the plain, side-effect-free question —
+// "is the disk ahead of this tab?" — for callers that want to ask
+// without changing anything.
 func diskChangedSinceLoad(t *editor.Tab) bool {
 	info, err := os.Stat(t.Path)
 	if err != nil {

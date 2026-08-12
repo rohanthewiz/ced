@@ -34,6 +34,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -478,6 +479,17 @@ func (a *App) handleFormatDone(e *formatDoneEvent) {
 			continue
 		}
 		if tab.Dirty {
+			// The formatter's write was OURS, so adopt its mtime even
+			// though the buffer keeps the user's newer edits. Without
+			// this the tab would look exactly like "someone else wrote
+			// your file while you had unsaved changes" — a clobber
+			// conflict (reconcile.go) — and ced would block the user's
+			// next save behind a question about a write it made itself.
+			// Their edits still win on save, which is what the flash
+			// below promises.
+			if info, err := os.Stat(tab.Path); err == nil {
+				tab.Mtime = info.ModTime()
+			}
 			if !e.quiet {
 				a.flash(fmt.Sprintf("%s ran — kept your edits (file on disk was reformatted)", e.label))
 			}

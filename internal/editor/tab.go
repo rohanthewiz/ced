@@ -350,6 +350,43 @@ func (t *Tab) Reload() error {
 	return nil
 }
 
+// ReloadUndoable is Reload with an escape hatch: the buffer as it stood
+// *before* the reload is re-filed onto the (freshly reset) undo stack,
+// so a single Undo brings the user's version back.
+//
+// It exists for the two moments where the editor replaces the user's
+// text with the disk's on the editor's own initiative rather than the
+// user's — the reconcile tick silently reloading a clean tab, and the
+// clobber prompt's "Take disk" (app/reconcile.go). Both are only
+// defensible if they are reversible.
+//
+// Ordering matters, and it is the opposite of the intuitive one:
+//
+//	capture "mine"  →  Reload (initUndo makes DISK the revert anchor)
+//	                →  push "mine" on top of that anchor
+//
+// so the stack reads baseline=disk, one-step-back=mine. Undo then
+// restores the user's text and, because Dirty is recomputed against the
+// new (disk) anchor, correctly marks the tab dirty again — it now
+// differs from the file. Redo returns to the disk version.
+//
+// Image tabs and pathless tabs have nothing to snapshot, so they simply
+// forward to Reload.
+func (t *Tab) ReloadUndoable() error {
+	if t.Path == "" || t.IsImage() || t.Buffer == nil {
+		return t.Reload()
+	}
+	before := t.captureSnapshot()
+	if err := t.Reload(); err != nil {
+		return err // buffer untouched; nothing to unwind.
+	}
+	// undoTop is the on-open original Reload just re-seeded (the stack is
+	// empty), which is exactly the "one edit step away" baseline
+	// snapshotCost wants to measure the entry against.
+	t.pushUndoEntry(before, t.undoTop())
+	return nil
+}
+
 // HasSelection reports whether the tab currently has a non-empty selection.
 func (t *Tab) HasSelection() bool {
 	return t.Cursor != t.Anchor

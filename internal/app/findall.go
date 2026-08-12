@@ -37,11 +37,22 @@
 // It still lives in App.modal: the single slot is what makes it mutually
 // exclusive with every other overlay and gets it keyboard/mouse routing
 // and draw ordering for free.
+//
+// …until it is PINNED. The interactive layer at the bottom of this file
+// grew the popup into an optional results PANEL: pin it (◇ / p) and the
+// same object moves from the modal slot into App.findAllPin, where it
+// survives editor clicks and edits like the git panels do — plus a
+// filter box narrowing the view, per-row dismissal (a worklist you burn
+// down), replace-across-survivors through the workspace-edit machinery
+// (one undo gesture), a re-run button, and stale-row dimming when the
+// buffer moves under the list. Unpinned, the peek contract above is
+// untouched.
 
 package app
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -54,8 +65,9 @@ import (
 
 const (
 	// findAllChromeRows is the non-row overhead of the popup: top
-	// border, title, divider under it, bottom border.
-	findAllChromeRows = 4
+	// border, title, the filter/replace fields row, divider, bottom
+	// border.
+	findAllChromeRows = 5
 	// findAllVisibleRows is how many result rows the popup shows when
 	// the window can afford them. Ten matches the palette/finder so the
 	// three list surfaces feel like one instrument.
@@ -105,7 +117,20 @@ type findAllRow struct {
 	// relative path and line together in project mode.
 	path  string
 	label string
+
+	// dismissed marks a row the user struck off (the ✕ / Delete
+	// gesture): it leaves the view but not the slice, so indices held
+	// elsewhere stay valid and a re-run resets the worklist cleanly.
+	dismissed bool
 }
+
+// Field focus for the list's two inputs. The list itself is the default
+// owner; a field only holds the keyboard while the user is in it.
+const (
+	findAllFocusList = iota
+	findAllFocusFilter
+	findAllFocusReplace
+)
 
 // findAllModal is one Find-all session: the resolved result list, where
 // the highlight sits, and — the part that makes Esc mean something —
@@ -115,8 +140,29 @@ type findAllModal struct {
 	tabIdx int
 	rows   []findAllRow
 
+	// view is the display order: indices into rows that survive the
+	// filter and the dismissals, rebuilt by rebuildView. selected and
+	// scroll are VIEW positions — everything the user sees, points at,
+	// or replaces goes through this indirection, so "the results" and
+	// "the results still standing" can never disagree.
+	view []int
+
 	selected int
 	scroll   int
+
+	// pinned turns the popup into a docked panel (held in
+	// App.findAllPin, not the modal slot): the editor gets its keyboard
+	// and clicks back, and the list stays put as a worklist. Unpinned
+	// keeps the original PEEK contract to the letter.
+	pinned bool
+	// focus names which input owns keys: the list (default), the
+	// filter box, or the replace box.
+	focus int
+	// filter narrows the DISPLAYED rows (never re-runs the search) —
+	// a second, cheaper question asked of results already in hand.
+	filter textField
+	// replace holds the replacement text for "Replace in N results".
+	replace textField
 
 	// Origin view state, restored verbatim by abort. Cursor and Anchor
 	// are written back as plain fields (not MoveCursorTo) precisely so
@@ -288,12 +334,17 @@ func (a *App) showFindAll(query string) {
 	// about what "all of them" means, and the previewed row paints as
 	// the current match for free (findSource reads FindIndex).
 	tab.SetFindQuery(query)
+	m.rebuildView()
 	// Start on the hit at or after the cursor — the same "nearest, not
 	// first" rule the find bar uses, so opening the list from where you
-	// are doesn't jump you to the top of the file.
+	// are doesn't jump you to the top of the file. Fresh list: view
+	// position and match index still coincide.
 	if idx := editor.FirstMatchAtOrAfter(matches, tab.Cursor); idx > 0 {
 		m.selected = idx
 	}
+	// A fresh list replaces any pinned survivor from an earlier search —
+	// two lists answering different questions would fight over the band.
+	a.dropFindAllPin()
 	a.openModal(m)
 	m.preview(a)
 }
@@ -340,6 +391,55 @@ func findAllRowsFor(buf *editor.Buffer, matches []editor.Match) []findAllRow {
 	}
 	return rows
 }
+
+// rebuildView recomputes the display order from the filter and the
+// dismissals, keeping the highlight on the same underlying row when it
+// survives and clamping it when it doesn't. Document order is
+// preserved on purpose — the filter narrows the list, it does not
+// re-rank it, so row N is always above row N+1 the way the file reads.
+func (m *findAllModal) rebuildView() {
+	prev := -1
+	if m.selected >= 0 && m.selected < len(m.view) {
+		prev = m.view[m.selected]
+	}
+	needle := strings.ToLower(strings.TrimSpace(m.filter.String()))
+	m.view = m.view[:0]
+	for i := range m.rows {
+		if m.rows[i].dismissed {
+			continue
+		}
+		if needle != "" &&
+			!strings.Contains(strings.ToLower(m.rows[i].text), needle) &&
+			!strings.Contains(strings.ToLower(m.rows[i].label), needle) {
+			continue
+		}
+		m.view = append(m.view, i)
+	}
+	m.selected = 0
+	for vi, ri := range m.view {
+		if ri >= prev && prev >= 0 {
+			m.selected = vi
+			break
+		}
+	}
+	if m.selected >= len(m.view) {
+		m.selected = len(m.view) - 1
+	}
+	if m.selected < 0 {
+		m.selected = 0
+	}
+}
+
+// viewRow returns the row behind view position vi, or nil.
+func (m *findAllModal) viewRow(vi int) *findAllRow {
+	if vi < 0 || vi >= len(m.view) {
+		return nil
+	}
+	return &m.rows[m.view[vi]]
+}
+
+// selectedRow is the row under the highlight, or nil on an empty view.
+func (m *findAllModal) selectedRow() *findAllRow { return m.viewRow(m.selected) }
 
 // compactLine strips a line's leading indentation and renders interior
 // tabs as a single space, returning the display text and how many runes
@@ -404,12 +504,12 @@ func (m *findAllModal) preview(a *App) {
 		return
 	}
 	tab := m.tab(a)
-	if tab == nil || m.selected < 0 || m.selected >= len(m.rows) {
+	r := m.selectedRow()
+	if tab == nil || r == nil {
 		return
 	}
-	r := m.rows[m.selected]
-	if m.selected < len(tab.FindMatches) {
-		tab.FindIndex = m.selected // paint this hit as the current one
+	if ri := m.view[m.selected]; ri < len(tab.FindMatches) {
+		tab.FindIndex = ri // paint this hit as the current one
 	}
 	tab.MoveCursorTo(editor.Position{Line: r.line, Col: r.col}, false)
 	// Left alone, the on-screen case still gets Render's EnsureVisible
@@ -424,11 +524,16 @@ func (m *findAllModal) preview(a *App) {
 
 // accept settles where the preview left the cursor and closes. Every
 // dismissal except Esc lands here — a click in the editor, like an Enter,
-// reads as "this is the place I wanted".
+// reads as "this is the place I wanted". A PINNED list commits the jump
+// but stays put: it is a worklist, and accepting one item doesn't
+// finish the list.
 func (m *findAllModal) accept(a *App) {
 	if m.project {
 		m.openSelected(a)
 		return
+	}
+	if m.pinned {
+		return // the preview already parked the cursor; the panel stays
 	}
 	m.restoreFind(a)
 	a.closeModal()
@@ -477,18 +582,18 @@ func (m *findAllModal) moveSelection(a *App, delta int) {
 	m.selectRow(a, m.selected+delta)
 }
 
-// selectRow highlights row idx and previews it. The single write path for
-// the selection, so keyboard and mouse can't disagree about what
-// "selected" implies.
+// selectRow highlights view row idx and previews it. The single write
+// path for the selection, so keyboard and mouse can't disagree about
+// what "selected" implies.
 func (m *findAllModal) selectRow(a *App, idx int) {
-	if len(m.rows) == 0 {
+	if len(m.view) == 0 {
 		return
 	}
 	if idx < 0 {
 		idx = 0
 	}
-	if idx >= len(m.rows) {
-		idx = len(m.rows) - 1
+	if idx >= len(m.view) {
+		idx = len(m.view) - 1
 	}
 	m.selected = idx
 	m.preview(a)
@@ -521,7 +626,7 @@ func (m *findAllModal) scrollList(a *App, delta int) {
 
 // clampScroll keeps the visible window inside the list.
 func (m *findAllModal) clampScroll(a *App) {
-	max := len(m.rows) - m.visibleRows(a)
+	max := len(m.view) - m.visibleRows(a)
 	if max < 0 {
 		max = 0
 	}
@@ -542,8 +647,8 @@ func (m *findAllModal) clampScroll(a *App) {
 // mode costs columns instead). Lives on App (not the modal) because
 // editorRect needs it without knowing what's in the modal slot.
 func (a *App) findAllPanelHeight() int {
-	m, ok := a.modal.(*findAllModal)
-	if !ok || a.findAllDockRight {
+	m := a.findAllVisible()
+	if m == nil || a.findAllDockRight {
 		return 0
 	}
 	return m.height(a)
@@ -553,8 +658,8 @@ func (a *App) findAllPanelHeight() int {
 // the editor band — 0 in the default top dock. The exact mirror of
 // findAllPanelHeight, and exactly one of the two is ever non-zero.
 func (a *App) findAllPanelWidth() int {
-	m, ok := a.modal.(*findAllModal)
-	if !ok || !a.findAllDockRight {
+	m := a.findAllVisible()
+	if m == nil || !a.findAllDockRight {
 		return 0
 	}
 	return m.width(a)
@@ -661,6 +766,85 @@ func (m *findAllModal) dockRect(a *App) btnRect {
 	return btnRect{x: mx + mw - 5 - findAllDockBtnW, y: my + 1, w: findAllDockBtnW}
 }
 
+// pinRect is the ◇ / ◆ pin button, immediately left of the dock button.
+// Same one-source-of-geometry rule as every button here.
+func (m *findAllModal) pinRect(a *App) btnRect {
+	d := m.dockRect(a)
+	return btnRect{x: d.x - findAllDockBtnW, y: d.y, w: findAllDockBtnW}
+}
+
+// rerunRect is the ⟳ re-run button, left of the pin.
+func (m *findAllModal) rerunRect(a *App) btnRect {
+	p := m.pinRect(a)
+	return btnRect{x: p.x - findAllDockBtnW, y: p.y, w: findAllDockBtnW}
+}
+
+// closePinRect is the pinned panel's ✕, drawn over the spot the "esc"
+// hint occupies unpinned — Esc is not how a panel closes, and the cell
+// should say what the truth is.
+func (m *findAllModal) closePinRect(a *App) btnRect {
+	mx, my, mw, _ := m.rect(a)
+	return btnRect{x: mx + mw - 5, y: my + 1, w: 4}
+}
+
+// pinGlyph names the state the button switches TO (the ≡ toggle-row
+// convention): ◇ pins, ◆ unpins. Single-width per the marker rule — the
+// plan's 📌 is double-width and would overrun the row.
+func (m *findAllModal) pinGlyph() string {
+	if m.pinned {
+		return " ◆ "
+	}
+	return " ◇ "
+}
+
+// findAllFields is the computed geometry of the filter/replace row:
+// where each box and the replace button sit. Zero-width rects mean the
+// row is too narrow for that piece (the right dock at minimum width) —
+// the filter survives longest, being the cheaper, more-used question.
+type findAllFields struct {
+	y       int
+	filter  btnRect
+	replace btnRect
+	button  btnRect
+}
+
+// fieldsLayout computes the row. One geometry source for draw AND the
+// mouse (the btnRect rule), which matters more than usual here — a
+// caret placed by clickAt against a rect the draw didn't use would put
+// the cursor in the wrong cell.
+func (m *findAllModal) fieldsLayout(a *App) findAllFields {
+	mx, my, mw, _ := m.rect(a)
+	f := findAllFields{y: my + 2}
+	inner := mw - 4 // [mx+2, mx+mw-2)
+	if inner < 16 {
+		return f
+	}
+	btnLabel := m.replaceBtnLabel()
+	btnW := runeLen(btnLabel)
+	// Narrow row: the filter takes everything, replace waits for the
+	// top dock (or a wider window).
+	if inner < btnW+26 {
+		f.filter = btnRect{x: mx + 4, y: f.y, w: inner - 2}
+		return f
+	}
+	avail := inner - btnW - 7 // two 2-cell labels + gaps + button gap
+	fw := avail * 2 / 5
+	if fw < 8 {
+		fw = 8
+	}
+	rw := avail - fw
+	f.filter = btnRect{x: mx + 4, y: f.y, w: fw}
+	f.replace = btnRect{x: f.filter.x + fw + 3, y: f.y, w: rw}
+	f.button = btnRect{x: mx + mw - 2 - btnW, y: f.y, w: btnW}
+	return f
+}
+
+// replaceBtnLabel counts what the button would actually touch — the
+// surviving rows — so the label is the confirmation's first draft.
+func (m *findAllModal) replaceBtnLabel() string {
+	return fmt.Sprintf("[ Replace in %d ]", len(m.view))
+}
+
 // findAllDockGlyph names the layout the button will switch TO, not the
 // one in force — the action-not-state convention the ≡ toggle rows use.
 // Half-filled squares because the glyph IS the layout: ◨ is a column on
@@ -723,11 +907,11 @@ func (a *App) findAllDockToggleLabel() string {
 // click and the hover, so they can't disagree about which row is which.
 func (m *findAllModal) rowIndexAt(a *App, x, y int) int {
 	mx, my, mw, mh := m.rect(a)
-	if x < mx || x >= mx+mw || y < my+3 || y > my+mh-2 {
+	if x < mx || x >= mx+mw || y < my+4 || y > my+mh-2 {
 		return -1
 	}
-	idx := m.scroll + (y - (my + 3))
-	if idx < 0 || idx >= len(m.rows) {
+	idx := m.scroll + (y - (my + 4))
+	if idx < 0 || idx >= len(m.view) {
 		return -1
 	}
 	return idx
@@ -772,32 +956,51 @@ func rowLabelText(label string, width int) string {
 // Input
 // -----------------------------------------------------------------------------
 
-// handleKey routes a keystroke while the list is up:
+// handleKey routes a keystroke while the list owns the keyboard —
+// the whole time unpinned, and only while a field is focused when
+// pinned (the pinned panel's list is mouse-driven; the editor keeps
+// its keys). List focus:
 //
 //	Esc              abort — put the cursor and viewport back
 //	Enter            accept — keep the previewed position
 //	Up/Down          preview the neighbouring hit
 //	PgUp/PgDn        preview a page away
 //	Home/End         preview the first / last hit
+//	Delete           dismiss the highlighted row (the ✕ twin)
 //	d                flip the dock (top strip ⇄ right column)
+//	p                pin / unpin
+//	/                jump to the filter box
 //
-// Everything else is dropped: the list has no input field, and letting
-// keys fall through to the buffer behind a popup that owns the screen
-// would type into code the user can't see. `d` is the exception because
-// the ≡ menu — the usual keyboard twin of a click — can't be opened
-// while a modal holds the keyboard, which would leave the button as the
-// ONLY way in on a terminal that eats clicks.
+// Field focus hands ordinary editing keys to the field; Enter and Esc
+// return to the list (Enter in the replace box runs the replace).
+// Everything else is dropped: letting keys fall through to the buffer
+// behind a popup that owns the screen would type into code the user
+// can't see. The letter keys exist because the ≡ menu — the usual
+// keyboard twin of a click — can't be opened while a modal holds the
+// keyboard, which would leave the buttons as the ONLY way in on a
+// terminal that eats clicks.
 func (m *findAllModal) handleKey(a *App, ev *tcell.EventKey) {
+	if m.focus != findAllFocusList {
+		m.handleFieldKey(a, ev)
+		return
+	}
 	switch ev.Key() {
 	case tcell.KeyRune:
-		if r := ev.Rune(); r == 'd' || r == 'D' {
+		switch r := ev.Rune(); r {
+		case 'd', 'D':
 			a.toggleFindAllDock()
 			m.preview(a) // the band it was centered against just changed
+		case 'p', 'P':
+			m.togglePin(a)
+		case '/':
+			m.focus = findAllFocusFilter
 		}
 	case tcell.KeyEsc:
 		m.abort(a)
 	case tcell.KeyEnter:
 		m.accept(a)
+	case tcell.KeyDelete, tcell.KeyBackspace, tcell.KeyBackspace2:
+		m.dismissRow(a, m.selected)
 	case tcell.KeyUp:
 		m.moveSelection(a, -1)
 	case tcell.KeyDown:
@@ -809,7 +1012,44 @@ func (m *findAllModal) handleKey(a *App, ev *tcell.EventKey) {
 	case tcell.KeyHome:
 		m.selectRow(a, 0)
 	case tcell.KeyEnd:
-		m.selectRow(a, len(m.rows)-1)
+		m.selectRow(a, len(m.view)-1)
+	}
+}
+
+// handleFieldKey is the focused filter/replace box's share of the
+// keyboard. Esc backs out to the list; Enter backs out too, and in the
+// replace box it is the do-it gesture. Every edit to the filter
+// re-narrows the view live — that immediacy is the whole point of a
+// filter over a re-search.
+func (m *findAllModal) handleFieldKey(a *App, ev *tcell.EventKey) {
+	switch ev.Key() {
+	case tcell.KeyEsc:
+		m.focus = findAllFocusList
+		return
+	case tcell.KeyEnter:
+		if m.focus == findAllFocusReplace {
+			m.focus = findAllFocusList
+			m.confirmReplace(a)
+			return
+		}
+		m.focus = findAllFocusList
+		return
+	case tcell.KeyTab:
+		// Tab hops between the two boxes — they're one row of form.
+		if m.focus == findAllFocusFilter {
+			m.focus = findAllFocusReplace
+		} else {
+			m.focus = findAllFocusFilter
+		}
+		return
+	}
+	field := &m.filter
+	if m.focus == findAllFocusReplace {
+		field = &m.replace
+	}
+	if _, edited := field.handleKey(ev); edited && m.focus == findAllFocusFilter {
+		m.rebuildView()
+		m.clampScroll(a)
 	}
 }
 
@@ -835,19 +1075,62 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	}
 	mx, my, mw, mh := m.rect(a)
 	if x < mx || x >= mx+mw || y < my || y >= my+mh {
+		// Pinned, the panel is furniture: an outside click belongs to
+		// whatever it landed on (the router only sends the panel its
+		// own clicks, but belt and braces). Unpinned keeps the original
+		// contract — the click landed where the user wants to work.
+		if m.pinned {
+			m.focus = findAllFocusList
+			return
+		}
 		m.accept(a)
 		return
 	}
-	// The dock button is checked before the rows and returns without
-	// touching lastClick — flipping the layout is not half a
-	// double-click on whatever row lands under the pointer afterwards.
+	// Buttons are checked before the rows and return without touching
+	// lastClick — flipping a control is not half a double-click on
+	// whatever row lands under the pointer afterwards.
+	if m.pinned && m.closePinRect(a).contains(x, y) {
+		m.closePin(a)
+		return
+	}
+	if m.rerunRect(a).contains(x, y) {
+		m.rerun(a)
+		return
+	}
+	if m.pinRect(a).contains(x, y) {
+		m.togglePin(a)
+		return
+	}
 	if m.dockRect(a).contains(x, y) {
 		a.toggleFindAllDock()
 		m.preview(a)
 		return
 	}
+	// The filter/replace row: clicking a box focuses it and places the
+	// caret; clicking the button runs the replace.
+	if f := m.fieldsLayout(a); y == f.y {
+		switch {
+		case f.filter.w > 0 && x >= f.filter.x-2 && x < f.filter.x+f.filter.w:
+			m.focus = findAllFocusFilter
+			m.filter.clickAt(f.filter.x, f.filter.x+f.filter.w, x)
+		case f.replace.w > 0 && x >= f.replace.x-2 && x < f.replace.x+f.replace.w:
+			m.focus = findAllFocusReplace
+			m.replace.clickAt(f.replace.x, f.replace.x+f.replace.w, x)
+		case f.button.contains(x, y):
+			m.focus = findAllFocusList
+			m.confirmReplace(a)
+		}
+		return
+	}
 	idx := m.rowIndexAt(a, x, y)
 	if idx < 0 {
+		return
+	}
+	m.focus = findAllFocusList
+	// The ✕ zone at the row's right edge dismisses instead of selecting
+	// — the worklist gesture.
+	if x >= mx+mw-3 {
+		m.dismissRow(a, idx)
 		return
 	}
 	now := time.Now()
@@ -872,9 +1155,10 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 // Layout (relative to the frame's top-left):
 //
 //	0        top border
-//	1        title — Find all "query"    3/57  ◨  esc
-//	2        divider
-//	3..N     result rows —  123 │ compacted line text
+//	1        title — Find all "query"   3/57 ⟳ ◇ ◨ esc|✕
+//	2        fields — ⌕ filter…   ⇄ replace…   [ Replace in N ]
+//	3        divider
+//	4..N     result rows —  123 │ compacted line text          ✕
 //	N+1      bottom border, carrying the key hint
 func (m *findAllModal) draw(a *App) {
 	mx, my, mw, mh := m.rect(a)
@@ -883,12 +1167,15 @@ func (m *findAllModal) draw(a *App) {
 	}
 	c := a.chrome()
 
-	dock := m.dockRect(a)
-	count := fmt.Sprintf("%d/%d ", m.selected+1, len(m.rows))
-	countX := dock.x - runeLen(count)
+	rerun := m.rerunRect(a)
+	count := fmt.Sprintf("%d/%d ", m.selected+1, len(m.view))
+	if len(m.view) == 0 {
+		count = "0/0 "
+	}
+	countX := rerun.x - runeLen(count)
 	title := m.titleText()
 	// Clip the title against everything to its right — the count, the
-	// dock button, and drawFrame's "esc" — so a long query on a narrow
+	// buttons, and drawFrame's "esc" — so a long query on a narrow
 	// column can never overwrite them.
 	if room := countX - (mx + 2); room > 0 && runeLen(title) > room {
 		title = string([]rune(title)[:room-1]) + "…"
@@ -897,16 +1184,30 @@ func (m *findAllModal) draw(a *App) {
 	if countX > mx+1 {
 		drawAt(a.screen, countX, my+1, count, c.muted)
 	}
-	// The dock button reads as a control, not as chrome — accent, like
-	// the panels' header buttons.
+	// The buttons read as controls, not as chrome — accent, like the
+	// panels' header buttons. Re-run, pin, dock, right to left toward
+	// the corner.
+	drawAt(a.screen, rerun.x, rerun.y, " ⟳ ", c.title)
+	pin := m.pinRect(a)
+	drawAt(a.screen, pin.x, pin.y, m.pinGlyph(), c.title)
+	dock := m.dockRect(a)
 	drawAt(a.screen, dock.x, dock.y, a.findAllDockGlyph(), c.title)
+	if m.pinned {
+		// A pinned panel doesn't answer to Esc — replace drawFrame's
+		// hint with the ✕ that actually closes it.
+		cl := m.closePinRect(a)
+		drawAt(a.screen, cl.x, cl.y, " ✕  ", c.title)
+	}
+
+	m.drawFields(a, c)
+	drawHDivider(a.screen, mx, my+3, mw, c.border)
 
 	vis := m.visibleRows(a)
 	digits := m.labelWidth(a)
 	for i := 0; i < vis; i++ {
-		ry := my + 3 + i
+		ry := my + 4 + i
 		idx := m.scroll + i
-		if idx >= len(m.rows) {
+		if idx >= len(m.view) {
 			// Clear the tail so a shorter scroll window doesn't leave
 			// the previous frame's rows behind.
 			for cx := mx + 1; cx < mx+mw-1; cx++ {
@@ -914,7 +1215,15 @@ func (m *findAllModal) draw(a *App) {
 			}
 			continue
 		}
-		m.drawRow(a, mx, ry, mw, digits, m.rows[idx], idx == m.selected)
+		r := m.rows[m.view[idx]]
+		m.drawRow(a, mx, ry, mw, digits, r, idx == m.selected, m.rowStale(a, r))
+	}
+	if len(m.view) == 0 && vis > 0 {
+		msg := "no rows match — edit the filter, or ⟳ to re-run"
+		if m.filter.String() == "" {
+			msg = "every row dismissed — ⟳ re-runs the search"
+		}
+		drawStatusText(a.screen, mx+2, my+4, mw-4, msg, c.muted)
 	}
 
 	// Footer hint, widest form that fits — the right-docked column has
@@ -928,11 +1237,47 @@ func (m *findAllModal) draw(a *App) {
 	}
 }
 
+// drawFields paints the filter/replace row over the divider drawFrame
+// stamped at my+2 (the divider moves down one row — see draw's layout
+// map). The boxes render on the editor BG so they read as inputs
+// against the modal chrome; the focused one owns the terminal caret.
+func (m *findAllModal) drawFields(a *App, c modalChrome) {
+	mx, my, mw, _ := m.rect(a)
+	// Reclaim the divider row: interior back to chrome bg, border cells
+	// back to plain verticals.
+	for cx := mx + 1; cx < mx+mw-1; cx++ {
+		a.screen.SetContent(cx, my+2, ' ', nil, c.bgSt)
+	}
+	a.screen.SetContent(mx, my+2, '│', nil, c.border)
+	a.screen.SetContent(mx+mw-1, my+2, '│', nil, c.border)
+
+	f := m.fieldsLayout(a)
+	if f.filter.w <= 0 {
+		return
+	}
+	fieldSt := tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Text)
+	drawAt(a.screen, f.filter.x-2, f.y, "⌕ ", c.muted)
+	m.filter.draw(a.screen, f.y, f.filter.x, f.filter.x+f.filter.w, fieldSt, m.focus == findAllFocusFilter)
+	if m.filter.String() == "" && m.focus != findAllFocusFilter {
+		drawAt(a.screen, f.filter.x, f.y, "filter…", tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Muted))
+	}
+	if f.replace.w > 0 {
+		drawAt(a.screen, f.replace.x-2, f.y, "⇄ ", c.muted)
+		m.replace.draw(a.screen, f.y, f.replace.x, f.replace.x+f.replace.w, fieldSt, m.focus == findAllFocusReplace)
+		if m.replace.String() == "" && m.focus != findAllFocusReplace {
+			drawAt(a.screen, f.replace.x, f.y, "replace…", tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Muted))
+		}
+	}
+	if f.button.w > 0 {
+		drawAt(a.screen, f.button.x, f.y, m.replaceBtnLabel(), c.title)
+	}
+}
+
 // drawRow paints one result: right-aligned line number, a rule, then the
 // compacted text with the matched runes lit. The selected row flips its
 // background to the editor's BG — the same block highlight the palette
 // and finder use, so "which one am I on" reads the same everywhere.
-func (m *findAllModal) drawRow(a *App, mx, ry, mw, digits int, r findAllRow, selected bool) {
+func (m *findAllModal) drawRow(a *App, mx, ry, mw, digits int, r findAllRow, selected, stale bool) {
 	c := a.chrome()
 	rowBG := c.bg
 	numFG := a.theme.Muted
@@ -944,10 +1289,26 @@ func (m *findAllModal) drawRow(a *App, mx, ry, mw, digits int, r findAllRow, sel
 	numStyle := tcell.StyleDefault.Background(rowBG).Foreground(numFG)
 	ruleStyle := tcell.StyleDefault.Background(rowBG).Foreground(a.theme.Subtle)
 	hitStyle := tcell.StyleDefault.Background(rowBG).Foreground(a.theme.FindCurrent).Bold(true)
+	if stale {
+		// The buffer moved under this row: its text and coordinates are
+		// history. Dimming says "roughly here, re-run for the truth"
+		// without pretending the row can still be trusted.
+		rowStyle = tcell.StyleDefault.Background(rowBG).Foreground(a.theme.Muted)
+		hitStyle = rowStyle.Bold(true)
+	}
 
 	for cx := mx + 1; cx < mx+mw-1; cx++ {
 		a.screen.SetContent(cx, ry, ' ', nil, rowStyle)
 	}
+	// The per-row ✕ — the dismiss target the mouse router honors for
+	// the row's last three cells. Muted until the row is selected, so a
+	// hundred ✕s don't shout over the code they sit beside.
+	xFG := a.theme.Muted
+	if selected {
+		xFG = a.theme.Accent
+	}
+	a.screen.SetContent(mx+mw-2, ry, '✕', nil,
+		tcell.StyleDefault.Background(rowBG).Foreground(xFG))
 
 	// Right-aligned in file mode (numbers line up on their units digit),
 	// LEFT-aligned in project mode: the paths are already truncated to a
@@ -962,7 +1323,8 @@ func (m *findAllModal) drawRow(a *App, mx, ry, mw, digits int, r findAllRow, sel
 	a.screen.SetContent(mx+2+digits+1, ry, '│', nil, ruleStyle)
 
 	textStart := mx + 2 + digits + 3
-	maxCols := (mx + mw - 1) - textStart
+	// Two cells short of the border: the last interior cell is the ✕.
+	maxCols := (mx + mw - 3) - textStart
 	if maxCols <= 0 {
 		return
 	}
@@ -976,4 +1338,297 @@ func (m *findAllModal) drawRow(a *App, mx, ry, mw, digits int, r findAllRow, sel
 		}
 		a.screen.SetContent(textStart+i, ry, ch, nil, st)
 	}
+}
+
+// -----------------------------------------------------------------------------
+// Interactive layer: pin, filter, dismiss, re-run, replace
+// -----------------------------------------------------------------------------
+//
+// The list grew from a peek popup into a results PANEL (the plan's
+// "fully interactive find-all"): pin it and it survives editor clicks
+// and edits like the git panels do; filter it without re-searching;
+// strike rows off and burn the remainder down; replace across what
+// survives as one undoable gesture; re-run when the buffer has moved
+// under it. Unpinned, the original peek contract is untouched.
+
+// findAllVisible returns whichever find-all list is on screen — the
+// modal-slot one or the pinned panel — or nil. The geometry helpers
+// (findAllPanelHeight/Width) and the draw/mouse/key hooks all go
+// through this, so the two homes share every behavior.
+func (a *App) findAllVisible() *findAllModal {
+	if m, ok := a.modal.(*findAllModal); ok {
+		return m
+	}
+	return a.findAllPin
+}
+
+// dropFindAllPin closes a pinned panel outright — a fresh search
+// replaces it, and closing the app-side pointer must also hand back the
+// borrowed find tint.
+func (a *App) dropFindAllPin() {
+	if a.findAllPin == nil {
+		return
+	}
+	m := a.findAllPin
+	a.findAllPin = nil
+	m.restoreFind(a)
+}
+
+// togglePin moves the list between the modal slot and the pinned-panel
+// slot. Pinning frees the modal slot (the editor gets its keyboard and
+// clicks back); unpinning re-enters it, restoring the peek contract.
+// The borrowed find tint travels with the list either way — it lives
+// exactly as long as the list that explains it.
+func (m *findAllModal) togglePin(a *App) {
+	if m.pinned {
+		m.pinned = false
+		a.findAllPin = nil
+		a.openModal(m) // closeAllModals inside is a no-op here: the slot is free
+		return
+	}
+	m.pinned = true
+	m.focus = findAllFocusList
+	a.modal = nil // deliberate: closeModal semantics without the name saying "dismiss"
+	a.findAllPin = m
+	a.flash("Find all pinned — it stays while you edit · ◆ or p unpins")
+}
+
+// closePin dismisses the pinned panel — its ✕ button. No view restore:
+// every jump a pinned panel made was a committed one.
+func (m *findAllModal) closePin(a *App) {
+	a.findAllPin = nil
+	m.restoreFind(a)
+}
+
+// dismissRow strikes view row vi off the worklist. The row is marked,
+// not removed, so a re-run resurrects it cleanly.
+func (m *findAllModal) dismissRow(a *App, vi int) {
+	r := m.viewRow(vi)
+	if r == nil {
+		return
+	}
+	r.dismissed = true
+	m.rebuildView()
+	m.clampScroll(a)
+	if len(m.view) == 0 {
+		a.flash("All results dismissed — ⟳ re-runs the search")
+	}
+}
+
+// rerun executes the same question again. In-file it is synchronous —
+// fresh matches against the buffer as it is now, dismissals reset,
+// filter kept (it narrows the new answer the way it narrowed the old).
+// A project search re-runs through the async pipeline, whose arrival
+// replaces this list wholesale; a producer that is not a text search
+// (heading != "") has nothing to re-run and says so.
+func (m *findAllModal) rerun(a *App) {
+	if m.project {
+		if m.heading != "" {
+			a.flash("This list came from the language server — re-run it from the menu")
+			return
+		}
+		a.startProjectSearch(m.query)
+		return
+	}
+	tab := m.tab(a)
+	if tab == nil || tab.Buffer == nil {
+		return
+	}
+	matches := editor.FindAll(tab.Buffer, m.query)
+	if len(matches) == 0 {
+		a.flash(fmt.Sprintf("Find all: no occurrences of %q anymore", m.query))
+		if m.pinned {
+			m.closePin(a)
+		} else {
+			m.abort(a)
+		}
+		return
+	}
+	m.rows = findAllRowsFor(tab.Buffer, matches)
+	tab.SetFindQuery(m.query)
+	m.rebuildView()
+	m.scroll = 0
+	m.selectRow(a, editor.FirstMatchAtOrAfter(matches, tab.Cursor))
+}
+
+// rowStale reports whether the buffer has moved under an in-file row:
+// the match range no longer holds the text the row was built from. A
+// stale row still answers "roughly where", so it dims instead of
+// vanishing — and replace skips it, because its coordinates are lies.
+// Project rows never report stale; there is no buffer behind them to
+// check against, and reading files per frame is not a price a draw
+// may pay.
+func (m *findAllModal) rowStale(a *App, r findAllRow) bool {
+	if m.project {
+		return false
+	}
+	tab := m.tab(a)
+	if tab == nil || tab.Buffer == nil {
+		return true
+	}
+	if r.line < 0 || r.line >= tab.Buffer.LineCount() {
+		return true
+	}
+	line := tab.Buffer.LineRunes(r.line)
+	if r.col < 0 || r.col+r.width > len(line) {
+		return true
+	}
+	return string(line[r.col:r.col+r.width]) != m.query
+}
+
+// confirmReplace is the "Replace in N results" gesture: plan the edit
+// over every SURVIVING, non-stale row, say exactly what will happen
+// (file and match counts, where the bytes land), and only then commit —
+// through the workspace-edit machinery, so the whole thing is one undo
+// gesture with the same journal, rollback, and report every server
+// edit gets.
+func (m *findAllModal) confirmReplace(a *App) {
+	replacement := m.replace.String()
+	if replacement == m.query {
+		a.flash("Replace: the replacement is the search text")
+		return
+	}
+	plan, skipped, err := m.buildReplacePlan(a, replacement)
+	if err != nil {
+		a.flash("Replace: " + err.Error())
+		return
+	}
+	if plan == nil || plan.count == 0 {
+		a.flash("Replace: no live results to change")
+		return
+	}
+	msg := fmt.Sprintf("%q becomes %q — %s in %s.",
+		m.query, replacement,
+		plural(plan.count, "occurrence", "occurrences"),
+		plural(len(plan.files), "file", "files"))
+	if plan.toDisk > 0 {
+		msg += fmt.Sprintf(" %s not open in a tab will be written to disk now.",
+			plural(plan.toDisk, "file", "files"))
+	} else {
+		msg += " Buffers are edited unsaved."
+	}
+	if skipped > 0 {
+		msg += fmt.Sprintf(" %s skipped (the text changed under them).",
+			plural(skipped, "stale row", "stale rows"))
+	}
+	wasPinned := m.pinned
+	a.openConfirm("Replace in results", msg, func(app *App) {
+		if ok, _ := app.commitWorkspaceEdit(plan); ok {
+			// The rows this list held now describe text that no longer
+			// exists. Re-running is the honest refresh — and for the
+			// unpinned modal the confirm displaced, reopening it on
+			// stale rows would be worse than closing.
+			if wasPinned {
+				m.rerun(app)
+			} else {
+				m.restoreFind(app)
+			}
+		}
+	})
+	// The confirm modal displaced an unpinned list (single slot); its
+	// borrowed tint must not outlive it if the user cancels. A pinned
+	// panel is untouched — it lives outside the slot.
+	if !wasPinned {
+		m.restoreFind(a)
+	}
+}
+
+// buildReplacePlan turns the surviving view rows into a validated
+// wsEditPlan: rune-coordinate edits grouped per file, open tabs edited
+// in the buffer, everything else loaded through the same guards a real
+// open gets (planDocument's contract, minus the LSP coordinate round
+// trip — these positions were measured against these buffers directly).
+// Returns how many stale rows were skipped alongside the plan.
+func (m *findAllModal) buildReplacePlan(a *App, replacement string) (*wsEditPlan, int, error) {
+	type fileEdits struct {
+		tab   *editor.Tab
+		open  bool
+		edits []editor.Edit
+	}
+	perFile := map[string]*fileEdits{}
+	order := []string{}
+	skipped := 0
+
+	for _, ri := range m.view {
+		r := m.rows[ri]
+		var (
+			path string
+			tab  *editor.Tab
+			open bool
+		)
+		if m.project {
+			path = r.path
+			if t := a.tabByPath(path); t != nil {
+				tab, open = t, true
+			}
+		} else {
+			tab, open = m.tab(a), true
+			if tab == nil {
+				return nil, 0, fmt.Errorf("the tab this list was opened against is gone")
+			}
+			if tab.Path == "" {
+				return nil, 0, fmt.Errorf("save the buffer first — replace needs a file behind it")
+			}
+			path = tab.Path
+		}
+		fe, ok := perFile[path]
+		if !ok {
+			if tab == nil {
+				t, err := editor.NewTab(path)
+				if err != nil {
+					return nil, 0, fmt.Errorf("%s: %w", filepath.Base(path), err)
+				}
+				tab = t
+			}
+			fe = &fileEdits{tab: tab, open: open}
+			perFile[path] = fe
+			order = append(order, path)
+		}
+		// Staleness against the buffer that will actually be edited —
+		// same check rowStale draws with, generalized to any file.
+		line := []rune{}
+		if r.line >= 0 && r.line < fe.tab.Buffer.LineCount() {
+			line = fe.tab.Buffer.LineRunes(r.line)
+		}
+		if r.col < 0 || r.col+r.width > len(line) ||
+			string(line[r.col:r.col+r.width]) != m.query {
+			skipped++
+			continue
+		}
+		fe.edits = append(fe.edits, editor.Edit{
+			Start:   editor.Position{Line: r.line, Col: r.col},
+			End:     editor.Position{Line: r.line, Col: r.col + r.width},
+			NewText: replacement,
+		})
+	}
+
+	plan := &wsEditPlan{label: fmt.Sprintf("Replace %q", m.query)}
+	for _, path := range order {
+		fe := perFile[path]
+		if len(fe.edits) == 0 {
+			continue
+		}
+		editor.NormalizeEdits(fe.edits)
+		if i := editor.OverlapIndex(fe.edits); i >= 0 {
+			return nil, 0, fmt.Errorf("overlapping matches at line %d", fe.edits[i].Start.Line+1)
+		}
+		plan.files = append(plan.files, wsFilePlan{
+			path: path, tab: fe.tab, open: fe.open, edits: fe.edits,
+		})
+		plan.count += len(fe.edits)
+		if !fe.open {
+			plan.toDisk++
+		}
+	}
+	return plan, skipped, nil
+}
+
+// findAllPinContains reports whether (x, y) falls on the pinned panel —
+// the mouse router's gate, mirroring gitPanelContains and friends.
+func (a *App) findAllPinContains(x, y int) bool {
+	if a.findAllPin == nil {
+		return false
+	}
+	mx, my, mw, mh := a.findAllPin.rect(a)
+	return x >= mx && x < mx+mw && y >= my && y < my+mh
 }

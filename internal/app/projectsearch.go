@@ -148,6 +148,10 @@ func (a *App) handleProjectSearch(e *projectSearchEvent) {
 		truncated: e.truncated,
 		rows:      a.projectSearchRows(e.hits),
 	}
+	m.rebuildView()
+	// Same replacement rule as showFindAll: a fresh list supersedes a
+	// pinned survivor from an earlier search.
+	a.dropFindAllPin()
 	a.openModal(m)
 	m.ensureRowVisible(a)
 }
@@ -201,12 +205,18 @@ func (a *App) projectSearchLabel(path string) string {
 // against a band the panel is still taking rows out of, and the line
 // would land off-centre the moment the panel left.
 func (m *findAllModal) openSelected(a *App) {
-	if m.selected < 0 || m.selected >= len(m.rows) {
-		a.closeModal()
+	rp := m.selectedRow()
+	if rp == nil {
+		if !m.pinned {
+			a.closeModal()
+		}
 		return
 	}
-	r := m.rows[m.selected]
-	a.closeModal()
+	r := *rp
+	// A pinned list is a worklist: the jump commits but the panel stays.
+	if !m.pinned {
+		a.closeModal()
+	}
 	if r.path == "" {
 		return
 	}
@@ -256,17 +266,26 @@ func (m *findAllModal) titleText() string {
 // press changes which file you are looking at) and drops "preview", which
 // it deliberately does not do.
 func (m *findAllModal) footerHints() []string {
+	if m.pinned {
+		// The pinned panel is mouse-driven — the hint teaches the
+		// buttons, not keys the editor now owns.
+		return []string{
+			" click preview · double-click jump · ✕ dismiss · ◆ unpin ",
+			" click preview · ✕ dismiss · ◆ unpin ",
+			" ◆ unpins ",
+		}
+	}
 	if m.project {
 		return []string{
-			" ↑↓ walk · enter open · esc close · d dock ",
-			" ↑↓ walk · enter open · esc close ",
+			" ↑↓ walk · enter open · del dismiss · / filter · p pin · esc close ",
+			" ↑↓ walk · enter open · / filter · esc close ",
 			" enter open · esc close ",
 			" esc close ",
 		}
 	}
 	return []string{
-		" ↑↓ preview · enter accept · esc back · d dock ",
-		" ↑↓ preview · enter accept · esc back ",
+		" ↑↓ preview · enter accept · del dismiss · / filter · p pin · d dock · esc back ",
+		" ↑↓ preview · enter accept · / filter · esc back ",
 		" enter accept · esc back ",
 		" esc back ",
 	}

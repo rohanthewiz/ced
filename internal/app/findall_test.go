@@ -255,7 +255,7 @@ func TestFindAll_ClickPreviewsAndKeepsListOpen(t *testing.T) {
 	m := openFindAllT(t, a, "count")
 	mx, my, _, _ := m.rect(a)
 
-	m.handleMouse(a, mx+8, my+3+2, tcell.Button1) // third visible row
+	m.handleMouse(a, mx+8, my+4+2, tcell.Button1) // third visible row
 	if a.modal == nil {
 		t.Fatal("a click on a row must leave the list open")
 	}
@@ -273,7 +273,7 @@ func TestFindAll_DoubleClickAccepts(t *testing.T) {
 	a, tab := seedFindAllApp(t)
 	m := openFindAllT(t, a, "count")
 	mx, my, _, _ := m.rect(a)
-	x, y := mx+8, my+3+1
+	x, y := mx+8, my+4+1
 
 	m.handleMouse(a, x, y, tcell.Button1)
 	if a.modal == nil {
@@ -294,7 +294,7 @@ func TestFindAll_SlowSecondClickIsNotADoubleClick(t *testing.T) {
 	a, _ := seedFindAllApp(t)
 	m := openFindAllT(t, a, "count")
 	mx, my, _, _ := m.rect(a)
-	x, y := mx+8, my+3+1
+	x, y := mx+8, my+4+1
 
 	m.handleMouse(a, x, y, tcell.Button1)
 	a.lastClick.when = time.Now().Add(-2 * doubleClickMs)
@@ -826,5 +826,219 @@ func TestFindAll_ImageTabIsInert(t *testing.T) {
 	a.openFindAll()
 	if a.modal != nil {
 		t.Errorf("openFindAll with no tab opened %T", a.modal)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Interactive layer: filter, dismiss, pin, re-run, replace (Phase 1.6)
+// -----------------------------------------------------------------------------
+
+// typeFindAllFilter routes runes through the modal's own key handler so
+// the focus plumbing is what's being exercised, not the field directly.
+func typeFindAllFilter(a *App, m *findAllModal, s string) {
+	m.focus = findAllFocusFilter
+	for _, r := range s {
+		m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone))
+	}
+}
+
+func TestFindAll_FilterNarrowsView(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	total := len(m.view)
+	if total != len(m.rows) {
+		t.Fatalf("fresh list: view (%d) should cover all rows (%d)", total, len(m.rows))
+	}
+
+	typeFindAllFilter(a, m, "++")
+	if len(m.view) == 0 || len(m.view) >= total {
+		t.Fatalf("filter should narrow the view: %d of %d", len(m.view), total)
+	}
+	for _, ri := range m.view {
+		if !strings.Contains(m.rows[ri].text, "++") {
+			t.Fatalf("surviving row %q does not match the filter", m.rows[ri].text)
+		}
+	}
+	// Backspace the filter away: everything returns.
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyBackspace2, 0, tcell.ModNone))
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyBackspace2, 0, tcell.ModNone))
+	if len(m.view) != total {
+		t.Fatalf("clearing the filter should restore the view: %d of %d", len(m.view), total)
+	}
+}
+
+func TestFindAll_DismissRowShrinksWorklist(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	total := len(m.view)
+	first := m.view[0]
+
+	m.selectRow(a, 0)
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyDelete, 0, tcell.ModNone))
+	if len(m.view) != total-1 {
+		t.Fatalf("dismiss should drop one row: %d of %d", len(m.view), total)
+	}
+	for _, ri := range m.view {
+		if ri == first {
+			t.Fatal("the dismissed row is still in the view")
+		}
+	}
+	if !m.rows[first].dismissed {
+		t.Fatal("the row should be marked, not deleted")
+	}
+	// Re-run resurrects the worklist.
+	m.rerun(a)
+	if len(m.view) != total {
+		t.Fatalf("re-run should reset dismissals: %d of %d", len(m.view), total)
+	}
+}
+
+func TestFindAll_PinMovesToPanelAndBack(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'p', tcell.ModNone))
+	if a.modal != nil {
+		t.Fatal("pinning should free the modal slot")
+	}
+	if a.findAllPin != m || !m.pinned {
+		t.Fatal("pinning should install the panel")
+	}
+	if a.findAllPanelHeight() == 0 {
+		t.Fatal("the pinned panel should still displace the editor band")
+	}
+	// The editor owns the keyboard again: a rune types into the buffer.
+	before := tab.Buffer.String()
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'x', tcell.ModNone))
+	if tab.Buffer.String() == before {
+		t.Fatal("editing must work while the list is pinned")
+	}
+	// The panel survived the edit.
+	if a.findAllPin == nil {
+		t.Fatal("the pinned panel must survive editor keystrokes")
+	}
+	// Unpin: back into the modal slot.
+	m.togglePin(a)
+	if a.findAllPin != nil || a.modal != m || m.pinned {
+		t.Fatal("unpinning should re-enter the modal slot")
+	}
+}
+
+func TestFindAll_PinnedClickPreviewsWithoutClosing(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	m.togglePin(a)
+	mx, my, _, _ := m.rect(a)
+
+	m.handleMouse(a, mx+8, my+4+2, tcell.Button1) // third visible row
+	if a.findAllPin == nil {
+		t.Fatal("a click on a pinned row must leave the panel up")
+	}
+	if m.selected != 2 {
+		t.Fatalf("selected = %d, want 2", m.selected)
+	}
+	if tab.Cursor.Line != m.rows[m.view[2]].line {
+		t.Error("the click should still preview the row")
+	}
+	// The ✕ button closes the panel and returns the borrowed tint.
+	cl := m.closePinRect(a)
+	m.handleMouse(a, cl.x, cl.y, tcell.Button1)
+	if a.findAllPin != nil {
+		t.Fatal("✕ should close the pinned panel")
+	}
+	if tab.FindQuery == "count" {
+		t.Fatal("closing should hand back the borrowed find state")
+	}
+}
+
+func TestFindAll_RowStaleAfterEdit(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	r := m.rows[m.view[0]]
+	if m.rowStale(a, r) {
+		t.Fatal("a fresh row must not read as stale")
+	}
+	// Rewrite the matched line out from under the row.
+	tab.MoveCursorTo(editor.Position{Line: r.line, Col: 0}, false)
+	tab.MoveLineEnd(true)
+	tab.InsertString("rewritten")
+	if !m.rowStale(a, r) {
+		t.Fatal("a row whose match text is gone must read as stale")
+	}
+}
+
+func TestFindAll_ReplaceInResults(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	total := len(m.view)
+
+	// Dismiss the first row: replace must honor the worklist.
+	m.selectRow(a, 0)
+	m.dismissRow(a, 0)
+
+	m.replace = newTextField("tally")
+	plan, skipped, err := m.buildReplacePlan(a, "tally")
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if skipped != 0 {
+		t.Fatalf("nothing is stale yet, skipped = %d", skipped)
+	}
+	if plan.count != total-1 {
+		t.Fatalf("plan should cover the %d surviving rows, got %d", total-1, plan.count)
+	}
+	if len(plan.files) != 1 || plan.toDisk != 0 {
+		t.Fatalf("one open file expected: files=%d toDisk=%d", len(plan.files), plan.toDisk)
+	}
+
+	if ok, reason := a.commitWorkspaceEdit(plan); !ok {
+		t.Fatalf("commit failed: %s", reason)
+	}
+	text := tab.Buffer.String()
+	if !strings.Contains(text, "tally") {
+		t.Fatal("replacement text should be in the buffer")
+	}
+	if strings.Count(text, "count") != 1 {
+		// exactly the dismissed occurrence survives
+		t.Fatalf("dismissed row should be untouched; %d 'count' left", strings.Count(text, "count"))
+	}
+	// One undo gesture: the workspace-edit journal owns it.
+	if !a.wsUndoAvailable() {
+		t.Fatal("replace should arm the one-gesture undo")
+	}
+}
+
+func TestFindAll_ReplaceSkipsStaleRows(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+
+	// Invalidate the first surviving row by rewriting its line.
+	r := m.rows[m.view[0]]
+	tab.MoveCursorTo(editor.Position{Line: r.line, Col: 0}, false)
+	tab.MoveLineEnd(true)
+	tab.InsertString("rewritten")
+
+	_, skipped, err := m.buildReplacePlan(a, "tally")
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if skipped == 0 {
+		t.Fatal("the rewritten row should be skipped as stale")
+	}
+}
+
+func TestFindAll_FreshSearchDropsPinnedPanel(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	m.togglePin(a)
+	if a.findAllPin == nil {
+		t.Fatal("precondition: pinned")
+	}
+	a.showFindAll("count")
+	if a.findAllPin != nil {
+		t.Fatal("a fresh search should replace the pinned survivor")
+	}
+	if _, ok := a.modal.(*findAllModal); !ok {
+		t.Fatal("the fresh search should own the modal slot")
 	}
 }

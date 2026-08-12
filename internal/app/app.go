@@ -793,6 +793,12 @@ type App struct {
 	// mutually exclusive by the focus and click handlers.
 	treeFocus bool
 
+	// findAllPin is the PINNED find-all list (findall.go): the same
+	// modal object moved out of the modal slot so it survives editor
+	// clicks and edits like the git panels do. nil when no list is
+	// pinned; at most one of this and a modal-slot findAllModal exists.
+	findAllPin *findAllModal
+
 	// projectSearchSeq generation-stamps "Find in project" runs so a
 	// result launched before the user changed their mind can't open a
 	// list over whatever they're doing now. See projectsearch.go.
@@ -2000,6 +2006,14 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		a.handleFindKey(ev)
 		return
 	}
+	// A focused field on the PINNED find-all panel owns the keys the
+	// same way the find bar does — the panel itself is furniture (the
+	// editor keeps the keyboard), but a box the user clicked into is a
+	// box they're typing into. Esc inside drops back to the list focus.
+	if a.findAllPin != nil && a.findAllPin.focus != findAllFocusList {
+		a.findAllPin.handleFieldKey(a, ev)
+		return
+	}
 
 	// A half-typed chord (Esc-a waiting for its second rune) claims the
 	// next keystroke before anything else can. Checked ahead of the Esc
@@ -2519,6 +2533,9 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		if a.chat.open && a.chat.focused && !a.chatPanelContains(x, y) {
 			a.chat.focused = false
 		}
+		if a.findAllPin != nil && !a.findAllPinContains(x, y) {
+			a.findAllPin.focus = findAllFocusList
+		}
 		// The tree follows the same click-where-you-want-to-type rule:
 		// a press outside the sidebar hands the keyboard back; a press
 		// on a tree row (sidebarClick) takes it, and moves the cursor.
@@ -2557,6 +2574,12 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			a.dragMode = a.gitLogPress(x, y)
 		case a.compare.open && a.comparePanelContains(x, y):
 			a.dragMode = a.comparePanelPress(x, y)
+		// The pinned find-all panel took its rows/columns out of the
+		// editor band, so its hit-test runs before the catch-all — the
+		// same reason the git panel's does. Clicks elsewhere first drop
+		// any focused field it holds (click-where-you-want-to-type).
+		case a.findAllPinContains(x, y):
+			a.findAllPin.handleMouse(a, x, y, btn)
 		// The find bar sits inside the editor's former y-range too, so
 		// its hit-test runs before the catch-all — otherwise a click on
 		// the Aa toggle would land in the file behind it and move the
@@ -2634,6 +2657,10 @@ func (a *App) scrollAt(x, y, delta int) {
 	}
 	if a.term.open && a.termPanelContains(x, y) {
 		a.termPanelScroll(delta)
+		return
+	}
+	if a.findAllPinContains(x, y) {
+		a.findAllPin.scrollList(a, delta)
 		return
 	}
 	if y > 0 && y < a.height-1 {
@@ -3724,6 +3751,12 @@ func (a *App) draw() {
 	}
 	if a.findOpen {
 		a.drawFindBar()
+	}
+	// The pinned find-all panel draws with the other panels — it took
+	// its rows out of the editor band exactly as the modal form does,
+	// so the editor above/beside it has already been shortened.
+	if a.findAllPin != nil {
+		a.findAllPin.draw(a)
 	}
 	a.drawStatusBar()
 

@@ -2317,12 +2317,17 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	}
 
 	// Right-click handling. Over a file-tree row it opens a small context
-	// menu with file-management actions for that node; everywhere else
-	// it falls through to the main action menu so users have a redundant
-	// mouse-only path to it. Note: macOS Terminal + tmux often swallows
-	// Button3, which is why every action also lives in the main ≡ menu.
+	// menu with file-management actions for that node; over the editor
+	// body it opens the editor's own context menu (contextmenu.go);
+	// everywhere else it falls through to the main action menu so users
+	// have a redundant mouse-only path to it. Note: macOS Terminal + tmux
+	// often swallows Button3, which is why every action here also lives
+	// in the main ≡ menu.
 	if btn&tcell.Button3 != 0 {
 		if a.tryTreeContextClick(x, y) {
+			return
+		}
+		if a.tryEditorContextClick(x, y) {
 			return
 		}
 		a.openMenu()

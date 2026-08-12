@@ -111,6 +111,15 @@ type compareState struct {
 	// that answers it. While it's set the panel shows the instruction and
 	// comparePasteTarget claims the next bracketed paste.
 	awaitPaste bool
+
+	// selPending is a snapshot of the editor selection armed by "Compare
+	// selection with paste…" (contextmenu.go): when the awaited paste
+	// arrives it diffs against these lines instead of the whole buffer.
+	// A snapshot rather than a re-read on arrival, because the paste
+	// gesture itself (⌘V into the panel) must not be able to disturb
+	// the selection it is about to be compared with. nil when the armed
+	// paste is the ordinary whole-buffer kind.
+	selPending []string
 }
 
 // -----------------------------------------------------------------------------
@@ -266,6 +275,7 @@ func (a *App) runCompare(oldLabel, oldPath string, oldLines []string) {
 	added, removed := diff.Stats(edits)
 
 	a.compare.awaitPaste = false
+	a.compare.selPending = nil // any ordinary compare supersedes an armed selection
 	a.compare.oldLabel = oldLabel
 	a.compare.oldPath = oldPath
 	a.compare.oldLines = oldLines
@@ -370,7 +380,12 @@ func (a *App) comparePasteTarget() bool {
 // compareInsertPaste turns a pasted block into the old side. Unlike the
 // chat composer and the terminal, nothing is flattened or split: the
 // point of the gesture is to compare the text EXACTLY as it arrived.
+// An armed selection snapshot outranks the whole buffer as the new side.
 func (a *App) compareInsertPaste(text string) {
+	if a.compare.selPending != nil {
+		a.compareTextWithSelection("pasted text", text)
+		return
+	}
 	a.compareWithText("pasted text", text)
 }
 
@@ -381,7 +396,59 @@ func (a *App) comparePasteClip() {
 		a.flash("Clipboard is empty")
 		return
 	}
+	if a.compare.selPending != nil {
+		a.compareTextWithSelection("clipboard", a.clipBuf)
+		return
+	}
 	a.compareWithText("clipboard", a.clipBuf)
+}
+
+// compareSelectionWithPaste arms the panel to diff the CURRENT SELECTION
+// against the next paste — "is the block the agent proposed the same as
+// the block I have?" without leaving the editor. Same visible-mode rules
+// as menuComparePaste: the panel opens first and shows the instruction.
+func (a *App) compareSelectionWithPaste() {
+	tab := a.activeTabPtr()
+	if tab == nil || !tab.HasSelection() {
+		a.flash("Select the text to compare first")
+		return
+	}
+	a.openComparePanel()
+	a.compare.awaitPaste = true
+	a.compare.selPending = diff.SplitLines(tab.SelectionText())
+	a.compare.lines = nil
+	a.compare.identical = false
+	a.compare.oldLabel = "pasted text"
+	a.compare.newLabel = "selection"
+	a.flash("Paste now to compare with the selection (⌘V or a terminal paste) · Esc cancels")
+}
+
+// compareTextWithSelection resolves an armed selection compare: the
+// arrived text is the old side, the snapshot the new. Deliberately NOT
+// routed through runCompare — that reads the whole buffer as the new
+// side. oldLines stays nil so ⟳ has nothing to re-run: neither side of
+// a snapshot-vs-snapshot diff can be refreshed into anything but lies.
+func (a *App) compareTextWithSelection(oldLabel, text string) {
+	newLines := a.compare.selPending
+	oldLines := diff.SplitLines(text)
+	edits := diff.Diff(oldLines, newLines)
+	added, removed := diff.Stats(edits)
+
+	a.compare.awaitPaste = false
+	a.compare.selPending = nil
+	a.compare.oldLabel = oldLabel
+	a.compare.oldPath = ""
+	a.compare.oldLines = nil
+	a.compare.newLabel = "selection"
+	a.compare.newPath = ""
+	a.compare.lines = diff.Unified(edits, oldLabel, "selection", compareContext)
+	a.compare.identical = len(a.compare.lines) == 0
+	a.compare.added, a.compare.remove = added, removed
+	a.compare.scroll = 0
+	a.openComparePanel()
+	if a.compare.identical {
+		a.flash("No differences")
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -403,9 +470,11 @@ func (a *App) openComparePanel() {
 
 // closeComparePanel collapses the panel and disarms any pending paste —
 // a mode the user can no longer see must not still be claiming pastes.
+// The armed selection snapshot goes with it, for the same reason.
 func (a *App) closeComparePanel() {
 	a.compare.open = false
 	a.compare.awaitPaste = false
+	a.compare.selPending = nil
 }
 
 // -----------------------------------------------------------------------------

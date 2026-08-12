@@ -447,6 +447,7 @@ func pluginLeaderBindings(a *App) []leaderBinding {
 		out = append(out, leaderBinding{
 			key:    e.key,
 			action: func(app *App) { app.runPluginCommand(e.plugin, e.cmd) },
+			label:  e.label, // shows the command name in the which-key overlay
 		})
 	}
 	return out

@@ -779,6 +779,12 @@ type App struct {
 	// only reads it. See statusbar.go.
 	statusSegs []statusSegment
 
+	// whichKey is the leader cheat-sheet overlay (whichkey.go): shown
+	// after a ~350ms hesitation on an armed leader, dismissed by any
+	// non-leader key. Not a modal — it documents the leader without
+	// claiming its keys.
+	whichKey whichKeyState
+
 	// projectSearchSeq generation-stamps "Find in project" runs so a
 	// result launched before the user changed their mind can't open a
 	// list over whatever they're doing now. See projectsearch.go.
@@ -1355,6 +1361,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleRemoteOpen(e)
 	case *caretBlinkEvent:
 		a.handleCaretBlink()
+	case *whichKeyEvent:
+		a.handleWhichKeyTick(e)
 	case *gitDiffEvent:
 		a.handleGitDiff(e)
 	case *customActionDoneEvent:
@@ -2050,7 +2058,19 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 			a.lastEscape = time.Time{}
 			return
 		}
+		// A visible which-key overlay makes Esc mean "drop that": close
+		// it and disarm. Checked AFTER the double-Esc branch so Esc-Esc
+		// keeps opening the menu even when the overlay got there first.
+		if a.whichKey.open {
+			a.closeWhichKey()
+			a.clearChord()
+			a.lastEscape = time.Time{}
+			return
+		}
 		a.lastEscape = now
+		// The hesitation timer: if this armed leader is still waiting in
+		// ~350ms, the which-key overlay documents it (whichkey.go).
+		a.armWhichKey()
 		return
 	}
 	// Esc-leader hotkey: if Esc was pressed within doubleEscMs and this
@@ -2061,7 +2081,10 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// times — without this, the extra z's would type into the buffer);
 	// chain mode admits only repeatable bindings so quick typing after a
 	// leader can't misfire an unrelated action.
-	if !a.lastEscape.IsZero() && time.Since(a.lastEscape) < doubleEscMs {
+	// A visible which-key overlay holds the window open past doubleEscMs:
+	// once the editor has shown the table, "I'm reading" must not time
+	// out mid-read.
+	if (!a.lastEscape.IsZero() && time.Since(a.lastEscape) < doubleEscMs) || a.whichKey.open {
 		if ev.Key() == tcell.KeyRune {
 			if b := leaderBindingFor(ev.Rune()); b != nil && (!a.leaderChained || b.repeat) {
 				a.fireLeader(b)
@@ -2083,9 +2106,11 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		}
 	}
 	// Any other key cancels a pending Esc so a stale half-tap doesn't
-	// surprise the user later.
+	// surprise the user later. The which-key overlay goes with it —
+	// typing through the cheat sheet is the expert saying "not needed".
 	a.lastEscape = time.Time{}
 	a.leaderChained = false
+	a.closeWhichKey()
 
 	// Cmd+C / Cmd+V. Terminals speaking the kitty keyboard protocol
 	// (kitty, Ghostty, WezTerm, iTerm2 with CSI-u) deliver the Cmd/Super
@@ -2314,6 +2339,16 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		a.updateMenuHover(x, y)
 		a.handleMenuMouse(x, y, btn)
 		return
+	}
+
+	// The which-key overlay's rows are clickable. A left press on a row
+	// fires it; inside the band, it's swallowed; anywhere else the
+	// overlay dismisses and the press falls through to normal routing
+	// (whichKeyClick reports which happened).
+	if a.whichKey.open && btn&tcell.Button1 != 0 && a.dragMode == "" {
+		if a.whichKeyClick(x, y) {
+			return
+		}
 	}
 
 	// Right-click handling. Over a file-tree row it opens a small context
@@ -3653,6 +3688,13 @@ func (a *App) draw() {
 	}
 	a.drawStatusBar()
 
+	// The which-key overlay sits above the panels but below the menu
+	// and modals — it never coexists with either (opening them closes
+	// it), so the order here is belt and braces.
+	if a.whichKey.open {
+		a.drawWhichKey()
+	}
+
 	// Overlay layer. The menu and the active modal are mutually
 	// exclusive (closeAllModals enforces it), so at most one of these
 	// draws — last, above everything else.
@@ -3673,7 +3715,6 @@ func (a *App) draw() {
 func (a *App) iconsOn() bool {
 	return a.tree != nil && a.tree.IconsEnabled
 }
-
 
 // drawSplitter paints a 1-column vertical line at the editor-facing edge
 // of the sidebar. Idle it sits in Subtle grey; while the user is dragging

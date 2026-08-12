@@ -38,6 +38,14 @@ type leaderBinding struct {
 	key    rune
 	action func(*App)
 
+	// label names the action for the which-key overlay (whichkey.go) —
+	// the same short imperative the ≡ menu row sharing the shortcut
+	// uses. A prefix's label names the namespace it opens ("AI…").
+	// Empty hides the entry from the overlay, so an unlabeled binding
+	// degrades to what it was before the overlay existed: bound but
+	// undocumented.
+	label string
+
 	// sub makes this entry a PREFIX rather than an action: firing it
 	// arms a second window in which one more rune dispatches from this
 	// table (see fireLeader / handleChordKey). One namespace exists
@@ -90,43 +98,43 @@ type leaderBinding struct {
 //     menu's confirm dialog to gate the action as a deliberate gesture.
 func leaderBindings() []leaderBinding {
 	return []leaderBinding{
-		{key: 's', action: (*App).menuSave},
-		{key: 'u', action: (*App).menuUndo, repeat: true},
-		{key: 'r', action: (*App).menuRedo, repeat: true},
+		{key: 's', action: (*App).menuSave, label: "Save"},
+		{key: 'u', action: (*App).menuUndo, repeat: true, label: "Undo"},
+		{key: 'r', action: (*App).menuRedo, repeat: true, label: "Redo"},
 		// 'z' is the Cmd+Z muscle-memory alias for undo (same spirit as
 		// 'k' for the palette); the shifted variant redoes, mirroring
 		// the h/H and o/O pair convention.
-		{key: 'z', action: (*App).menuUndo, repeat: true},
-		{key: 'Z', action: (*App).menuRedo, repeat: true},
-		{key: 'w', action: (*App).menuClose},
-		{key: 'q', action: (*App).menuQuit},
-		{key: 'n', action: (*App).menuNewFile},
-		{key: 't', action: (*App).menuToggleSidebar},
-		{key: '/', action: (*App).menuToggleLineComment},
-		{key: 'f', action: (*App).openFind},
+		{key: 'z', action: (*App).menuUndo, repeat: true, label: "Undo"},
+		{key: 'Z', action: (*App).menuRedo, repeat: true, label: "Redo"},
+		{key: 'w', action: (*App).menuClose, label: "Close tab"},
+		{key: 'q', action: (*App).menuQuit, label: "Quit"},
+		{key: 'n', action: (*App).menuNewFile, label: "New file"},
+		{key: 't', action: (*App).menuToggleSidebar, label: "File explorer"},
+		{key: '/', action: (*App).menuToggleLineComment, label: "Toggle comment"},
+		{key: 'f', action: (*App).openFind, label: "Find"},
 		// 'F' lists every occurrence instead of walking them one Enter at
 		// a time — the shifted variant of the same verb, following the
 		// h/H and o/O convention. It seeds itself from the find bar, the
 		// selection, or the word under the cursor, so it's a one-key
 		// gesture from anywhere in the file.
-		{key: 'F', action: (*App).menuFindAll},
+		{key: 'F', action: (*App).menuFindAll, label: "Find all"},
 		// 'e' for rEplace — the letter the verb's own name offers once
 		// 'r' is spoken for (redo, with 'Z' as its shifted twin). It
 		// deliberately isn't 'F's neighbour on a shift: replace is a
 		// MUTATING verb, not another way to read, so pairing it with
 		// find under the shift convention would have said the wrong
 		// thing about what pressing it does.
-		{key: 'e', action: (*App).menuReplace},
+		{key: 'e', action: (*App).menuReplace, label: "Replace"},
 		// 'j' for Jump to line. Not 'l' — a lone 'l' is one stray Esc
 		// away from every word with an L in it, which is the same
 		// argument that put the git Log on a shifted 'L'.
-		{key: 'j', action: (*App).menuGoToLine},
-		{key: 'p', action: (*App).openFinder},
+		{key: 'j', action: (*App).menuGoToLine, label: "Go to line"},
+		{key: 'p', action: (*App).openFinder, label: "Find file"},
 		// 'P' searches the project's CONTENTS rather than its filenames —
 		// the shifted variant of the same verb, following the f/F and o/O
 		// convention. Results land in the Find-all panel, so the two
 		// scopes of "find" read as one instrument (projectsearch.go).
-		{key: 'P', action: (*App).menuFindInProject},
+		{key: 'P', action: (*App).menuFindInProject, label: "Find in project"},
 		// Tab switching. ',' / '.' rather than the '[' / ']' every editor
 		// with buffers uses, because those two CANNOT work here: "\x1b["
 		// is the CSI introducer and "\x1b]" is OSC, so the terminal (and
@@ -136,9 +144,9 @@ func leaderBindings() []leaderBinding {
 		// anything. 'b' opens the switcher as a picker — "buffer", and
 		// the surface that still works once the strip is scrolled and
 		// the tab you want isn't drawn at all. See tabbar.go.
-		{key: ',', action: (*App).menuPrevTab, repeat: true},
-		{key: '.', action: (*App).menuNextTab, repeat: true},
-		{key: 'b', action: (*App).menuSwitchTab},
+		{key: ',', action: (*App).menuPrevTab, repeat: true, label: "Previous tab"},
+		{key: '.', action: (*App).menuNextTab, repeat: true, label: "Next tab"},
+		{key: 'b', action: (*App).menuSwitchTab, label: "Switch tab"},
 		// 'k' for the palette — the Cmd+K muscle memory every editor and
 		// chat app teaches (the real Cmd+K never reaches a terminal app,
 		// so Esc-k is the closest stand-in). It used to share the binding
@@ -146,11 +154,11 @@ func leaderBindings() []leaderBinding {
 		// which is the higher-traffic use of the letter. The palette is
 		// still the ≡ menu's pinned headline row, so it keeps three ways
 		// in without that alias.
-		{key: 'k', action: (*App).openPalette},
+		{key: 'k', action: (*App).openPalette, label: "Command palette"},
 		// 'a' for AI — a PREFIX, not an action. Everything the chat agent
 		// touches lives one rune deeper: the panel itself, context, the
 		// model and backend pickers, skills, and MCP tools.
-		{key: 'a', sub: aiLeaderBindings(), name: "AI",
+		{key: 'a', sub: aiLeaderBindings(), name: "AI", label: "AI…",
 			hint: "AI  c chat · s skills · a attach · f file · m model · b backend · t tools"},
 		// 'x' for eXtensions — the plugin namespace, and the codebase's
 		// only DYNAMIC prefix: its sub-table is whatever leader keys the
@@ -164,73 +172,73 @@ func leaderBindings() []leaderBinding {
 		// could no longer bind, and any letter ced later bound would
 		// silently break somebody's plugin. A namespace is the only
 		// place a user-owned key can live without fighting the editor's.
-		{key: 'x', subFor: pluginLeaderBindings, hintFor: pluginLeaderHint, name: "Plugin"},
+		{key: 'x', subFor: pluginLeaderBindings, hintFor: pluginLeaderHint, name: "Plugin", label: "Plugins…"},
 		// Multi-line editing (multicaret.go). 'm' grows the caret column
 		// downward, 'M' upward — the same "shift means the other
 		// direction" convention as h/H and o/O. Both repeat, so
 		// "Esc m m m" builds a four-line column in one gesture.
-		{key: 'm', action: (*App).menuAddCaretBelow, repeat: true},
-		{key: 'M', action: (*App).menuAddCaretAbove, repeat: true},
+		{key: 'm', action: (*App).menuAddCaretBelow, repeat: true, label: "Caret below"},
+		{key: 'M', action: (*App).menuAddCaretAbove, repeat: true, label: "Caret above"},
 		// '*' is vim's word-under-cursor key, which is the muscle memory
 		// this actually competes with — VS Code's Cmd+D never reaches a
 		// terminal app. Repeats, so "Esc * * *" claims three occurrences.
-		{key: '*', action: (*App).menuAddNextOccurrence, repeat: true},
+		{key: '*', action: (*App).menuAddNextOccurrence, repeat: true, label: "Next occurrence"},
 		// '&' is the bulk form of the same idea, one shift-key over on
 		// the row — "all of them" next to "the next one". Deliberately
 		// NOT repeatable: it already claimed every occurrence in the
 		// file, so a second press has nothing to add and re-arming the
 		// window would only swallow the next keystroke.
-		{key: '&', action: (*App).menuSelectAllOccurrences},
+		{key: '&', action: (*App).menuSelectAllOccurrences, label: "All occurrences"},
 		// 'h' for "hunk" — jump between git-changed regions. Shifted
 		// variant walks backwards, mirroring find's Enter/Shift-Enter.
-		{key: 'h', action: (*App).menuNextHunk, repeat: true},
-		{key: 'H', action: (*App).menuPrevHunk, repeat: true},
+		{key: 'h', action: (*App).menuNextHunk, repeat: true, label: "Next change"},
+		{key: 'H', action: (*App).menuPrevHunk, repeat: true, label: "Previous change"},
 		// 'g' for "git" — collapse/expand the diff review panel.
 		// '=' / '-' resize whichever bottom panel is open (grow/shrink,
 		// borrowing the browser-zoom mnemonic); silent no-ops while
 		// both are collapsed. No menu rows for these two: resize's
 		// primary surface is dragging the panel header, same as the
 		// sidebar splitter.
-		{key: 'g', action: (*App).menuToggleGitPanel},
+		{key: 'g', action: (*App).menuToggleGitPanel, label: "Git panel"},
 		// 'L' for the git Log — shifted because lowercase 'l' is too
 		// close to the common typing flow after a stray Esc, and the
 		// h/H, o/O pairs already teach that shift means "the other git
 		// surface".
-		{key: 'L', action: (*App).menuToggleGitLog},
-		{key: '=', action: (*App).growBottomPanel, repeat: true},
-		{key: '-', action: (*App).shrinkBottomPanel, repeat: true},
+		{key: 'L', action: (*App).menuToggleGitLog, label: "Git log"},
+		{key: '=', action: (*App).growBottomPanel, repeat: true, label: "Grow panel"},
+		{key: '-', action: (*App).shrinkBottomPanel, repeat: true, label: "Shrink panel"},
 		// '`' for the terminal — the key VS Code binds, minus the Ctrl.
 		// An open-but-unfocused panel grabs focus first, so the leader
 		// doubles as "jump back into the shell".
-		{key: '`', action: (*App).leaderTerminal},
+		{key: '`', action: (*App).leaderTerminal, label: "Terminal"},
 		// '~' is the shifted twin of the terminal's own key, and it means
 		// "the file locations in what the terminal printed" — the
 		// keyboard path into the clickable-output list (termdiag.go).
 		// The panel is mouse-driven, but macOS Terminal swallows clicks,
 		// so its verbs need a keyboard route; the shift convention (f/F,
 		// p/P, d/D) makes this one guessable from the key beside it.
-		{key: '~', action: (*App).menuTermLocations},
+		{key: '~', action: (*App).menuTermLocations, label: "Terminal locations"},
 		// LSP trio: 'd' definition, 'i' info (hover), 'D' the file's whole
 		// symbol outline as a picker. The shifted pair follows the same
 		// convention f/F and p/P do — same verb, wider scope: 'd' goes to
 		// the definition of the symbol under the cursor, 'D' lists every
 		// definition in the file and lets you pick one.
-		{key: 'd', action: (*App).menuGoToDefinition},
-		{key: 'i', action: (*App).menuHoverInfo},
-		{key: 'D', action: (*App).menuGoToSymbol},
+		{key: 'd', action: (*App).menuGoToDefinition, label: "Go to definition"},
+		{key: 'i', action: (*App).menuHoverInfo, label: "Hover info"},
+		{key: 'D', action: (*App).menuGoToSymbol, label: "Go to symbol"},
 		// 'R' for References — the letter the verb's own name offers once
 		// 'r' is spoken for by redo, which is the same argument that put
 		// rEplace on 'e'. It is deliberately NOT a shifted twin of redo:
 		// redo's twin is 'Z' (beside its own 'z' alias), so the pair
 		// convention was already spent and 'R' is free to mean what it
 		// says. Results open in the Find-all panel (lspreferences.go).
-		{key: 'R', action: (*App).menuFindReferences},
+		{key: 'R', action: (*App).menuFindReferences, label: "Find references"},
 		// 'I' is signature help — the shifted twin of hover's 'i', and a
 		// true one this time: same tooltip, same glance, one question
 		// over. 'i' describes the symbol under the cursor; 'I' describes
 		// the CALL the cursor is standing inside, which is the thing you
 		// want while your hands are between the parentheses.
-		{key: 'I', action: (*App).menuSignatureHelp},
+		{key: 'I', action: (*App).menuSignatureHelp, label: "Signature help"},
 		// 'E' is rename — the shifted twin of rEplace's 'e', and the pair
 		// says exactly what it should under the f/F, p/P, d/D convention:
 		// same verb, wider and smarter scope. 'e' replaces text you name,
@@ -244,7 +252,7 @@ func leaderBindings() []leaderBinding {
 		// 'N' because "\x1bN" is SS2 — one of the ESC pairs a terminal can
 		// eat before tcell ever sees it, the same trap that keeps '[' and
 		// ']' off the tab-switching keys.
-		{key: 'E', action: (*App).menuRenameSymbol},
+		{key: 'E', action: (*App).menuRenameSymbol, label: "Rename symbol"},
 		// 'c' is code actions — the letter its own name offers, and the
 		// only obvious one still free in this table. It collides with the
 		// AI namespace's Esc-a-c (chat), which is exactly what a namespace
@@ -255,13 +263,13 @@ func leaderBindings() []leaderBinding {
 		// what it can do here at all. It is deliberately not bound to
 		// anything resembling VS Code's Ctrl-. — '.' is next-tab, and the
 		// no-Ctrl rule rules out the original (lspcodeaction.go).
-		{key: 'c', action: (*App).menuCodeActions},
+		{key: 'c', action: (*App).menuCodeActions, label: "Code actions"},
 		// Navigation history: 'o' back "out" of a jump — 'b' was
 		// tempting but reads as "buffer" to vim hands. Shifted variant
 		// walks forward again, mirroring the h/H hunk convention.
 		// Alt+Left / Alt+Right (handleKey) are the arrow twins.
-		{key: 'o', action: (*App).menuNavBack, repeat: true},
-		{key: 'O', action: (*App).menuNavForward, repeat: true},
+		{key: 'o', action: (*App).menuNavBack, repeat: true, label: "Back"},
+		{key: 'O', action: (*App).menuNavForward, repeat: true, label: "Forward"},
 	}
 }
 
@@ -283,20 +291,20 @@ func aiLeaderBindings() []leaderBinding {
 	return []leaderBinding{
 		// 'c' for chat — focus-or-toggle, the same gesture Esc-` uses for
 		// the terminal, so an open-but-unfocused panel is one key away.
-		{key: 'c', action: (*App).leaderChat},
-		{key: 's', action: (*App).menuUseSkill},
+		{key: 'c', action: (*App).leaderChat, label: "Chat"},
+		{key: 's', action: (*App).menuUseSkill, label: "Use skill"},
 		// 'a' doubles the prefix: Esc-a-a is "attach what I'm looking
 		// at", the namespace's most-reached-for verb, and a doubled
 		// prefix is the standard way to spell "the obvious one".
-		{key: 'a', action: (*App).menuChatAttachCurrent},
-		{key: 'f', action: (*App).menuChatAttachFile},
-		{key: 'm', action: (*App).menuChatModel},
+		{key: 'a', action: (*App).menuChatAttachCurrent, label: "Attach current file"},
+		{key: 'f', action: (*App).menuChatAttachFile, label: "Attach file"},
+		{key: 'm', action: (*App).menuChatModel, label: "Model"},
 		// 'b' for backend — 'a' was taken by attach, and "backend" is
 		// the word the ≡ row's help text uses for the agent registry.
-		{key: 'b', action: (*App).menuChatAgent},
+		{key: 'b', action: (*App).menuChatAgent, label: "Backend"},
 		// 't' for tools — what MCP servers actually are from the chat
 		// panel's side, and the word the README leads with.
-		{key: 't', action: (*App).menuMCPServers},
+		{key: 't', action: (*App).menuMCPServers, label: "MCP tools"},
 	}
 }
 
@@ -350,6 +358,7 @@ func (a *App) fireLeader(b *leaderBinding) {
 		// namespace exists and is currently empty.
 		if len(sub) == 0 {
 			a.clearChord()
+			a.closeWhichKey()
 			a.lastEscape = time.Time{}
 			a.leaderChained = false
 			a.flash(hint)
@@ -360,10 +369,18 @@ func (a *App) fireLeader(b *leaderBinding) {
 		a.leaderChordAt = time.Now()
 		a.lastEscape = time.Time{}
 		a.leaderChained = false
+		// The which-key overlay follows the chord: already visible, it
+		// re-renders with the sub-table on the next draw; not yet
+		// visible, the fresh arm gives the sub-table its own ~350ms
+		// hesitation window (whichkey.go).
+		if !a.whichKey.open {
+			a.armWhichKey()
+		}
 		a.flash(hint)
 		return
 	}
 	a.clearChord()
+	a.closeWhichKey()
 	if b.repeat {
 		a.lastEscape = time.Now()
 		a.leaderChained = true
@@ -389,7 +406,9 @@ func (a *App) handleChordKey(ev *tcell.EventKey) bool {
 	if a.leaderChord == nil {
 		return false
 	}
-	if time.Since(a.leaderChordAt) >= leaderChordFor {
+	// A visible which-key overlay holds the chord open past its window —
+	// same reading-time contract the top-level table gets in handleKey.
+	if time.Since(a.leaderChordAt) >= leaderChordFor && !a.whichKey.open {
 		a.clearChord()
 		return false
 	}
@@ -406,6 +425,7 @@ func (a *App) handleChordKey(ev *tcell.EventKey) bool {
 	}
 	prefix := chordPrefixFor(a.leaderChordName)
 	a.clearChord()
+	a.closeWhichKey() // the chord resolved (or missed); either way it's answered
 	for i := range sub {
 		if sub[i].key == ev.Rune() {
 			sub[i].action(a)

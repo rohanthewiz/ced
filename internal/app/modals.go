@@ -51,6 +51,9 @@ func (a *App) closeAllModals() {
 	a.hoveredMenuRow = -1
 	a.dragMode = ""
 	a.stopAutoScroll()
+	// The which-key overlay rides along: it never coexists with a modal
+	// or the menu, and every surface that opens one comes through here.
+	a.closeWhichKey()
 }
 
 // anyModalOpen reports whether any overlay surface is on screen. Used by

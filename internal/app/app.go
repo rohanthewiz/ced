@@ -773,6 +773,12 @@ type App struct {
 	lastClick    clickRecord
 	lastTabRects []tabRect
 
+	// statusSegs is the status bar's clickable spans, re-stamped by
+	// every drawStatusBar the same way lastTabRects tracks the tab
+	// strip: the draw is the one source of geometry, the click handler
+	// only reads it. See statusbar.go.
+	statusSegs []statusSegment
+
 	// projectSearchSeq generation-stamps "Find in project" runs so a
 	// result launched before the user changed their mind can't open a
 	// list over whatever they're doing now. See projectsearch.go.
@@ -2487,6 +2493,12 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// the Aa toggle would land in the file behind it and move the
 		// cursor there.
 		case a.findBarPress(x, y):
+		// The status bar owns the bottom row; its segments carry their
+		// own click targets (statusbar.go). Placed after every panel
+		// case — none of them reaches the bottom row — and before the
+		// editor catch-all, which already excluded it.
+		case y == a.height-1:
+			a.statusBarClick(x, y)
 		case y > 0 && y < a.height-1:
 			// Alt+click drops (or lifts) an extra caret instead of
 			// moving the one you have — the multi-line editing gesture.
@@ -3737,71 +3749,6 @@ func (a *App) drawEmptyEditor() {
 		a.screen.SetContent(cx2+i, cy+1, r, nil, muted)
 	}
 	a.screen.HideCursor()
-}
-
-// drawStatusBar paints the bottom status bar.
-func (a *App) drawStatusBar() {
-	sx, sy, sw, _ := a.statusRect()
-	bg := a.theme.StatusBG
-	fg := a.theme.BG
-	style := tcell.StyleDefault.Background(bg).Foreground(fg).Bold(true)
-	for cx := sx; cx < sx+sw; cx++ {
-		a.screen.SetContent(cx, sy, ' ', nil, style)
-	}
-
-	// Right-side text: the Copilot fragment (device code mid-sign-in,
-	// quiet check mark when signed in) and the current git branch,
-	// dot-separated. Drawn first so the left-side text can be clipped
-	// against it and the two pieces never overlap on a narrow window.
-	var rightParts []string
-	if seg := a.copilotStatusSegment(); seg != "" {
-		rightParts = append(rightParts, seg)
-	}
-	if a.gitBranch != "" {
-		rightParts = append(rightParts, a.gitBranch)
-	}
-	var rightWidth int
-	if len(rightParts) > 0 {
-		right := " " + strings.Join(rightParts, " · ") + " "
-		rw := len([]rune(right))
-		if rw < sw {
-			drawAt(a.screen, sx+sw-rw, sy, right, style)
-			rightWidth = rw
-		}
-	}
-
-	// Left-side text: status flash, file info, or root dir.
-	var left string
-	if time.Now().Before(a.statusUntil) && a.statusMsg != "" {
-		left = " " + a.statusMsg
-	} else if tab := a.activeTabPtr(); tab != nil {
-		if tab.IsImage() && tab.Image != nil {
-			b := tab.Image.Bounds()
-			left = fmt.Sprintf(" %s · %d×%d · %s",
-				strings.ToUpper(tab.ImageFmt), b.Dx(), b.Dy(), filepath.Base(tab.Path))
-		} else {
-			lang := detectLangLabel(tab.Path)
-			dirty := ""
-			if tab.Dirty {
-				dirty = " · ●"
-			}
-			left = fmt.Sprintf(" %s · Ln %d, Col %d · %d lines%s%s%s%s",
-				lang, tab.Cursor.Line+1, tab.Cursor.Col+1, tab.Buffer.LineCount(), dirty,
-				a.caretStatusSuffix(), a.diagStatusSuffix(), a.syntaxStatusSuffix())
-		}
-	} else {
-		left = " " + filepath.Base(a.rootDir)
-	}
-	// One cell of breathing room between left and right text so they
-	// don't visually butt up against each other on a tight terminal.
-	leftMax := sw - rightWidth
-	if rightWidth > 0 {
-		leftMax--
-	}
-	if leftMax < 0 {
-		leftMax = 0
-	}
-	drawStatusText(a.screen, sx, sy, leftMax, left, style)
 }
 
 // drawTooSmall paints a centred error message when the terminal window is

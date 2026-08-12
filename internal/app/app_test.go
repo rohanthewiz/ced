@@ -1870,9 +1870,10 @@ func TestTabBarClick_ClosesViaX(t *testing.T) {
 }
 
 // TestDrawStatusBar_RendersBranchRightAligned pins down the lower-right
-// branch label: when gitBranch is set, the rightmost cells of the
-// status bar carry " <branch> " in order, so the user can glance at
-// the corner and read which checkout they're on.
+// corner: when gitBranch is set, the rightmost cells of the status bar
+// carry " <branch>  ≡ " in order — the branch label so the user can
+// glance at the corner and read which checkout they're on, then the ≡
+// menu button pinned to the very edge (statusbar.go).
 func TestDrawStatusBar_RendersBranchRightAligned(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.gitBranch = "feat/widgets"
@@ -1883,7 +1884,7 @@ func TestDrawStatusBar_RendersBranchRightAligned(t *testing.T) {
 	cells, w, _ := scr.GetContents()
 	_, sy, _, _ := a.statusRect()
 
-	want := []rune(" feat/widgets ")
+	want := []rune(" feat/widgets  ≡ ")
 	startX := w - len(want)
 	for i, r := range want {
 		c := cells[sy*w+startX+i]
@@ -1895,8 +1896,8 @@ func TestDrawStatusBar_RendersBranchRightAligned(t *testing.T) {
 }
 
 // TestDrawStatusBar_OmitsBranchWhenEmpty confirms a non-repo project
-// (gitBranch == "") doesn't paint a stray label or steal cells from
-// the left-side text — the right edge should just be the bar's bg.
+// (gitBranch == "") doesn't paint a stray label — the right edge holds
+// only the ≡ menu button, with blank bar behind it.
 func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.gitBranch = ""
@@ -1907,12 +1908,19 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 	cells, w, _ := scr.GetContents()
 	_, sy, _, _ := a.statusRect()
 
-	// Tail of the status bar must be blank — the bar's fill character.
-	for x := w - 5; x < w; x++ {
-		c := cells[sy*w+x]
-		if len(c.Runes) > 0 && c.Runes[0] != ' ' {
-			t.Fatalf("status bar col %d = %v, expected blank tail", x, c.Runes)
+	want := []rune("  ≡ ") // just the gap + menu button, no branch text
+	startX := w - len(want)
+	for i, r := range want {
+		c := cells[sy*w+startX+i]
+		if len(c.Runes) == 0 || c.Runes[0] != r {
+			t.Fatalf("status bar col %d = %v, want %q",
+				startX+i, c.Runes, r)
 		}
+	}
+	// And nothing else painted to the left of the button.
+	c := cells[sy*w+startX-1]
+	if len(c.Runes) > 0 && c.Runes[0] != ' ' {
+		t.Fatalf("status bar col %d = %v, expected blank", startX-1, c.Runes)
 	}
 }
 

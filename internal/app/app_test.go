@@ -1936,16 +1936,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 133 {
-		t.Errorf("modalHeight = %d, want 133", h)
+	if h != 134 {
+		t.Errorf("modalHeight = %d, want 134", h)
 	}
-	if got := len(items); got != 127 {
-		t.Errorf("row count = %d, want 127 (2 top-zone + 111 group actions + 14 headers)", got)
+	if got := len(items); got != 128 {
+		t.Errorf("row count = %d, want 128 (2 top-zone + 112 group actions + 14 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (127) — headers separate the
+	// one setting off the headerless Quit group (128) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 130}
+	wantDiv := []int{2, 5, 131}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -1965,17 +1965,17 @@ func TestMenuLayout_CollapseHidesSectionRows(t *testing.T) {
 	a.customActions = nil
 	before, _, hBefore := a.menuLayout()
 
-	// Git is the largest section (14 rows) — a clear signal.
+	// Git is the largest section (15 rows) — a clear signal.
 	a.toggleMenuSection("Git")
 	if !a.sectionCollapsed("Git") {
 		t.Fatal("toggle should collapse Git")
 	}
 	after, _, hAfter := a.menuLayout()
-	if got := len(before) - len(after); got != 14 {
-		t.Errorf("collapsing Git hid %d rows, want 14", got)
+	if got := len(before) - len(after); got != 15 {
+		t.Errorf("collapsing Git hid %d rows, want 15", got)
 	}
-	if got := hBefore - hAfter; got != 14 {
-		t.Errorf("height shrank by %d, want 14", got)
+	if got := hBefore - hAfter; got != 15 {
+		t.Errorf("height shrank by %d, want 15", got)
 	}
 	// The Git header itself must survive so the user can unfold.
 	if menuHeaderIndex(after, "Git") < 0 {
@@ -2273,8 +2273,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 136 { // 133 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 136", h)
+	if h != 137 { // 134 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 137", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

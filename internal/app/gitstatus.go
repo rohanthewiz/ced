@@ -50,6 +50,21 @@ type gitStatus struct {
 	// HasStash reports whether refs/stash exists — i.e. `git stash pop`
 	// has something to pop. Gates the "Pop stash" menu row.
 	HasStash bool
+	// Upstream is HEAD's tracked remote-tracking branch in short form
+	// ("origin/main"), or "" when the branch has no upstream, HEAD is
+	// detached, or we couldn't tell. Ahead / Behind count the commits
+	// HEAD has that the upstream doesn't and vice versa; both are 0
+	// whenever Upstream is empty, because there is nothing to measure
+	// against. They feed the status bar's push indicator and seed the
+	// push dialog (gitpush.go).
+	Upstream      string
+	Ahead, Behind int
+	// HasRemote reports whether the repo has at least one remote
+	// configured — the difference between "this branch isn't pushed
+	// yet" and "there is nowhere to push". Gates the push entry points
+	// so a purely local repo never offers a dialog whose first dropdown
+	// would be empty.
+	HasRemote bool
 }
 
 // loadGitStatus inspects rootDir and returns the set of dirty file paths
@@ -83,6 +98,7 @@ func loadGitStatus(rootDir string) gitStatus {
 		return gitStatus{IsRepo: true, DirtyFiles: map[string]bool{}, Branch: loadGitBranch(rootDir)}
 	}
 
+	upstream, ahead, behind := loadGitTracking(rootDir)
 	dirty := parsePorcelain(out, toplevel)
 	return gitStatus{
 		IsRepo:      true,
@@ -91,7 +107,67 @@ func loadGitStatus(rootDir string) gitStatus {
 		HasStaged:   hasStagedPorcelain(out),
 		StagedFiles: stagedPorcelainSet(out, toplevel),
 		HasStash:    loadGitHasStash(rootDir),
+		Upstream:    upstream,
+		Ahead:       ahead,
+		Behind:      behind,
+		// Only an UNTRACKED branch has to ask whether a remote exists at
+		// all: an upstream is itself proof of one. The steady state (a
+		// tracked branch) therefore pays nothing for this answer, which
+		// is what keeps the extra fork off the 10-second tick for every
+		// repo anyone actually works in.
+		HasRemote: upstream != "" || len(loadGitRemotes(rootDir)) > 0,
 	}
+}
+
+// loadGitTracking reports HEAD's upstream in short form plus how far
+// ahead of / behind it the local branch sits. Best-effort like
+// everything else here: no upstream, a detached HEAD, or any git failure
+// yields ("", 0, 0), which callers read as "nothing to say about the
+// remote".
+//
+// Two forks rather than one because each has an unambiguous machine
+// format. The one-fork alternative — `for-each-ref` with
+// %(upstream:track) — answers both questions at once but does it in
+// English ("[ahead 3, behind 1]"), which is a parser waiting to break.
+// The second fork is skipped entirely when there is no upstream, so the
+// case that would pay for a lookup that can only fail doesn't.
+func loadGitTracking(rootDir string) (upstream string, ahead, behind int) {
+	if rootDir == "" {
+		return "", 0, 0
+	}
+	out, err := exec.Command("git", "-C", rootDir, "rev-parse",
+		"--abbrev-ref", "--symbolic-full-name", "@{upstream}").Output()
+	if err != nil {
+		return "", 0, 0
+	}
+	upstream = strings.TrimRight(string(out), "\n\r")
+	if upstream == "" {
+		return "", 0, 0
+	}
+	cnt, err := exec.Command("git", "-C", rootDir, "rev-list",
+		"--count", "--left-right", "@{upstream}...HEAD").Output()
+	if err != nil {
+		return upstream, 0, 0
+	}
+	// --left-right counts the two halves of the symmetric difference in
+	// the order the revisions were named: with "@{upstream}...HEAD" the
+	// left column is the upstream's exclusive commits (we are BEHIND by
+	// that many) and the right column is ours (AHEAD).
+	ahead, behind = parseTrackingCounts(cnt)
+	return upstream, ahead, behind
+}
+
+// parseTrackingCounts decodes rev-list's "<behind>\t<ahead>" pair.
+// Split out so the column order — the one thing easy to get backwards —
+// can be pinned by a test without forking git.
+func parseTrackingCounts(out []byte) (ahead, behind int) {
+	fields := strings.Fields(string(out))
+	if len(fields) != 2 {
+		return 0, 0
+	}
+	behind, _ = strconv.Atoi(fields[0])
+	ahead, _ = strconv.Atoi(fields[1])
+	return ahead, behind
 }
 
 // hasStagedPorcelain reports whether any porcelain v1 line carries an

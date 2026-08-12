@@ -207,6 +207,13 @@ func (a *App) gitPanelActionItems(targets []gitPanelFile) []paletteItem {
 	if a.gitHasStaged {
 		add("Commit staged…", (*App).menuGitCommit)
 	}
+	// Push closes the sequence the commit rows above start. It names the
+	// branch rather than saying a bare "Push" because this picker is
+	// fuzzy-searchable: typing the branch name should find the row that
+	// sends it.
+	if a.hasGitPushTarget() && a.gitBranch != "" {
+		add("Push "+a.gitBranch+"…", (*App).openGitPush)
+	}
 	if n := a.gitPanelCheckedCount(); n < len(a.gitPanel.files) {
 		add("Select all ("+itoa(len(a.gitPanel.files))+")", (*App).gitPanelSelectAll)
 	}

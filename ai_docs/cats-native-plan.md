@@ -354,21 +354,50 @@ ced's git layer is already deep — `gitlogactions.go` **already implements
 cherry-pick, revert, reset (hard-mode confirm), checkout, branch, tag, copy
 SHA**. This phase closes the specific named gaps:
 
-1. **Push dialog — never type the current branch.** New `gitpush.go` on
-   `formModal` (select rows already supported — `handleSelectKey`,
-   formmodal.go ~256). Pre-open, gather off-loop: remotes, current branch,
-   upstream, ahead/behind; `git ls-remote --heads` async (dropdown fills
-   when it arrives). Rows:
-   1. **Remote** — select; defaults to upstream's remote, else `origin`.
-   2. **Remote branch** — select whose FIRST option is always the current
-      local branch (**the hard requirement**), then tracked upstream if
-      different, then fetched heads, last "other…" (becomes a text field).
-   3. **Set upstream** — pre-checked iff no upstream exists.
-   4. **Force with lease** — default off; when checked the submit button
-      relabels "Force Push" + a confirm sentence appears. Never bare force.
-   Header: `main → origin/main (ahead 3)`. Push via the `runGitCmd`
-   plumbing; Tier 1 reports `working` during. Entry: gitpanel Actions, gitlog
-   header, ≡ Git group, status-bar branch segment. ~350 LOC.
+1. **Push dialog — never type the current branch.** — ✅ done 2026-08-12
+   New `gitpush.go` + `gitpush_test.go`. All four rows as specified, the
+   hard requirement honored (option 0 is always the current branch, present
+   before any network call), header `main → origin/main (ahead 3, behind 1)`,
+   push via `runGitCmd`. Entry points all four: ≡ Git group ("Push…"),
+   gitpanel Actions, a new `↑ push` gitlog header button, and the status bar.
+   Deviations, all deliberate:
+   - **Its own modal, not `formModal`.** formModal's rows ARE
+     `customactions.Prompt` values — a config type describing what a TOML
+     action author can declare. Teaching it checkboxes, a live header,
+     goroutine-refilled option lists, and a state-dependent button label
+     would push editor UI into a package that exists to parse config. It
+     mirrors formModal's shape and shares its primitives (`centeredRect`,
+     `drawFrame`, `btnRect`, `drawButton`, `textField`) — the same
+     problems.go-vs-gitlog.go call, for the same reason.
+   - **Locals inline, network async.** `git remote` + `symbolic-ref` are two
+     forks the dialog can't open without — `menuGitSwitchBranch`'s budget.
+     Only `ls-remote` goes to a goroutine (`gitPushRefsEvent`), and its
+     failure posts an EMPTY list so an offline push still works.
+   - **Key axes split**: Up/Down move between rows, Left/Right change the
+     row's value. formModal cycles selects with both, which it can afford
+     because every row is one kind; here the branch row becomes a text
+     field that owns Left/Right. Arrowing off either END of that field is
+     the way back out of "other…" (the chevrons stay drawn for the mouse).
+   - **The force confirm is in-dialog, not a second modal** — the tick, the
+     red `⚠ Overwrites origin/x unless it moved since your last fetch.`
+     line, and a button relabeled "Force Push" (right-anchored so it can't
+     slide out from under the pointer) are the confirmation.
+   - **Status-bar entry is a NEW `↑3↓2` segment**, not the branch segment:
+     the branch keeps switch-branch, and the count is the fact whose verb
+     is push — the ● → Save pairing. A bare `↑` marks a never-pushed
+     branch. Fed by new `gitStatus.Upstream/Ahead/Behind/HasRemote`
+     (`loadGitTracking`), where the extra `git remote` fork is paid only by
+     an untracked branch.
+   - **Detached HEAD is refused with a flash** rather than offered a
+     `HEAD:refs/heads/x` refspec — this dialog's premise is that the
+     current branch is the default answer.
+   - Tier 1 `working` reporting is left to Phase 5.3, which builds the
+     reporter.
+   ~640 LOC incl. tests. Verified against a scratch repo with a local bare
+   remote: set-upstream, the rename refspec `main:feature-x` (and that `-u`
+   tracks the right-hand side), force-with-lease overwriting, and
+   force-with-lease correctly REFUSING with "stale info" once the remote
+   moved.
 2. **Git history search.** gitlog.go gains a filter bar (`textField`
    primitive, like find.go). `/` or a 🔍 header button focuses it. Modes via
    clickable chip or prefix syntax: default `--grep -i` (message) ·
@@ -519,11 +548,12 @@ emission pulled forward to week one** (two escape sequences, instant
 cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
-**Progress:** Phases 1, 2, 3.1 and 3.2 are done (all 2026-08-12). Next is
-**Phase 4 — the git suite**, starting with 4.1's push dialog. The two
-remaining Phase-3 items are small and unclaimed: 3.3 (hover on mouse
-dwell) is Tier-1 only and so really belongs with Phase 5, and 3.4
-(recent-files picker) is an hour's work whenever a breather is wanted.
+**Progress:** Phases 1, 2, 3.1, 3.2 and 4.1 are done (all 2026-08-12).
+Next is **Phase 4.2 — git history search** (the gitlog filter bar), then
+4.3–4.5. The two remaining Phase-3 items are small and unclaimed: 3.3
+(hover on mouse dwell) is Tier-1 only and so really belongs with Phase 5,
+and 3.4 (recent-files picker) is an hour's work whenever a breather is
+wanted.
 
 ## 8. Verification
 

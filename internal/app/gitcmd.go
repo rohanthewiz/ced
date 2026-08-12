@@ -282,3 +282,26 @@ func loadGitBranches(rootDir string) []string {
 	}
 	return branches
 }
+
+// loadGitRemotes returns the repo's configured remote names in git's own
+// order (which puts "origin" first in the overwhelmingly common case),
+// best-effort on the same terms as loadGitBranches. It lives here rather
+// than in gitpush.go because it is a plain read of the repo — the same
+// shelf as the branch listing — and both the push dialog and the status
+// snapshot's HasRemote flag consume it.
+func loadGitRemotes(rootDir string) []string {
+	if rootDir == "" {
+		return nil
+	}
+	out, err := exec.Command("git", "-C", rootDir, "remote").Output()
+	if err != nil {
+		return nil
+	}
+	var remotes []string
+	for _, ln := range strings.Split(string(out), "\n") {
+		if ln = strings.TrimSpace(ln); ln != "" {
+			remotes = append(remotes, ln)
+		}
+	}
+	return remotes
+}

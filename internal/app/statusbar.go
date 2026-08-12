@@ -131,6 +131,16 @@ func (a *App) statusRightSegments() []statusSegment {
 		}
 		segs = append(segs, statusSegment{text: " " + a.gitBranch,
 			onClick: (*App).menuGitSwitchBranch})
+		if s := a.gitPushStatusSuffix(); s != "" {
+			// The unpushed-commit count IS the push button — the same
+			// pairing as ● and Save on the left side: the fact, and the
+			// verb that clears it, in one target. It gets its own segment
+			// rather than annexing the branch's click so neither verb has
+			// to be stolen from the other, and so the arrow can vanish
+			// (level with the upstream, or no remote) without taking the
+			// branch name with it.
+			segs = append(segs, statusSegment{text: s, onClick: (*App).menuGitPush})
+		}
 	}
 	// Two-cell gap so the branch name never reads as part of the button.
 	segs = append(segs,

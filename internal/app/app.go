@@ -287,6 +287,11 @@ func builtinMenuGroups() []menuGroup {
 			// drafts the message for the panel's selection, or for the
 			// index when nothing is ticked.
 			{label: "Suggest commit message", action: (*App).menuGitSuggestCommit, enabled: (*App).hasSuggestableCommit},
+			// Push sits right after the commit rows because that is the
+			// sequence it belongs to — stage, commit, push — and it is the
+			// keyboard twin of the three click targets (both panels' headers
+			// and the status bar's arrow) that open the same dialog.
+			{label: "Push…", action: (*App).menuGitPush, enabled: (*App).hasGitPushTarget},
 			{label: "Stash changes", action: (*App).menuGitStash, enabled: (*App).hasGitChanges},
 			{label: "Pop stash", action: (*App).menuGitStashPop, enabled: (*App).hasGitStash},
 			{label: "Switch branch", action: (*App).menuGitSwitchBranch, enabled: (*App).hasGitRepo},
@@ -971,6 +976,18 @@ type App struct {
 	gitHasStash    bool
 	gitStagedFiles map[string]bool
 
+	// gitUpstream / gitAhead / gitBehind / gitHasRemote mirror the
+	// tracking half of the same snapshot: HEAD's upstream in short form
+	// ("origin/main"), the commit distance either way, and whether the
+	// repo has any remote at all. Fields for the same fork-free reason
+	// as the flags above — the status bar's push indicator is rebuilt on
+	// every draw and the Push row's enabled() runs on every menu draw.
+	// See gitpush.go.
+	gitUpstream  string
+	gitAhead     int
+	gitBehind    int
+	gitHasRemote bool
+
 	// fileDiffs holds the latest parsed `git diff -U0` hunks per open
 	// file path, feeding the gutter marks and hunk navigation. Written
 	// only from the main loop (handleGitDiff); nil until the first
@@ -1290,6 +1307,13 @@ func (a *App) refreshGitStatus() {
 	a.gitHasStaged = st.HasStaged
 	a.gitHasStash = st.HasStash
 	a.gitStagedFiles = st.StagedFiles
+	// The tracking facts follow the same snapshot, including the reset
+	// on a non-repo: a stale "↑3" outliving the folder it described
+	// would be a status bar lying about a repo the user has left.
+	a.gitUpstream = st.Upstream
+	a.gitAhead = st.Ahead
+	a.gitBehind = st.Behind
+	a.gitHasRemote = st.HasRemote
 	if !st.IsRepo {
 		a.tree.DirtyFiles = nil
 		a.tree.DirtyFolders = nil
@@ -1439,6 +1463,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleGitLogShow(e)
 	case *gitCommitDiffEvent:
 		a.handleGitCommitDiff(e)
+	case *gitPushRefsEvent:
+		a.handleGitPushRefs(e)
 	case *termOutputEvent:
 		a.handleTermOutput()
 	case *termDoneEvent:

@@ -442,10 +442,12 @@ func (a *App) dragGitLogDivTo(x int) {
 
 // Header button labels. All glyphs are single-width on purpose (the
 // runeLen house rule — a double-width emoji would skew every rect to
-// its right): ▾ marks "opens a list", ⧉ copies, ⟳ refreshes, ✕ closes.
+// its right): ▾ marks "opens a list", ⧉ copies, ↑ pushes, ⟳ refreshes,
+// ✕ closes.
 const (
 	gitLogActionsLabel = " Actions ▾ "
 	gitLogCopyLabel    = " ⧉ hash "
+	gitLogPushLabel    = " ↑ push "
 )
 
 // gitLogCloseRect returns the ✕ collapse button's rectangle in the
@@ -477,6 +479,20 @@ func (a *App) gitLogCopyRect() btnRect {
 func (a *App) gitLogActionsRect() btnRect {
 	px, py, _, _ := a.gitLogRect()
 	return btnRect{x: px + 1, y: py, w: runeLen(gitLogActionsLabel)}
+}
+
+// gitLogPushRect returns the ↑ push button, immediately right of
+// Actions. It rides the LEFT-anchored chain rather than the right one so
+// adding it left the ⧉/⟳/✕ trio's geometry untouched; the title, which
+// already drops out on a narrow panel, absorbs the cost.
+//
+// Push is per-BRANCH while every other verb in this header is per-commit
+// — it sits here anyway because the history panel is where you look to
+// decide whether to push, and reading "3 commits since origin/main" is
+// the gesture that raises the question.
+func (a *App) gitLogPushRect() btnRect {
+	act := a.gitLogActionsRect()
+	return btnRect{x: act.x + act.w, y: act.y, w: runeLen(gitLogPushLabel)}
 }
 
 // gitLogContains reports whether (x, y) falls inside the open panel.
@@ -537,6 +553,8 @@ func (a *App) gitLogPress(x, y int) (dragMode string) {
 		switch {
 		case a.gitLogActionsRect().contains(x, y):
 			a.openGitLogActions()
+		case a.gitLogPushRect().contains(x, y):
+			a.openGitPush()
 		case a.gitLogCopyRect().contains(x, y):
 			if c, ok := a.gitLogSelectedCommit(); ok {
 				a.gitLogCopyHash(c)
@@ -714,13 +732,15 @@ func (a *App) drawGitLog() {
 	drawAt(a.screen, copyBtn.x, copyBtn.y, gitLogCopyLabel, btnSt)
 	actions := a.gitLogActionsRect()
 	drawAt(a.screen, actions.x, actions.y, gitLogActionsLabel, btnSt)
+	pushBtn := a.gitLogPushRect()
+	drawAt(a.screen, pushBtn.x, pushBtn.y, gitLogPushLabel, btnSt)
 
 	title := " Git log · " + itoa(len(a.gitLog.commits))
 	if a.gitLog.truncated {
 		title += "+"
 	}
 	title += " commits "
-	if tx := actions.x + actions.w; tx+runeLen(title) <= copyBtn.x {
+	if tx := pushBtn.x + pushBtn.w; tx+runeLen(title) <= copyBtn.x {
 		drawAt(a.screen, tx, py, title, titleSt)
 	}
 

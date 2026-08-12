@@ -1,7 +1,10 @@
 # Session: cats-native plan, Phase 3.2 — the Problems panel
 
+- Session id: `870a43e4-0578-4ef9-8db8-0e7273b0250a`
 - Date: 2026-08-12
 - Branch: `main`, commits `c9f4a33..5a5415e` (2 commits + this doc)
+- Worked from the cats checkout (`~/projs/go/cats`) against the ced
+  repo (`~/projs/go/ced`), which is where every change landed.
 - Plan: `ai_docs/cats-native-plan.md` §Phase 3.2 — now marked ✅ done
 - Predecessor: `2026-0812-1707-cats-native-phase3-1.md`
 

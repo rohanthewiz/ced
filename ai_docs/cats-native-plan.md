@@ -228,7 +228,53 @@ stamped-rect idiom.
 
 ### Phase 3 — IDE smarts (~2–3 weeks; completion is the big rock)
 
-1. **LSP completion popup** — the single biggest GoLand gap;
+1. **LSP completion popup** — ✅ done 2026-08-12.
+
+   *Landed as specified: `internal/lsp/completion.go` (wire layer) +
+   `internal/app/completion.go` (the popup), ~1100 LOC with tests. Notes
+   vs. spec:*
+
+   - *`completionItem/resolve` is wired but **dormant against gopls**,
+     and that is the correct outcome. The client deliberately does NOT
+     declare `resolveSupport`, so gopls computes `additionalTextEdits`
+     (the auto-import) up front — verified against a real server: every
+     item comes back with `addl=1`. gopls then answers
+     `resolveProvider:false`, so the resolve call is gated off. The
+     trade is the same one codeAction already makes: correctness never
+     waits on a second round trip, and resolve exists only to enrich the
+     detail pane for a server that offers it.*
+   - *`snippetSupport:false` is declared (ced has no tab-stop engine);
+     an item that arrives as a snippet anyway is **refused with a flash**
+     rather than writing `${1:}` into the buffer.*
+   - *gopls answers `isIncomplete:true`, so the re-request path — not
+     local filtering — is the one that actually runs for Go. Both exist:
+     a complete list filters in memory with the palette's fzy scorer.*
+   - *Auto-trigger is server trigger characters ONLY (`.` for Go), never
+     every letter — Copilot ghost text already occupies "guess what I'm
+     typing", and two overlays racing per keystroke is noise. Esc-Space
+     is the deliberate invocation (⌘Space is the OS's, Ctrl is banned),
+     which needed a `keyLabel` field on `leaderBinding` so the which-key
+     overlay can print `spc` instead of a blank cell.*
+   - *New editor primitive: `Tab.PosScreenCell` — `CursorScreenCell` for
+     an arbitrary position, because the popup anchors at the START OF
+     THE TOKEN, not the caret.*
+   - *Accept goes through `ApplyMultiEdit`, so the item's edit and its
+     auto-import are ONE undo step; the caret lands via the returned
+     result, since an import inserted above shifts every line after it.
+     The server's edit end is extended to the caret when the user typed
+     on while the request was in flight (else `fmt.Pr` + "in" accepts as
+     `fmt.Printlnin`).*
+   - *Staleness is deliberately looser than hover's: a response is kept
+     when the caret is still on its line with only identifier runes typed
+     since. At a 150ms debounce the strict rule would have shown the
+     popup only to slow typists.*
+   - *Kind glyphs live in `internal/icons` as `CompletionKind` (Codicon
+     block, spelled as escapes — pasted PUA glyphs silently became empty
+     strings that still compiled).*
+
+   The original spec follows.
+
+   The single biggest GoLand gap;
    `textDocument/completion` is simply unwired today (only Copilot ghost
    text exists). Wire request + `completionItem/resolve` in `internal/lsp`
    (the definition/hover plumbing pattern). New `completion.go`: an anchored
@@ -419,6 +465,11 @@ emission pulled forward to week one** (two escape sequences, instant
 cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
+**Progress:** Phases 1, 2 and 3.1 are done (all 2026-08-12). Next is
+**Phase 4 — the git suite**, starting with 4.1's push dialog. Phase 3.2's
+Problems panel is the natural breather: the Phase-1 diag status segment is
+already stamped and inert, waiting for it to claim the click.
+
 ## 8. Verification
 
 - House rules: `_test.go` sibling per file; UI assertions via
@@ -440,6 +491,11 @@ is needed.
 - `internal/app/app.go` — event loop ~1289, key router ~1935 + ModMeta
   ~2067, mouse router ~2252, reconcile ~1572, status bar ~3719, menu groups
   ~202
+- `internal/app/completion.go` + `internal/lsp/completion.go` — the
+  non-modal popup and its wire layer. The pattern any future
+  live-while-typing surface should copy: keys read off the top of the
+  router (not the modal slot), state on App, draw above the panels,
+  stamped rects for clicks.
 - `internal/app/leader.go` — leaderBinding table (which-key labels, new
   bindings)
 - `internal/app/palette.go` + `formmodal.go` — the generic picker and form

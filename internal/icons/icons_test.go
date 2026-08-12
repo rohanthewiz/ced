@@ -204,3 +204,36 @@ func TestDetectViaFilesystemMissingDir(t *testing.T) {
 		t.Fatalf("missing dir should return false, not panic or true")
 	}
 }
+
+// TestCompletionKindKnownAndUnknown pins the completion glyph table's
+// two halves: a kind the popup distinguishes gets its own glyph, and
+// anything unmapped — including the 0 an item that never declared a kind
+// decodes to — falls back rather than rendering blank.
+func TestCompletionKindKnownAndUnknown(t *testing.T) {
+	fn := CompletionKind(3) // function
+	if fn == "" || fn == CompletionDefault {
+		t.Fatalf("CompletionKind(function) = %q, want its own glyph", fn)
+	}
+	if got := CompletionKind(3); got != kindIcons[3] {
+		t.Fatalf("CompletionKind(3) = %q, want the table's %q", got, kindIcons[3])
+	}
+	for _, kind := range []int{0, 11, 16, 23, 999, -1} {
+		if got := CompletionKind(kind); got != CompletionDefault {
+			t.Errorf("CompletionKind(%d) = %q, want the default glyph", kind, got)
+		}
+	}
+}
+
+// TestCompletionKindGlyphsAreSingleRune pins the house rule the popup's
+// two-cell icon column depends on: every glyph is one rune wide, so the
+// label always starts at the same column.
+func TestCompletionKindGlyphsAreSingleRune(t *testing.T) {
+	for kind, glyph := range kindIcons {
+		if n := len([]rune(glyph)); n != 1 {
+			t.Errorf("kind %d glyph %q is %d runes, want 1", kind, glyph, n)
+		}
+	}
+	if n := len([]rune(CompletionDefault)); n != 1 {
+		t.Errorf("CompletionDefault is %d runes, want 1", n)
+	}
+}

@@ -152,7 +152,7 @@ func (a *App) whichKeyEntries() (string, []whichKeyEntry) {
 				continue
 			}
 			entries = append(entries, whichKeyEntry{
-				key:   string(b.key),
+				key:   b.displayKey(),
 				label: b.label,
 				fire: func(app *App) {
 					app.clearChord()
@@ -171,7 +171,7 @@ func (a *App) whichKeyEntries() (string, []whichKeyEntry) {
 			continue
 		}
 		entries = append(entries, whichKeyEntry{
-			key:   string(b.key),
+			key:   b.displayKey(),
 			label: b.label,
 			// fireLeader, not b.action: a prefix row must arm its
 			// namespace (and re-render this overlay), and a repeatable

@@ -76,6 +76,15 @@ type lspConn interface {
 	HoverAt(path string, pos lsp.Position) (*lsp.Hover, error)
 	SignatureHelpAt(path string, pos lsp.Position) (*lsp.Signature, error)
 	DocumentSymbols(path string) ([]lsp.Symbol, error)
+	// The completion quartet (completion.go). Two of the four ask the
+	// SERVER'S OPINION rather than sending a request, which is new to
+	// this interface: which characters open the popup, and whether
+	// resolve is worth calling, are facts the server declared at
+	// handshake time and the editor would otherwise be guessing at.
+	Completion(path string, pos lsp.Position, ctx lsp.CompletionContext) ([]lsp.CompletionItem, bool, error)
+	ResolveCompletion(raw json.RawMessage) (*lsp.CompletionItem, error)
+	CompletionTriggerChars() []string
+	CompletionResolves() bool
 	Close()
 }
 

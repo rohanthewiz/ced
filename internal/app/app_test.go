@@ -1928,7 +1928,7 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 // every section expanded: the pinned top zone contributes two rows (the
 // command palette + the expand/collapse-all toggle), fourteen collapsible
 // groups each contribute a header row (14) plus their action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 122 total. The
+// Quit renders headerless behind a divider (its 1 row) — 123 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1936,16 +1936,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 129 {
-		t.Errorf("modalHeight = %d, want 129", h)
+	if h != 130 {
+		t.Errorf("modalHeight = %d, want 130", h)
 	}
-	if got := len(items); got != 123 {
-		t.Errorf("row count = %d, want 123 (2 top-zone + 107 group actions + 14 headers)", got)
+	if got := len(items); got != 124 {
+		t.Errorf("row count = %d, want 124 (2 top-zone + 108 group actions + 14 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (125) — headers separate the
+	// one setting off the headerless Quit group (127) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 126}
+	wantDiv := []int{2, 5, 127}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2273,8 +2273,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 132 { // 129 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 132", h)
+	if h != 133 { // 130 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 133", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

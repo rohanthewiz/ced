@@ -253,9 +253,18 @@ func (a *App) copilotFlushDoc(t *editor.Tab) {
 // -----------------------------------------------------------------------------
 
 // copilotGhostActive reports whether inline completions should run at
-// all right now: sidecar up, signed in, and the suggestions toggle on.
+// all right now: sidecar up, signed in, the suggestions toggle on, and
+// no LSP completion popup in the way.
+//
+// That last clause is the whole ghost-text/popup interplay, in one
+// place. Both surfaces answer "what comes next" and both claim Tab, so
+// while the list is up the popup wins: the user is choosing from named
+// items, and a second suggestion painting itself into the same line
+// would make Tab ambiguous at exactly the moment they press it. Gating
+// here rather than at the paint site also stops the request — no point
+// spending a model call on a suggestion that may not be shown.
 func (a *App) copilotGhostActive() bool {
-	return a.copilotReady() && a.copilot.signedIn && a.copilot.suggest
+	return a.copilotReady() && a.copilot.signedIn && a.copilot.suggest && !a.completion.open
 }
 
 // copilotAfterEvent runs after every event dispatch, mirroring

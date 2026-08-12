@@ -359,6 +359,69 @@ func ColorFor(name string, isDir bool, fallback tcell.Color) tcell.Color {
 	return fallback
 }
 
+// kindIcons maps LSP CompletionItemKind values to Nerd Font glyphs for
+// the completion popup's leading column.
+//
+// The keys are bare integers rather than named constants because that is
+// what keeps the dependency arrow pointing one way: internal/lsp imports
+// nothing from here, and importing it back so the table could spell
+// `lsp.CompletionFunction` would tie the glyph vocabulary to the
+// protocol package for no gain. The protocol's enum is frozen — those
+// numbers cannot change — so the comment column carries the meaning.
+//
+// Coverage is deliberately partial. Kinds a Go workspace never produces
+// (Color, Unit, Event) fall through to CompletionDefault, the same
+// graceful-miss contract extIcons keeps for exotic file types.
+//
+// Unlike extIcons above, the values are spelled as ESCAPES rather than
+// pasted glyphs. These are the Codicon block — the symbol vocabulary
+// every IDE's completion list draws from — and they live in the Unicode
+// private use area, where a copy-paste through a tool that does not
+// preserve PUA silently yields an empty string that still compiles. The
+// escape says which glyph is meant even to a reader whose terminal
+// cannot draw it, and the nf- name in the comment is the lookup key.
+var kindIcons = map[int]string{
+	1:  "\ueb8d", // nf-cod-symbol_string      text
+	2:  "\uea8c", // nf-cod-symbol_method      method
+	3:  "\uea8c", // nf-cod-symbol_method      function
+	4:  "\uea8c", // nf-cod-symbol_method      constructor
+	5:  "\ueb5f", // nf-cod-symbol_field       field
+	6:  "\uea88", // nf-cod-symbol_variable    variable
+	7:  "\ueb5b", // nf-cod-symbol_class       class
+	8:  "\ueb61", // nf-cod-symbol_interface   interface
+	9:  "\uea8b", // nf-cod-symbol_namespace   module / package
+	10: "\ueb65", // nf-cod-symbol_property    property
+	12: "\uea93", // nf-cod-symbol_key         value
+	13: "\uea95", // nf-cod-symbol_enum        enum
+	14: "\ueb62", // nf-cod-symbol_keyword     keyword
+	15: "\ueb66", // nf-cod-symbol_snippet     snippet
+	17: "\ueb60", // nf-cod-symbol_file        file
+	18: "\ueb63", // nf-cod-symbol_misc        reference
+	19: "\uea83", // nf-cod-folder             folder
+	20: "\ueb5e", // nf-cod-symbol_enum_member enum member
+	21: "\ueb5d", // nf-cod-symbol_constant    constant
+	22: "\uea91", // nf-cod-symbol_structure   struct
+	24: "\ueb64", // nf-cod-symbol_operator    operator
+	25: "\uea92", // nf-cod-symbol_parameter   type parameter
+}
+
+// CompletionDefault is the glyph for a completion kind with no entry in
+// the table — including kind 0, which is what an item that never
+// declared one decodes to.
+const CompletionDefault = "\ueb63" // nf-cod-symbol_misc — generic symbol
+
+// CompletionKind returns the Nerd Font glyph for one LSP completion
+// kind. Callers gate on the same icons-enabled decision the file tree
+// resolved at startup; with icons off the popup omits the column
+// entirely rather than substituting ASCII, because a one-cell stand-in
+// for twenty-five kinds would say less than nothing.
+func CompletionKind(kind int) string {
+	if g, ok := kindIcons[kind]; ok {
+		return g
+	}
+	return CompletionDefault
+}
+
 // For returns the Nerd Font glyph that best fits a file tree entry.
 // The decision tree:
 //

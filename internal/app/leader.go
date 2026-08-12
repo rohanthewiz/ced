@@ -46,6 +46,12 @@ type leaderBinding struct {
 	// undocumented.
 	label string
 
+	// keyLabel overrides how the KEY prints in the overlay, for the one
+	// binding whose rune has no visible form: space draws as a blank
+	// cell, which documents nothing at all. Empty means "print the
+	// rune", which is right for every other entry.
+	keyLabel string
+
 	// sub makes this entry a PREFIX rather than an action: firing it
 	// arms a second window in which one more rune dispatches from this
 	// table (see fireLeader / handleChordKey). One namespace exists
@@ -83,6 +89,15 @@ type leaderBinding struct {
 	// through to normal typing, so "Esc z" followed quickly by the
 	// word "so" doesn't trigger a save.
 	repeat bool
+}
+
+// displayKey is how this binding's key prints in the which-key overlay:
+// the rune itself, unless keyLabel names something more legible.
+func (b leaderBinding) displayKey() string {
+	if b.keyLabel != "" {
+		return b.keyLabel
+	}
+	return string(b.key)
 }
 
 // leaderBindings is the editor's full Esc-leader table. The order is purely
@@ -229,6 +244,20 @@ func leaderBindings() []leaderBinding {
 		// definition in the file and lets you pick one.
 		{key: 'd', action: (*App).menuGoToDefinition, label: "Go to definition"},
 		{key: 'i', action: (*App).menuHoverInfo, label: "Hover info"},
+		// Space asks "what could go here?" — the completion popup
+		// (completion.go), invoked deliberately. It is the muscle memory
+		// this competes with, minus the modifier: every IDE puts
+		// completion on Ctrl-Space or ⌘-Space, and ced can claim
+		// neither — Ctrl is banned outright (it fights tmux prefixes and
+		// terminal flow control) and ⌘-Space is the OS's. Esc-Space is
+		// the same gesture through the one modifier that survives SSH.
+		//
+		// Space is also the only rune in the table with no printable
+		// form, which is what keyLabel exists for. Binding it costs
+		// nothing: the leader window is armed only right after an Esc,
+		// and "Esc then space" is not something a typist produces by
+		// accident.
+		{key: ' ', action: (*App).menuCompletion, label: "Completions", keyLabel: "spc"},
 		{key: 'D', action: (*App).menuGoToSymbol, label: "Go to symbol"},
 		// 'R' for References — the letter the verb's own name offers once
 		// 'r' is spoken for by redo, which is the same argument that put

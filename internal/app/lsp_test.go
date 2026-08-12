@@ -61,6 +61,20 @@ type fakeLSPConn struct {
 	execCmd  string
 	execArgs []json.RawMessage
 	execErr  error
+	// The completion set (completion.go). compTriggers and compResolves
+	// stand in for the two capabilities the real client reads off the
+	// initialize response; compCtx/compPos record what the last request
+	// carried.
+	compItems      []lsp.CompletionItem
+	compIncomplete bool
+	compErr        error
+	compTriggers   []string
+	compResolves   bool
+	compCtx        lsp.CompletionContext
+	compPos        lsp.Position
+	resolveItem    *lsp.CompletionItem
+	resolveErr     error
+	resolveRaw     json.RawMessage
 }
 
 func (f *fakeLSPConn) record(s string) {
@@ -146,6 +160,32 @@ func (f *fakeLSPConn) DocumentSymbols(path string) ([]lsp.Symbol, error) {
 	f.record("documentSymbol:" + filepath.Base(path))
 	return f.symbols, f.symErr
 }
+
+// Completion answers textDocument/completion and records the context it
+// was asked with. The trigger kind and character are the part of this
+// request most easily got wrong — a server answers `.` differently from
+// a bare invocation — so a test can prove what reached the wire.
+func (f *fakeLSPConn) Completion(path string, pos lsp.Position, ctx lsp.CompletionContext) ([]lsp.CompletionItem, bool, error) {
+	f.mu.Lock()
+	f.compCtx = ctx
+	f.compPos = pos
+	f.mu.Unlock()
+	f.record(fmt.Sprintf("completion:%s:%d:%s", filepath.Base(path),
+		ctx.TriggerKind, ctx.TriggerCharacter))
+	return f.compItems, f.compIncomplete, f.compErr
+}
+
+func (f *fakeLSPConn) ResolveCompletion(raw json.RawMessage) (*lsp.CompletionItem, error) {
+	f.mu.Lock()
+	f.resolveRaw = raw
+	f.mu.Unlock()
+	f.record("resolveCompletion")
+	return f.resolveItem, f.resolveErr
+}
+
+func (f *fakeLSPConn) CompletionTriggerChars() []string { return f.compTriggers }
+
+func (f *fakeLSPConn) CompletionResolves() bool { return f.compResolves }
 
 func (f *fakeLSPConn) Close() {
 	f.mu.Lock()

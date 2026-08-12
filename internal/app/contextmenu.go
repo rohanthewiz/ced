@@ -114,6 +114,7 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	items := []editorContextItem{
 		// The LSP verbs, in the ≡ Code group's order — same vocabulary,
 		// new door. All already aim at the caret the click just placed.
+		{label: "Completions", action: (*App).menuCompletion, enabled: (*App).hasLSPActions},
 		{label: "Go to definition", action: (*App).menuGoToDefinition, enabled: (*App).hasLSPActions},
 		{label: "Find references", action: (*App).menuFindReferences, enabled: (*App).hasLSPActions},
 		{label: "Rename symbol…", action: (*App).menuRenameSymbol, enabled: (*App).hasLSPActions},

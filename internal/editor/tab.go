@@ -983,14 +983,26 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 // (the hover popup) use it to anchor overlays to the caret without
 // duplicating the gutter/tab-stop arithmetic.
 func (t *Tab) CursorScreenCell(w, h int) (dx, dy int, ok bool) {
+	return t.PosScreenCell(t.Cursor, w, h)
+}
+
+// PosScreenCell is CursorScreenCell for an ARBITRARY buffer position.
+//
+// It exists for the completion popup, which anchors to the start of the
+// token being completed rather than to the caret: an IDE's list lines up
+// with the beginning of the word you are typing, so the labels sit
+// directly above what they would replace. Everything else — the gutter
+// offset, the tab-stop arithmetic, the "scrolled out of view" answer —
+// is identical, which is why the caret flavour is now one line.
+func (t *Tab) PosScreenCell(p Position, w, h int) (dx, dy int, ok bool) {
 	contentX := gutterWidth + 1
 	contentW := w - gutterWidth - 1
 	if contentW < 1 {
 		contentW = 1
 	}
-	dy = t.Cursor.Line - t.ScrollY
-	runes := t.Buffer.LineRunes(t.Cursor.Line)
-	dx = contentX + (LineVisualCol(runes, t.Cursor.Col) - LineVisualCol(runes, t.ScrollX))
+	dy = p.Line - t.ScrollY
+	runes := t.Buffer.LineRunes(p.Line)
+	dx = contentX + (LineVisualCol(runes, p.Col) - LineVisualCol(runes, t.ScrollX))
 	if dy < 0 || dy >= h || dx < contentX || dx >= contentX+contentW {
 		return 0, 0, false
 	}

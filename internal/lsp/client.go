@@ -113,6 +113,53 @@ type Client struct {
 	// cmd is the spawned server process when the client came from
 	// Start; nil for clients built over arbitrary pipes (tests).
 	cmd *exec.Cmd
+
+	// caps is the server's declared capability set, captured from the
+	// initialize response. Only one member is read today — completion's
+	// trigger characters — and it is read because completion is the
+	// first verb whose TRIGGER is the server's business rather than the
+	// editor's: which characters open the popup is a language fact
+	// (`.` in Go, `->` and `::` in C++), and hard-coding it here would
+	// be the editor guessing at the server's job.
+	//
+	// Guarded by mu with the rest of the mutable state: Initialize runs
+	// on the start goroutine and the accessors are called from the main
+	// loop.
+	caps serverCapabilities
+}
+
+// serverCapabilities is the slice of the initialize response this client
+// keeps. Everything else the server declares is either implied by the
+// requests ced sends (it finds out by asking) or unused.
+type serverCapabilities struct {
+	Completion struct {
+		TriggerChars   []string `json:"triggerCharacters"`
+		ResolveProvide bool     `json:"resolveProvider"`
+	} `json:"completionProvider"`
+}
+
+// initializeResult is the response envelope Initialize decodes.
+type initializeResult struct {
+	Capabilities serverCapabilities `json:"capabilities"`
+}
+
+// CompletionTriggerChars returns the characters the server asked to be
+// re-consulted on. Empty (including "the server declared no completion
+// provider at all") means the caller falls back to its own minimal set —
+// see the app layer's completionTriggerChars.
+func (c *Client) CompletionTriggerChars() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.caps.Completion.TriggerChars...)
+}
+
+// CompletionResolves reports whether the server answers
+// completionItem/resolve. A false here is not a degradation: resolve
+// only ever enriches the detail pane (see ResolveCompletion).
+func (c *Client) CompletionResolves() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.caps.Completion.ResolveProvide
 }
 
 // NewClient wraps an existing reader/writer pair (the server's stdout /
@@ -557,6 +604,44 @@ func (c *Client) Initialize(rootDir string) error {
 					// box, and gopls honours the preference order.
 					"contentFormat": []string{"plaintext", "markdown"},
 				},
+				// Completion. Three declarations, each of which changes
+				// what the server sends, and each chosen so that what
+				// arrives is something ced can actually honour:
+				//
+				//   - snippetSupport:false. A snippet's `${1:name}` tab
+				//     stops need an expansion engine with its own modal
+				//     keyboard mode; ced has none, so declaring support
+				//     would mean writing placeholder syntax into the
+				//     user's buffer. Declining gets literal text
+				//     instead, which is exactly what the popup inserts.
+				//   - documentationFormat plaintext-first, for the same
+				//     reason hover and signature help ask for it: the
+				//     detail pane is a dumb text box.
+				//   - resolveSupport is ABSENT, the same trade codeAction
+				//     makes above. Declaring it tells the server it may
+				//     defer additionalTextEdits to a resolve round trip —
+				//     and additionalTextEdits is the auto-import, the
+				//     single most valuable thing an accepted completion
+				//     does. Not declaring it makes the server compute
+				//     those edits up front, so an accept applies
+				//     immediately and can never half-land while a second
+				//     request is in flight. completionItem/resolve is
+				//     still WIRED (see ResolveCompletion), but only ever
+				//     to enrich documentation for the row being looked
+				//     at — never for correctness.
+				//
+				// contextSupport is what lets the request say WHY it
+				// fired (typed a '.', invoked deliberately, re-asking an
+				// incomplete list); gopls answers differently for each.
+				"completion": map[string]any{
+					"contextSupport": true,
+					"completionItem": map[string]any{
+						"snippetSupport":      false,
+						"deprecatedSupport":   true,
+						"preselectSupport":    true,
+						"documentationFormat": []string{"plaintext", "markdown"},
+					},
+				},
 			},
 			// The workspace-edit declaration is what stops a server from
 			// asking for something this client would have to refuse after
@@ -587,9 +672,18 @@ func (c *Client) Initialize(rootDir string) error {
 			},
 		},
 	}
-	if err := c.Call("initialize", params, nil); err != nil {
+	// The response IS read now, where it used to be discarded: completion
+	// is the first verb whose trigger set belongs to the server (see
+	// serverCapabilities). A response that fails to decode is not fatal —
+	// the handshake succeeded, and an empty capability set degrades to
+	// the caller's fallback trigger characters.
+	var res initializeResult
+	if err := c.Call("initialize", params, &res); err != nil {
 		return err
 	}
+	c.mu.Lock()
+	c.caps = res.Capabilities
+	c.mu.Unlock()
 	return c.Notify("initialized", map[string]any{})
 }
 

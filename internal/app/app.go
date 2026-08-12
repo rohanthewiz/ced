@@ -313,6 +313,12 @@ func builtinMenuGroups() []menuGroup {
 		}},
 		// Code intelligence (LSP-backed; rows dim when no server)
 		{title: "Code", collapsible: true, items: []menuItemDef{
+			// The completion popup (completion.go). It heads the group
+			// because it is the row a GoLand user looks for first, and
+			// because it is the only one here that also fires ITSELF —
+			// the server's trigger characters open it as you type, and
+			// this row is the deliberate invocation for everywhere else.
+			{label: "Completions", shortcut: "esc spc", action: (*App).menuCompletion, enabled: (*App).hasLSPActions},
 			{label: "Go to definition", shortcut: "esc d", action: (*App).menuGoToDefinition, enabled: (*App).hasLSPActions},
 			// The inverse question, one row down from the one it inverts:
 			// 'd' asks where a symbol comes FROM, this asks who uses it.
@@ -983,6 +989,13 @@ type App struct {
 	// the main loop; background work posts lsp*Events. See lsp.go.
 	lsp lspState
 
+	// completion is the LSP completion popup (completion.go). It rides
+	// the same connection lspState owns but keeps its own state because
+	// it is the one code-intelligence surface that PERSISTS across
+	// keystrokes — a list the user types into rather than a fact shown
+	// once. Deliberately not a modal; see that file's header.
+	completion completionState
+
 	// copilot holds the GitHub Copilot sidecar state: the
 	// copilot-language-server connection and the sign-in machinery.
 	// Mutated only on the main loop; background work posts
@@ -1457,6 +1470,12 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPCommand(e)
 	case *lspSignatureEvent:
 		a.handleLSPSignature(e)
+	case *completionTickEvent:
+		a.handleCompletionTick(e)
+	case *lspCompletionEvent:
+		a.handleLSPCompletion(e)
+	case *lspCompletionResolveEvent:
+		a.handleLSPCompletionResolve(e)
 	case *copilotReadyEvent:
 		a.handleCopilotReady(e)
 	case *copilotExitEvent:
@@ -1501,6 +1520,11 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// edits arrive through many paths (keys, paste, modals, reloads on
 	// the refresh tick) and this is a few integer compares when idle.
 	a.lspAfterEvent()
+	// And the completion popup: keep an open list honest against the
+	// buffer that just moved (re-filter, or close if the caret left the
+	// token), then decide whether the edit that just happened typed a
+	// trigger character. See completion.go.
+	a.completionAfterEvent()
 	// The Copilot twin: drop a ghost the event invalidated and re-arm
 	// the inline-completion debounce on fresh edits. See copilot_ghost.go.
 	a.copilotAfterEvent()
@@ -1987,6 +2011,16 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	if a.handleChordKey(ev) {
 		return
 	}
+
+	// The completion popup takes navigation, accept and dismiss off the
+	// top of the router and lets everything else through — it is not a
+	// modal, and the letters the user keeps typing are what narrow it.
+	// Checked BEFORE the Esc branch so dismissing the list doesn't also
+	// arm the leader, and after the chord check so a half-typed chord
+	// still owns its second rune. See completion.go.
+	if a.completionKey(ev) {
+		return
+	}
 	if ev.Key() == tcell.KeyEsc {
 		// Esc always dismisses a ghost suggestion — the one editing
 		// gesture that clears it without moving the cursor. Purely a
@@ -2349,6 +2383,18 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// (whichKeyClick reports which happened).
 	if a.whichKey.open && btn&tcell.Button1 != 0 && a.dragMode == "" {
 		if a.whichKeyClick(x, y) {
+			return
+		}
+	}
+
+	// The completion popup's rows are clickable too, on the same
+	// contract: a row accepts, the box swallows, outside dismisses and
+	// falls through to whatever the click was actually aimed at. It sits
+	// after which-key because the two never coexist (an edit closes the
+	// overlay) and before everything else because the popup is drawn on
+	// top of it. See completion.go.
+	if a.completion.open && a.dragMode == "" {
+		if a.completionMouse(x, y, btn) {
 			return
 		}
 	}
@@ -3154,6 +3200,13 @@ func (a *App) closeTab(idx int) {
 	// Likewise the disk-conflict record: keyed by tab pointer, it would
 	// otherwise outlive the buffer it describes (reconcile.go).
 	a.reconcileForgetTab(a.tabs[idx])
+	// And a completion popup anchored into the buffer that is about to
+	// disappear. completionSync would close it on the next event anyway,
+	// but the list would draw once against a tab that no longer exists
+	// in between (completion.go).
+	if a.completion.open && a.completion.path == a.tabs[idx].Path {
+		a.completionClose()
+	}
 	a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
 	if a.activeTab >= len(a.tabs) {
 		a.activeTab = len(a.tabs) - 1
@@ -3749,6 +3802,14 @@ func (a *App) draw() {
 	// it), so the order here is belt and braces.
 	if a.whichKey.open {
 		a.drawWhichKey()
+	}
+
+	// The completion popup sits one layer higher again: it is anchored
+	// INTO the editor body, so anything drawn after it would cover the
+	// list the user is choosing from. Still below the menu and modals,
+	// which close it (completionAvailable refuses while either is up).
+	if a.completion.open {
+		a.drawCompletion()
 	}
 
 	// Overlay layer. The menu and the active modal are mutually

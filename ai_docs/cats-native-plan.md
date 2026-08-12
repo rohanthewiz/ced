@@ -116,8 +116,16 @@ Ordering: intuitiveness quick wins → safety → completion → git suite → d
 cats. Phases 1–3 are pure-ced and fully functional at Tier 0. Each phase is
 shippable alone; every new file gets a `_test.go` sibling.
 
-### Phase 1 — Click-first discoverability (~1–2 weeks)
+### Phase 1 — Click-first discoverability (~1–2 weeks) — ✅ done 2026-08-12
 *Goal: a GoLand user drives ced for a day without learning one chord.*
+
+*All six items landed (statusbar.go, contextmenu.go, whichkey.go,
+searchable ≡ menu, treenav.go, interactive find-all incl. pin/filter/
+dismiss/replace-in-results/re-run). Notes vs. spec: the pin glyph is
+◇/◆ (single-width house rule, not 📌); the diag status segment is
+stamped but inert until Phase 3's Problems panel claims its click;
+"Compare selection with…" landed as compare-selection-with-paste via
+an armed snapshot (compare.go selPending).*
 
 1. **Clickable status bar** — extract `drawStatusBar` (app.go ~3719) into new
    `statusbar.go` as a slice of `statusSegment{text, onClick, rect}` (the

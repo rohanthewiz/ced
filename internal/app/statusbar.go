@@ -100,9 +100,13 @@ func (a *App) statusLeftSegments() []statusSegment {
 		segs = append(segs, statusSegment{text: s})
 	}
 	if s := a.diagStatusSuffix(); s != "" {
-		// Reserved click target: Phase 3's Problems panel opens from
-		// here. Until it exists the counts stay informational.
-		segs = append(segs, statusSegment{text: s})
+		// The counts are the door to the list behind them (problems.go).
+		// This segment reports the ACTIVE FILE's diagnostics while the
+		// panel opens on the whole project — which is why the panel's
+		// scope chip exists, and why opening it lands the highlight on
+		// this file's first problem.
+		segs = append(segs, statusSegment{text: s,
+			onClick: (*App).menuToggleProblems})
 	}
 	if s := a.syntaxStatusSuffix(); s != "" {
 		segs = append(segs, statusSegment{text: s})

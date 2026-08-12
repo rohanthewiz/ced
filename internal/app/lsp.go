@@ -309,6 +309,12 @@ func (a *App) handleLSPExit() {
 	a.lsp.dead = true
 	a.lsp.diags = nil
 	a.lspStopTimers()
+	// Same contract as a publish: the panel's cached rows describe a map
+	// that no longer exists, and an open panel must not go on offering
+	// jumps into a list the server has taken back.
+	if a.problems.open {
+		a.refreshProblems()
+	}
 }
 
 // lspShutdown tears the connection down on editor exit.
@@ -476,9 +482,16 @@ func (a *App) handleLSPDiags(e *lspDiagsEvent) {
 	}
 	if len(e.diags) == 0 {
 		delete(a.lsp.diags, e.path)
-		return
+	} else {
+		a.lsp.diags[e.path] = e.diags
 	}
-	a.lsp.diags[e.path] = e.diags
+	// The Problems panel caches its rows, so a publish has to tell it —
+	// but only while it is on screen. A closed panel's list is rebuilt by
+	// whoever next asks for it (the next/previous verbs do), so a
+	// background publish never pays to sort a list nobody is reading.
+	if a.problems.open {
+		a.refreshProblems()
+	}
 }
 
 // -----------------------------------------------------------------------------

@@ -462,6 +462,7 @@ func (a *App) openComparePanel() {
 	a.compare.open = true
 	a.gitPanel.open = false
 	a.gitLog.open = false
+	a.problems.open = false
 	if !a.termDockLeft {
 		a.term.open = false
 		a.term.focused = false

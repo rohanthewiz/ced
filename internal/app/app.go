@@ -357,6 +357,14 @@ func builtinMenuGroups() []menuGroup {
 			// completely (lspcodeaction.go).
 			{labelFor: (*App).codeActionMenuLabel, shortcut: "esc c", action: (*App).menuCodeActions, enabled: (*App).hasCodeActions},
 			{label: "Rename symbol…", shortcut: "esc E", action: (*App).menuRenameSymbol, enabled: (*App).hasLSPActions},
+			// The Problems panel (problems.go) and its keyboard twins.
+			// They sit at the foot of the group because they are about
+			// the whole project rather than the caret, and the toggle
+			// stays enabled with no server so the panel can say WHY it
+			// is empty — a dimmed row never could.
+			{shortcut: "esc !", action: (*App).menuToggleProblems, enabled: alwaysTrue, labelFor: (*App).problemsToggleLabel},
+			{label: "Next problem", action: (*App).menuNextProblem, enabled: (*App).hasAnyDiagnostics},
+			{label: "Previous problem", action: (*App).menuPrevProblem, enabled: (*App).hasAnyDiagnostics},
 			// Undo a server-authored multi-file edit as one gesture
 			// (workspaceedit.go). Plain undo already claims the press when
 			// the cursor is in one of the touched files; this row is the
@@ -804,6 +812,13 @@ type App struct {
 	// clicks and edits like the git panels do. nil when no list is
 	// pinned; at most one of this and a modal-slot findAllModal exists.
 	findAllPin *findAllModal
+
+	// problems is the diagnostics worklist (problems.go): a bottom-strip
+	// panel listing every problem the language server has published, and
+	// what the status bar's `✗ 2 ⚠ 5` segment opens. Its rows/selection
+	// live here even while it is closed, because the next/previous-problem
+	// verbs walk the same list without needing it on screen.
+	problems problemsState
 
 	// projectSearchSeq generation-stamps "Find in project" runs so a
 	// result launched before the user changed their mind can't open a
@@ -1801,6 +1816,9 @@ func (a *App) editorBandRows() int {
 	if a.compare.open {
 		h -= a.comparePanelHeight()
 	}
+	if a.problems.open {
+		h -= a.problemsHeight()
+	}
 	if a.term.open && !a.termDockLeft {
 		h -= a.termPanelHeight()
 	}
@@ -2410,6 +2428,13 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		if a.tryTreeContextClick(x, y) {
 			return
 		}
+		// The problems panel's rows carry their own verbs (quick fix,
+		// go to, copy), so it claims the gesture before the editor menu
+		// — which would otherwise answer for a click that never landed
+		// in the editor at all.
+		if a.tryProblemsContextClick(x, y) {
+			return
+		}
 		if a.tryEditorContextClick(x, y) {
 			return
 		}
@@ -2527,6 +2552,12 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
+	// Problems panel resize drag — same gesture, same strip.
+	if leftDown && a.dragMode == "problems" {
+		a.dragProblemsPanelTo(y)
+		return
+	}
+
 	// Terminal panel resize drag — same gesture, other bottom panel.
 	if leftDown && a.dragMode == "termpanel" {
 		a.dragTermPanelTo(y)
@@ -2585,6 +2616,11 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			a.dragMode = a.gitLogPress(x, y)
 		case a.compare.open && a.comparePanelContains(x, y):
 			a.dragMode = a.comparePanelPress(x, y)
+		// The problems panel shares that strip, so its hit-test sits with
+		// its neighbours — before the catch-all editor case, for the same
+		// reason theirs do.
+		case a.problemsContains(x, y):
+			a.dragMode = a.problemsPress(x, y)
 		// The pinned find-all panel took its rows/columns out of the
 		// editor band, so its hit-test runs before the catch-all — the
 		// same reason the git panel's does. Clicks elsewhere first drop
@@ -2660,6 +2696,10 @@ func (a *App) scrollAt(x, y, delta int) {
 	}
 	if a.compare.open && a.comparePanelContains(x, y) {
 		a.comparePanelScroll(delta)
+		return
+	}
+	if a.problemsContains(x, y) {
+		a.problemsScroll(delta)
 		return
 	}
 	if a.chatPanelContains(x, y) {
@@ -3777,6 +3817,9 @@ func (a *App) draw() {
 	}
 	if a.gitLog.open {
 		a.drawGitLog()
+	}
+	if a.problems.open {
+		a.drawProblems()
 	}
 	if a.term.open {
 		a.drawTermPanel()

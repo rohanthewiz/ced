@@ -68,6 +68,7 @@ func (a *App) tryEditorContextClick(x, y int) bool {
 	}
 	if (a.gitPanel.open && a.gitPanelContains(x, y)) ||
 		(a.gitLog.open && a.gitLogContains(x, y)) ||
+		a.problemsContains(x, y) ||
 		(a.compare.open && a.comparePanelContains(x, y)) ||
 		(a.term.open && a.termPanelContains(x, y)) ||
 		(a.chat.open && a.chatPanelContains(x, y)) ||

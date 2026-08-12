@@ -199,6 +199,7 @@ func (a *App) menuToggleGitPanel() {
 		// it right back), and so does the git log panel. A left-docked
 		// strip isn't competing for the bottom, so it stays.
 		a.gitLog.open = false
+		a.problems.open = false
 		a.closeComparePanel()
 		if !a.termDockLeft {
 			a.term.open = false

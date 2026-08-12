@@ -127,6 +127,7 @@ func (a *App) menuToggleGitLog() {
 	a.gitLog.open = !a.gitLog.open
 	if a.gitLog.open {
 		a.gitPanel.open = false
+		a.problems.open = false
 		a.closeComparePanel()
 		if !a.termDockLeft {
 			a.term.open = false

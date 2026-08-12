@@ -297,6 +297,12 @@ func leaderBindings() []leaderBinding {
 		// anything resembling VS Code's Ctrl-. — '.' is next-tab, and the
 		// no-Ctrl rule rules out the original (lspcodeaction.go).
 		{key: 'c', action: (*App).menuCodeActions, label: "Code actions"},
+		// The Problems panel (problems.go). '!' because the letters this
+		// table would want — 'p' is find-file, 'P' find-in-project — are
+		// long gone, and because a bang is what a list of errors looks
+		// like. It is the keyboard twin of the status bar's `✗ 2 ⚠ 5`
+		// segment, which opens the same panel with a click.
+		{key: '!', action: (*App).menuToggleProblems, label: "Problems"},
 		// Navigation history: 'o' back "out" of a jump — 'b' was
 		// tempting but reads as "buffer" to vim hands. Shifted variant
 		// walks forward again, mirroring the h/H hunk convention.

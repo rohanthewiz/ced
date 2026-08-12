@@ -88,6 +88,17 @@ type Tree struct {
 	// regardless, so flipping this re-renders instantly without a tree
 	// reload.
 	ExecMarks bool
+
+	// Selected is the keyboard-navigation cursor: the row arrow keys
+	// move and Enter acts on. Distinct from ActiveFolder/ActiveFile —
+	// those describe the EDITOR's state, this one is a position in the
+	// tree that may wander freely before committing to anything. nil
+	// until keyboard navigation first touches the tree.
+	Selected *Node
+	// Focused marks the tree as owning the keyboard, which is the only
+	// time the Selected row renders with its highlight — a cursor you
+	// can't move shouldn't look like one.
+	Focused bool
 }
 
 // New creates a tree rooted at root and pre-loads its top-level children so
@@ -288,7 +299,8 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		active := item.Node.IsDir && item.Node.Path == t.ActiveFolder
 		activeFile := !item.Node.IsDir && t.ActiveFile != "" && item.Node.Path == t.ActiveFile
 		dirty := t.isDirty(item.Node)
-		drawNodeRow(scr, th, x, listTop+row, w, item, active, activeFile, dirty, t.IconsEnabled, t.ExecMarks)
+		selected := t.Focused && t.Selected != nil && item.Node == t.Selected
+		drawNodeRow(scr, th, x, listTop+row, w, item, active, activeFile, dirty, t.IconsEnabled, t.ExecMarks, selected)
 		visible = append(visible, item.Node)
 	}
 	t.visible = visible
@@ -333,8 +345,18 @@ func (t *Tree) isDirty(n *Node) bool {
 // styling. That's the visual cue you find in nvim-tree and friends:
 // a quick eye-scan picks out Go from Ruby from Markdown without
 // reading any text.
-func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, active, activeFile, dirty, withIcons, execMarks bool) {
+func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, active, activeFile, dirty, withIcons, execMarks, selected bool) {
 	bg := th.SidebarBG
+	// The keyboard cursor paints the whole row on the Selection color —
+	// the same highlight every list in the editor uses — so the fg
+	// cascade below stays untouched and dirty/active reads keep working
+	// on the selected row.
+	if selected {
+		bg = th.Selection
+		for cx := x; cx < x+w; cx++ {
+			scr.SetContent(cx, y, ' ', nil, tcell.StyleDefault.Background(bg))
+		}
+	}
 	indent := strings.Repeat("  ", item.Depth)
 
 	// Compute the row-level foreground via this priority cascade
@@ -489,4 +511,113 @@ func (t *Tree) Scroll(delta int) {
 	if t.ScrollY < 0 {
 		t.ScrollY = 0
 	}
+}
+
+// -----------------------------------------------------------------------------
+// Keyboard navigation
+// -----------------------------------------------------------------------------
+//
+// The tree was mouse-only from birth; these helpers are the mechanics
+// behind the app's keyboard layer (internal/app/treenav.go). Policy —
+// which key does what — stays in the app; the tree only knows how to
+// enumerate its visible rows and move a cursor through them.
+
+// VisibleNodes returns every currently visible row in display order:
+// the same flattening Render draws, independent of scroll. The root is
+// not a row (it renders as the header), matching the click contract.
+func (t *Tree) VisibleNodes() []*Node {
+	flat := make([]flatNode, 0, 128)
+	for _, c := range t.Root.Children {
+		flattenInto(c, 0, &flat)
+	}
+	out := make([]*Node, len(flat))
+	for i, f := range flat {
+		out[i] = f.Node
+	}
+	return out
+}
+
+// selectedIndex finds Selected in rows, or -1. A selection collapsed
+// out of view (its ancestor folded) is "gone" on purpose — the cursor
+// only ever points at something the user can see.
+func (t *Tree) selectedIndex(rows []*Node) int {
+	for i, n := range rows {
+		if n == t.Selected {
+			return i
+		}
+	}
+	return -1
+}
+
+// SelectDelta moves the keyboard cursor by delta visible rows, clamping
+// at both ends. With no (visible) selection, any movement lands on the
+// first row — the predictable entry point.
+func (t *Tree) SelectDelta(delta int) {
+	rows := t.VisibleNodes()
+	if len(rows) == 0 {
+		t.Selected = nil
+		return
+	}
+	idx := t.selectedIndex(rows)
+	if idx < 0 {
+		t.Selected = rows[0]
+		return
+	}
+	idx += delta
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(rows) {
+		idx = len(rows) - 1
+	}
+	t.Selected = rows[idx]
+}
+
+// ParentOf returns the directory containing n, or nil when n is a
+// top-level entry (its parent is the root header, which is not a row).
+func (t *Tree) ParentOf(n *Node) *Node {
+	var walk func(dir *Node) *Node
+	walk = func(dir *Node) *Node {
+		for _, c := range dir.Children {
+			if c == n {
+				if dir == t.Root {
+					return nil
+				}
+				return dir
+			}
+			if c.IsDir {
+				if p := walk(c); p != nil {
+					return p
+				}
+			}
+		}
+		return nil
+	}
+	return walk(t.Root)
+}
+
+// EnsureSelectedVisible scrolls the list so the cursor sits inside a
+// viewport of viewH rows. No-op when nothing is selected.
+func (t *Tree) EnsureSelectedVisible(viewH int) {
+	if t.Selected == nil || viewH <= 0 {
+		return
+	}
+	rows := t.VisibleNodes()
+	idx := t.selectedIndex(rows)
+	if idx < 0 {
+		return
+	}
+	if idx < t.ScrollY {
+		t.ScrollY = idx
+	}
+	if idx >= t.ScrollY+viewH {
+		t.ScrollY = idx - viewH + 1
+	}
+}
+
+// SelectedIndex returns the cursor's position within rows (as returned
+// by VisibleNodes), or -1 when nothing visible is selected — the
+// exported face of selectedIndex for the app's keyboard layer.
+func (t *Tree) SelectedIndex(rows []*Node) int {
+	return t.selectedIndex(rows)
 }

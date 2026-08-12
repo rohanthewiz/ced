@@ -110,6 +110,10 @@ func leaderBindings() []leaderBinding {
 		{key: 'q', action: (*App).menuQuit, label: "Quit"},
 		{key: 'n', action: (*App).menuNewFile, label: "New file"},
 		{key: 't', action: (*App).menuToggleSidebar, label: "File explorer"},
+		// 'T' is the shifted twin of the explorer's own key, following
+		// the f/F, p/P convention — same subject, deeper engagement:
+		// 't' shows the tree, 'T' hands it the keyboard (treenav.go).
+		{key: 'T', action: (*App).menuFocusTree, label: "Focus file tree"},
 		{key: '/', action: (*App).menuToggleLineComment, label: "Toggle comment"},
 		{key: 'f', action: (*App).openFind, label: "Find"},
 		// 'F' lists every occurrence instead of walking them one Enter at

@@ -220,6 +220,9 @@ func builtinMenuGroups() []menuGroup {
 		// too often to bury. Keep these rows above the fold.
 		{title: "View", collapsible: true, items: []menuItemDef{
 			{shortcut: "esc t", action: (*App).menuToggleSidebar, enabled: alwaysTrue, labelFor: (*App).sidebarToggleLabel},
+			// Keyboard focus for the tree (treenav.go) — sits under the
+			// row that shows/hides it, same subject one step deeper.
+			{label: "Focus file tree", shortcut: "esc T", action: (*App).menuFocusTree, enabled: alwaysTrue},
 			{action: (*App).menuToggleExecMarks, enabled: alwaysTrue, labelFor: (*App).execMarksToggleLabel},
 			{action: (*App).menuToggleWordHighlight, enabled: alwaysTrue, labelFor: (*App).wordHighlightToggleLabel},
 			{shortcut: "esc `", action: (*App).menuToggleTerminal, enabled: alwaysTrue, labelFor: (*App).termToggleLabel},
@@ -784,6 +787,11 @@ type App struct {
 	// non-leader key. Not a modal — it documents the leader without
 	// claiming its keys.
 	whichKey whichKeyState
+
+	// treeFocus hands the keyboard to the file tree (treenav.go) —
+	// same single-owner model as term.focused and chat.focused, kept
+	// mutually exclusive by the focus and click handlers.
+	treeFocus bool
 
 	// projectSearchSeq generation-stamps "Find in project" runs so a
 	// result launched before the user changed their mind can't open a
@@ -2234,6 +2242,15 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		return
 	}
 
+	// The focused file tree claims the rest — arrows, Enter, typeahead,
+	// the n/d/r verbs (treenav.go). Same placement contract as the two
+	// panels above: global gestures already had their chance, and a
+	// keystroke aimed at the tree must never leak into the buffer.
+	if a.treeFocus && a.sidebarShown {
+		a.handleTreeNavKey(ev)
+		return
+	}
+
 	tab := a.activeTabPtr()
 	if tab == nil {
 		return
@@ -2502,6 +2519,12 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		if a.chat.open && a.chat.focused && !a.chatPanelContains(x, y) {
 			a.chat.focused = false
 		}
+		// The tree follows the same click-where-you-want-to-type rule:
+		// a press outside the sidebar hands the keyboard back; a press
+		// on a tree row (sidebarClick) takes it, and moves the cursor.
+		if a.treeFocus && !a.inSidebarBlock(x) {
+			a.treeFocus = false
+		}
 		switch {
 		case a.splitterX() >= 0 && x == a.splitterX():
 			a.dragMode = "sidebar"
@@ -2674,6 +2697,12 @@ func (a *App) sidebarClick(x, y int) {
 	n, ok := a.tree.HitTest(x-sx, y-sy)
 	if !ok {
 		return
+	}
+	// A click is also a focus gesture (the panels' shared rule) and
+	// moves the keyboard cursor, so a mouse-then-arrows mix just works.
+	a.treeFocus = true
+	if n != a.tree.Root {
+		a.tree.Selected = n
 	}
 	if n == a.tree.Root {
 		a.setActiveFolder(a.rootDir)
@@ -3658,6 +3687,10 @@ func (a *App) draw() {
 		} else {
 			a.tree.ActiveFile = ""
 		}
+		// Same re-sync for the keyboard-focus flag: the render is the
+		// only consumer, and pushing it here beats chasing every place
+		// treeFocus flips.
+		a.tree.Focused = a.treeFocus
 		sx, sy, sw, sh := a.sidebarRect()
 		a.tree.Render(a.screen, a.theme, sx, sy, sw, sh)
 		a.drawSplitter()

@@ -214,6 +214,21 @@ func (a *App) menuCommandPalette() {
 	a.openPalette()
 }
 
+// menuSearchFrom is what typing does while the ≡ menu is open: the menu
+// switches into fuzzy-search mode, seeded with the rune that was just
+// typed so the keystroke is never lost. It IS the palette's action
+// source under a different title — every group's rows regardless of
+// fold state, minus the file index, because the user was just LOOKING
+// at the menu and the question being answered is "where did that row
+// go", not "open me a file". The title says how the mode was entered so
+// the discovery teaches itself.
+func (a *App) menuSearchFrom(r rune) {
+	a.closeMenu()
+	m := a.openPickerWithCancel("Search the menu", paletteActionItems(a), nil)
+	m.field = newTextField(string(r))
+	m.refresh()
+}
+
 // refresh re-scores the inventory against the current query. An empty
 // query lists everything in source order (which mirrors the action
 // menu's own order, so the palette doubles as a menu you can read);

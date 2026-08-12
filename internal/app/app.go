@@ -2175,9 +2175,11 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		}
 	}
 
-	// While the menu is open, only the navigation keys do anything —
-	// editing keys are blocked, but Down/Up move the highlight and Enter
-	// activates the highlighted row.
+	// While the menu is open: Down/Up move the highlight, Enter
+	// activates, and TYPING switches the menu into fuzzy-search mode
+	// over its whole inventory (palette.go) — the row you can't find in
+	// the folds is one keystroke away, and the keystroke that asked is
+	// the seed. Editing keys stay blocked as before.
 	if a.menuOpen {
 		switch ev.Key() {
 		case tcell.KeyDown:
@@ -2186,6 +2188,10 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 			a.menuMoveSelection(-1)
 		case tcell.KeyEnter:
 			a.menuActivate()
+		case tcell.KeyRune:
+			if ev.Modifiers()&(tcell.ModAlt|tcell.ModMeta|tcell.ModCtrl) == 0 {
+				a.menuSearchFrom(ev.Rune())
+			}
 		}
 		return
 	}

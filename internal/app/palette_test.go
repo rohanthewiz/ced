@@ -456,3 +456,46 @@ func TestOpenPicker_TitleAndCallerItems(t *testing.T) {
 		t.Fatal("running a picker item should close the modal")
 	}
 }
+
+// TestMenuTypingOpensSearch pins the searchable-≡-menu contract: a rune
+// typed while the menu is open switches to the fuzzy action search,
+// seeded with that rune, listing rows from COLLAPSED sections too.
+func TestMenuTypingOpensSearch(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.setAllMenuSections(true) // startup default: everything folded
+	a.openMenu()
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'q', tcell.ModNone))
+	if a.menuOpen {
+		t.Fatal("typing should close the menu proper")
+	}
+	m := paletteOf(a)
+	if m == nil {
+		t.Fatalf("typing should open the search picker, got %T", a.modal)
+	}
+	if got := m.field.String(); got != "q" {
+		t.Fatalf("query should be seeded with the typed rune, got %q", got)
+	}
+	// "q" must find Quit even though every section is folded.
+	found := false
+	for _, match := range m.matches {
+		if match.item.label == "Quit editor" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("search should reach rows inside collapsed sections")
+	}
+}
+
+// TestMenuTypingIgnoresModifiedRunes keeps Alt/Meta chords out of the
+// search seed — those belong to the leader and Cmd layers.
+func TestMenuTypingIgnoresModifiedRunes(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openMenu()
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModMeta))
+	if !a.menuOpen {
+		t.Fatal("a modified rune must not enter search mode")
+	}
+}

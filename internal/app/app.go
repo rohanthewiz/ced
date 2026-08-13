@@ -1094,6 +1094,11 @@ type App struct {
 	// once. Deliberately not a modal; see that file's header.
 	completion completionState
 
+	// hoverDwell is the mouse-dwell hover tooltip (hoverdwell.go): the
+	// pointer's half of the hover verb, ambient where the keyboard's
+	// half is modal. Armed at Tier 1 only; see that file's header.
+	hoverDwell hoverDwellState
+
 	// copilot holds the GitHub Copilot sidecar state: the
 	// copilot-language-server connection and the sign-in machinery.
 	// Mutated only on the main loop; background work posts
@@ -1518,6 +1523,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 	case *tcell.EventResize:
 		a.width, a.height = a.screen.Size()
 		a.screen.Sync()
+		// A dwell tooltip describes the cell under the pointer, and a
+		// resize moved what is in that cell — so it is now a claim about
+		// the wrong symbol. Dismiss rather than reposition.
+		a.closeHoverDwell()
 	case *tcell.EventKey:
 		a.handleKey(e)
 	case *tcell.EventPaste:
@@ -1540,6 +1549,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleCaretBlink()
 	case *whichKeyEvent:
 		a.handleWhichKeyTick(e)
+	case *hoverDwellEvent:
+		a.handleHoverDwellTick(e)
 	case *gitDiffEvent:
 		a.handleGitDiff(e)
 	case *customActionDoneEvent:
@@ -2142,6 +2153,12 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		a.accumulatePaste(ev)
 		return
 	}
+	// Typing dismisses the dwell tooltip and cancels any request behind
+	// it: attention has moved to the keyboard, and a tooltip that popped
+	// up mid-keystroke because the mouse happened to be resting on an
+	// identifier is the exact behaviour that makes people turn hover off.
+	// Non-consuming — the key then does what it always did.
+	a.closeHoverDwell()
 	// The active modal owns the keyboard while it's up. Each handler
 	// understands Esc (cancel), Enter (submit / activate), and the keys
 	// relevant to its layout (text editing for the prompt, arrow keys for
@@ -2583,6 +2600,16 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		}
 		a.updateMenuHover(x, y)
 		a.handleMenuMouse(x, y, btn)
+		return
+	}
+
+	// Dwell bookkeeping runs before any routing below, because it is
+	// about the POINTER rather than about what the pointer is over: a
+	// motion re-arms the clock, and anything with a button down cancels
+	// it. It only claims an event when a press landed inside the drawn
+	// tooltip, which must not fall through to the code it covers.
+	// See hoverdwell.go.
+	if a.notePointer(x, y, btn) {
 		return
 	}
 
@@ -4068,6 +4095,13 @@ func (a *App) draw() {
 	if a.completion.open {
 		a.drawCompletion()
 	}
+
+	// The dwell tooltip shares that layer for the same reason — it is
+	// anchored into the editor body — and never coexists with the
+	// completion popup (hoverDwellEligible refuses while one is up).
+	// It is always given the chance to draw, because that call is also
+	// what clears the stamped rect when it is NOT visible.
+	a.drawHoverDwell()
 
 	// Overlay layer. The menu and the active modal are mutually
 	// exclusive (closeAllModals enforces it), so at most one of these

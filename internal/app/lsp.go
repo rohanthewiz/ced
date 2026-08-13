@@ -183,11 +183,26 @@ type lspDefinitionEvent struct {
 func (e *lspDefinitionEvent) When() time.Time { return e.when }
 
 // lspHoverEvent carries a hover response, already flattened to text.
+//
+// Two surfaces land here, and the dwell fields are what tells them
+// apart: the keyboard verb below (modal, flashes when there is nothing
+// to say) and the mouse-dwell tooltip (hoverdwell.go — ambient, silent).
+// One event type rather than two because the request, the flattening and
+// the "is this still the right tab" question are identical; only the
+// destination differs.
 type lspHoverEvent struct {
 	when time.Time
 	path string
 	text string
 	err  error
+
+	// dwell marks a request made by the pointer rather than the caret.
+	dwell bool
+	// seq is the dwell generation this answer was asked under, and ax/ay
+	// the screen cell it was asked about. Meaningless when dwell is false
+	// — the caret flavour has no pointer to have moved.
+	seq    int
+	ax, ay int
 }
 
 // When satisfies the tcell.Event interface.
@@ -607,6 +622,13 @@ func (a *App) menuHoverInfo() {
 // the user has already left is dropped — popping a modal about a
 // different file would be disorienting.
 func (a *App) handleLSPHover(e *lspHoverEvent) {
+	// A pointer-driven answer belongs to the ambient tooltip, which has
+	// its own staleness question (has the mouse moved?) and its own
+	// answer to an empty response (say nothing).
+	if e.dwell {
+		a.handleHoverDwellResult(e)
+		return
+	}
 	t := a.activeTabPtr()
 	if t == nil || t.Path != e.path {
 		return

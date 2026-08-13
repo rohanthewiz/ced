@@ -380,7 +380,49 @@ stamped-rect idiom.
    find-all's dock machinery: all diagnostics, click row = PEEK-style jump,
    severity filter buttons, right-click → quick-fix (code actions already
    wired). Entry: the Phase-1 diag status segment. ~500 LOC.
-3. **Hover on mouse dwell** — Tier 1 (motion reporting reliable there).
+3. **Hover on mouse dwell** — ✅ done 2026-08-13.
+
+   *Landed as `internal/app/hoverdwell.go` + tests: rest the pointer on an
+   identifier and the LSP's answer appears under it. Notes vs. spec:*
+
+   - ***Ambient, not modal.** The keyboard verb (`menuHoverInfo`) keeps
+     the modal slot because someone ASKED; nobody asked for this one, so
+     it is a passive popup on the completion popup's layer — it never
+     owns the keyboard and never blocks the dialog the user was about to
+     open. Same argument the Problems panel makes about diagnostics.*
+   - ***The tooltip belongs to the cell it describes.** It anchors under
+     the pointer's cell and closes the instant the pointer leaves it — a
+     tooltip that outlives what it points at is an obstruction, and this
+     one is drawn over the user's code. Typing dismisses it too (and
+     cancels the request behind it): a box that pops up mid-keystroke
+     because the mouse happened to rest somewhere is the behaviour that
+     makes people switch hover off in other editors.*
+   - ***Silence is the failure mode.** A server with nothing to say
+     produces nothing — no flash, no empty box. `menuHoverInfo` flashes
+     "No hover info" because a person asked and deserves an answer.*
+   - ***`hoverDwellPos` refuses far more than it accepts.** The pointer
+     must be ON an identifier rune: gutter, whitespace, punctuation and
+     the space past end-of-line are all cells where `HitTest`'s
+     "nearest column" answer — exactly right for a click — would invent
+     a symbol nobody is pointing at. "On it" is decided by round-tripping
+     through the renderer's own `PosScreenCell` rather than re-deriving
+     the gutter offset here, which is also what keeps tabs and
+     double-width runes honest.*
+   - *Timing/staleness is which-key's shape: a one-shot `AfterFunc` per
+     motion posts a tick, and one generation counter invalidates BOTH a
+     stale tick and an answer that arrives after the pointer moved.*
+   - *Tier-1 gated per the spec, and it survives contact: motion
+     reporting is precise and local inside cats. Tier 0 keeps the
+     explicit verb, so this is a degraded capability rather than a
+     missing one. `hoverDwellArmed` is the single line to widen if it
+     should ever light up in bare kitty/Ghostty.*
+   - *`hoverModal`'s geometry and painter were split into
+     `tooltipSize` / `tooltipPlace` / `drawTooltipBox` so both hover
+     surfaces are the same box measured the same way.*
+
+   The original spec follows.
+
+   Tier 1 (motion reporting reliable there).
 4. **Recent files picker** — ✅ done 2026-08-13.
 
    *Landed as `internal/app/recentfiles.go` + tests, with a `Recent []string`
@@ -902,9 +944,12 @@ the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords
    field reads as 0, i.e. today's behavior). ⌘W ⌘T ⌘L ⌘R ⌘N ⌘Q stay the
    browser's on purpose.
 
-   Worth adding now: **⌘E**, which ced binds since 3.4 (recent files) and
-   the allowlist predates. No browser claims it, so it is the same
-   one-entry change `KeyS` was.
+   ✅ **Follow-up shipped 2026-08-13 (cats `ed4962c`)** — **⌘E** added to
+   `CMD_TO_PANE`. ced binds it since 3.4 (recent files) and the allowlist
+   predated the binding. It passes the same test as the rest of the set:
+   Safari and Chrome spend ⌘E on "use selection for find", which asks a
+   CANVAS for a text selection it cannot have, so the browser loses
+   nothing measurable. The kitty-flags gate is unchanged.
 
    Still open: the **mac app**, and it may already be free. Cocoa resolves
    ⌘ *menu key equivalents* before the WebView, but catapp's menus claim
@@ -980,10 +1025,10 @@ cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
 **Progress:** Phases 1, 2, 3.1, 3.2, 4.1–4.5 and **5.1, 5.3, 5.4, 5.5, 5.7**
-are done (2026-08-12); **5.6, the last of 5.8, 5.2 and 3.4** landed
-2026-08-13. **Phases 4 and 5 are closed** — 4.6 (blame) is explicitly
+are done (2026-08-12); **5.6, the last of 5.8, 5.2, 3.4 and 3.3** landed
+2026-08-13. **Phases 3, 4 and 5 are closed** — 4.6 (blame) is explicitly
 optional and unclaimed. §5's item 5 is verified, and its item 2 shipped
-cats-side the same day.
+cats-side the same day (plus the ⌘E follow-up, cats `ed4962c`).
 
 Every Phase-5 consumer now shares one shape, and it is worth stating once
 because the next one should follow it: **poll on a goroutine, cache on the
@@ -1017,10 +1062,20 @@ that look like visits but aren't (a close making a neighbour active, a quit
 closing every tab in turn) must NOT touch it. The failure mode is invisible
 until the next launch, so it is a test rather than a comment.
 
-**Phase 5 is closed, and Phase 3 now has only 3.3 left.** What remains
-anywhere in the roadmap is small and unclaimed: 3.3 (hover on mouse dwell,
-Tier-1 only, builds on this client), 4.6 (blame, optional), and Phase 2's
-`⚠` tab marker re-raising a deferred conflict prompt. Phase 6 is entirely
+3.3 added a fifth, and it is the one to weigh before any future surface
+that appears without being asked for: **an unbidden surface is defined by
+its refusals.** The dwell tooltip's code is mostly places it declines to
+ask (gutter, whitespace, past end-of-line, mid-drag, under a menu) and
+answers it declines to paint (superseded, wrong file, empty). The
+feature is one call to a verb ced already had; everything else is the
+work of not being in the way. Its sibling rule: the ambient flavour of a
+verb must not inherit the modal flavour's failure behaviour — the
+keyboard hover flashes "No hover info" because a person asked, and the
+same flash on mouse-rest would be noise the user cannot switch off.
+
+**Phases 3, 4 and 5 are all closed.** What remains anywhere in the
+roadmap is small and unclaimed: 4.6 (blame, optional) and Phase 2's `⚠`
+tab marker re-raising a deferred conflict prompt. Phase 6 is entirely
 upstream-gated; with §5 item 2 shipped, its critical path is now item 1
 (`clipboard.read`), which is the one ask with a whole feature behind it
 (§4 Tier 1 + native paste anywhere).
@@ -1062,6 +1117,12 @@ upstream-gated; with §5 item 2 shipped, its critical path is now item 1
   (no second source for the mode), argv built by a pure function the tests
   pin without forking, sequence-numbered results, and a pipeline refresh
   that stands down while a user-owned query is applied
+- `internal/app/hovermodal.go` + `internal/app/hoverdwell.go` — one verb
+  with a modal flavour and an ambient one, sharing `tooltipSize` /
+  `tooltipPlace` / `drawTooltipBox`. The pattern for any future surface
+  the user did not ask for: tie its lifetime to whatever summoned it,
+  refuse loudly in code and silently on screen, and never let it take
+  the modal slot
 - `internal/app/problems.go` — the bottom-strip worklist. The pattern any
   future docked list should copy: rows/view indirection with the selection
   preserved by identity, header chips as the only filter UI, one geometry

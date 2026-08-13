@@ -54,6 +54,11 @@ func (a *App) closeAllModals() {
 	// The which-key overlay rides along: it never coexists with a modal
 	// or the menu, and every surface that opens one comes through here.
 	a.closeWhichKey()
+	// So does the dwell tooltip, on the same grounds — and this call is
+	// also what cancels a hover request already in flight, so an overlay
+	// opened during the round trip can't be painted over by an answer
+	// that arrives after it.
+	a.closeHoverDwell()
 }
 
 // anyModalOpen reports whether any overlay surface is on screen. Used by

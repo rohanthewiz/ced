@@ -39,10 +39,17 @@ type fakeLSPConn struct {
 	refErr   error
 	hoverRes *lsp.Hover
 	hoverErr error
-	sigRes   *lsp.Signature
-	sigErr   error
-	symbols  []lsp.Symbol
-	symErr   error
+	// hoverPos records the position the last hover was asked about, and
+	// hoverCalls counts the requests. The dwell tooltip (hoverdwell.go)
+	// makes its whole claim about WHICH position reaches the wire — the
+	// pointer's, not the caret's — so the request has to be inspectable
+	// and not merely its answer.
+	hoverPos   lsp.Position
+	hoverCalls int
+	sigRes     *lsp.Signature
+	sigErr     error
+	symbols    []lsp.Symbol
+	symErr     error
 	// renameEdit is what textDocument/rename answers with. renameName
 	// records the last name asked for, so a test can prove the value that
 	// reached the wire is the one the prompt collected.
@@ -147,8 +154,20 @@ func (f *fakeLSPConn) ExecuteCommand(cmd string, args []json.RawMessage) error {
 	return f.execErr
 }
 
-func (f *fakeLSPConn) HoverAt(string, lsp.Position) (*lsp.Hover, error) {
+func (f *fakeLSPConn) HoverAt(_ string, pos lsp.Position) (*lsp.Hover, error) {
+	f.mu.Lock()
+	f.hoverPos = pos
+	f.hoverCalls++
+	f.mu.Unlock()
 	return f.hoverRes, f.hoverErr
+}
+
+// hoverAsked reports the position and count of hover requests so far,
+// mutex-guarded because HoverAt runs on a request goroutine.
+func (f *fakeLSPConn) hoverAsked() (lsp.Position, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.hoverPos, f.hoverCalls
 }
 
 func (f *fakeLSPConn) SignatureHelpAt(path string, _ lsp.Position) (*lsp.Signature, error) {

@@ -172,8 +172,17 @@ internal clipboard, which turns "gone" into "press ⌘V".
     says there are no menu collisions — now three days old;
   - §5 item 4 (`ui.notify`), deferred on purpose; item 6 (⌘click) retired
     as impossible; item 5 verified, not built.
-- **Owed downstream: cats-mobile.** `pane.split`'s generated Dart method
-  changed shape (`Future<void>` → `Future<SplitResult>`, plus the new params
-  and `SplitResult` class). cats is pushed, so `tool/regen.sh` in
-  `../cats-mobile` → `dart test` → commit the `CATS_REV` pin is the flow.
-  Not run this session.
+- **cats-mobile: regenerated and pushed** (`28459ee`, pinned at cats
+  `ff8c89a`). `pane.split`'s generated Dart method changed shape
+  (`Future<void>` → `Future<SplitResult>`, plus `SplitParams`' new
+  cwd/command/env and a `SplitResult` class) — source-compatible for a caller
+  that ignores the reply, and nothing there calls it yet. `dart test` and
+  `dart analyze` green.
+
+  The other two asks leave no mark on the phone, and both for reasons worth
+  keeping straight: `clipboard.read` is a control-TRANSPORT method rather
+  than a §7 command, so it is off the generated table BY DESIGN — a phone
+  reaches cats through the browser protocol, which is exactly the front end
+  that must never be able to read the host's clipboard. `theme_changed` is an
+  `events.subscribe` frame, which the generator does not emit at all. The pin
+  also skips cats `ed4962c` (the ⌘E follow-up): browser HTML, no wire change.

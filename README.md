@@ -1085,6 +1085,13 @@ Every switch lives in the `≡ → Copilot` menu and persists to
 }
 ```
 
+One of them lives in `≡ → Git` instead, because its subject is the
+commit rather than the agent: **AI commit trailer** (`"commitmsgtrailer"`,
+default on) decides whether a commit message the agent *drafted* carries
+a `Co-Authored-By:` line naming it. A message you typed never gets one.
+The commit prompt's `[trailer: on]` chip, beside the ✦ button, overrides
+the setting for a single commit without changing it.
+
 MCP servers live in their own file (`~/.config/ced/mcp.json`) — delete an
 entry, or give it `"disabled": true`, to take it out of play.
 

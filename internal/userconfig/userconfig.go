@@ -59,6 +59,14 @@
 //	                        // and cursor positions it had last time
 //	{"session": "off"}      // folders are still remembered (for the
 //	                        // recent list), but tabs are never reopened
+//	{"commitmsgtrailer": "on"}
+//	                        // default; a commit message the chat agent
+//	                        // DRAFTED carries a Co-Authored-By trailer
+//	                        // naming the agent. Hand-typed messages never
+//	                        // get one, whatever this says.
+//	{"commitmsgtrailer": "off"}
+//	                        // never add it. The commit prompt's chip
+//	                        // overrides this for one commit either way.
 //	{"theme": "<name>"}     // named color theme ("tokyo-night" — the
 //	                        // default — "darcula", "solarized-light", …,
 //	                        // or a user theme from themes/*.json). Not
@@ -231,6 +239,19 @@ type Config struct {
 	// same as AutoSave.
 	Session bool
 
+	// CommitMsgTrailer controls whether a commit message the chat agent
+	// DRAFTED carries a Co-Authored-By trailer naming the agent. Defaults
+	// to on: a machine wrote the sentence, and the trailer is the record
+	// of that — the same convention every agent CLI already writes. Off
+	// is for people whose projects don't want machine co-authors in the
+	// log at all. It never applies to a message the user typed, so this
+	// key cannot put attribution on human work.
+	//
+	// Set from the ≡ Git toggle, which persists it; the ✦ commit prompt's
+	// [trailer: on] chip overrides it for a single commit without writing
+	// anything back.
+	CommitMsgTrailer bool
+
 	// Theme is the named color theme's registry id ("tokyo-night",
 	// "darcula", a user theme's filename stem, …). Empty (the default)
 	// means the shipped default. Deliberately not validated here for
@@ -246,7 +267,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true}
+	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -272,6 +293,13 @@ type fileFormat struct {
 	Remote      string `json:"remote,omitempty"`
 	Session     string `json:"session,omitempty"`
 	Theme       string `json:"theme,omitempty"`
+
+	// The tag is lowercase like every other key here. encoding/json
+	// matches field tags case-INSENSITIVELY, so the camelCase spelling
+	// the roadmap used ("commitMsgTrailer") loads the same key — which is
+	// the point: a user copying either spelling out of a document gets
+	// the setting they meant, not a silently ignored line.
+	CommitMsgTrailer string `json:"commitmsgtrailer,omitempty"`
 }
 
 // configFilePath resolves the ced config directory
@@ -593,6 +621,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(ff.CommitMsgTrailer)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.CommitMsgTrailer = true
+	case "off":
+		cfg.CommitMsgTrailer = false
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: commitmsgtrailer must be \"on\" or \"off\" (got %q)",
+			path, ff.CommitMsgTrailer,
+		)
+	}
+
 	// Any non-blank value is accepted as-is — see Config.ChatModel,
 	// Config.ChatAgent, and Config.Theme for why there's no allowlist to
 	// check against.
@@ -725,6 +767,17 @@ func SaveSession(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "session", val)
+}
+
+// SaveCommitMsgTrailer persists the drafted-commit-attribution
+// preference into the config file at path. See saveKey for the
+// round-trip guarantees.
+func SaveCommitMsgTrailer(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "commitmsgtrailer", val)
 }
 
 // SaveTheme persists the named color theme into the config file at

@@ -57,6 +57,19 @@ type chatAgentDef struct {
 	// env var), and the raw protocol error never says which — this line
 	// does.
 	authHint string
+
+	// coAuthorEmail is the address in the Co-Authored-By trailer of a
+	// commit message this agent DRAFTED (gitcommitmsg.go); the name half
+	// of the trailer is `name` above, so the log credits the agent by
+	// exactly the string the UI calls it. Empty = no trailer for this
+	// backend, whatever the preference says.
+	//
+	// Deliberately a non-routing noreply@ address at the vendor's own
+	// domain, not the account address a forge resolves to an avatar: the
+	// trailer is a RECORD that a machine drafted the sentence, and an
+	// address that resolves would turn that record into a mention of a
+	// specific account ced has no way to verify was involved.
+	coAuthorEmail string
 }
 
 // chatAgents returns the registry in display order. The first entry is
@@ -67,17 +80,20 @@ func chatAgents() []chatAgentDef {
 		{
 			id: chatAgentCopilotID, name: "Copilot",
 			binary: copilotServerBinary, args: []string{"--acp"},
-			authHint: "Sign in first: ≡ → Copilot → Sign in to GitHub",
+			authHint:      "Sign in first: ≡ → Copilot → Sign in to GitHub",
+			coAuthorEmail: "noreply@github.com",
 		},
 		{
 			id: "claude", name: "Claude Code",
-			binary:   "claude-code-acp",
-			authHint: "Authenticate first: run `claude` in a terminal and sign in, or set ANTHROPIC_API_KEY",
+			binary:        "claude-code-acp",
+			authHint:      "Authenticate first: run `claude` in a terminal and sign in, or set ANTHROPIC_API_KEY",
+			coAuthorEmail: "noreply@anthropic.com",
 		},
 		{
 			id: "gemini", name: "Gemini",
 			binary: "gemini", args: []string{"--experimental-acp"},
-			authHint: "Authenticate first: run `gemini` in a terminal and sign in",
+			authHint:      "Authenticate first: run `gemini` in a terminal and sign in",
+			coAuthorEmail: "noreply@google.com",
 		},
 	}
 }

@@ -365,12 +365,13 @@ func TestCommitPromptAIButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("modal = %T, want the commit prompt", a.modal)
 	}
-	if pm.extraLabel == "" || pm.extraRun == nil {
+	if len(pm.extras) == 0 || pm.extras[0].run == nil {
 		t.Fatal("an available agent should put the ✦ AI button on the row")
 	}
-	if extra := pm.extraButton(a); extra.w == 0 {
+	rects := pm.extraRects(a)
+	if len(rects) == 0 {
 		t.Fatal("the button has to fit the standard prompt")
-	} else if _, ok := pm.buttons(a); extra.x <= ok.x {
+	} else if _, ok := pm.buttons(a); rects[0].x <= ok.x {
 		t.Fatal("the extra button belongs right of OK")
 	}
 
@@ -379,7 +380,7 @@ func TestCommitPromptAIButton(t *testing.T) {
 	a.chat.dead = true
 	a.openCommitPrompt(a.gitPanel.files, "")
 	pm = a.modal.(*promptModal)
-	if pm.extraLabel != "" || pm.extraButton(a).w != 0 {
+	if len(pm.extras) != 0 || len(pm.extraRects(a)) != 0 {
 		t.Fatal("no agent, no button")
 	}
 }

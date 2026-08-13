@@ -287,6 +287,14 @@ func builtinMenuGroups() []menuGroup {
 			// drafts the message for the panel's selection, or for the
 			// index when nothing is ticked.
 			{label: "Suggest commit message", action: (*App).menuGitSuggestCommit, enabled: (*App).hasSuggestableCommit},
+			// The attribution default for those drafts
+			// (gitcommitmsg.go). It sits beside the row that PRODUCES
+			// them rather than in Copilot's group because its subject is
+			// the commit, and because this is the only place the
+			// preference is visible with no draft on screen — the ✦
+			// prompt's chip overrides it for one commit, this sets what
+			// the chip starts from.
+			{action: (*App).menuToggleCommitTrailer, enabled: alwaysTrue, labelFor: (*App).commitTrailerToggleLabel},
 			// Push sits right after the commit rows because that is the
 			// sequence it belongs to — stage, commit, push — and it is the
 			// keyboard twin of the three click targets (both panels' headers
@@ -957,6 +965,14 @@ type App struct {
 	autoSaveTimer   *time.Timer
 	autoSaveSig     int
 
+	// commitTrailer mirrors the persisted "commitmsgtrailer" preference
+	// (≡ Git toggle, default on): whether a commit message the chat
+	// agent DRAFTED carries a Co-Authored-By trailer naming it. Read at
+	// the moment a prompt or a suggestion opens; the prompt then owns a
+	// copy the chip can flip for that one commit without touching this.
+	// See gitcommitmsg.go.
+	commitTrailer bool
+
 	// conflicts is the open set of "the file changed under you" records,
 	// keyed by the tab holding the stale buffer. A tab present here has
 	// an unresolved disk conflict: it wears the ⚠ marker in the strip,
@@ -1302,6 +1318,7 @@ func (a *App) loadUserConfig() {
 	a.chat.agent = chatAgentByID(cfg.ChatAgent)
 	a.chat.autoContext = cfg.ChatContext
 	a.chat.writeEnabled = cfg.ChatWrite
+	a.commitTrailer = cfg.CommitMsgTrailer
 	a.plugins.enabled = cfg.Plugins
 	a.sessionEnabled = cfg.Session
 	a.remote.enabled = cfg.Remote

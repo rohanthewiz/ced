@@ -962,6 +962,72 @@ func TestChatWrite_LoadAndSave(t *testing.T) {
 	}
 }
 
+// TestCommitMsgTrailer_LoadAndSave pins the commitmsgtrailer key end to
+// end: it defaults ON (a machine drafted the sentence, and the trailer
+// is the record of that), the recognised values load case-insensitively,
+// an omitted field keeps the default, a typo errors rather than quietly
+// deciding attribution for the user, and SaveCommitMsgTrailer
+// round-trips beside hand-set keys.
+//
+// The camelCase spelling matters enough to pin: the roadmap wrote the
+// key as "commitMsgTrailer" while every key here is lowercase, and
+// encoding/json's case-insensitive tag matching is what makes both
+// spellings land on the same field. A user copying either one out of a
+// document gets the setting they meant.
+func TestCommitMsgTrailer_LoadAndSave(t *testing.T) {
+	if !Defaults().CommitMsgTrailer {
+		t.Fatal("Defaults().CommitMsgTrailer = false, want true")
+	}
+	cases := map[string]bool{
+		`{"commitmsgtrailer":"on"}`:    true,
+		`{"commitmsgtrailer":"off"}`:   false,
+		`{"commitmsgtrailer":" OFF "}`: false,
+		`{"commitMsgTrailer":"off"}`:   false, // the roadmap's spelling
+		`{}`:                           true,
+	}
+	for body, want := range cases {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", body, err)
+		}
+		if cfg.CommitMsgTrailer != want {
+			t.Errorf("Load(%s).CommitMsgTrailer = %v, want %v", body, cfg.CommitMsgTrailer, want)
+		}
+	}
+
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"commitmsgtrailer":"sometimes"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("invalid commitmsgtrailer value should error")
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"icons\": \"on\",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveCommitMsgTrailer(path, false); err != nil {
+		t.Fatalf("SaveCommitMsgTrailer: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.CommitMsgTrailer || cfg.Icons != IconsOn {
+		t.Fatalf("round trip lost values: commitmsgtrailer=%v icons=%q", cfg.CommitMsgTrailer, cfg.Icons)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}
+
 // TestTheme_LoadAndSave pins the theme key: absent means "" (the
 // editor's shipped default), any non-blank name loads trimmed and
 // lowercased but un-validated — the theme registry includes files the

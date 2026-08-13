@@ -226,7 +226,7 @@ func (a *App) gitPanelActionItems(targets []gitPanelFile) []paletteItem {
 	if a.canSuggestCommitMsg() && (len(targets) > 0 || a.gitHasStaged) {
 		suggestFor := targets
 		add("Suggest commit message for "+gitCommitLabel(suggestFor)+" ("+a.chatAgent().name+")", func(app *App) {
-			app.gitPanelSuggestCommit(suggestFor)
+			app.gitPanelSuggestCommit(suggestFor, app.commitTrailer)
 		})
 	}
 	if a.gitHasStaged {

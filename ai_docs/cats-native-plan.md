@@ -625,11 +625,55 @@ SHA**. This phase closes the specific named gaps:
    - **Terminal state**: the walk ends on the commit-message field with the
      ✨ AI button adjacent — survey flows straight into commit.
    ~250 LOC.
-5. **AI commit message — no-trailer option.** `commitMsgTrailer` config key
-   (`internal/userconfig`, string-enum `"on"|"off"` house style) honored by
-   gitcommitmsg.go, plus a clickable `[trailer: on]` toggle chip next to the
-   AI button for per-invocation override — visible state beats a buried
-   setting. ~60 LOC.
+5. **AI commit message — no-trailer option.** — ✅ done 2026-08-12
+   `commitmsgtrailer` in internal/userconfig (default on), the trailer and
+   the chip in gitcommitmsg.go, `coAuthorEmail` on chatAgentDef, and a
+   generalized button row in modals.go (~450 LOC incl. tests). Deviations
+   and findings, all deliberate:
+   - **The trailer had to be BUILT, not just suppressed.** The spec reads
+     as an opt-out, but ced never emitted one: the wire prompt asks for a
+     bare subject line and `commitSubject` keeps exactly one. So this is
+     both halves — `Co-Authored-By: <agent name> <address>` appended to a
+     drafted message, and the key and chip that turn it off.
+   - **Only a DRAFTED message is attributed**, never one the user typed —
+     hence two entry points (`openCommitPrompt` /
+     `openCommitPromptDraft`) where there was one. It follows that the
+     chip appears only on the drafted prompt: a `[trailer: on]` chip over
+     hand-written work would state something untrue that the user cannot
+     act on.
+   - **The address is deliberately non-routing** (`noreply@` at the
+     vendor's own domain, `chatAgentDef.coAuthorEmail`), not the account
+     address a forge resolves to an avatar. The trailer is a RECORD that
+     a machine wrote the sentence; an address that resolves turns it into
+     a mention of an account ced never verified was involved.
+   - **The key is lowercase `commitmsgtrailer`**, like every other key in
+     the file — and encoding/json matches tags case-insensitively, so the
+     camelCase spelling this plan used loads the same key. Pinned by a
+     test, because a user copying a key out of a document should get the
+     setting they meant.
+   - **The chip got a ≡ Git twin** (`AI commit trailer: on/off`), which
+     is what PERSISTS. The chip is the per-invocation override the spec
+     asked for and writes nothing back — so the preference needed a
+     surface of its own, and every other on/off key already has one.
+     (One new ≡ row moved the pinned menu counts again: 137→138, 131→132
+     + its comment, `dividers[2]` 134→135, Git 18→19 ×2 + its comment,
+     140→141.)
+   - **The chip's answer travels with the request** (`commitSuggestReq`),
+     so asking the agent for another draft does not quietly re-arm a
+     trailer the user just switched off.
+   - **`promptModal` grew a generic extras ROW**, not a second ad-hoc
+     button: `extras[0]` holds the right edge (so the ✦ button does not
+     move when the chip joins it), each extra reserves the width of its
+     WIDEST label (a toggle whose target resizes slides out from under
+     the pointer), and the modal WIDENS to carry them — refusing to on a
+     terminal too narrow, where extras shed from the left rather than
+     paint a truncated click target. What that costs: at 56 columns the
+     chip is gone, so the per-commit override is unavailable there (the
+     setting still is, in ≡).
+   Verified against a real repository: a drafted message commits with the
+   trailer, the same message commits without it after the chip is clicked
+   through `handleMouse`, and the button row was dumped to a
+   `SimulationScreen` and read before being trusted.
 6. *(Optional, cut freely)* **Blame layer** via the decoration layer
    (`internal/editor/decoration.go`); click an annotation → that commit's
    diff in gitlog.
@@ -744,10 +788,10 @@ emission pulled forward to week one** (two escape sequences, instant
 cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
-**Progress:** Phases 1, 2, 3.1, 3.2, 4.1, 4.2, 4.3 and 4.4 are done (all
-2026-08-12). Next is **Phase 4.5** (`commitMsgTrailer` config key + the
-clickable `[trailer: on]` chip beside the AI button, ~60 LOC), which
-closes Phase 4 — 4.6 (blame) is explicitly optional. Then Phase 5.
+**Progress:** Phases 1, 2, 3.1, 3.2, 4.1, 4.2, 4.3, 4.4 and 4.5 are done
+(all 2026-08-12). **Phase 4 is closed** — 4.6 (blame) is explicitly
+optional and unclaimed. Next is **Phase 5** (deep cats integration), with
+5.4's OSC 7 / title emission pulled to the front as planned.
 The two remaining Phase-3 items are small and unclaimed: 3.3 (hover on
 mouse dwell) is Tier-1 only and so really belongs with Phase 5, and 3.4
 (recent-files picker) is an hour's work whenever a breather is wanted.

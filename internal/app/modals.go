@@ -119,6 +119,23 @@ func (a *App) centeredRect(w, h int) (x, y, ww, hh int) {
 // Prompt modal (text input + OK / Cancel)
 // -----------------------------------------------------------------------------
 
+// promptExtra is one optional button on the prompt's button row, right
+// of OK — for a prompt whose value can be PRODUCED as well as typed, or
+// whose result has a knob attached to it.
+//
+// label is a function, not a string, because an extra may be a toggle
+// whose label IS its state (the commit prompt's [trailer: on] chip): the
+// row is redrawn every frame, so the label can never lag the value it
+// reports. width is the cells reserved for it and must cover the widest
+// label it can ever show — a click target that resizes as you toggle it
+// slides out from under the pointer, the same rule that right-anchors
+// the push dialog's Force button.
+type promptExtra struct {
+	label func(*App) string
+	width int
+	run   func(*App)
+}
+
 // promptModal is a single-line text input with OK / Cancel. callback
 // runs with the trimmed value when the user confirms with Enter or
 // clicks OK; an empty submit is ignored.
@@ -128,16 +145,19 @@ type promptModal struct {
 	field    textField
 	callback func(*App, string)
 
-	// extraLabel / extraRun are an OPTIONAL third button on the button
-	// row, for a prompt whose value can be produced as well as typed.
-	// One caller today: the commit prompt's ✦ AI button, which is the
-	// terminal state of the pre-commit survey — the walk ends on the
-	// message field, and drafting the message has to be reachable from
-	// there rather than from a picker two gestures back
-	// (gitpanelwalk.go). Empty label = no button, and the modal is
-	// exactly what it always was.
-	extraLabel string
-	extraRun   func(*App)
+	// extras are OPTIONAL buttons on the button row, laid out RIGHT to
+	// left in slice order — so extras[0] keeps the right edge whatever
+	// else joins it, and the primary action never moves under the
+	// pointer as its neighbours come and go.
+	//
+	// Two callers today, both on the commit prompt (gitcommitmsg.go):
+	// the ✦ AI button, which is the terminal state of the pre-commit
+	// survey — the walk ends on the message field, and drafting the
+	// message has to be reachable from there rather than from a picker
+	// two gestures back (gitpanelwalk.go) — and the [trailer: on] chip
+	// beside it. Empty slice = no buttons, and the modal is exactly what
+	// it always was.
+	extras []promptExtra
 }
 
 // openPrompt shows a single-line text input modal. title is the heading,
@@ -152,19 +172,18 @@ func (a *App) openPrompt(title, hint, initial string, callback func(*App, string
 	})
 }
 
-// openPromptExtra is openPrompt with one more button on the button row.
-// extraRun runs INSTEAD of submitting — it is a way to fill the field,
-// not a second way to confirm — so it closes the modal itself if that
-// is what it needs (the AI draft reopens the prompt when the answer
-// lands).
-func (a *App) openPromptExtra(title, hint, initial, extraLabel string, extraRun func(*App), callback func(*App, string)) {
+// openPromptExtras is openPrompt with extra buttons on the button row.
+// An extra's run function fires INSTEAD of submitting — these are ways
+// to fill the field or to qualify what OK will do, not second ways to
+// confirm — so one closes the modal itself if that is what it needs
+// (the AI draft reopens the prompt when the answer lands).
+func (a *App) openPromptExtras(title, hint, initial string, extras []promptExtra, callback func(*App, string)) {
 	a.openModal(&promptModal{
-		title:      title,
-		hint:       hint,
-		field:      newTextField(initial),
-		callback:   callback,
-		extraLabel: extraLabel,
-		extraRun:   extraRun,
+		title:    title,
+		hint:     hint,
+		field:    newTextField(initial),
+		callback: callback,
+		extras:   extras,
 	})
 }
 
@@ -203,21 +222,30 @@ func (m *promptModal) buttons(a *App) (cancel, ok btnRect) {
 	return btnRect{x: mx + 14, y: my + 6, w: 10}, btnRect{x: mx + 30, y: my + 6, w: 8}
 }
 
-// extraButton returns the optional third button's rect, zero-width when
-// there is none. It sits right of OK in the space the fixed Cancel / OK
-// pair leaves at the end of the row — btnRect.contains is false for
-// w == 0, so the drawer and the hit-test drop out together.
-func (m *promptModal) extraButton(a *App) btnRect {
-	if m.extraLabel == "" {
-		return btnRect{}
+// extraRects returns one rect per extra that FITS, in extras order
+// (rightmost first). The modal normally widens to carry them all
+// (rect), so the short return is the narrow-terminal case: an extra
+// that would collide with OK is dropped, and everything further left
+// with it — a truncated button is a click target that lies about what
+// it runs. Callers index m.extras by the returned slice's index, which
+// stays valid because only a TAIL is ever cut.
+func (m *promptModal) extraRects(a *App) []btnRect {
+	if len(m.extras) == 0 {
+		return nil
 	}
 	mx, my, mw, _ := m.rect(a)
-	w := runeLen(m.extraLabel)
-	x := mx + mw - 2 - w
-	if _, ok := m.buttons(a); x < ok.x+ok.w+1 {
-		return btnRect{}
+	_, ok := m.buttons(a)
+	rects := make([]btnRect, 0, len(m.extras))
+	x := mx + mw - 2 // two cells of right margin, border included
+	for _, e := range m.extras {
+		x -= e.width
+		if x < ok.x+ok.w+1 {
+			break
+		}
+		rects = append(rects, btnRect{x: x, y: my + 6, w: e.width})
+		x-- // one blank cell between neighbours
 	}
-	return btnRect{x: x, y: my + 6, w: w}
+	return rects
 }
 
 // fieldSpan returns the input row and its [start, end) columns.
@@ -246,11 +274,14 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	case ok.contains(x, y):
 		m.submit(a)
 		return
-	case m.extraButton(a).contains(x, y):
-		if m.extraRun != nil {
-			m.extraRun(a)
+	}
+	for i, r := range m.extraRects(a) {
+		if r.contains(x, y) {
+			if run := m.extras[i].run; run != nil {
+				run(a)
+			}
+			return
 		}
-		return
 	}
 	fy, start, end := m.fieldSpan(a)
 	if y == fy {
@@ -261,7 +292,38 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 // rect returns the on-screen rectangle of the prompt modal, centered in
 // the window.
 func (m *promptModal) rect(a *App) (x, y, w, h int) {
-	return a.centeredRect(promptModalWidth, promptModalHeight)
+	return a.centeredRect(m.width(a), promptModalHeight)
+}
+
+// width is promptModalWidth, GROWN when extras need room past OK — the
+// same "the modal sizes to its content" rule confirmModal already
+// follows for its extra body lines, applied to the other axis. A prompt
+// with no extras is exactly its old self.
+//
+// The growth is refused on a terminal too narrow to hold it: a box
+// wider than the window would paint its right half off screen, taking
+// the buttons with it, which is worse than dropping the extras
+// (extraRects) and keeping a working prompt.
+func (m *promptModal) width(a *App) int {
+	if len(m.extras) == 0 {
+		return promptModalWidth
+	}
+	// 43 = the two-cell right margin extraRects reserves, plus the
+	// leftmost column an extra should start in: OK's last cell is mx+37
+	// and three blanks separate the confirm pair from the extras, the
+	// same visible gap that already separates Cancel from OK. (The
+	// hit-test in extraRects tolerates one blank — that is the
+	// narrow-terminal floor, not the layout.) Each extra then costs its
+	// width, and each pair of neighbours one blank between them.
+	need := 43
+	for _, e := range m.extras {
+		need += e.width + 1
+	}
+	need-- // no gap to the right of the rightmost extra
+	if need > promptModalWidth && need <= a.width {
+		return need
+	}
+	return promptModalWidth
 }
 
 // draw renders the prompt modal: a centered box with a title row, a
@@ -294,9 +356,22 @@ func (m *promptModal) draw(a *App) {
 	cancel, ok := m.buttons(a)
 	drawButton(a.screen, cancel.x, cancel.y, "[ Cancel ]", c.bg, a.theme.Text, false)
 	drawButton(a.screen, ok.x, ok.y, "[  OK  ]", c.bg, a.theme.Accent, true)
-	if extra := m.extraButton(a); extra.w > 0 {
-		drawButton(a.screen, extra.x, extra.y, m.extraLabel, c.bg, a.theme.AccentSoft, false)
+	for i, r := range m.extraRects(a) {
+		// Padded to the reserved width so a toggle whose two labels
+		// differ in length ("[trailer: on]" / "[trailer: off]") leaves
+		// no stale cell behind when it shortens.
+		drawButton(a.screen, r.x, r.y, padTo(m.extras[i].label(a), r.w), c.bg, a.theme.AccentSoft, false)
 	}
+}
+
+// padTo right-pads s with spaces to w cells, leaving a longer string
+// alone (the caller reserved the width, so an over-long label is a bug
+// at the call site, not something to truncate here).
+func padTo(s string, w int) string {
+	for n := runeLen(s); n < w; n++ {
+		s += " "
+	}
+	return s
 }
 
 // -----------------------------------------------------------------------------

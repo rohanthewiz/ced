@@ -9,10 +9,13 @@ package app
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // TestCommitSubject_StripsAgentDressing pins the parser that turns an
@@ -250,6 +253,277 @@ func TestChatDisconnect_ClearsCommitSuggest(t *testing.T) {
 	a.chatDisconnect()
 	if a.chat.commitSuggest != nil {
 		t.Error("commitSuggest survived a disconnect")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// The attribution trailer (Phase 4.5)
+// -----------------------------------------------------------------------------
+
+// TestCommitTrailerLine_NamesTheActiveAgent pins what the trailer says:
+// the agent's DISPLAY name — the same string the header, the ≡ picker
+// and the transcript use — beside its non-routing address, and nothing
+// at all for a backend with no identity to credit.
+func TestCommitTrailerLine_NamesTheActiveAgent(t *testing.T) {
+	for _, def := range chatAgents() {
+		got := commitTrailerLine(def)
+		if !strings.HasPrefix(got, "Co-Authored-By: "+def.name+" <") || !strings.HasSuffix(got, ">") {
+			t.Errorf("commitTrailerLine(%s) = %q", def.id, got)
+		}
+		// A resolving account address would turn the record into a
+		// mention of somebody ced never verified was involved.
+		if !strings.Contains(got, "noreply@") {
+			t.Errorf("commitTrailerLine(%s) = %q, want a non-routing address", def.id, got)
+		}
+	}
+	if got := commitTrailerLine(chatAgentDef{name: "Nameless"}); got != "" {
+		t.Errorf("an agent with no address should get no trailer, got %q", got)
+	}
+}
+
+// TestCommitMsgWithTrailer pins the assembly: the trailer is its own
+// paragraph (git reads a trailer block only after a blank line), adding
+// it twice is a no-op, and an empty trailer leaves the message alone.
+func TestCommitMsgWithTrailer(t *testing.T) {
+	line := "Co-Authored-By: Copilot <noreply@github.com>"
+	got := commitMsgWithTrailer("Add the thing", line)
+	if got != "Add the thing\n\n"+line {
+		t.Fatalf("assembled = %q", got)
+	}
+	if again := commitMsgWithTrailer(got, line); again != got {
+		t.Errorf("second application changed the message: %q", again)
+	}
+	if got := commitMsgWithTrailer("Add the thing", ""); got != "Add the thing" {
+		t.Errorf("no trailer should mean no change, got %q", got)
+	}
+}
+
+// TestCommitPromptTrailerChip_OnlyOnADraft pins where the chip may
+// appear: on a message the AGENT wrote, never on one the user is about
+// to type — there is nothing to attribute on hand-written work, and a
+// chip reading "trailer: on" over it would be a lie.
+func TestCommitPromptTrailerChip_OnlyOnADraft(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	wireChat(a)
+	files := []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
+
+	a.openCommitPrompt(files, "")
+	pm := a.modal.(*promptModal)
+	if len(pm.extras) != 1 {
+		t.Fatalf("a hand-typed prompt should carry the ✦ button alone, got %d extras", len(pm.extras))
+	}
+
+	a.closeModal()
+	a.openCommitPromptDraft(files, "Add the thing", true)
+	pm = a.modal.(*promptModal)
+	if len(pm.extras) != 2 {
+		t.Fatalf("a drafted prompt should carry ✦ and the chip, got %d extras", len(pm.extras))
+	}
+	chip := pm.extras[1]
+	if got := chip.label(a); got != "[trailer: on]" {
+		t.Fatalf("chip label = %q", got)
+	}
+	chip.run(a)
+	if got := chip.label(a); got != "[trailer: off]" {
+		t.Fatalf("after the click chip label = %q", got)
+	}
+	if chip.width < runeLen("[trailer: off]") {
+		t.Errorf("chip width %d must cover its widest label", chip.width)
+	}
+}
+
+// TestCommitPromptTrailerChip_Layout pins the button row with both
+// extras on it: the ✦ button keeps the right edge (so it doesn't move
+// when the chip joins it), the chip sits left of it, neither overlaps
+// OK, and the modal is drawn wide enough to hold the lot.
+func TestCommitPromptTrailerChip_Layout(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	wireChat(a)
+	files := []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
+
+	a.openCommitPrompt(files, "")
+	pm := a.modal.(*promptModal)
+	aiAlone := pm.extraRects(a)[0]
+	plainX, _, plainW, _ := pm.rect(a)
+	// Measured from the modal's RIGHT edge: the box is centered, so it
+	// is the edge, not the screen column, that the button holds onto.
+	plainInset := plainX + plainW - (aiAlone.x + aiAlone.w)
+
+	a.closeModal()
+	a.openCommitPromptDraft(files, "Add the thing", true)
+	pm = a.modal.(*promptModal)
+	rects := pm.extraRects(a)
+	if len(rects) != 2 {
+		t.Fatalf("both extras should fit a 120-column screen, got %d", len(rects))
+	}
+	mx, _, mw, _ := pm.rect(a)
+	if mw <= plainW {
+		t.Errorf("modal width %d did not grow past the plain %d", mw, plainW)
+	}
+	if got := mx + mw - (rects[0].x + rects[0].w); got != plainInset {
+		t.Errorf("✦ sits %d cells in from the right edge, want %d (it holds that edge)", got, plainInset)
+	}
+	if rects[1].x+rects[1].w >= rects[0].x {
+		t.Errorf("chip %v overlaps the ✦ button %v", rects[1], rects[0])
+	}
+	_, ok := pm.buttons(a)
+	if rects[1].x < ok.x+ok.w+1 {
+		t.Errorf("chip %v crowds OK %v", rects[1], ok)
+	}
+
+	// And it survives a real draw: both labels land on the button row,
+	// with OK still legible beside them.
+	pm.draw(a)
+	a.screen.Show()
+	row := strings.Split(screenText(a), "\n")[rects[0].y]
+	for _, want := range []string{"[  OK  ]", "[trailer: on]", "[ ✦ AI ]"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("button row %q missing %q", row, want)
+		}
+	}
+}
+
+// TestCommitPromptTrailerChip_NarrowScreenDropsTheChip pins the
+// degradation: on a terminal too narrow to widen into, the modal keeps
+// its shipped width and sheds extras from the LEFT — the ✦ button, which
+// holds the right edge, survives; the chip drops rather than being
+// painted truncated or over OK. The preference still applies and is
+// still visible in the ≡ row, so what a 56-column terminal loses is the
+// per-commit override, not the setting.
+func TestCommitPromptTrailerChip_NarrowScreenDropsTheChip(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	wireChat(a)
+	a.width = 56 // wide enough for the prompt, too narrow for the row
+	a.openCommitPromptDraft([]gitPanelFile{{Path: "/p/a.go", Rel: "a.go"}}, "Add the thing", true)
+	pm := a.modal.(*promptModal)
+	if _, _, mw, _ := pm.rect(a); mw != promptModalWidth {
+		t.Errorf("modal width = %d, want the shipped %d on a narrow screen", mw, promptModalWidth)
+	}
+	rects := pm.extraRects(a)
+	if len(rects) != 1 {
+		t.Fatalf("extras = %v, want just the ✦ button", rects)
+	}
+	if _, ok := pm.buttons(a); rects[0].x < ok.x+ok.w+1 {
+		t.Errorf("surviving button %v crowds OK %v", rects[0], ok)
+	}
+}
+
+// TestCommitPromptTrailer_CommitsWithAndWithoutIt pins the payload end
+// to end against a real repository: a drafted message commits with the
+// trailer, and the same message commits without it once the chip is
+// clicked. The click goes through handleMouse, so the hit-test is
+// exercised too — a chip that can't be clicked is not a control.
+func TestCommitPromptTrailer_CommitsWithAndWithoutIt(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	repo, file := panelRepo(t)
+	a := newTestApp(t, repo)
+	wireChat(a)
+	a.refreshGitStatus()
+
+	writeFileT(t, file, "one\nWITH\n")
+	target := []gitPanelFile{{Path: file, Rel: "f.txt", Code: " M"}}
+	a.openCommitPromptDraft(target, "Add the first thing", true)
+	a.modal.(*promptModal).submit(a)
+	pumpAppEvents(t, a, func() bool {
+		return strings.Contains(gitOut(t, repo, "log", "-1", "--pretty=%s"), "Add the first thing")
+	})
+	want := commitTrailerLine(a.chatAgent())
+	if body := gitOut(t, repo, "log", "-1", "--pretty=%B"); !strings.Contains(body, want) {
+		t.Fatalf("commit body = %q, want the trailer %q", body, want)
+	}
+
+	writeFileT(t, file, "one\nWITHOUT\n")
+	a.openCommitPromptDraft(target, "Add the second thing", true)
+	pm := a.modal.(*promptModal)
+	chip := pm.extraRects(a)[1]
+	pm.handleMouse(a, chip.x+1, chip.y, tcell.Button1)
+	if got := pm.extras[1].label(a); got != "[trailer: off]" {
+		t.Fatalf("the click missed the chip: label %q", got)
+	}
+	pm.submit(a)
+	pumpAppEvents(t, a, func() bool {
+		return strings.Contains(gitOut(t, repo, "log", "-1", "--pretty=%s"), "Add the second thing")
+	})
+	if body := gitOut(t, repo, "log", "-1", "--pretty=%B"); strings.Contains(body, "Co-Authored-By") {
+		t.Fatalf("chip off, but the commit still carries a trailer: %q", body)
+	}
+}
+
+// TestCommitTrailer_SurvivesTheRedraft pins the round trip: the chip's
+// answer travels with the request, so asking the agent for another
+// draft does not quietly re-arm the trailer the user just switched off.
+func TestCommitTrailer_SurvivesTheRedraft(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	wireChat(a)
+	files := []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
+
+	// The ✦ button on a prompt whose chip is off must ask with it off.
+	a.handleGitCommitDiff(&gitCommitDiffEvent{
+		when: time.Now(), files: files, diff: "@@ -1 +1 @@\n+new", trailer: false,
+	})
+	if req := a.chat.commitSuggest; req == nil || req.trailer {
+		t.Fatalf("request = %+v, want the trailer decision carried through", req)
+	}
+	// And the prompt the answer reopens starts from that decision.
+	a.chatAppendMsg(chatMsg{role: chatRoleAgent, text: "Add the thing"})
+	a.handleChatTurnDone(&chatTurnDoneEvent{when: time.Now(), seq: a.chat.connSeq})
+	pm, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the commit prompt", a.modal)
+	}
+	if got := pm.extras[1].label(a); got != "[trailer: off]" {
+		t.Fatalf("reopened chip = %q, want the user's earlier answer", got)
+	}
+}
+
+// TestMenuToggleCommitTrailer_PersistsAndSeedsThePrompt pins the ≡ row:
+// it flips the preference, writes it, and the next drafted prompt opens
+// from the new default — the chip is the override, this is the setting.
+func TestMenuToggleCommitTrailer_PersistsAndSeedsThePrompt(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	wireChat(a)
+	if got := a.commitTrailerToggleLabel(); got != "AI commit trailer: on" {
+		t.Fatalf("label = %q, want the shipped default", got)
+	}
+
+	a.menuToggleCommitTrailer()
+	if a.commitTrailer {
+		t.Fatal("the ≡ row did not flip the preference")
+	}
+	if got := a.commitTrailerToggleLabel(); got != "AI commit trailer: off" {
+		t.Errorf("label = %q after the toggle", got)
+	}
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ced", "config.json"))
+	if err != nil || !strings.Contains(string(data), `"commitmsgtrailer": "off"`) {
+		t.Fatalf("preference not persisted: %v %s", err, data)
+	}
+
+	// And the ≡ "Suggest commit message" row asks with it: the entry
+	// points read the preference, the prompt's chip is the only thing
+	// that departs from it. Needs a real change to describe, or the
+	// request is never sent at all.
+	if !gitAvailable() {
+		t.Skip("git not on PATH — the entry-point half needs a real diff")
+	}
+	repo, file := panelRepo(t)
+	writeFileT(t, file, "one\nCHANGED\n")
+	gitRun(t, repo, "add", "f.txt") // the ≡ row describes the index
+	b := newTestApp(t, repo)
+	wireChat(b)
+	b.refreshGitStatus()
+	b.commitTrailer = false // as applyConfig would have loaded it
+	b.menuGitSuggestCommit()
+	pumpAppEvents(t, b, func() bool { return b.chat.commitSuggest != nil })
+	if req := b.chat.commitSuggest; req == nil || req.trailer {
+		t.Fatalf("request = %+v, want the persisted off", req)
 	}
 }
 

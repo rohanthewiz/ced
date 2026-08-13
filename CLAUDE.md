@@ -1658,6 +1658,26 @@ rules:
   or a commit of only-new-files would look empty to the agent.
 - The ≡ Git group's "Suggest commit message" row is the keyboard twin
   and takes the same targets.
+- **A DRAFTED message is attributed; a typed one never is.** Config
+  `"commitmsgtrailer"` (default on, `SaveCommitMsgTrailer`, ≡ Git
+  toggle) appends `Co-Authored-By: <agent name> <noreply@…>` — the
+  address is deliberately non-routing (`chatAgentDef.coAuthorEmail`),
+  because the trailer is a RECORD that a machine wrote the sentence,
+  not a mention of an account ced never verified. `openCommitPrompt`
+  (typed) and `openCommitPromptDraft` (the agent's) are separate entry
+  points for exactly this reason, and the `[trailer: on]` chip beside
+  the ✦ button appears only on the drafted one — a chip over
+  hand-written work would state something the user can't act on. The
+  chip is a PER-INVOCATION copy (the ≡ row is what persists), and it
+  travels with `commitSuggestReq` so a re-draft doesn't re-arm what the
+  user just switched off. `commitMsgWithTrailer` is idempotent.
+- **`promptModal.extras` is the generic button row** behind both the ✦
+  button and the chip: `extras[0]` holds the modal's right edge and the
+  rest lay out leftwards, each with a RESERVED width (a toggle's label
+  changes length; the target must not). The modal WIDENS to carry them
+  (`promptModal.width`) — and refuses to on a terminal too narrow,
+  where `extraRects` sheds extras from the left instead of painting a
+  truncated click target.
 
 ### Git log panel (app/gitlog.go + gitlogactions.go)
 A JetBrains-style history browser (Esc-L) in the SAME bottom strip as

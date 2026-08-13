@@ -38,6 +38,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 const (
@@ -56,6 +58,11 @@ const (
 	// for a subject line; an agent that answers with a paragraph gets
 	// its first line clipped rather than overflowing the input field.
 	commitSubjectMaxRunes = 120
+
+	// commitTrailerChipWidth reserves the row for the WIDER of the chip's
+	// two labels, so toggling it never moves the target under the pointer
+	// (promptExtra's rule).
+	commitTrailerChipWidth = 14 // len("[trailer: off]")
 )
 
 // -----------------------------------------------------------------------------
@@ -73,10 +80,32 @@ func gitCommitLabel(files []gitPanelFile) string {
 	return gitPanelTargetLabel(files)
 }
 
-// openCommitPrompt asks for the message and commits on Enter. initial
-// pre-fills the field — empty for a hand-written message, the agent's
-// draft when a suggestion landed. promptModal rejects an empty submit,
-// so there's no empty-message guard here.
+// openCommitPrompt asks for the message and commits on Enter — the
+// entry point for a message the user is going to TYPE. initial
+// pre-fills the field (empty from every caller here; see
+// openCommitPromptDraft for the agent's). promptModal rejects an empty
+// submit, so there's no empty-message guard here.
+func (a *App) openCommitPrompt(files []gitPanelFile, initial string) {
+	a.openCommitPromptWith(files, initial, false, a.commitTrailer)
+}
+
+// openCommitPromptDraft is the same prompt over a message the AGENT
+// wrote. Two things follow from that and from nothing else: the commit
+// carries the Co-Authored-By trailer, and the chip that switches it off
+// is on the row — a machine drafted this sentence, and the prompt is
+// where that fact is still true and still visible.
+//
+// trailer is the decision carried through the round trip
+// (commitSuggestReq), not a fresh read of the preference: a user who
+// switched the chip off and then asked for a re-draft has already
+// answered this question.
+func (a *App) openCommitPromptDraft(files []gitPanelFile, draft string, trailer bool) {
+	a.openCommitPromptWith(files, draft, true, trailer)
+}
+
+// openCommitPromptWith is the shared body. drafted says whether the
+// message came from the agent; trailer is the attribution decision for
+// THIS commit.
 //
 // The ✦ AI button sits on the button row whenever an agent could
 // answer. It is the survey's terminal state (gitpanelwalk.go): the walk
@@ -85,22 +114,112 @@ func gitCommitLabel(files []gitPanelFile) string {
 // prompt and go back to a picker to ask for the sentence describing
 // them. It does not submit; it swaps the modal for a request whose
 // answer reopens this same prompt pre-filled (chatCommitSuggestDone).
-func (a *App) openCommitPrompt(files []gitPanelFile, initial string) {
+func (a *App) openCommitPromptWith(files []gitPanelFile, initial string, drafted, trailer bool) {
 	title := "Commit " + gitCommitLabel(files)
-	commit := func(app *App, msg string) { app.gitCommitFiles(files, msg) }
+	// Captured by the closures below, so the chip, the ✦ re-draft and
+	// the commit all read ONE value — and it is a per-invocation copy:
+	// the chip qualifies this commit and never writes the preference
+	// back (the ≡ Git toggle is what changes the default).
+	trailerOn := trailer
+	commit := func(app *App, msg string) {
+		if drafted && trailerOn {
+			msg = commitMsgWithTrailer(msg, commitTrailerLine(app.chatAgent()))
+		}
+		app.gitCommitFiles(files, msg)
+	}
 	if !a.canSuggestCommitMsg() {
 		a.openPrompt(title, "message", initial, commit)
 		return
 	}
+	// extras[0] holds the right edge (promptExtra), so the ✦ button
+	// sits in the same place whether or not the chip is beside it.
+	//
 	// ✦ (U+2726), not the ✨ the roadmap sketched: drawAt advances one
 	// CELL per rune, and U+2728 is East-Asian-Wide — it would render two
 	// cells wide and shift the rest of the button row right by one,
 	// through the modal's border. Every glyph ced draws is narrow for
 	// this reason.
-	a.openPromptExtra(title, "message", initial, "[ ✦ AI ]", func(app *App) {
-		app.closeModal()
-		app.gitPanelSuggestCommit(files)
-	}, commit)
+	extras := []promptExtra{{
+		label: func(*App) string { return "[ ✦ AI ]" },
+		width: runeLen("[ ✦ AI ]"),
+		run: func(app *App) {
+			app.closeModal()
+			app.gitPanelSuggestCommit(files, trailerOn)
+		},
+	}}
+	// The chip appears only where it tells the truth: on a drafted
+	// message, from an agent ced can name in a trailer. On a message the
+	// user typed there is nothing to attribute, and a chip reading
+	// "trailer: on" over a hand-written commit would be a lie the user
+	// couldn't act on.
+	if drafted && commitTrailerLine(a.chatAgent()) != "" {
+		extras = append(extras, promptExtra{
+			label: func(*App) string { return commitTrailerChipLabel(trailerOn) },
+			width: commitTrailerChipWidth,
+			run:   func(*App) { trailerOn = !trailerOn },
+		})
+	}
+	a.openPromptExtras(title, "message", initial, extras, commit)
+}
+
+// commitTrailerChipLabel spells the state in words rather than a tick:
+// the chip is small, and "on"/"off" needs no glyph decoding and no
+// color the theme could flatten.
+func commitTrailerChipLabel(on bool) string {
+	if on {
+		return "[trailer: on]"
+	}
+	return "[trailer: off]"
+}
+
+// commitTrailerLine is the Co-Authored-By line crediting def, or "" for
+// an agent with no identity to credit (chatAgentDef.coAuthorEmail).
+// Git's trailer block is case-insensitive; this is the spelling GitHub
+// documents and the one already in this repository's log.
+func commitTrailerLine(def chatAgentDef) string {
+	if def.coAuthorEmail == "" || def.name == "" {
+		return ""
+	}
+	return "Co-Authored-By: " + def.name + " <" + def.coAuthorEmail + ">"
+}
+
+// commitMsgWithTrailer appends trailer as its own paragraph — git reads
+// a trailer block only after a blank line, and the subject is one line
+// by construction (commitSubject), so there is never a body to push it
+// away from.
+//
+// Idempotent on purpose: the message survives a round trip through the
+// prompt (draft → edit → ✦ re-draft → commit), and an agent that echoes
+// a trailer it saw in the diff must not produce two.
+func commitMsgWithTrailer(msg, trailer string) string {
+	if trailer == "" {
+		return msg
+	}
+	if strings.Contains(msg, trailer) {
+		return msg
+	}
+	return strings.TrimRight(msg, "\n") + "\n\n" + trailer
+}
+
+// commitTrailerToggleLabel names the ≡ Git row for its current
+// direction, the house toggle-label idiom.
+func (a *App) commitTrailerToggleLabel() string {
+	if a.commitTrailer {
+		return "AI commit trailer: on"
+	}
+	return "AI commit trailer: off"
+}
+
+// menuToggleCommitTrailer flips the drafted-commit attribution default
+// from the ≡ menu, and persists it. The chip on the prompt is the
+// per-commit override; this is the preference it starts from.
+func (a *App) menuToggleCommitTrailer() {
+	a.closeMenu()
+	a.commitTrailer = !a.commitTrailer
+	a.flash(a.commitTrailerToggleLabel())
+	if err := userconfig.SaveCommitMsgTrailer(userconfig.DefaultPath(), a.commitTrailer); err != nil {
+		a.flash("config: " + err.Error())
+	}
 }
 
 // gitCommitFiles commits the given targets, or the index when there are
@@ -137,15 +256,22 @@ type commitSuggestReq struct {
 	files []gitPanelFile
 	seq   int
 	mark  int
+
+	// trailer is the attribution decision the prompt will reopen with.
+	// It travels WITH the request, like files, so a user who switched
+	// the chip off and then asked for another draft is not asked again
+	// — the round trip through the agent is not a new commit.
+	trailer bool
 }
 
 // gitCommitDiffEvent carries a collected diff from the goroutine that
 // forked git to the main loop, which is the only place App.chat may be
 // touched.
 type gitCommitDiffEvent struct {
-	when  time.Time
-	files []gitPanelFile
-	diff  string
+	when    time.Time
+	files   []gitPanelFile
+	diff    string
+	trailer bool // carried through to commitSuggestReq — see there
 }
 
 // When satisfies the tcell.Event interface.
@@ -171,14 +297,17 @@ func (a *App) hasSuggestableCommit() bool {
 // describe the same change.
 func (a *App) menuGitSuggestCommit() {
 	a.closeMenu()
-	a.gitPanelSuggestCommit(a.gitPanelTargets())
+	a.gitPanelSuggestCommit(a.gitPanelTargets(), a.commitTrailer)
 }
 
 // gitPanelSuggestCommit opens the chat panel, collects the diff for the
 // targets off-loop, and lets handleGitCommitDiff send the turn. The
 // panel opens FIRST so the user sees where the answer is coming from —
 // a request that streams into a hidden panel looks like a hang.
-func (a *App) gitPanelSuggestCommit(files []gitPanelFile) {
+// trailer is the attribution the prompt will open with — the preference
+// from every entry point except the prompt's own ✦ button, which passes
+// the chip's current value instead (openCommitPromptWith).
+func (a *App) gitPanelSuggestCommit(files []gitPanelFile, trailer bool) {
 	if !a.gitIsRepo {
 		return
 	}
@@ -199,7 +328,7 @@ func (a *App) gitPanelSuggestCommit(files []gitPanelFile) {
 	targets := append([]gitPanelFile(nil), files...)
 	go func() {
 		diff := loadCommitDiff(root, targets)
-		_ = scr.PostEvent(&gitCommitDiffEvent{when: time.Now(), files: targets, diff: diff})
+		_ = scr.PostEvent(&gitCommitDiffEvent{when: time.Now(), files: targets, diff: diff, trailer: trailer})
 	}()
 }
 
@@ -220,9 +349,10 @@ func (a *App) handleGitCommitDiff(e *gitCommitDiffEvent) {
 	switch {
 	case a.chatReady():
 		a.chat.commitSuggest = &commitSuggestReq{
-			files: e.files,
-			seq:   a.chat.connSeq,
-			mark:  len(a.chat.msgs),
+			files:   e.files,
+			seq:     a.chat.connSeq,
+			mark:    len(a.chat.msgs),
+			trailer: e.trailer,
 		}
 		a.chatSendPrompt(commitSuggestPrompt(e.files, e.diff))
 	case a.chat.starting:
@@ -342,7 +472,7 @@ func (a *App) chatCommitSuggestDone(e *chatTurnDoneEvent) {
 		a.flash("Commit message suggested — see the chat panel")
 		return
 	}
-	a.openCommitPrompt(req.files, subject)
+	a.openCommitPromptDraft(req.files, subject, req.trailer)
 }
 
 // chatAgentTextSince returns the agent prose written after transcript

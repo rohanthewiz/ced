@@ -334,6 +334,11 @@ func (a *App) switchToTab(idx int) {
 		a.recordNav(from)
 	}
 	a.activeTab = idx
+	// Being the one funnel is also why the recent-files ring is touched
+	// here rather than in each surface: a tab switched to by ANY means is
+	// a file visited, and the ring's head has to stay the file on screen
+	// for the picker's first row to be the one before it (recentfiles.go).
+	a.touchRecentFile(a.tabs[idx].Path)
 }
 
 // menuNextTab / menuPrevTab step through the open files, wrapping at the

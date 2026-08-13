@@ -76,6 +76,10 @@ func (a *App) loadSessionStore() {
 		a.flash("session: " + err.Error())
 	}
 	a.sessionStore = st
+	// Seed the recent-file ring here, before restoreSession reopens
+	// anything, so the tabs coming back touch the ring on TOP of what was
+	// remembered rather than replacing it (recentfiles.go).
+	a.loadRecentFiles()
 	st.Touch(a.rootDir)
 	a.saveSessionStore()
 }
@@ -123,6 +127,11 @@ func (a *App) recordSession() {
 		})
 	}
 	e.Active = active
+	// The recent-file ring rides along in the same entry and the same
+	// write. It is captured whether or not session restore is enabled:
+	// that preference governs reopening tabs, not remembering where the
+	// user has been — the line folder-recency already draws.
+	e.Recent = a.recentFiles
 	a.sessionStore.Record(e)
 	a.saveSessionStore()
 }
@@ -188,6 +197,11 @@ func (a *App) restoreSession() {
 		active = len(a.tabs) - 1
 	}
 	a.activeTab = active
+	// Only the tab the restore LANDS on touches the ring. The others were
+	// put back in their stored order, which the seeded ring already
+	// carries — touching them here would reorder it by tab index, i.e. by
+	// the order the files were first opened rather than last visited.
+	a.touchRecentFile(a.tabs[active].Path)
 	// The active folder drives where "New file" lands, so point it at the
 	// file the user was last looking at rather than leaving it on the
 	// project root.

@@ -166,6 +166,13 @@ func leaderBindings() []leaderBinding {
 		{key: ',', action: (*App).menuPrevTab, repeat: true, label: "Previous tab"},
 		{key: '.', action: (*App).menuNextTab, repeat: true, label: "Next tab"},
 		{key: 'b', action: (*App).menuSwitchTab, label: "Switch tab"},
+		// 'B' is the same question one step wider: b lists the files that
+		// are OPEN, B lists the ones you have BEEN in — including the one
+		// you closed an hour ago, which is the row worth having (see
+		// recentfiles.go). The shift pair follows f/F and p/P, where the
+		// capital is the same verb at a larger scope. It is also ⌘E's
+		// Esc-side twin, which the ⌘ layer requires of every chord.
+		{key: 'B', action: (*App).menuRecentFiles, label: "Recent files"},
 		// 'k' for the palette — the Cmd+K muscle memory every editor and
 		// chat app teaches (the real Cmd+K never reaches a terminal app,
 		// so Esc-k is the closest stand-in). It used to share the binding

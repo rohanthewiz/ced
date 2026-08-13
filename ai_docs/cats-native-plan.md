@@ -116,7 +116,12 @@ each pass-through needs native menu routing upstream (mapped in cats
 above, both found by reading the wire rather than by trying it:**
 
 - **⌘E and ⌘click are not in the table.** ⌘E's picker does not exist yet
-  (3.4). ⌘click *cannot* exist: SGR mouse reports carry three modifier
+  (3.4) — ***added 2026-08-13 once 3.4 built it***, so the table is nine
+  chords plus ⌘E; its Esc twin is `Esc B`. ⌘E is deliberately NOT on
+  cats' `CMD_TO_PANE` allowlist yet, so browser-cats still keeps it for
+  the browser and the chord is live in kitty/Ghostty/WezTerm only — the
+  same armed-but-host-gated state every row here started in.
+  ⌘click *cannot* exist: SGR mouse reports carry three modifier
   bits — shift 4, meta/alt 8, ctrl 16 — and none of them is super, so
   cats' encoder drops the Command modifier before writing the report and
   tcell's SGR decoder has no ModMeta path to decode into. A ⌘+click is
@@ -376,7 +381,51 @@ stamped-rect idiom.
    severity filter buttons, right-click → quick-fix (code actions already
    wired). Entry: the Phase-1 diag status segment. ~500 LOC.
 3. **Hover on mouse dwell** — Tier 1 (motion reporting reliable there).
-4. **Recent files picker** — MRU ring over `internal/session` data via
+4. **Recent files picker** — ✅ done 2026-08-13.
+
+   *Landed as `internal/app/recentfiles.go` + tests, with a `Recent []string`
+   field on `session.Entry` and a pure `session.TouchRecent` for the ring.
+   Notes vs. spec:*
+
+   - *The ring persists **per folder** in state.json beside that folder's
+     tab list, rather than being an in-memory ring seeded from the tab
+     list. That is the whole difference between this picker and the tab
+     switcher (`Esc b`): the rows worth having are the CLOSED files, and a
+     ring derived from open tabs would have none of them.*
+   - ***The order is the feature.** The ring's head is the file on screen,
+     so the picker's first row is the file before it — ⌘E, Enter is the
+     two-file flip, which is what the chord means to a hand trained in VS
+     Code or GoLand. That is why every activation touches the ring, and
+     why the touch lives in `switchToTab` (the one funnel every switching
+     surface already goes through) rather than in each surface.*
+   - ***`closeTab` deliberately does NOT touch it.** Closing makes a
+     neighbour active with nobody having navigated there, and quitting
+     closes every tab in turn — hooking it would persist the reverse
+     close order at the exact moment `recordSession` writes the file, so
+     the list would come back as the one nobody visited. Pinned by a
+     test, because the bug only shows up on the NEXT launch.*
+   - *Not gated on the session-restore preference: that toggle governs
+     reopening tabs, not remembering where the user has been — the line
+     folder-recency already drew.*
+   - *`openPicker`, not the spec's `openPickerWithCancel` — the latter
+     exists for callers that must hear about a dismissal (an agent
+     blocked on an answer), and the former is literally that call with a
+     nil cancel. Nothing here needs the callback.*
+   - *Surfaces: `Esc B` (the shifted twin of `Esc b` — open tabs vs. every
+     file you have been in), ≡ → Tab → "Recent files…" directly under
+     "Switch tab…", and ⌘E at Tier 1 / kitty hosts. Rows render through
+     the tab switcher's own `tabPickerLabel`, so a file that is open looks
+     the same in both lists; a file outside the root gets its directory
+     spelled out, which the switcher can afford to omit and this list
+     cannot.*
+   - *Deleted files are pruned when the picker opens (stat per entry, cap
+     50), in memory only — the write rides the session at Close like
+     every other change. The ≡ predicate deliberately does not stat: menu
+     predicates run every draw.*
+
+   The original spec follows.
+
+   MRU ring over `internal/session` data via
    `openPickerWithCancel`; ⌘E at Tier 1.
 
 ### Phase 4 — The git suite (~2 weeks)
@@ -853,6 +902,10 @@ the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords
    field reads as 0, i.e. today's behavior). ⌘W ⌘T ⌘L ⌘R ⌘N ⌘Q stay the
    browser's on purpose.
 
+   Worth adding now: **⌘E**, which ced binds since 3.4 (recent files) and
+   the allowlist predates. No browser claims it, so it is the same
+   one-entry change `KeyS` was.
+
    Still open: the **mac app**, and it may already be free. Cocoa resolves
    ⌘ *menu key equivalents* before the WebView, but catapp's menus claim
    only ⌘H ⌥⌘H ⌘Q, Edit's ⌘Z ⇧⌘Z ⌘X ⌘C ⌘V ⌘A and View's ⌘+ ⌘= ⌘- ⌘0 —
@@ -927,9 +980,10 @@ cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
 **Progress:** Phases 1, 2, 3.1, 3.2, 4.1–4.5 and **5.1, 5.3, 5.4, 5.5, 5.7**
-are done (2026-08-12); **5.6, the last of 5.8, and 5.2** landed 2026-08-13.
-**Phases 4 and 5 are closed** — 4.6 (blame) is explicitly optional and
-unclaimed. §5's item 5 is verified.
+are done (2026-08-12); **5.6, the last of 5.8, 5.2 and 3.4** landed
+2026-08-13. **Phases 4 and 5 are closed** — 4.6 (blame) is explicitly
+optional and unclaimed. §5's item 5 is verified, and its item 2 shipped
+cats-side the same day.
 
 Every Phase-5 consumer now shares one shape, and it is worth stating once
 because the next one should follow it: **poll on a goroutine, cache on the
@@ -956,13 +1010,20 @@ shipping a gate that has to be re-opened by a release. It is also the
 reason a feature's status has to name the HOST's half: "done" here means
 done in kitty/Ghostty/WezTerm and ready in cats.
 
-**Phase 5 is closed.** What remains anywhere in the roadmap is small and
-unclaimed: 3.3 (hover on mouse dwell, Tier-1 only, builds on this client),
-3.4 (recent-files picker — an hour's work, and the only thing standing
-between ⌘E and its row in `metakeys.go`), 4.6 (blame, optional), and
-Phase 2's `⚠` tab marker re-raising a deferred conflict prompt. Phase 6 is
-entirely upstream-gated; §5 item 2 is now its critical path, and its
-browser half is the small half.
+3.4 added a fourth, small and easy to get backwards: **an MRU list is only
+useful if its head is what is on screen**, which means the touch belongs at
+the one funnel every surface already goes through — and means the events
+that look like visits but aren't (a close making a neighbour active, a quit
+closing every tab in turn) must NOT touch it. The failure mode is invisible
+until the next launch, so it is a test rather than a comment.
+
+**Phase 5 is closed, and Phase 3 now has only 3.3 left.** What remains
+anywhere in the roadmap is small and unclaimed: 3.3 (hover on mouse dwell,
+Tier-1 only, builds on this client), 4.6 (blame, optional), and Phase 2's
+`⚠` tab marker re-raising a deferred conflict prompt. Phase 6 is entirely
+upstream-gated; with §5 item 2 shipped, its critical path is now item 1
+(`clipboard.read`), which is the one ask with a whole feature behind it
+(§4 Tier 1 + native paste anywhere).
 
 ## 8. Verification
 

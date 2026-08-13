@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -79,6 +80,36 @@ func TestMetaAccelSaves(t *testing.T) {
 	}
 	if string(got) != "a" {
 		t.Fatalf("file on disk = %q, want %q", got, "a")
+	}
+}
+
+// ⌘E is the newest row and the only one with a picker built for it: the
+// chord must open the recent-files list holding the file visited before
+// this one, which is the gesture (⌘E, Enter) the row exists for. The ring
+// itself is tested in recentfiles_test.go; this pins that the chord
+// reaches that picker rather than one of the editor's several others.
+func TestMetaAccelOpensRecentFiles(t *testing.T) {
+	armMetaHost(t)
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.txt")
+	second := filepath.Join(dir, "second.txt")
+	for _, p := range []string{first, second} {
+		if err := os.WriteFile(p, []byte("x\n"), 0644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	a := newTestApp(t, dir)
+	a.openFile(first)
+	a.openFile(second)
+
+	a.handleKey(metaKeyEv('e', false))
+
+	m, ok := a.modal.(*paletteModal)
+	if !ok {
+		t.Fatalf("Cmd+E opened %T, want the recent-files picker", a.modal)
+	}
+	if len(m.items) != 1 || !strings.Contains(m.items[0].label, "first.txt") {
+		t.Fatalf("first row should be the previously visited file, got %d rows", len(m.items))
 	}
 }
 

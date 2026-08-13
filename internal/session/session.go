@@ -51,6 +51,14 @@ const (
 	// turn startup into a visible stall. Thirty is past any working set
 	// somebody navigates by clicking tabs.
 	MaxTabs = 30
+
+	// MaxRecentFiles caps a folder's recent-file ring. It can afford to
+	// be larger than MaxTabs because nothing here is opened at startup —
+	// the list costs one string each and is read only when the picker
+	// opens — and it wants to be larger because the whole point of the
+	// ring is the files that are NOT open: a working set of thirty tabs
+	// would otherwise leave no room for the ones you closed.
+	MaxRecentFiles = 50
 )
 
 // TabState is one restored tab: the file and where the user was in it.
@@ -70,10 +78,18 @@ type TabState struct {
 // absolute, cleaned path — it's the map key everything else looks up by,
 // and two spellings of one directory would silently split a session in
 // half.
+//
+// Recent is the folder's recent-FILE ring, most recent first — every file
+// the editor made active while it was rooted here, including ones that
+// have since been closed. It is deliberately separate from Tabs even
+// though the two overlap: Tabs is "what was on screen" and is restored,
+// Recent is "where I have been" and is only ever offered. A file that is
+// in both appears once in each, because they answer different questions.
 type Entry struct {
 	Root   string     `json:"root"`
 	Tabs   []TabState `json:"tabs,omitempty"`
 	Active int        `json:"active,omitempty"`
+	Recent []string   `json:"recent,omitempty"`
 }
 
 // Store is the whole state file: folders in most-recently-opened order.
@@ -120,6 +136,7 @@ func Load(path string) (*Store, error) {
 		}
 		e.Tabs = trimTabs(e.Tabs)
 		e.Active = clampActive(e.Active, len(e.Tabs))
+		e.Recent = trimRecent(e.Recent)
 		s.Folders = append(s.Folders, e)
 		if len(s.Folders) >= MaxEntries {
 			break
@@ -193,6 +210,7 @@ func (s *Store) Record(e Entry) {
 	}
 	e.Tabs = trimTabs(e.Tabs)
 	e.Active = clampActive(e.Active, len(e.Tabs))
+	e.Recent = trimRecent(e.Recent)
 	s.put(e)
 }
 
@@ -291,6 +309,69 @@ func trimTabs(tabs []TabState) []TabState {
 		}
 		out = append(out, t)
 		if len(out) >= MaxTabs {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// TouchRecent returns list with path moved to the front — the whole of
+// the MRU ring's semantics, as a pure function so the app layer can hold
+// the live list and this package can apply the same rule when a stored
+// one comes back off disk.
+//
+// A move, not an append: a file visited for the tenth time must not
+// occupy ten of the max slots, and the ring is a queue of PLACES, so the
+// second visit erases the first rather than sitting beside it.
+//
+// Paths are compared as given. Callers pass what openFile passes — an
+// absolute path from filepath.Abs — which is the same key the tab list
+// and the diagnostics map are already keyed by; running Normalize here
+// instead would resolve symlinks per file and hand back a path that no
+// open tab matches.
+//
+// max <= 0 means unbounded, which is what makes this testable without
+// building a 50-entry fixture.
+func TouchRecent(list []string, path string, max int) []string {
+	if path == "" {
+		return list
+	}
+	out := make([]string, 0, len(list)+1)
+	out = append(out, path)
+	for _, p := range list {
+		if p == path || p == "" {
+			continue
+		}
+		out = append(out, p)
+		if max > 0 && len(out) >= max {
+			break
+		}
+	}
+	return out
+}
+
+// trimRecent cleans a ring that arrived from disk (or from a caller that
+// built one by hand): blanks dropped, duplicates collapsed to their
+// first — i.e. most recent — position, and the tail cut to
+// MaxRecentFiles. A hand-edited state file is the only way any of those
+// can happen, but a duplicate would then show up as two identical picker
+// rows, which reads as a bug in the picker.
+func trimRecent(list []string) []string {
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]string, 0, min(len(list), MaxRecentFiles))
+	seen := make(map[string]bool, len(list))
+	for _, p := range list {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+		if len(out) >= MaxRecentFiles {
 			break
 		}
 	}

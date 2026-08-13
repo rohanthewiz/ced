@@ -375,3 +375,75 @@ func TestNormalizeKeepsMissingPaths(t *testing.T) {
 		t.Fatal("a missing folder could not be pruned")
 	}
 }
+
+// TestTouchRecentMovesRatherThanAppends is the ring's whole contract: a
+// file visited twice occupies one slot, at the front. Get this wrong and
+// a single file bounced between two others fills the list with itself.
+func TestTouchRecentMovesRatherThanAppends(t *testing.T) {
+	var ring []string
+	for _, p := range []string{"/a", "/b", "/c", "/a"} {
+		ring = TouchRecent(ring, p, 0)
+	}
+	want := []string{"/a", "/c", "/b"}
+	if len(ring) != len(want) {
+		t.Fatalf("ring = %v, want %v", ring, want)
+	}
+	for i := range want {
+		if ring[i] != want[i] {
+			t.Fatalf("ring = %v, want %v", ring, want)
+		}
+	}
+	if got := TouchRecent(ring, "", 0); len(got) != len(ring) {
+		t.Fatalf("an empty path entered the ring: %v", got)
+	}
+}
+
+// The cap trims the TAIL — the oldest visit — and never the head.
+func TestTouchRecentCapsTheTail(t *testing.T) {
+	ring := []string{"/a", "/b", "/c"}
+	ring = TouchRecent(ring, "/d", 3)
+	if len(ring) != 3 {
+		t.Fatalf("ring = %v, want 3 entries", ring)
+	}
+	if ring[0] != "/d" || ring[2] != "/b" {
+		t.Fatalf("ring = %v, want the newest at the head and /c dropped", ring)
+	}
+}
+
+// TestRecentSurvivesTheStateFile is the round trip that makes the picker
+// useful across restarts, plus the hand-edit defence: duplicates collapse
+// to their most recent position rather than showing up as two identical
+// picker rows.
+func TestRecentSurvivesTheStateFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(t.TempDir(), "state.json")
+	s := &Store{}
+	s.Record(Entry{Root: root, Recent: []string{"/x", "/y", "", "/x"}})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	back, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	e, ok := back.Find(root)
+	if !ok {
+		t.Fatal("entry did not survive the round trip")
+	}
+	if len(e.Recent) != 2 || e.Recent[0] != "/x" || e.Recent[1] != "/y" {
+		t.Fatalf("Recent = %v, want [/x /y] — blanks dropped, duplicate collapsed", e.Recent)
+	}
+}
+
+// A folder's ring survives Touch: startup marks the folder most-recent
+// before anything else runs, and it must not cost the list it carries.
+func TestTouchKeepsTheRecentRing(t *testing.T) {
+	root := t.TempDir()
+	s := &Store{}
+	s.Record(Entry{Root: root, Recent: []string{"/x"}})
+	s.Touch(root)
+	if e, _ := s.Find(root); len(e.Recent) != 1 {
+		t.Fatalf("Touch dropped the ring: %+v", e)
+	}
+}

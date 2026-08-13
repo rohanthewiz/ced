@@ -212,6 +212,12 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Next tab", shortcut: "esc .", action: (*App).menuNextTab, enabled: (*App).hasMultipleTabs},
 			{label: "Previous tab", shortcut: "esc ,", action: (*App).menuPrevTab, enabled: (*App).hasMultipleTabs},
 			{label: "Switch tab…", shortcut: "esc b", action: (*App).menuSwitchTab, enabled: (*App).hasMultipleTabs},
+			// Recent files sits under Switch tab because it answers the
+			// same question — "get me to another file" — over a wider set:
+			// the ones no longer open. In the Tab group rather than File
+			// for that adjacency, and because File is far enough down the
+			// menu to be below the fold (recentfiles.go).
+			{label: "Recent files…", shortcut: "esc B", action: (*App).menuRecentFiles, enabled: (*App).hasRecentFiles},
 			{action: (*App).menuToggleAutoSave, enabled: alwaysTrue, labelFor: (*App).autoSaveToggleLabel},
 		}},
 		// View toggles. Deliberately the second group: the menu outgrows
@@ -1155,6 +1161,14 @@ type App struct {
 	// a folder reopens its tabs. Folders are recorded either way — the
 	// recent list is a separate feature reading the same file.
 	sessionEnabled bool
+
+	// recentFiles is the live MRU ring for THIS folder, most recent
+	// first: every file made active since the editor opened, seeded from
+	// the store at startup and written back into it on Close. Held on the
+	// App rather than read out of sessionStore on demand because it is
+	// touched on every tab switch and pruned in place, and the store
+	// hands its entries out by value. See recentfiles.go.
+	recentFiles []string
 
 	// remote is the `ced --remote` / `ced --wait` listener: the socket
 	// another ced hands a file to, plus the clients blocked waiting for
@@ -3238,6 +3252,7 @@ func (a *App) openFile(path string) {
 				a.recordNav(from)
 			}
 			a.activeTab = i
+			a.touchRecentFile(path)
 			return
 		}
 	}
@@ -3252,6 +3267,9 @@ func (a *App) openFile(path string) {
 	a.wireTab(t)
 	a.tabs = append(a.tabs, t)
 	a.activeTab = len(a.tabs) - 1
+	// After the tab exists, so the ring only ever names files the editor
+	// actually got open — a NewTab that failed above returned already.
+	a.touchRecentFile(path)
 	a.announceTab(t)
 	a.flash(fmt.Sprintf("Opened %s", filepath.Base(path)))
 }

@@ -697,30 +697,50 @@ SHA**. This phase closes the specific named gaps:
    with it: a `pane_notify` from a sibling pane reaches ced's status bar.
    *Not yet marked as blocked* — a workspace rename, format-on-save, and the
    other long ops that are currently invisible to the reporter.
-4. **Theme unity + identity.** ✅ *the OSC half is done* (`hostident.go`).
-   Synthesize a "Cats (host)" theme from
-   `config.get` colors onto `internal/theme` slots, auto-selected unless the
-   user pinned one; re-poll on `focus_changed` until a `theme_changed` event
-   exists upstream. **Emit OSC 7 (cwd) + OSC 0/2 (title) — pull this to week
-   one**: two escape sequences, instant payoff (cats chrome, tab names,
-   notifications name the file being edited). ~200 LOC.
-5. **Splits via the mux.** "Open in split →/↓" (context menu, tab-bar
-   right-click, leader) ⇒ `pane.split` spawning an **independent sibling
-   ced** on the same file — Phase 2's conflict matrix + autosave already
-   make two-ced-one-file safe, so v1 is near-zero work beyond the spawn
-   call. Shared-buffer over `internal/remote` is a stretch goal. ~150 LOC.
+4. ✅ **done 2026-08-12** — **Theme unity + identity.** The OSC half landed
+   earlier (`hostident.go`); `catstheme.go` now synthesizes a "Cats (host:
+   ⟨name⟩)" theme from `config.get`. Both palettes are built on the SAME
+   eight required keys (bg fg muted line accent ok warn err), so the bridge
+   is those eight plus `panel`→`sidebar-bg` and `panel2`→`line-hl`, with
+   ced's derivation table inventing the other twenty-seven (cats has no
+   syntax colors). Non-hex values (cats' rgba() keys) are dropped; a missing
+   or non-hex CORE key abandons the synthesis rather than half-translating
+   it. Auto-selected only when the user has never pinned a theme, and never
+   persisted. Re-polled on `focus_changed` (rate-limited, 3s) until
+   `theme_changed` exists upstream. *Verified live: 33 host colors →
+   10 mapped → a full resolved palette.*
+5. ✅ **done 2026-08-12** — **Splits via the mux.** "Open in split →/↓" (≡
+   Cats group, editor right-click, `Esc C r`/`Esc C d`) ⇒ `pane.list` /
+   `pane.split` / `pane.list` / `pane.send_input`, spawning an independent
+   sibling ced on the same file. `pane.split` returns no data, so the new
+   pane is recovered by DIFFING the two listings — an ambiguous diff types
+   nothing (see §5 item 7). The sibling is started with `exec ced --root
+   <root> <file>`: `--root` is a new ced flag, because a file path alone
+   would root the sibling at the file's parent instead of this project.
+   Shared-buffer over `internal/remote` remains a stretch goal.
 6. **Real terminal panes.** Tier 1 "Terminal" spawns a real PTY sibling via
    `pane.split`/`tab.create` (grsh remains Tier 0). "Run file" uses
    `pane.wait_for_output` to badge success/failure via the hook.
-7. **Frecency navigation.** Merge `path.list` recents (cdx-ranked) into the
-   fuzzy finder with a distinct icon; "Recent projects" picker → open tree
-   there or `tab.create` a new ced. ~200 LOC.
-8. **Agents as collaborators.** Status-bar segment for sibling agent state
-   ("claude: working", click → `pane.focus`); context-menu "Send selection
-   to ⟨agent pane⟩" → `pane.send_input` (staged, not auto-submitted); "Ask
-   cats chat about selection" → `chat.send` with file/line prefix; `capture`
-   a sibling pane into a read-only compare tab (diff an agent's proposal
-   against your buffer without leaving the editor). ~300 LOC.
+7. ✅ **done 2026-08-12** — **Frecency navigation.** `path.list` recents are
+   merged into ≡ → File → **Recent folders…** (`catsfrecency.go`): ced's own
+   places first (they carry tab counts and were recorded by this program),
+   the host's after, deduped, pruned, capped at 24, and marked "· cats" —
+   which doubles as a fuzzy search term. The picker now opens on the host's
+   list ALONE, so a ced that has never been anywhere still knows your
+   projects. "Open project in new cats tab…" spawns an independent ced
+   elsewhere via `tab.create` (an argv, so no shell and nothing to quote).
+   *Verified live: 34 host recents → 24 rows.*
+8. **Agents as collaborators.** *Three of four done 2026-08-12*
+   (`catsagents.go`): ✅ status-bar segment naming the sibling that most
+   wants attention ("claude: blocked +1", ranked blocked > working > idle,
+   click → `pane.focus`, our own pane excluded because the hook reporter
+   makes cats call it the agent "ced"); ✅ "Send selection to agent…" →
+   `pane.send_input` with a `path:12-40` reference and **submit false**,
+   permanently (cats paste-encodes, so a multi-line selection lands intact);
+   ✅ "Ask cats chat about selection" → `chat.send` with the same quote.
+   **Still unclaimed:** `capture` a sibling pane into a read-only compare
+   tab (diff an agent's proposal against your buffer without leaving the
+   editor).
 
 ### Phase 6 — Upstream-gated polish
 Each landed ask gets its consumer: `clipboard.read` → native
@@ -766,6 +786,18 @@ the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords
 6. *(Later, if splits feel good)* `pane.open_file` convention — cats asks
    the focused editor pane to open a path (inverse of `ced --remote`):
    "click a file anywhere in cats → opens in ced".
+7. **`pane.split` should return its new pane** (`{num, pane}`, exactly as
+   `tab.create` already does). The dispatcher has the id in hand — it is
+   `np` in `CmdPaneSplit` — and drops it. Without it a client that wants to
+   drive the new pane must diff `pane.list` before and after, which is racy
+   by construction; ced's split refuses to type anything when the diff is
+   ambiguous, so the cost today is a rare "run the editor there by hand"
+   rather than input in the wrong pane. Smallest ask on this list.
+8. **A `command` (argv) on `pane.split`**, matching `TabCreateParams`. With
+   it, "open in split" becomes ONE round trip and needs no shell in the
+   middle — no `exec`, no quoting, no bracketed-paste assumption. Bigger
+   than item 7 and strictly nicer; item 7 alone already makes the current
+   sequence correct.
 
 ## 6. Risks and tradeoffs
 
@@ -803,25 +835,24 @@ emission pulled forward to week one** (two escape sequences, instant
 cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
-**Progress:** Phases 1, 2, 3.1, 3.2, 4.1–4.5, and **5.1, 5.3 plus 5.4's OSC
-half** are done (all 2026-08-12). **Phase 4 is closed** — 4.6 (blame) is
-explicitly optional and unclaimed. §5's item 5 is verified.
+**Progress:** Phases 1, 2, 3.1, 3.2, 4.1–4.5, and **5.1, 5.3, 5.4, 5.5, 5.7
+and three quarters of 5.8** are done (all 2026-08-12). **Phase 4 is closed**
+— 4.6 (blame) is explicitly optional and unclaimed. §5's item 5 is verified.
 
-The foundation is now in place — `internal/cats` speaks the control socket,
-the event stream, and the hook socket, and `cats_glue.go` holds the client,
-the tier, and this pane's id — so every remaining Phase-5 item is a consumer
-of it rather than new plumbing. Suggested next: **5.4's theme unity**
-(`config.get` already verified to return the host palette, and it wants a
-`focus_changed` subscription the stream can carry today), then **5.5 splits**
-(near-zero work: `pane.split` + spawn a sibling ced), then **5.7 frecency**
-(`path.list` already returns 34 recents here) and **5.8 agents as
-collaborators** (`pane.list` already reports sibling agent/state, and
-`pane_notify` is already subscribed). **5.2, the ⌘ table**, is independent of
-all of it.
-The two remaining Phase-3 items are small and unclaimed: 3.3 (hover on
-mouse dwell) is Tier-1 only and can now be built on this client, and 3.4
-(recent-files picker) is an hour's work whenever a breather is wanted —
-and it is the natural host for 5.7's frecency merge.
+Every Phase-5 consumer now shares one shape, and it is worth stating once
+because the next one should follow it: **poll on a goroutine, cache on the
+App, read the cache from the loop.** The theme, the frecency list and the
+pane list are all read by main-loop code (a picker, a draw call), and none
+of them may dial a socket there. Refresh points are the stream's own events
+(`focus_changed`, `pane_notify`), each behind a rate limit.
+
+**What is left in Phase 5:** **5.2 (the ⌘ table)**, independent of everything
+and gated on the Mac app's routing; **5.6 (real terminal panes)**, which
+wants `pane.wait_for_output` and the same spawn plumbing 5.5 built; and
+**5.8's fourth quarter** — `capture` a sibling pane into a read-only compare
+tab. The two remaining Phase-3 items are small and unclaimed: 3.3 (hover on
+mouse dwell) is Tier-1 only and can be built on this client, and 3.4
+(recent-files picker) is an hour's work whenever a breather is wanted.
 
 ## 8. Verification
 

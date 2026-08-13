@@ -551,6 +551,14 @@ func (a *App) visibleMenuGroups() []menuGroup {
 	quit := groups[len(groups)-1]
 	groups = groups[: len(groups)-1 : len(groups)-1]
 
+	// The host-multiplexer group, present only INSIDE cats (cats_glue.go).
+	// Spliced rather than built in, and conditional rather than dimmed,
+	// because every row in it addresses a program that isn't there in a
+	// plain terminal — the whole group would be permanently grey for the
+	// overwhelming majority of ced users, which is noise, not vocabulary.
+	if cg := a.catsMenuItems(); len(cg) > 0 {
+		groups = append(groups, menuGroup{title: "Cats", collapsible: true, items: cg})
+	}
 	if pc := a.pluginMenuItems(); len(pc) > 0 {
 		groups = append(groups, menuGroup{
 			title: "Plugin commands", collapsible: true, items: pc,
@@ -749,6 +757,12 @@ type App struct {
 	// edited mid-session shows up without a restart.
 	themeName  string
 	themeSpecs []theme.Spec
+
+	// themePinned records that the user has CHOSEN a theme — config.json
+	// named one at startup, or they picked one from the ≡ picker since.
+	// Its only consumer is the cats host-theme auto-select (catstheme.go),
+	// which must never overrule a choice somebody actually made.
+	themePinned bool
 
 	rootDir   string
 	tree      *filetree.Tree
@@ -1350,6 +1364,11 @@ func (a *App) loadUserConfig() {
 	// letting it land last keeps a more important message visible.
 	// persist=false: we're reading the preference, not restating it.
 	a.loadThemes()
+	// A named theme in the config is a CHOICE; an empty one is the absence
+	// of a choice, which is what lets the cats host theme step in
+	// (catstheme.go). Recorded before applying, since applyThemeName's own
+	// persist path sets the same flag for the picker.
+	a.themePinned = strings.TrimSpace(cfg.Theme) != ""
 	a.applyThemeName(cfg.Theme, false)
 }
 

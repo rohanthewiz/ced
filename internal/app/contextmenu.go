@@ -129,6 +129,31 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 		{label: "Paste", action: (*App).pasteClipboard, enabled: alwaysTrue},
 		{label: "Compare selection with paste…", action: (*App).compareSelectionWithPaste, enabled: (*App).hasSelection},
 	}
+	// The cats split (catssplit.go), appended conditionally like the search
+	// row below rather than listed above with the fixed vocabulary: a row
+	// that would be dimmed in every terminal but one does not earn a
+	// permanent place in a popup this small — and inside cats, "put a
+	// second editor beside this one" is exactly what a right-click on the
+	// file is reaching for.
+	if a.hasCatsSplit() {
+		items = append(items,
+			editorContextItem{label: "Open in split →", action: (*App).catsSplitRight, enabled: alwaysTrue},
+			editorContextItem{label: "Open in split ↓", action: (*App).catsSplitDown, enabled: alwaysTrue},
+		)
+	}
+	// Handing the selection to a sibling agent (catsagents.go). Gated on
+	// there being a selection as well as a host, because "send the
+	// selection" with nothing selected is not a row, it is a question.
+	if a.hasCatsSelectionSend() {
+		if a.hasCatsAgents() {
+			items = append(items, editorContextItem{
+				label: "Send selection to agent…", action: (*App).menuCatsSendSelection, enabled: alwaysTrue,
+			})
+		}
+		items = append(items, editorContextItem{
+			label: "Ask cats chat about selection", action: (*App).menuCatsAskChat, enabled: alwaysTrue,
+		})
+	}
 	if word := a.contextSearchWord(tab); word != "" {
 		items = append(items, editorContextItem{
 			label:   "Search project for \"" + word + "\"",

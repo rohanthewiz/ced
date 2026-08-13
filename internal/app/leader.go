@@ -192,6 +192,13 @@ func leaderBindings() []leaderBinding {
 		// silently break somebody's plugin. A namespace is the only
 		// place a user-owned key can live without fighting the editor's.
 		{key: 'x', subFor: pluginLeaderBindings, hintFor: pluginLeaderHint, name: "Plugin", label: "Plugins…"},
+		// 'C' for cats — the host multiplexer's namespace (cats_glue.go),
+		// and the third dynamic prefix, for the third distinct reason: its
+		// contents exist only while ced is running inside cats, so outside
+		// one the namespace arms nothing and its hint says why. Uppercase
+		// because 'c' is code actions, and because everything under it is
+		// an occasional gesture rather than an editing verb.
+		{key: 'C', subFor: catsLeaderBindings, hintFor: catsLeaderHint, name: "Cats", label: "Cats…"},
 		// Multi-line editing (multicaret.go). 'm' grows the caret column
 		// downward, 'M' upward — the same "shift means the other
 		// direction" convention as h/H and o/O. Both repeat, so

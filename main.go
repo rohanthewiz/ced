@@ -57,6 +57,8 @@ type cliResult struct {
 //   - --last / -l → reopen the most recently edited folder
 //   - --remote / --wait, then a file → hand the file to a running
 //     instance instead of starting a second editor (see below)
+//   - --root <dir>, then anything → root the editor at <dir> whatever
+//     the rest of the line resolves to
 //   - a directory path → use as the editor's root
 //   - a file path → root at the file's parent dir, open the file in a tab
 //   - a missing path → assume "ced foo.go" means "create foo.go" —
@@ -100,7 +102,16 @@ func resolveArgs(args []string) cliResult {
 	// doesn't matter and repeats are harmless — `git config core.editor`
 	// values get copied around and edited by hand, and rejecting
 	// "--wait --wait" would be pedantry with a broken commit behind it.
+	//
+	// --root joined that loop because it answers a question a file path
+	// cannot: `ced internal/app/x.go` roots at internal/app, which is the
+	// right guess for a human typing it and the wrong one for a program
+	// reproducing a workspace. The cats split (internal/app/catssplit.go)
+	// spawns a sibling editor on the file you are looking at, and that
+	// sibling has to open the project you are IN, not the directory the
+	// file happens to sit in.
 	var remoteFlag, waitFlag bool
+	var rootOverride string
 flags:
 	for len(args) > 0 {
 		switch args[0] {
@@ -112,10 +123,40 @@ flags:
 			// nvim's spelling of the pair; accepting it costs one case
 			// and saves anyone porting an $EDITOR line.
 			remoteFlag, waitFlag = true, true
+		case "--root":
+			if len(args) < 2 {
+				return cliResult{Err: errors.New("--root needs a directory")}
+			}
+			rootOverride = args[1]
+			args = args[1:]
 		default:
 			break flags
 		}
 		args = args[1:]
+	}
+	if rootOverride != "" {
+		// Checked rather than trusted: a bad --root would otherwise
+		// surface as a file tree rooted in a directory that isn't there,
+		// several seconds after the mistake.
+		info, err := os.Stat(rootOverride)
+		switch {
+		case err != nil:
+			return cliResult{Err: fmt.Errorf("--root %s: %w", rootOverride, err)}
+		case !info.IsDir():
+			return cliResult{Err: fmt.Errorf("--root %s is not a directory", rootOverride)}
+		}
+		if len(args) == 0 {
+			// `ced --root .` is just `ced .` — the override with nothing
+			// to override is still a perfectly good way to open a project.
+			return cliResult{Action: actionEdit, RootDir: rootOverride}
+		}
+		res := resolveArgs(args)
+		if res.Err != nil || res.Action != actionEdit {
+			return res
+		}
+		res.RootDir = rootOverride
+		res.Remote, res.Wait = remoteFlag, waitFlag
+		return res
 	}
 	if remoteFlag || waitFlag {
 		if len(args) == 0 {
@@ -173,6 +214,8 @@ Usage:
   ced <directory>         Open a project directory.
   ced <file>              Open a file (its parent becomes the project root).
   ced --last              Reopen the most recently edited folder.
+  ced --root <dir> <file> Open the file with <dir> as the project root,
+                          instead of the file's own parent directory.
   ced --remote <file>     Open the file in a ced already running on that
                           project, then exit. Starts a normal editor when
                           nothing is running.

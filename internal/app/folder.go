@@ -351,20 +351,26 @@ func (a *App) menuOpenFolder() {
 // is the only moment ced is in a position to notice.
 func (a *App) menuRecentFolders() {
 	a.closeMenu()
-	if a.sessionStore == nil {
+	if a.sessionStore == nil && len(a.cats.recents) == 0 {
 		a.flash("No recent folders recorded yet")
 		return
 	}
 	var items []paletteItem
 	pruned := false
 	cur := session.Normalize(a.rootDir)
-	for _, root := range a.sessionStore.Recent() {
+	// have records every path this half of the list claims, so the host's
+	// half (below) can leave out the folders ced already knows about. The
+	// current root goes in first: it is skipped as a row, and it must not
+	// come back around as a cats one.
+	have := map[string]bool{cur: true}
+	for _, root := range a.recentFolderRoots() {
 		info, err := os.Stat(root)
 		if err != nil || !info.IsDir() {
 			a.sessionStore.Remove(root)
 			pruned = true
 			continue
 		}
+		have[root] = true
 		if root == cur {
 			continue
 		}
@@ -381,11 +387,38 @@ func (a *App) menuRecentFolders() {
 	if pruned {
 		a.saveSessionStore()
 	}
+	// Then the host's frecency list, after ced's own and marked as its own
+	// kind of row (catsfrecency.go). Places you have BEEN, under places you
+	// have EDITED — a wider, noisier list that turns a fresh ced into one
+	// that already knows your projects.
+	for _, dir := range a.catsRecentFolders(have) {
+		dir := dir
+		items = append(items, paletteItem{
+			label: catsRecentLabel(dir),
+			run:   func(app *App) { app.requestOpenFolder(dir) },
+		})
+	}
+	// Freshen the cache for the NEXT open. The picker runs on the main
+	// loop and path.list is a socket round trip, so this list is always
+	// one gesture behind by construction — see catsfrecency.go.
+	a.catsPollRecents()
 	if len(items) == 0 {
 		a.flash("No other recent folders — use ≡ → File → Open folder…")
 		return
 	}
 	a.openPicker("Recent folders", items)
+}
+
+// recentFolderRoots is the editor's own recent list, or nothing when the
+// session store never loaded. Split out so menuRecentFolders can keep its
+// pruning loop while still running with no store at all — which is the
+// state a ced inside cats can usefully be in, since the host's list stands
+// on its own.
+func (a *App) recentFolderRoots() []string {
+	if a.sessionStore == nil {
+		return nil
+	}
+	return a.sessionStore.Recent()
 }
 
 // menuToggleSession flips whether opening a folder reopens its tabs, and
@@ -418,6 +451,12 @@ func (a *App) sessionToggleLabel() string {
 // hasRecentFolders gates the Recent folders row: with nothing but the
 // current folder on record there is no list to show.
 func (a *App) hasRecentFolders() bool {
+	// The host's frecency list stands on its own: inside cats the picker
+	// is worth opening on the very first run, before this editor has been
+	// anywhere (catsfrecency.go).
+	if len(a.cats.recents) > 0 {
+		return true
+	}
 	if a.sessionStore == nil {
 		return false
 	}

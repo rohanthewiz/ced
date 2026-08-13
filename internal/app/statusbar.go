@@ -121,7 +121,19 @@ func (a *App) statusLeftSegments() []statusSegment {
 // runs least-vital first and the menu button, last, survives longest.
 func (a *App) statusRightSegments() []statusSegment {
 	var segs []statusSegment
+	// The sibling agent leads, and so is the first thing dropped on a
+	// narrow window: it is the only fact up here about a program that
+	// isn't this editor. Clicking it focuses that pane, so the editor
+	// stops being a place you have to LEAVE to find out what the agent two
+	// panes over is doing (catsagents.go). Empty outside cats, which is
+	// the whole Tier-0 story for this segment.
+	if s := a.catsAgentStatusSegment(); s != "" {
+		segs = append(segs, statusSegment{text: " " + s, onClick: (*App).catsFocusAgent})
+	}
 	if s := a.copilotStatusSegment(); s != "" {
+		if len(segs) > 0 {
+			segs = append(segs, statusSegment{text: " ·"})
+		}
 		segs = append(segs, statusSegment{text: " " + s,
 			onClick: func(app *App) { app.openMenuAtSection("Copilot") }})
 	}

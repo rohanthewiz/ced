@@ -34,6 +34,14 @@ const (
 	// SourceUser marks a theme loaded from ~/.config/ced/themes/*.json.
 	// A user theme whose name matches a built-in shadows it in place.
 	SourceUser Source = "user"
+	// SourceHost marks a theme synthesized from the terminal host's own
+	// palette (the cats multiplexer — see internal/app/catstheme.go). It
+	// exists on disk nowhere, lives only as long as the host connection,
+	// and is rebuilt whenever the host's theme changes; the constant is
+	// here rather than in the app so the picker's label and "Customize
+	// theme…" (which may only write files it owns) can tell the three
+	// origins apart.
+	SourceHost Source = "host"
 )
 
 // DefaultName is the theme ced starts in when config.json says nothing —

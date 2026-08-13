@@ -50,6 +50,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // catsEventKind discriminates the payload of a catsEvent. One event type for
@@ -66,6 +67,22 @@ const (
 	catsKindLink
 	// catsKindFrame carries one subscribed event from the stream.
 	catsKindFrame
+	// catsKindTheme carries the host's palette back from a config.get
+	// poll (catstheme.go), which is IO and so cannot run on the loop.
+	catsKindTheme
+	// catsKindRecents carries the host's frecency-ranked directory list
+	// back from a path.list poll (catsfrecency.go).
+	catsKindRecents
+	// catsKindPanes carries the session's pane list back from a pane.list
+	// poll — who the sibling agents are and what they are doing
+	// (catsagents.go).
+	catsKindPanes
+	// catsKindNotice is the generic "a background cats call finished"
+	// message: a phrase for the status bar and nothing else. Every
+	// multi-step control-socket action (a split, a spawn) is a goroutine,
+	// and this is how its outcome — success or the server's own error —
+	// gets in front of the user without each one inventing an event kind.
+	catsKindNotice
 )
 
 // catsEvent is the goroutine → main-loop message for everything cats. The
@@ -83,6 +100,11 @@ type catsEvent struct {
 	up bool // catsKindLink
 
 	frame cats.Event // catsKindFrame
+
+	theme   cats.ConfigTheme // catsKindTheme
+	recents []string         // catsKindRecents
+	panes   []cats.PaneInfo  // catsKindPanes
+	notice  string           // catsKindNotice
 }
 
 // When satisfies the tcell.Event interface.
@@ -118,6 +140,25 @@ type catsState struct {
 	// asking is why an unprompted question is on screen ("" when none).
 	// See the file comment.
 	asking string
+
+	// hostTheme is the palette synthesized from the host's own theme, and
+	// hostThemeOK says whether there is one. themePolledAt rate-limits the
+	// config.get poll that produces it. See catstheme.go.
+	hostTheme     theme.Spec
+	hostThemeOK   bool
+	themePolledAt time.Time
+
+	// recents is the host's frecency-ranked directory list, cached
+	// because the picker that shows it runs on the main loop and a
+	// socket round trip does not. See catsfrecency.go.
+	recents []string
+
+	// panes is the session's pane list — who the sibling agents are and
+	// what they are doing — cached for the same reason recents is, and
+	// read by a DRAW call (the status-bar segment), which makes the cache
+	// non-negotiable rather than merely tidy. See catsagents.go.
+	panes         []cats.PaneInfo
+	panesPolledAt time.Time
 
 	// lastState / lastStatus are what the reporter last sent. Reporting on
 	// change is not just economy: every report is a potential toast or
@@ -178,6 +219,16 @@ func (a *App) handleCatsEvent(e *catsEvent) {
 		a.cats.caps.Control = e.up
 	case catsKindFrame:
 		a.catsFrame(e.frame)
+	case catsKindTheme:
+		a.catsThemeArrived(e.theme)
+	case catsKindRecents:
+		a.cats.recents = e.recents
+	case catsKindPanes:
+		a.cats.panes = e.panes
+	case catsKindNotice:
+		if e.notice != "" {
+			a.flash(e.notice)
+		}
 	}
 }
 
@@ -192,6 +243,18 @@ func (a *App) catsReady(e *catsEvent) {
 	}
 	a.cats.client = cats.NewClient(e.caps.ControlSocket)
 	a.catsSubscribe()
+	// Read the host's palette straight away: theme unity that only arrives
+	// after the first focus change would look like a bug on the frame the
+	// user is actually looking at (catstheme.go).
+	a.catsPollTheme()
+	// And prime the frecency list, so the first "Recent folders…" the user
+	// opens already carries the host's places rather than acquiring them
+	// on the second try (catsfrecency.go).
+	a.catsPollRecents()
+	// Same for the sibling agents: the status bar draws from that cache,
+	// so an empty one is a bar that says nothing about the agent running
+	// two panes over (catsagents.go).
+	a.catsPollPanes()
 }
 
 // catsSubscribe starts the event stream, filtered to the events ced acts on.
@@ -204,7 +267,12 @@ func (a *App) catsSubscribe() {
 	scr := a.screen
 	a.cats.stream = cats.Subscribe(
 		a.cats.caps.ControlSocket,
-		cats.SubscribeFilter{Events: []string{cats.EventPaneNotify}},
+		// Two names, two consumers: pane_notify is a sibling agent asking
+		// for a human, focus_changed is the stand-in for the theme_changed
+		// event cats does not have yet (roadmap §5 item 3). Nothing else is
+		// subscribed — an idle editor should not be woken by every title
+		// change in the session.
+		cats.SubscribeFilter{Events: []string{cats.EventPaneNotify, cats.EventFocusChanged}},
 		func(ev cats.Event) {
 			_ = scr.PostEvent(&catsEvent{when: time.Now(), kind: catsKindFrame, frame: ev})
 		},
@@ -219,9 +287,24 @@ func (a *App) catsSubscribe() {
 // anything arriving here was asked for by an older or newer version of this
 // same list.
 func (a *App) catsFrame(ev cats.Event) {
+	if ev.Name == cats.EventFocusChanged {
+		// The theme poll's trigger. Focus moving is the cheapest available
+		// signal that a human has been driving the host, which is when a
+		// theme switch happens; catsPollTheme's own rate limit is what
+		// keeps a busy session from turning that into a poll loop.
+		a.catsPollTheme()
+		// Focus moving is also the cheapest hint that the session's shape
+		// changed — a new pane, a closed one — which is what the agent
+		// segment reads (catsagents.go).
+		a.catsPollPanes()
+		return
+	}
 	if ev.Name != cats.EventPaneNotify {
 		return
 	}
+	// A notify IS an agent state change, so the pane cache behind the
+	// status segment is stale by definition at this moment.
+	a.catsPollPanes()
 	var p cats.PaneNotifyEvent
 	if err := json.Unmarshal(ev.Data, &p); err != nil {
 		return
@@ -313,6 +396,91 @@ func (a *App) catsClose() {
 	a.cats.stream.Close()
 	a.cats.stream = nil
 	a.cats.hooks.Release()
+}
+
+// -----------------------------------------------------------------------------
+// The ≡ group and the leader namespace
+//
+// Both surfaces are DYNAMIC — empty outside cats — for the same reason:
+// every row here addresses a program that is not running in a plain
+// terminal, so a permanently-dimmed "Cats" section would be noise in the
+// menu of every ced user who has never heard of it. Inside cats the rows
+// appear, and they dim individually the ordinary way when their
+// precondition (Tier 1, a saved file, a sibling agent) is missing.
+// -----------------------------------------------------------------------------
+
+// catsMenuItems is the ≡ menu's "Cats" group, spliced in by
+// visibleMenuGroups. Returning nil is what hides the whole group.
+func (a *App) catsMenuItems() []menuItemDef {
+	if !a.cats.caps.InCats {
+		return nil
+	}
+	return []menuItemDef{
+		// The splits (catssplit.go). Arrows rather than "right"/"down"
+		// because the menu is scanned, not read, and the arrow says which
+		// half of the screen the second editor lands in.
+		{label: "Open in split →", shortcut: "esc C r", action: (*App).catsSplitRight, enabled: (*App).hasCatsSplit},
+		{label: "Open in split ↓", shortcut: "esc C d", action: (*App).catsSplitDown, enabled: (*App).hasCatsSplit},
+		// The frecency story's second half (catsfrecency.go). Its first
+		// half needs no row of its own: the host's places are merged into
+		// ≡ → File → Recent folders…, where a user already looks for them.
+		{label: "Open project in new cats tab…", shortcut: "esc C p", action: (*App).menuCatsOpenProject, enabled: (*App).hasCatsProjects},
+		// The sibling agents (catsagents.go). Focus first — it is the row
+		// with no precondition beyond an agent existing, and the one the
+		// status-bar segment's click duplicates.
+		{label: "Focus agent pane…", shortcut: "esc C a", action: (*App).catsFocusAgent, enabled: (*App).hasCatsAgents},
+		{label: "Send selection to agent…", shortcut: "esc C s", action: (*App).menuCatsSendSelection, enabled: (*App).hasCatsSelectionSend},
+		{label: "Ask cats chat about selection", shortcut: "esc C k", action: (*App).menuCatsAskChat, enabled: (*App).hasCatsSelectionSend},
+	}
+}
+
+// catsLeaderBindings is the Esc-C namespace's contents — the same
+// vocabulary as the ≡ group, since a leader key that does something the
+// menu cannot is a leader key nobody discovers.
+//
+// Dynamic (subFor) rather than static, so that outside cats the namespace
+// arms NOTHING and the next keystroke reaches the editor untouched.
+func catsLeaderBindings(a *App) []leaderBinding {
+	if !a.cats.caps.InCats {
+		return nil
+	}
+	return []leaderBinding{
+		{key: 'r', action: (*App).catsSplitRight, label: "Split right"},
+		{key: 'd', action: (*App).catsSplitDown, label: "Split down"},
+		{key: 'p', action: (*App).menuCatsOpenProject, label: "Project in new tab"},
+		{key: 'a', action: (*App).catsFocusAgent, label: "Focus agent pane"},
+		{key: 's', action: (*App).menuCatsSendSelection, label: "Send selection to agent"},
+		// 'k' rather than 'c' for chat: 'c' would be the obvious letter,
+		// and it is exactly the letter a user who meant Esc-c (code
+		// actions) would hit after a stray Shift. 'k' is what the flat
+		// table already uses for "talk to something" (the palette).
+		{key: 'k', action: (*App).menuCatsAskChat, label: "Ask cats chat"},
+	}
+}
+
+// catsLeaderHint is the one-line menu flashed when Esc-C arms. Outside
+// cats it is the namespace's only explanation of why it is empty — which
+// is the whole reason an empty namespace still flashes something.
+func catsLeaderHint(a *App) string {
+	if !a.cats.caps.InCats {
+		return "Cats — ced is not running in a cats pane"
+	}
+	if !a.catsTier1() {
+		return "Cats — the host's control socket is not answering"
+	}
+	return "Cats  r split → · d split ↓ · p project tab · a focus agent · s send selection · k ask chat"
+}
+
+// catsPostNotice hands one phrase from a background cats goroutine to the
+// status bar. It is the ONLY thing such a goroutine may do with a result —
+// the events-only rule — so every multi-step control-socket action ends in
+// a call to this rather than in a flash it is not on the right thread to
+// perform.
+func catsPostNotice(scr tcell.Screen, msg string) {
+	if scr == nil || msg == "" {
+		return
+	}
+	_ = scr.PostEvent(&catsEvent{when: time.Now(), kind: catsKindNotice, notice: msg})
 }
 
 // catsTier1 reports whether the full integration is available right now.

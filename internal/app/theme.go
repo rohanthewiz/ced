@@ -61,7 +61,12 @@ var themeConfigPathFn = userconfig.DefaultPath
 // doesn't cost the user their other themes.
 func (a *App) loadThemes() {
 	specs, errs := theme.Registry(themeDirFn())
-	a.themeSpecs = specs
+	// The host's own palette, synthesized (catstheme.go), leads the list
+	// when there is one: inside cats it is the theme of the room the user
+	// is sitting in. It is prepended here rather than inside the registry
+	// because internal/theme knows nothing about terminals — it reads
+	// built-ins and files, and this one is neither.
+	a.themeSpecs = append(a.catsHostThemeSpecs(specs), specs...)
 	if len(errs) > 0 {
 		a.flash("theme: " + errs[0].Error())
 	}
@@ -84,6 +89,10 @@ func (a *App) applyThemeName(name string, persist bool) {
 	}
 	a.setTheme(th, spec.Name)
 	if persist {
+		// Persisting IS pinning: the user has now answered the theme
+		// question, so the host-theme auto-select must stop answering it
+		// for them (catstheme.go, rule 2).
+		a.themePinned = true
 		if err := userconfig.SaveTheme(themeConfigPathFn(), spec.Name); err != nil {
 			a.flash("theme: " + err.Error())
 		}

@@ -276,3 +276,48 @@ func TestResolveArgs_MissingFileWithWait(t *testing.T) {
 		t.Fatalf("res = %+v, want Wait with OpenFile %q", res, target)
 	}
 }
+
+// TestResolveArgs_RootOverride pins the flag the cats split depends on
+// (internal/app/catssplit.go): a spawned sibling editor has to open the
+// PROJECT its parent is in, and the file path alone can only ever say
+// which directory the file sits in.
+func TestResolveArgs_RootOverride(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "internal", "app")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(sub, "x.go")
+	if err := os.WriteFile(file, []byte("package app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without it, the nested file roots at its own parent — the right
+	// guess for a human typing it, the wrong one for a program.
+	if res := resolveArgs([]string{file}); res.RootDir != sub {
+		t.Fatalf("bare file RootDir = %q, want %q", res.RootDir, sub)
+	}
+	// With it, the file still opens and the root is the project.
+	res := resolveArgs([]string{"--root", root, file})
+	if res.Err != nil {
+		t.Fatalf("Err = %v", res.Err)
+	}
+	if res.RootDir != root || res.OpenFile != file {
+		t.Fatalf("res = %+v, want root %q + file %q", res, root, file)
+	}
+	// With nothing after it, it is just another way to open a project.
+	if res := resolveArgs([]string{"--root", root}); res.Err != nil || res.RootDir != root || res.OpenFile != "" {
+		t.Fatalf("res = %+v, want a plain open of %q", res, root)
+	}
+	// And it is checked rather than trusted: a bad root would otherwise
+	// surface as a file tree rooted nowhere, seconds after the mistake.
+	if res := resolveArgs([]string{"--root"}); res.Err == nil {
+		t.Error("--root with no directory should be an error")
+	}
+	if res := resolveArgs([]string{"--root", filepath.Join(root, "nope"), file}); res.Err == nil {
+		t.Error("--root on a missing directory should be an error")
+	}
+	if res := resolveArgs([]string{"--root", file, file}); res.Err == nil {
+		t.Error("--root on a file should be an error")
+	}
+}

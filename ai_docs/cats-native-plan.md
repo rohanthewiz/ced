@@ -132,8 +132,11 @@ above, both found by reading the wire rather than by trying it:**
   **two-front-end** ask rather than a Mac-app one, and the browser half
   is the small half: widen one gate to a curated allowlist, since the
   encoder below it already emits `\x1b[<cp>;9u` for super (pinned by
-  cats' own encoder tests). Where the layer IS live today: kitty,
-  Ghostty and WezTerm, talking to ced directly.
+  cats' own encoder tests). **Closed the same day** — cats `77285f9`
+  forwards a curated set to kitty-protocol panes only (§5 item 2), so
+  browser-cats now carries ⌘S ⌘P ⌘⇧P ⌘F ⌘⇧F ⌘D ⌘G ⌘/ after all, with no
+  ced change. Where the layer is live: kitty, Ghostty and WezTerm talking
+  to ced directly, and browser-cats from that commit on.
 
 ---
 
@@ -829,24 +832,35 @@ the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords
    into the page; needs socket exposure + a permission stance (suggest a
    config flag and/or local-session-only) since remote panes could read the
    host clipboard. Unlocks §4 Tier 1 + native paste.
-2. **⌘ passthrough policy — in BOTH front ends, and the browser is the
-   easy half.** Established 2026-08-13 while building ced's side: the
-   browser gate at `cmd/catway/web/index.html` (`if (e.metaKey &&
-   !e.ctrlKey && e.code !== "KeyC" && e.code !== "KeyZ") return;`) means
-   *no* ⌘ chord but C and Z reaches a pane today, so this is not a
-   Mac-app-only gap. A "pane speaks kitty" policy — forward every
-   non-reserved ⌘ chord to kitty-protocol panes — needs (a) that gate
-   widened to a curated allowlist and (b) the mac app's Cocoa routing,
-   which is still the big half. Everything below the gate already works:
-   `mods()` sends meta as bit 8, `inputenc` maps it to ghostty's
-   `ModSuper`, and the encoder emits `\x1b[<cp>;9u` for a kitty-protocol
-   pane and nothing at all for a legacy one — so widening it cannot break
-   a shell. The curation is the actual design work: ⌘W/⌘T/⌘L are the
-   BROWSER's, and swallowing them to hand a pane a shortcut would be a
-   bad trade. Suggested first allowlist, the chords no browser needs and
-   ced already binds: ⌘S ⌘P ⌘⇧P ⌘F ⌘⇧F ⌘D ⌘/ ⌘G. Esc-leader carries
-   everything meanwhile, and ced's table is armed at Tier 1 already, so
-   the day the gate widens the chords light up with no ced release.
+2. ✅ **shipped cats-side 2026-08-13 (cats `77285f9`)** — **⌘ passthrough
+   policy.** Found while building ced's 5.2: the browser gate
+   (`cmd/catway/web/index.html`, `if (e.metaKey && !e.ctrlKey && e.code
+   !== "KeyC" && e.code !== "KeyZ") return;`) meant *no* ⌘ chord but C and
+   Z reached a pane, so this was never a Mac-app-only gap. Everything
+   below that gate already worked — `mods()` sends meta as bit 8,
+   `inputenc` maps it to ghostty's `ModSuper`, and the encoder emits
+   `\x1b[<cp>;9u` for a kitty-protocol pane and nothing at all for a
+   legacy one.
+
+   Shipped shape: a curated `CMD_TO_PANE` set (`KeyS KeyP KeyF KeyD KeyG
+   Slash`, matched on `e.code` so Shift rides along for the pane to
+   interpret and a non-QWERTY layout still works) forwarded **only to a
+   pane whose kitty flags are non-zero**. That second half is the part
+   that keeps it from being a regression: a legacy pane cannot receive a
+   super chord, so forwarding one there would swallow the user's browser
+   shortcut and send nothing. The browser could not tell the two apart, so
+   `pane_modes` now carries `kitty` (omitempty — an old client's absent
+   field reads as 0, i.e. today's behavior). ⌘W ⌘T ⌘L ⌘R ⌘N ⌘Q stay the
+   browser's on purpose.
+
+   Still open: the **mac app**, and it may already be free. Cocoa resolves
+   ⌘ *menu key equivalents* before the WebView, but catapp's menus claim
+   only ⌘H ⌥⌘H ⌘Q, Edit's ⌘Z ⇧⌘Z ⌘X ⌘C ⌘V ⌘A and View's ⌘+ ⌘= ⌘- ⌘0 —
+   none of which collides with `CMD_TO_PANE`, so those chords should fall
+   through the responder chain to the WebView and hit the same handler.
+   Worth confirming by hand; if it holds, the "needs native menu routing"
+   ask shrinks to "only for chords that collide with a menu item", which
+   is currently none of them.
 3. **`theme_changed` event** in the `events.subscribe` stream, payload = the
    theme section of `ConfigGetResult`. Small. Until then: poll on
    `focus_changed`.

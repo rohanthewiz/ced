@@ -160,3 +160,22 @@ still swallowed, so the menu's fuzzy search doesn't gain a stray letter).
   of an integration can be finished while the feature is still dark** —
   and a feature's status has to name the host's half. "Done" for 5.2 means
   done in kitty/Ghostty/WezTerm and ready in cats.
+
+## Addendum — the cats side, same session
+
+Asked for the gate change too, so it landed: cats `77285f9` (pushed),
+plus `cats-mobile fdd7b1e` re-pinning its generated wire layer. Written up
+in cats' own `ai_docs/claude_sessions/2026-0813-1304-cmd-chords-reach-editor-panes.md`.
+
+Shape, in one line: a curated `CMD_TO_PANE` set is forwarded **only to a
+pane whose kitty flags are non-zero**, which required teaching `pane_modes`
+to carry those flags — a legacy pane cannot receive a super chord, so
+forwarding one there would have swallowed the user's browser shortcut and
+sent nothing, which is worse than the status quo it was fixing.
+
+So ced's 5.2 is no longer dark in browser-cats. Two things remain worth a
+hand-check when convenient: the chords end to end in a browser (the
+running catway is the old binary, and restarting it would have killed this
+session), and the mac app, which looks free — none of `CMD_TO_PANE`
+collides with catapp's Cocoa menu equivalents, so those keys should reach
+the WebView untouched.

@@ -210,6 +210,16 @@ func (a *App) openGitConflictPicker() {
 		return
 	}
 	a.openPicker(gitConflictTitle(op, len(rels)), a.gitConflictItems(op, root, rels))
+	// A stopped cherry-pick/revert is the definition of an unasked-for
+	// question: the operation was supposed to finish on its own and now
+	// waits on a human. Marked even when reached from ≡ — the repo is
+	// mid-operation either way, and that is what the badge reports. See
+	// cats_glue.go.
+	reason := "conflicts need resolving" // no in-progress op, just conflicted files
+	if op != "" {
+		reason = op + " stopped on conflicts"
+	}
+	a.catsAsking(reason)
 }
 
 // gitConflictTitle names the state the picker is answering for. The

@@ -680,15 +680,25 @@ SHA**. This phase closes the specific named gaps:
 
 ### Phase 5 — Deep cats integration (~2–3 weeks, ced side)
 
-1. `internal/cats` package + `cats_glue.go` as specified. ~600 LOC.
+1. ✅ **done 2026-08-12** — `internal/cats` package + `cats_glue.go` as
+   specified (detect / client / events / hooks + the app-side seam). Tier
+   detection is split: a free env sniff inline at startup, the socket ping on
+   a goroutine posting one `catsEvent` back. Verified live against a running
+   catway: Tier 1, `ResolvePane("wF:p26") = 289`, `pane.list`, `config.get`
+   (theme `cats-green`, 33 colors), `path.list` (34 recents), and the event
+   stream connecting.
 2. **⌘ accelerator table** behind the cap (browser-cats first; Mac app after
    upstream routing). ~200 LOC.
-3. **Hook reporter — the editor can page you.** `blocked` + custom_status
-   when a modal question waits (clobber conflict, cherry-pick conflict,
-   trust prompt); `working` during long ops (project search, workspace
-   rename, agent turn); `idle` otherwise; release on exit. cats does
-   badge/toast/native/ntfy with zero further ced work. ~150 LOC.
-4. **Theme unity + identity.** Synthesize a "Cats (host)" theme from
+3. ✅ **done 2026-08-12** — **Hook reporter — the editor can page you.**
+   `blocked` + custom_status for a question the user did NOT ask for (disk
+   conflict, cherry-pick conflict, formatter trust, agent permission);
+   `working` for a chat turn or a project search; `idle` otherwise; release
+   on exit. Reported on transitions only. The reciprocal direction landed
+   with it: a `pane_notify` from a sibling pane reaches ced's status bar.
+   *Not yet marked as blocked* — a workspace rename, format-on-save, and the
+   other long ops that are currently invisible to the reporter.
+4. **Theme unity + identity.** ✅ *the OSC half is done* (`hostident.go`).
+   Synthesize a "Cats (host)" theme from
    `config.get` colors onto `internal/theme` slots, auto-selected unless the
    user pinned one; re-poll on `focus_changed` until a `theme_changed` event
    exists upstream. **Emit OSC 7 (cwd) + OSC 0/2 (title) — pull this to week
@@ -745,9 +755,14 @@ the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords
    `focus_changed`.
 4. **`ui.notify {title, body, actions}`** host-drawn toast. Nice-to-have;
    the hook's `custom_status` covers the attention story. Defer.
-5. *(Verify, not build)* the hook server grants full authority to arbitrary
-   sources — confirm `source:"ced"` gets badge/sidebar/toast/push per the
-   documented custom-source rules.
+5. ✅ *(Verified 2026-08-12, not built)* the hook server grants full authority
+   to arbitrary sources. A `pane.report_agent` from `source:"ced"` against a
+   live catway relabeled the target pane `agent: "ced", agent_state:
+   "blocked"` in `catctl panes`, and `pane.release_agent` handed it back
+   cleanly. The `cats:` prefix is what marks a source reserved (its state is
+   detection-driven and its hook state reports are dropped), so an
+   unprefixed name is both correct and necessary. Toast/push policy beyond
+   the sidebar was not exercised — it is cats-side configuration.
 6. *(Later, if splits feel good)* `pane.open_file` convention — cats asks
    the focused editor pane to open a path (inverse of `ced --remote`):
    "click a file anywhere in cats → opens in ced".
@@ -788,13 +803,25 @@ emission pulled forward to week one** (two escape sequences, instant
 cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
-**Progress:** Phases 1, 2, 3.1, 3.2, 4.1, 4.2, 4.3, 4.4 and 4.5 are done
-(all 2026-08-12). **Phase 4 is closed** — 4.6 (blame) is explicitly
-optional and unclaimed. Next is **Phase 5** (deep cats integration), with
-5.4's OSC 7 / title emission pulled to the front as planned.
+**Progress:** Phases 1, 2, 3.1, 3.2, 4.1–4.5, and **5.1, 5.3 plus 5.4's OSC
+half** are done (all 2026-08-12). **Phase 4 is closed** — 4.6 (blame) is
+explicitly optional and unclaimed. §5's item 5 is verified.
+
+The foundation is now in place — `internal/cats` speaks the control socket,
+the event stream, and the hook socket, and `cats_glue.go` holds the client,
+the tier, and this pane's id — so every remaining Phase-5 item is a consumer
+of it rather than new plumbing. Suggested next: **5.4's theme unity**
+(`config.get` already verified to return the host palette, and it wants a
+`focus_changed` subscription the stream can carry today), then **5.5 splits**
+(near-zero work: `pane.split` + spawn a sibling ced), then **5.7 frecency**
+(`path.list` already returns 34 recents here) and **5.8 agents as
+collaborators** (`pane.list` already reports sibling agent/state, and
+`pane_notify` is already subscribed). **5.2, the ⌘ table**, is independent of
+all of it.
 The two remaining Phase-3 items are small and unclaimed: 3.3 (hover on
-mouse dwell) is Tier-1 only and so really belongs with Phase 5, and 3.4
-(recent-files picker) is an hour's work whenever a breather is wanted.
+mouse dwell) is Tier-1 only and can now be built on this client, and 3.4
+(recent-files picker) is an hour's work whenever a breather is wanted —
+and it is the natural host for 5.7's frecency merge.
 
 ## 8. Verification
 

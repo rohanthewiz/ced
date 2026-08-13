@@ -112,6 +112,9 @@ func (a *App) startProjectSearch(query string) {
 
 	a.projectSearchSeq++
 	seq := a.projectSearchSeq
+	// Marked busy here and cleared on arrival, so "the editor is working"
+	// covers the whole scan rather than the instant it started.
+	a.projectSearchActive++
 	scr, root := a.screen, a.rootDir
 	a.flash(fmt.Sprintf("Searching %d files for %q…", len(paths), query))
 	go func() {
@@ -130,6 +133,12 @@ func (a *App) startProjectSearch(query string) {
 // in the meantime, and stealing the slot from a prompt they are typing
 // into would be worse than losing a search they can repeat.
 func (a *App) handleProjectSearch(e *projectSearchEvent) {
+	// Before the stale-generation drop below: a superseded scan finished
+	// too, and a count that only decremented on the paths that USE the
+	// result would climb forever as the user retyped their query.
+	if a.projectSearchActive > 0 {
+		a.projectSearchActive--
+	}
 	if e.seq != a.projectSearchSeq {
 		return
 	}

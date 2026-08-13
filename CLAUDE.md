@@ -116,6 +116,12 @@ internal/session/session.go   state.json: recent folders + per-folder tab sessio
 internal/app/folder.go        Open folder (restart), recent list, session record/restore
 internal/remote/remote.go     `ced --remote` / `--wait`: socket, root-based discovery
 internal/app/remote.go        The listener, the wait registry, the root guard, the ≡ row
+internal/app/hostident.go     OSC 7 cwd + OSC 2 title: the pane learns what you're editing
+internal/cats/detect.go       cats capabilities: env sniff (free) + control-socket ping
+internal/cats/client.go       Control socket: one call per connection, typed §7 verbs
+internal/cats/events.go       events.subscribe stream — reconnects forever, survives restarts
+internal/cats/hooks.go        Hook reporter: idle/working/blocked → cats badge/toast/push
+internal/app/cats_glue.go     Tier detection, the state reporter, sibling-agent notifications
 internal/app/gitcommitmsg.go  Commit the panel's selection + agent-drafted messages
 internal/app/gitlog.go        Git log panel: commit list + `git show` detail (Esc-L)
 internal/app/gitlogactions.go Git log verbs: cherry-pick, revert, reset, branch/tag, copies
@@ -1774,6 +1780,64 @@ House rules:
 - `remoteListenFn` is a package var; newTestApp leaves `remote.enabled`
   false and the transport tests stub `socketDirFn`, so no test can bind a
   socket a real client would then find.
+
+### The cats host integration (internal/cats + app/cats_glue.go)
+ced usually runs inside cats, the terminal multiplexer this editor is named
+after. The integration is a client for three of its surfaces: the control
+socket (unary JSON commands), the event stream that socket upgrades to, and
+the SEPARATE hook socket agents report their state on. Roadmap and phase
+plan: `ai_docs/cats-native-plan.md`. House rules:
+
+- **TWO TIERS, AND TIER 0 IS NOT A DEGRADED MODE — it is ced in any other
+  terminal.** Detection is `CATS_ENV=1` + `CATS_PANE_ID` + a control socket
+  that ANSWERS a ping (a socket file proves nothing; a crashed server leaves
+  one behind, and even a successful dial only proves something is
+  listening). **No feature may exist only at Tier 1 without a Tier-0 path.**
+  Every call site reads `if a.catsTier1() { … } else { fallback }`.
+- **The env sniff is free; the probe is IO.** `DetectEnv` runs inline at
+  startup, `Caps.Probe` runs on a goroutine and posts a `catsEvent` back. A
+  wedged host must never hold up the editor's first frame.
+- **Never import the cats module.** The wire structs in internal/cats are
+  hand-copied minimal mirrors of cats' `internal/app/command_vocab.go` and
+  `events.go`. ced has to stay buildable on a machine that has never heard
+  of cats, and a shared type package would make the editor's build depend on
+  the multiplexer's.
+- **Events only, as everywhere else.** The stream's callbacks run on the
+  reader goroutine and do exactly one thing: PostEvent. One event type
+  (`catsEvent{kind, …}`) so app.go's switch gains one case.
+- **The stream reconnects forever.** A unary call that fails is a feature
+  that didn't happen; a subscription that stays dead is a feature that
+  stopped working and never said so. Capped backoff, indefinitely, until
+  Close — and Close must interrupt a blocked read, which is why the live
+  connection is held under a mutex. **One json.Decoder spans the ack AND the
+  events**: a second decoder for the pump strands any event the server wrote
+  in the same breath as the ack, invisibly and forever.
+- **"Blocked" means a question the user did NOT ask for**, not "a modal is
+  open". They pressed Rename; they know. Blocked is the file that changed
+  underneath them, the agent asking permission, the formatter asking for
+  trust, the cherry-pick that stopped. Those sites call `catsAsking(phrase)`
+  AFTER opening the modal (openModal clears the mark on its way in), and the
+  mark clears itself when the modal slot empties. The phrase is what shows
+  up on a phone, so write it as one.
+- **Report on CHANGE only.** Every report is a potential toast or push, so
+  re-sending "working" per keystroke would get the whole channel muted.
+  `catsAfterEvent` runs LAST in the dispatch tail, after the hooks that can
+  raise the very question that blocks us.
+- **The hook seq is seeded from the clock, not from 1.** The server keeps a
+  per-source high-water mark ON THE PANE, which outlives the process; a
+  counter starting at 1 has every report from a restarted ced (a folder
+  switch alone rebuilds the App) silently dropped as stale. cats' own
+  shipped hooks use a wall-clock seq for the same reason. Seq is stamped at
+  CALL time, on the main loop, because the sends are fire-and-forget
+  goroutines that genuinely do arrive out of order.
+- **Source is `"ced"`, never `"cats:ced"`.** The `cats:` prefix names cats'
+  own built-in agent integrations, whose state is detection-driven and whose
+  hook state reports are deliberately ignored. Verified live: a custom
+  source takes real state authority for its pane, and `pane.release_agent`
+  hands it back.
+- The hook reporter is armed independently of the control client: different
+  sockets, and the attention story is the half that matters when you are not
+  looking at the screen.
 
 ### Navigation history (app/nav.go)
 Browser-style Go back / Go forward across files (≡ menu, Esc-o / Esc-O,

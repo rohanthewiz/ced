@@ -390,6 +390,10 @@ func (a *App) chatMaybeOpenPermission() {
 	a.chat.permModal = a.openPickerWithCancel(
 		a.chatAgent().name+" asks: "+title, items,
 		func(app *App) { app.chatDismissPermission(req) })
+	// The agent is stopped until this is answered, and the user may well
+	// have walked away expecting it to run — the case the host's
+	// notification story exists for. See cats_glue.go.
+	a.catsAsking(a.chatAgent().name + " needs an answer")
 }
 
 // chatAnswerPermission settles a request with the user's pick.

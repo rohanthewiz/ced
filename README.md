@@ -88,6 +88,17 @@ The goals, in order:
   menu; pick one and its instructions ride along with your next chat
   message. Read as-is, never executed. See
   [Skills](#9-skills-reusable-instructions-for-your-agent).
+- **At home in [cats](https://github.com/rohanthewiz/cats)** — inside
+  the cats multiplexer, ced names its own pane (the file you're editing,
+  its directory) and tells the host what it's doing: idle, working, or
+  waiting on a question you never asked for — a file that changed
+  underneath you, an agent asking permission, a formatter asking for
+  trust. cats turns that last one into a badge, a toast, or a push to
+  your phone, so you hear about it without watching the editor. It works
+  in reverse too: an agent in a neighbouring pane that needs you says so
+  in ced's status bar. Detected at startup and silently absent
+  everywhere else — in any other terminal ced is the editor it has
+  always been.
 - **Single binary, no CGO** — cross-compiled for macOS and Linux on
   amd64 and arm64. POSIX only: the embedded terminal panel needs
   job-control syscalls Windows doesn't provide.

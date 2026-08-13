@@ -263,6 +263,11 @@ func (a *App) conflictAfterEvent() {
 func (a *App) openConflictModal(c *diskConflict) {
 	c.prompted = true
 	a.openModal(&conflictModal{c: c})
+	// Nobody asked for this question — the file changed underneath them —
+	// so it earns a badge on the pane and, if the user is looking
+	// somewhere else, a notification. Marked AFTER openModal, which
+	// clears the mark on its way in. See cats_glue.go.
+	a.catsAsking("file changed on disk")
 }
 
 // focusConflictTab brings c's tab to the front. The compare panel and

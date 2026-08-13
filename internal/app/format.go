@@ -249,6 +249,12 @@ func (a *App) openFormatTrustPrompt(idx int, cfg *format.Config, argv []string) 
 	m.cancelHook = func(app *App) {
 		app.persistTrust(root, hash, false)
 	}
+	// A security question standing between the user and a completed save,
+	// so the host gets told the editor is blocked. The install prompt
+	// below is deliberately NOT marked: it is an offer, and declining it
+	// costs nothing — a push notification for it would be advertising.
+	// See cats_glue.go.
+	a.catsAsking("formatter trust")
 }
 
 // openFormatInstallPrompt asks whether to install the user's global

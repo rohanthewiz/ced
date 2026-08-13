@@ -853,6 +853,14 @@ type App struct {
 	// list over whatever they're doing now. See projectsearch.go.
 	projectSearchSeq int
 
+	// projectSearchActive counts scans currently off on a goroutine. A
+	// COUNT rather than a bool because a superseded run still finishes and
+	// still posts its event: every start is balanced by exactly one
+	// arrival, so the count returns to zero even when the user re-searches
+	// mid-scan. Read by anything that needs to know the editor is busy
+	// with something long (see cats_glue.go's state reporter).
+	projectSearchActive int
+
 	// tabScroll is the index of the leftmost tab DRAWN in the tab strip.
 	// Derived state, never a preference: layoutTabs re-derives it from
 	// the active tab and the available width on every frame. See
@@ -1139,6 +1147,14 @@ type App struct {
 	// a tab to close. See remote.go.
 	remote remoteState
 
+	// cats is the host-multiplexer integration: the capability probe, the
+	// control-socket client (nil below Tier 1), the event stream, and the
+	// hook reporter that lets the editor page the user through cats'
+	// notification story. The zero value is Tier 0 — an editor in any
+	// other terminal — so nothing here needs an "enabled" flag. See
+	// cats_glue.go and internal/cats.
+	cats catsState
+
 	// hostIdentWrite emits an escape sequence on the tty, identifying
 	// this editor to the hosting terminal/mux (OSC 7 cwd + OSC 2 title
 	// — see hostident.go). nil disables the feature entirely: New()
@@ -1261,6 +1277,13 @@ func New(rootDir string) (*App, error) {
 	// title names the restored active file rather than flashing the
 	// bare folder name for one frame.
 	a.hostIdentInit()
+	// And identify ourselves to the cats host, if we are in one: the env
+	// sniff is free, the socket probe rides a goroutine, and everything
+	// about this degrades to the Tier-0 editor you get in any other
+	// terminal. Beside hostIdentInit because they are the same act at two
+	// depths — the escape sequences say what file this is, the hook says
+	// what the editor is doing about it. See cats_glue.go.
+	a.catsInit()
 	// Kick off the project file index in the background so that by
 	// the time the user hits Esc-p (or ≡ → Find file) the modal can
 	// open with results already in hand. On a 50k-file repo this
@@ -1424,6 +1447,11 @@ func (a *App) Close() {
 	a.copilotShutdown()
 	a.chatShutdown()
 	a.mcpShutdown()
+	// Stop the cats event stream and hand the pane back before the tty
+	// work below: the release is a socket write that must not race a
+	// screen being finalized, and a pane still badged "ced" after ced
+	// exited is a lie the host has no way to correct.
+	a.catsClose()
 	// Give the terminal its previous title back (the pop matching
 	// hostIdentInit's push) while the tty is still ours.
 	a.hostIdentClose()
@@ -1599,6 +1627,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleMCPExit(e)
 	case *mcpToolResultEvent:
 		a.handleMCPToolResult(e)
+	case *catsEvent:
+		a.handleCatsEvent(e)
 	}
 	// After every dispatch, let the LSP layer notice buffer edits and
 	// (re-)arm its didChange debounce. Runs unconditionally because
@@ -1644,6 +1674,15 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// happens to, and the question is raised here — once that tab is
 	// frontmost and the modal slot is free. See reconcile.go.
 	a.conflictAfterEvent()
+	// LAST: the cats host's picture of what this editor is doing — idle,
+	// working, or blocked on a question the user didn't ask for. Last
+	// because the two hooks above it can RAISE that question (a deferred
+	// conflict, a queued agent permission), and a report taken before them
+	// would describe the editor as idle in the same pass that blocked it.
+	// Reported only on a transition, so the notification channel carries
+	// events a human would describe rather than one per keystroke. See
+	// cats_glue.go.
+	a.catsAfterEvent()
 }
 
 // workspaceChanged re-syncs every subsystem that mirrors on-disk

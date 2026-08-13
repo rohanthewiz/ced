@@ -1,5 +1,6 @@
 # Session: cats-native plan, Phase 5.4 / 5.5 / 5.7 / 5.8 — four consumers of one client
 
+- Session id: `bae506a2-92b7-442e-b7e1-c70cb768a1e4`
 - Date: 2026-08-12
 - Branch: `main`, feature commit `282fe51` (+ this doc)
 - Worked from the cats checkout (`~/projs/go/cats`) against the ced repo

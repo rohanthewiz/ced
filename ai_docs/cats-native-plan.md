@@ -112,6 +112,29 @@ every one keeps its Esc-leader/menu path. Never claim cats-reserved keys
 each pass-through needs native menu routing upstream (mapped in cats
 `ai_docs/claude_sessions/2026-0727-1618-…`); browser-cats works day one.
 
+**Built 2026-08-13 (`metakeys.go`), with two corrections to the paragraph
+above, both found by reading the wire rather than by trying it:**
+
+- **⌘E and ⌘click are not in the table.** ⌘E's picker does not exist yet
+  (3.4). ⌘click *cannot* exist: SGR mouse reports carry three modifier
+  bits — shift 4, meta/alt 8, ctrl 16 — and none of them is super, so
+  cats' encoder drops the Command modifier before writing the report and
+  tcell's SGR decoder has no ModMeta path to decode into. A ⌘+click is
+  byte-identical to a plain click. Go-to-definition stays Esc-d, and
+  ced's one modified click stays Alt+click (multicaret), which owns the
+  very bit ⌘ would have had to borrow. Retire this ask — it needs a
+  mouse protocol nobody implements.
+- **"browser-cats works day one" was wrong.** cats' front end forwards
+  only ⌘C and ⌘Z to the pane and returns early on every other Command
+  chord (`cmd/catway/web/index.html`: *"leave other Cmd shortcuts to the
+  browser"*), so at Tier 1 the table is armed but nothing reaches it —
+  in the browser as much as in the mac app. That makes §5 item 2 a
+  **two-front-end** ask rather than a Mac-app one, and the browser half
+  is the small half: widen one gate to a curated allowlist, since the
+  encoder below it already emits `\x1b[<cp>;9u` for super (pinned by
+  cats' own encoder tests). Where the layer IS live today: kitty,
+  Ghostty and WezTerm, talking to ced directly.
+
 ---
 
 ## 3. Phased roadmap
@@ -691,8 +714,23 @@ SHA**. This phase closes the specific named gaps:
    catway: Tier 1, `ResolvePane("wF:p26") = 289`, `pane.list`, `config.get`
    (theme `cats-green`, 33 colors), `path.list` (34 recents), and the event
    stream connecting.
-2. **⌘ accelerator table** behind the cap (browser-cats first; Mac app after
-   upstream routing). ~200 LOC.
+2. ✅ **done 2026-08-13** — **⌘ accelerator table** (`metakeys.go`): nine
+   chords (⌘S, ⌘P, ⌘⇧P, ⌘F, ⌘⇧F, ⌘W, ⌘D, ⌘/, ⌘G) behind a gate that is
+   Tier 1 **or** a self-identified kitty-protocol emulator (kitty, Ghostty,
+   WezTerm — iTerm2 deliberately excluded: it speaks the protocol but also
+   ships the Option-as-Meta setting this gate defends against, and no env
+   var separates the two). Command arrives as kitty's super bit, which
+   means the rune is UNSHIFTED with Shift in the modifiers (⌘⇧P is
+   `'p'+Shift+Meta`, not `'P'`), so `metaChord` folds both spellings into
+   one (rune, shift) pair. Two house rules are now enforced by test rather
+   than by discipline: nothing may be ⌘-only (every entry's action must
+   also be reachable from the Esc table or a ≡ row, checked by reflect
+   code pointer), and nothing may claim a cats-reserved chord. One
+   adjacent fix rode along: an unclaimed ⌘ chord is now SWALLOWED instead
+   of falling through to the editing switch, where it typed its letter
+   into the buffer — "⌘S didn't work" must never mean "⌘S typed an s".
+   See the corrections under §2's ⌘ layer for what was dropped (⌘E,
+   ⌘click) and why the Tier-1 half is armed but dark.
 3. ✅ **done 2026-08-12** — **Hook reporter — the editor can page you.**
    `blocked` + custom_status for a question the user did NOT ask for (disk
    conflict, cherry-pick conflict, formatter trust, agent permission);
@@ -791,10 +829,24 @@ the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords
    into the page; needs socket exposure + a permission stance (suggest a
    config flag and/or local-session-only) since remote panes could read the
    host clipboard. Unlocks §4 Tier 1 + native paste.
-2. **⌘ passthrough policy in the Mac app.** Rather than one-by-one native
-   menu items, a "pane speaks kitty" policy: forward all non-reserved ⌘
-   chords to kitty-protocol panes. Biggest ask; Esc-leader carries
-   everything meanwhile.
+2. **⌘ passthrough policy — in BOTH front ends, and the browser is the
+   easy half.** Established 2026-08-13 while building ced's side: the
+   browser gate at `cmd/catway/web/index.html` (`if (e.metaKey &&
+   !e.ctrlKey && e.code !== "KeyC" && e.code !== "KeyZ") return;`) means
+   *no* ⌘ chord but C and Z reaches a pane today, so this is not a
+   Mac-app-only gap. A "pane speaks kitty" policy — forward every
+   non-reserved ⌘ chord to kitty-protocol panes — needs (a) that gate
+   widened to a curated allowlist and (b) the mac app's Cocoa routing,
+   which is still the big half. Everything below the gate already works:
+   `mods()` sends meta as bit 8, `inputenc` maps it to ghostty's
+   `ModSuper`, and the encoder emits `\x1b[<cp>;9u` for a kitty-protocol
+   pane and nothing at all for a legacy one — so widening it cannot break
+   a shell. The curation is the actual design work: ⌘W/⌘T/⌘L are the
+   BROWSER's, and swallowing them to hand a pane a shortcut would be a
+   bad trade. Suggested first allowlist, the chords no browser needs and
+   ced already binds: ⌘S ⌘P ⌘⇧P ⌘F ⌘⇧F ⌘D ⌘/ ⌘G. Esc-leader carries
+   everything meanwhile, and ced's table is armed at Tier 1 already, so
+   the day the gate widens the chords light up with no ced release.
 3. **`theme_changed` event** in the `events.subscribe` stream, payload = the
    theme section of `ConfigGetResult`. Small. Until then: poll on
    `focus_changed`.
@@ -861,9 +913,9 @@ cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
 **Progress:** Phases 1, 2, 3.1, 3.2, 4.1–4.5 and **5.1, 5.3, 5.4, 5.5, 5.7**
-are done (2026-08-12); **5.6 and the last of 5.8** landed 2026-08-13.
-**Phase 4 is closed** — 4.6 (blame) is explicitly optional and unclaimed.
-§5's item 5 is verified.
+are done (2026-08-12); **5.6, the last of 5.8, and 5.2** landed 2026-08-13.
+**Phases 4 and 5 are closed** — 4.6 (blame) is explicitly optional and
+unclaimed. §5's item 5 is verified.
 
 Every Phase-5 consumer now shares one shape, and it is worth stating once
 because the next one should follow it: **poll on a goroutine, cache on the
@@ -880,11 +932,23 @@ command at it and waiting for the marker it prints. The wait is what turns
 "the editor typed something somewhere" into a result the hook can page a
 human about.
 
-**What is left in Phase 5: 5.2 (the ⌘ table) alone**, independent of
-everything and gated on the Mac app's routing. The two remaining Phase-3
-items are small and unclaimed: 3.3 (hover on mouse dwell) is Tier-1 only and
-can be built on this client, and 3.4 (recent-files picker) is an hour's work
-whenever a breather is wanted.
+5.2 added a third, and it is the one to keep in mind before promising a
+Tier-1 gesture: **the ced side of an integration can be finished while the
+feature is still dark.** The ⌘ table is written, tested and armed inside
+cats, and not one of its chords can arrive there until cats' own front end
+stops holding them back. That is the correct place to stop — the
+alternative is either waiting on another repo before writing anything, or
+shipping a gate that has to be re-opened by a release. It is also the
+reason a feature's status has to name the HOST's half: "done" here means
+done in kitty/Ghostty/WezTerm and ready in cats.
+
+**Phase 5 is closed.** What remains anywhere in the roadmap is small and
+unclaimed: 3.3 (hover on mouse dwell, Tier-1 only, builds on this client),
+3.4 (recent-files picker — an hour's work, and the only thing standing
+between ⌘E and its row in `metakeys.go`), 4.6 (blame, optional), and
+Phase 2's `⚠` tab marker re-raising a deferred conflict prompt. Phase 6 is
+entirely upstream-gated; §5 item 2 is now its critical path, and its
+browser half is the small half.
 
 ## 8. Verification
 

@@ -2303,6 +2303,16 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// shortcut: Cmd never collides with tmux prefixes or terminal flow
 	// control, which is what the no-Ctrl rule actually protects.
 	if ev.Key() == tcell.KeyRune && ev.Modifiers()&tcell.ModMeta != 0 {
+		// The ⌘ accelerator table (metakeys.go) gets first refusal, for
+		// the same reason the leader table above does: it is a global
+		// vocabulary, so ⌘S must save whether the keyboard currently
+		// belongs to the editor, the chat composer or the terminal
+		// panel — all of which return early below. It can never shadow
+		// the three chords handled here: c/v/z are on its reserved list
+		// and a test pins that they stay off it.
+		if a.metaAccelFire(ev) {
+			return
+		}
 		// An armed compare panel claims Cmd+V — the internal clipboard is
 		// the only one ced can READ (OSC 52 is write-only), so this is
 		// how a copy made inside the editor becomes the old side.
@@ -2356,6 +2366,18 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 			a.menuRedo()
 			return
 		}
+		// A Command chord is never TEXT. Anything still unclaimed here —
+		// a chord this build doesn't bind (⌘T, ⌘N), or one the
+		// accelerator gate deliberately refused because the host can't
+		// be trusted to distinguish Command from Meta — is swallowed
+		// rather than allowed to fall through to the editing switch
+		// below, where KeyRune inserts the rune. Without this, pressing
+		// ⌘S in a terminal ced doesn't recognize types an "s" into the
+		// user's code, which is the one outcome nobody wants from a
+		// shortcut that "didn't work". ModAlt is deliberately NOT
+		// treated this way: Option-as-Meta typists insert real
+		// characters with it (see the Alt-leader note above).
+		return
 	}
 
 	// While the menu is open: Down/Up move the highlight, Enter

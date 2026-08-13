@@ -2,9 +2,11 @@
 
 - Session id: `ed2482f7-91e8-4d6d-a0aa-1600345c3302`
 - Date: 2026-08-13
-- Branch: `main`
+- Branch: `main`, commits `684c95d` (the feature) and `4d10f88` (plan +
+  this doc's addendum)
 - Worked from the cats checkout (`~/projs/go/cats`) against the ced repo
-  (`~/projs/go/ced`), which is where every change landed.
+  (`~/projs/go/ced`), where the feature landed. The addendum at the end
+  covers the second half of the session, which landed in cats itself.
 - Plan: `ai_docs/cats-native-plan.md` §Phase 5 — **5.2 now ✅, so Phase 5
   is closed.**
 - Predecessor: `2026-0813-1218-cats-native-phase5-6.md`
@@ -69,7 +71,8 @@ The curation is the real work and it is a cats-side product call: ⌘W, ⌘T
 and ⌘L belong to the BROWSER, and swallowing them to hand a pane a
 shortcut is a bad trade. The plan now suggests a first allowlist of the
 chords no browser needs and ced already binds: ⌘S ⌘P ⌘⇧P ⌘F ⌘⇧F ⌘D ⌘/ ⌘G.
-**Not done — it is a change to the other repo and it is the user's call.**
+**Left undone here — a change to the other repo and the user's call.**
+(Asked for immediately after, and done: see the addendum.)
 
 ## The design
 

@@ -1095,3 +1095,61 @@ func TestDirtyButtonAt_HitsAndMisses(t *testing.T) {
 		}
 	}
 }
+
+// TestConfirmModal_MultiLineBody pins the extension that lets a Yes/No
+// dialog say more than fits on one line: the modal grows a row per extra
+// line, the button row rides down with it instead of being drawn over,
+// and the one-line spelling is byte-for-byte the layout it always had.
+func TestConfirmModal_MultiLineBody(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+
+	one := &confirmModal{message: "just the one line"}
+	_, oneY, _, oneH := one.rect(a)
+	if oneH != confirmModalHeight {
+		t.Errorf("one-line height = %d, want the historical %d", oneH, confirmModalHeight)
+	}
+	noOne, yesOne := one.buttons(a)
+	if noOne.y != oneY+5 || yesOne.y != oneY+5 {
+		t.Errorf("one-line buttons at y=%d/%d, want the historical %d", noOne.y, yesOne.y, oneY+5)
+	}
+
+	three := &confirmModal{lines: []string{"a", "b", "c"}}
+	_, threeY, _, threeH := three.rect(a)
+	if threeH != confirmModalHeight+2 {
+		t.Errorf("three-line height = %d, want %d", threeH, confirmModalHeight+2)
+	}
+	noThree, _ := three.buttons(a)
+	if noThree.y != threeY+7 {
+		t.Errorf("three-line buttons at y=%d, want %d (clear of the body)", noThree.y, threeY+7)
+	}
+	// The body rows are 4, 5, 6 relative to the frame; the buttons must
+	// start after them or the last line is painted over.
+	if noThree.y <= threeY+4+2 {
+		t.Errorf("buttons at y=%d overlap the body ending at %d", noThree.y, threeY+6)
+	}
+}
+
+// TestConfirmModal_BodyAccessor pins which body the drawer reads: lines
+// when a caller supplied them, the single message otherwise. One
+// accessor is what keeps rect() and draw() from disagreeing about how
+// tall the body is.
+func TestConfirmModal_BodyAccessor(t *testing.T) {
+	msg := &confirmModal{message: "solo"}
+	if got := msg.confirmBody(); len(got) != 1 || got[0] != "solo" {
+		t.Errorf("message body = %v, want [solo]", got)
+	}
+	if got := msg.confirmBodyRows(); got != 1 {
+		t.Errorf("message body rows = %d, want 1", got)
+	}
+	multi := &confirmModal{lines: []string{"one", "two"}}
+	if got := multi.confirmBody(); len(got) != 2 {
+		t.Errorf("lines body = %v, want two rows", got)
+	}
+	if got := multi.confirmBodyRows(); got != 2 {
+		t.Errorf("lines body rows = %d, want 2", got)
+	}
+	// An empty modal still reserves the row the drawer expects.
+	if got := (&confirmModal{}).confirmBodyRows(); got != 1 {
+		t.Errorf("empty body rows = %d, want 1", got)
+	}
+}

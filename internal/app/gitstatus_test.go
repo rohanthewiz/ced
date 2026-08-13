@@ -541,3 +541,70 @@ func TestLoadGitHasStash(t *testing.T) {
 		t.Fatal("non-repo / empty root must report no stash")
 	}
 }
+
+// TestIsPorcelainConflict pins the seven-code unmerged table. The two
+// same-letter pairs are the ones a "does either column say U?" test
+// quietly loses: AA is what two branches creating the same file looks
+// like, and it is the common case, not an exotic one.
+func TestIsPorcelainConflict(t *testing.T) {
+	conflicts := []string{"UU", "AU", "UA", "DU", "UD", "AA", "DD"}
+	for _, xy := range conflicts {
+		if !isPorcelainConflict(xy[0], xy[1]) {
+			t.Errorf("%s should read as unmerged", xy)
+		}
+	}
+	clean := []string{"M ", " M", "MM", "A ", "R ", "??", "!!", "D ", " D", "AM"}
+	for _, xy := range clean {
+		if isPorcelainConflict(xy[0], xy[1]) {
+			t.Errorf("%q should NOT read as unmerged", xy)
+		}
+	}
+}
+
+// TestConflictPorcelainSet pins the extraction: only unmerged lines
+// contribute, paths come back absolute against the toplevel, and an
+// ordinary dirty repo yields nothing — the flag that lights the
+// "Resolve conflicts…" row must stay dark for the common case.
+func TestConflictPorcelainSet(t *testing.T) {
+	out := []byte("UU both.go\nA  staged.go\n M dirty.go\n?? new.go\nAA added-twice.go\n")
+	got := conflictPorcelainSet(out, "/repo")
+	want := map[string]bool{
+		filepath.Join("/repo", "both.go"):        true,
+		filepath.Join("/repo", "added-twice.go"): true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("conflicted = %v, want %v", sortedKeys(got), sortedKeys(want))
+	}
+	for p := range want {
+		if !got[p] {
+			t.Errorf("missing conflicted path %s (got %v)", p, sortedKeys(got))
+		}
+	}
+	if n := len(conflictPorcelainSet([]byte(" M a.go\n?? b.go\n"), "/repo")); n != 0 {
+		t.Errorf("a merely dirty repo reported %d conflicts, want 0", n)
+	}
+}
+
+// TestLoadGitStatus_Conflicted is the end-to-end half: a real conflicted
+// repo must come back through the snapshot, because that field is what
+// gates the menu row on every draw.
+func TestLoadGitStatus_Conflicted(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	writeCommit(t, repo, "f.txt", "one\ntwo\nthree\n", "base")
+	gitRun(t, repo, "checkout", "-q", "-b", "side")
+	writeCommit(t, repo, "f.txt", "one\nSIDE\nthree\n", "side")
+	gitRun(t, repo, "checkout", "-q", "main")
+	writeCommit(t, repo, "f.txt", "one\nMAIN\nthree\n", "main")
+	gitRunAllowFail(t, repo, "merge", "side")
+
+	st := loadGitStatus(repo)
+	if !st.ConflictedFiles[filepath.Join(repo, "f.txt")] {
+		t.Errorf("conflicted set = %v, want f.txt", sortedKeys(st.ConflictedFiles))
+	}
+
+	gitRun(t, repo, "merge", "--abort")
+	if n := len(loadGitStatus(repo).ConflictedFiles); n != 0 {
+		t.Errorf("after abort: %d conflicted files, want 0", n)
+	}
+}

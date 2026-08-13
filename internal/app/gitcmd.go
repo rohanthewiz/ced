@@ -25,6 +25,7 @@
 package app
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -35,11 +36,19 @@ import (
 // goroutine to the main loop: the human-readable label for the status
 // flash, the exit error (nil on success), and the combined output for
 // the failure modal.
+//
+// onFail, when set, gets first refusal on a FAILED command and reports
+// whether it handled the outcome; returning false falls through to the
+// usual error modal. It rides on the event rather than on App so two
+// commands in flight can't claim each other's handler. The closure is
+// built on the main loop and only ever called there — the goroutine
+// carries it, it never runs it.
 type gitCmdDoneEvent struct {
 	when   time.Time
 	label  string
 	err    error
 	output []byte
+	onFail func(*App, *gitCmdDoneEvent) bool
 }
 
 // When satisfies the tcell.Event interface.
@@ -50,16 +59,63 @@ func (e *gitCmdDoneEvent) When() time.Time { return e.when }
 // background job here; a dropped event (screen shutting down) just
 // means the result is never reported.
 func (a *App) runGitCmd(label string, args ...string) {
+	a.runGitCmdHook(label, nil, args...)
+}
+
+// runGitCmdHook is runGitCmd for a caller that wants to answer its own
+// failures. onFail runs on the main loop when the command exits nonzero;
+// returning true means "handled, say no more" and suppresses the error
+// modal, false falls through to it unchanged.
+//
+// The one caller today is the cherry-pick / revert pair: a conflict is a
+// nonzero exit whose right response is a picker offering the way out
+// (gitconflict.go), not a wall of git's stderr — but a cherry-pick that
+// failed for any OTHER reason ("bad revision", "your local changes would
+// be overwritten") still wants exactly that wall, so the hook decides
+// per outcome rather than the call site deciding up front.
+func (a *App) runGitCmdHook(label string, onFail func(*App, *gitCmdDoneEvent) bool, args ...string) {
+	a.runGitCmdEnv(label, nil, onFail, args...)
+}
+
+// runGitCmdEnv is the full form: an optional child environment on top of
+// the failure hook. A nil env inherits ced's own, which is what every
+// caller but the conflict resolver wants — see gitNoEditorEnv for the
+// one that doesn't.
+func (a *App) runGitCmdEnv(label string, env []string, onFail func(*App, *gitCmdDoneEvent) bool, args ...string) {
 	if a.screen == nil || a.rootDir == "" {
 		return
 	}
 	scr := a.screen
 	root := a.rootDir
 	go func() {
-		cmdArgs := append([]string{"-C", root}, args...)
-		out, err := exec.Command("git", cmdArgs...).CombinedOutput()
-		_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out})
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		_ = scr.PostEvent(&gitCmdDoneEvent{
+			when: time.Now(), label: label, err: err, output: out, onFail: onFail,
+		})
 	}()
+}
+
+// gitNoEditorEnv is the child environment for a git command that would
+// otherwise try to open the commit-message editor — `merge --continue`
+// always does, and the other --continue verbs do whenever the sequencer
+// recorded an edit. A TUI cannot hand its terminal to $EDITOR mid-frame,
+// so the child gets an editor that succeeds without writing anything,
+// which git reads as "accept the message as prepared".
+//
+// It has to be GIT_EDITOR in the ENVIRONMENT, and the two nearer-looking
+// spellings are both wrong. `--continue --no-edit` git rejects outright
+// as conflicting options (verified against git 2.x). `-c
+// core.editor=true` loses to an inherited GIT_EDITOR, which is exactly
+// what a user who set one in their shell profile has — so the override
+// would work on the developer's machine and fail on theirs.
+//
+// os.Environ() is copied rather than extended in place because setting
+// Cmd.Env at all REPLACES the inherited environment; a bare
+// []string{"GIT_EDITOR=true"} would run git without PATH or HOME.
+func gitNoEditorEnv() []string {
+	return append(os.Environ(), "GIT_EDITOR=true")
 }
 
 // runGitCmdSeq runs several git subcommands in order on ONE goroutine,
@@ -69,6 +125,14 @@ func (a *App) runGitCmd(label string, args ...string) {
 // command to see the first one's result — firing two runGitCmds would
 // race them, and reporting two flashes for one action reads as a bug.
 func (a *App) runGitCmdSeq(label string, cmds [][]string) {
+	a.runGitCmdSeqEnv(label, nil, cmds)
+}
+
+// runGitCmdSeqEnv is runGitCmdSeq with a child environment, on the same
+// terms as runGitCmdEnv: nil inherits ced's own. The stage-then-continue
+// row in the conflict picker is the caller — its second command is a
+// --continue, and so needs the editor neutered.
+func (a *App) runGitCmdSeqEnv(label string, env []string, cmds [][]string) {
 	if a.screen == nil || a.rootDir == "" || len(cmds) == 0 {
 		return
 	}
@@ -76,8 +140,9 @@ func (a *App) runGitCmdSeq(label string, cmds [][]string) {
 	root := a.rootDir
 	go func() {
 		for _, args := range cmds {
-			cmdArgs := append([]string{"-C", root}, args...)
-			out, err := exec.Command("git", cmdArgs...).CombinedOutput()
+			cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+			cmd.Env = env
+			out, err := cmd.CombinedOutput()
 			if err != nil {
 				_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out})
 				return
@@ -96,6 +161,12 @@ func (a *App) runGitCmdSeq(label string, cmds [][]string) {
 // switch) are exactly what the user needs to read.
 func (a *App) handleGitCmdDone(e *gitCmdDoneEvent) {
 	if e.err != nil {
+		// The caller's own handler first — a conflicted cherry-pick is a
+		// failure with a UI of its own. Anything it declines lands in the
+		// generic modal exactly as before.
+		if e.onFail != nil && e.onFail(a, e) {
+			return
+		}
 		a.openInfo("Git failed: "+e.label, errorBodyLines(e.err, e.output, "… (truncated)"))
 		return
 	}

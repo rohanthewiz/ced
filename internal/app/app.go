@@ -308,6 +308,12 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Search history…", shortcut: "esc S", action: (*App).menuGitLogSearch, enabled: (*App).hasGitRepo},
 			// Same keyboard-twin rule for the log panel's Actions ▾ button.
 			{label: "Git log actions", action: (*App).menuGitLogActions, enabled: (*App).hasGitLogOpen},
+			// The way back into a conflict picker that was dismissed —
+			// and the only way into one for a conflict ced never started
+			// (a `stash pop`, or a rebase run in the terminal beside it).
+			// Dim on a clean repo, which is the overwhelming case, so the
+			// row doubles as a signal that something is parked.
+			{label: "Resolve conflicts…", action: (*App).menuGitResolveConflicts, enabled: (*App).hasGitConflict},
 		}},
 		// Diff viewer (compare.go). Its own group rather than rows under
 		// Git, because none of it needs a repository: the sources are the
@@ -980,6 +986,13 @@ type App struct {
 	gitHasStash    bool
 	gitStagedFiles map[string]bool
 
+	// gitConflicted mirrors the same snapshot's unmerged paths — the
+	// repo is parked mid-cherry-pick / revert / merge / rebase with
+	// files still to resolve. A field for the same reason as the flags
+	// above: it gates the "Resolve conflicts…" menu row, whose enabled()
+	// runs on every menu draw. See gitconflict.go.
+	gitConflicted map[string]bool
+
 	// gitUpstream / gitAhead / gitBehind / gitHasRemote mirror the
 	// tracking half of the same snapshot: HEAD's upstream in short form
 	// ("origin/main"), the commit distance either way, and whether the
@@ -1311,6 +1324,7 @@ func (a *App) refreshGitStatus() {
 	a.gitHasStaged = st.HasStaged
 	a.gitHasStash = st.HasStash
 	a.gitStagedFiles = st.StagedFiles
+	a.gitConflicted = st.ConflictedFiles
 	// The tracking facts follow the same snapshot, including the reset
 	// on a non-repo: a stale "↑3" outliving the folder it described
 	// would be a status bar lying about a repo the user has left.
@@ -2473,8 +2487,12 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// The problems panel's rows carry their own verbs (quick fix,
 		// go to, copy), so it claims the gesture before the editor menu
 		// — which would otherwise answer for a click that never landed
-		// in the editor at all.
+		// in the editor at all. The git log's commit rows claim it on
+		// exactly the same grounds.
 		if a.tryProblemsContextClick(x, y) {
+			return
+		}
+		if a.tryGitLogContextClick(x, y) {
 			return
 		}
 		if a.tryEditorContextClick(x, y) {

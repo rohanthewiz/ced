@@ -460,7 +460,75 @@ SHA**. This phase closes the specific named gaps:
    land). Filtered rows keep full behavior — click = per-commit diff,
    right-click = actions — so "search history, then cherry-pick the hit" is
    one flow. ~300 LOC.
-3. **Cherry-pick / revert polish.** (a) Right-click a log row opens the
+3. **Cherry-pick / revert polish.** — ✅ done 2026-08-12
+   New `gitconflict.go` + `gitconflict_test.go`, plus the right-click
+   surface and the confirms in `gitlogactions.go` (~1000 LOC incl. tests).
+   All three parts as specified. Deviations and findings, all deliberate:
+   - **(a) The anchored menu reuses `editorContextModal`**, the chassis
+     the problems panel already borrowed, rather than teaching the fuzzy
+     picker to anchor: a right-click has named its subject by where it
+     landed, so a query field would ask a question the gesture just
+     answered. Rows come from `gitLogActionItems` through a small
+     `contextItemsFromPalette` adapter, so the two doors cannot drift
+     apart. Right-clicking a commit row SELECTS it first; the detail pane
+     opens the menu against the standing selection (it has no row to
+     re-aim at); the header and search bar swallow the gesture rather
+     than escalating to the ≡ menu.
+   - **(b) The confirms needed a multi-line body.** `confirmModal`'s
+     single centered line is 50 cells and silently byte-sliced anything
+     longer — so the new `openConfirmLines` grows the modal a row per
+     line and rides the button row down with it. Found on the way: the
+     PRE-EXISTING `reset --hard` confirm, the most destructive verb in
+     the panel, was an 80-character sentence being cut mid-warning. Fixed
+     to two lines. The truncation is now `elide` (rune-safe, and marks
+     the cut) because commit subjects reach this dialog.
+   - **(c) The conflict picker's rows are a safety gradient**: open (and
+     one row per file, so the picker also answers "which files?"),
+     then resolve, then abort last behind its own confirm. The default
+     row can therefore only ever open a file.
+   - **"Resolved" means the INDEX says so, not that the markers are
+     gone.** git refuses `--continue` while any path is unmerged, so the
+     marker scan only decides which files are safe to `git add` — staging
+     a file that still contains `<<<<<<<` is how conflict markers get
+     committed. When every file is marker-free, staging and continuing
+     collapse into one row via `runGitCmdSeq`.
+   - **The operation is re-derived from the repo on every open**, never
+     remembered from the command that failed — the picker is reachable
+     long afterwards, and a remembered verb would offer
+     `cherry-pick --abort` for a rebase started in a terminal. The
+     detection table covers merge and rebase for free, so a `stash pop`
+     conflict or a terminal rebase gets the same surface.
+   - **`--continue` needs `GIT_EDITOR=true` in the ENVIRONMENT**, which
+     cost a new `runGitCmdEnv` / `runGitCmdSeqEnv` pair. Both
+     nearer-looking spellings were tested and fail: git rejects
+     `--continue --no-edit` as conflicting options, and `-c
+     core.editor=true` loses to an inherited `GIT_EDITOR` — so it would
+     work on the developer's machine and fail on a user's.
+   - **`runGitCmdHook`** is how a conflict is caught: the failure hook
+     rides on the done-event (so two commands in flight can't claim each
+     other's) and claims the failure ONLY when the repo is left
+     mid-operation — "bad revision" still gets the error modal with git's
+     own words. It also refreshes the tree, which the failure path never
+     did, so the gutters stop describing the pre-conflict work tree.
+   - **`git add` gets ABSOLUTE paths.** git reports unmerged paths
+     relative to the work-tree root while ced runs git with `-C rootDir`,
+     and rootDir is routinely a subdirectory of the repo — the relative
+     spelling would silently stage the wrong thing. Pinned by a test that
+     opens the repo from a subdirectory.
+   - **Entry points**: the right-click, and a new ≡ Git row "Resolve
+     conflicts…" gated on the status snapshot's new `ConflictedFiles`
+     set (read out of porcelain the snapshot already had, so the
+     predicate stays a fork-free field read).
+   - Tier 1 `blocked` reporting is left to Phase 5.3, which builds the
+     reporter; the hook point is marked in `gitConflictFailHook`.
+   Verified against real repos: a cherry-pick and a revert both stopped
+   on conflict, the marker scan flipping as the file is fixed, and
+   `--continue` actually finishing the cherry-pick — plus a merge whose
+   `--continue` proved that git really does launch the editor there.
+
+   The original spec follows.
+
+   (a) Right-click a log row opens the
    existing `gitLogActionItems` picker **at the pointer** (Tier 1;
    `Actions ▾` fallback Tier 0). (b) Confirm modals for cherry-pick/revert
    naming the commit subject + target branch (they currently run
@@ -600,13 +668,13 @@ emission pulled forward to week one** (two escape sequences, instant
 cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
-**Progress:** Phases 1, 2, 3.1, 3.2, 4.1 and 4.2 are done (all 2026-08-12).
-Next is **Phase 4.3 — cherry-pick / revert polish** (pointer-anchored log
-actions, confirm modals naming the commit, and the conflict picker), then
-4.4–4.5. The two remaining Phase-3 items are small and unclaimed: 3.3
-(hover on mouse dwell) is Tier-1 only and so really belongs with Phase 5,
-and 3.4 (recent-files picker) is an hour's work whenever a breather is
-wanted.
+**Progress:** Phases 1, 2, 3.1, 3.2, 4.1, 4.2 and 4.3 are done (all
+2026-08-12). Next is **Phase 4.4 — the one-gesture pre-commit survey**
+(walk mode through every changed file's diff, reviewed checkmarks, hunk
+verbs, ending on the commit-message field), then 4.5 (`commitMsgTrailer`).
+The two remaining Phase-3 items are small and unclaimed: 3.3 (hover on
+mouse dwell) is Tier-1 only and so really belongs with Phase 5, and 3.4
+(recent-files picker) is an hour's work whenever a breather is wanted.
 
 ## 8. Verification
 

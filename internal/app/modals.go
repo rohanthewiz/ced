@@ -257,6 +257,11 @@ func (m *promptModal) draw(a *App) {
 // format-trust prompt can react to a negative answer. The info flag
 // flips it into a single-button "OK" report (multi-line body in lines)
 // for passive output like a failed custom action's stderr.
+//
+// The body is either message (one centered line) or lines (several,
+// still centered) — see openConfirmLines for why a Yes/No dialog ever
+// needs more than one. The modal grows a row per extra line and the
+// button row rides down with it, so both spellings share one layout.
 type confirmModal struct {
 	title      string
 	message    string
@@ -277,6 +282,43 @@ func (a *App) openConfirm(title, message string, callback func(*App)) *confirmMo
 	m := &confirmModal{title: title, message: message, callback: callback}
 	a.openModal(m)
 	return m
+}
+
+// openConfirmLines is openConfirm with a multi-line body — same Yes/No
+// contract, same default focus on No.
+//
+// It exists because the single-line spelling silently ELIDES anything
+// past ~50 cells, and the confirms that matter most are exactly the ones
+// with the most to say: "Cherry-pick abc1234 «subject» onto main" names
+// three facts, and a body cut mid-sentence turns a safety gate into a
+// riddle. Wrapping is the caller's job (it knows which fact is the one
+// worth its own line); the drawer only centers and elides what it's
+// handed.
+func (a *App) openConfirmLines(title string, lines []string, callback func(*App)) *confirmModal {
+	m := &confirmModal{title: title, lines: lines, callback: callback}
+	a.openModal(m)
+	return m
+}
+
+// confirmBody is the Yes/No flavour's body text: the lines when a caller
+// supplied them, else the single message. One accessor so the drawer and
+// the geometry can never disagree about how tall the body is.
+func (m *confirmModal) confirmBody() []string {
+	if len(m.lines) > 0 {
+		return m.lines
+	}
+	return []string{m.message}
+}
+
+// confirmBodyRows is how many body rows the modal reserves — at least
+// one, so an empty body still leaves the layout the drawer expects. The
+// single source rect() and buttons() both derive from, which is what
+// keeps the button row glued under the body however long it is.
+func (m *confirmModal) confirmBodyRows() int {
+	if n := len(m.lines); n > 1 {
+		return n
+	}
+	return 1
 }
 
 // openInfo opens the confirm modal in single-button "OK" flavour for
@@ -347,9 +389,14 @@ func (m *confirmModal) handleKey(a *App, ev *tcell.EventKey) {
 // buttons returns the No / Yes button rects. The hit widths are a shade
 // wider than the drawn labels on purpose — they preserve the historical
 // click zones so a near-miss on a short label still lands.
+//
+// The row sits directly under the body rather than at a fixed offset, so
+// a multi-line body pushes the buttons down instead of having text drawn
+// over them. A one-line body reproduces the historical my+5 exactly.
 func (m *confirmModal) buttons(a *App) (no, yes btnRect) {
 	mx, my, _, _ := m.rect(a)
-	return btnRect{x: mx + 14, y: my + 5, w: 8}, btnRect{x: mx + 28, y: my + 5, w: 10}
+	by := my + 4 + m.confirmBodyRows()
+	return btnRect{x: mx + 14, y: by, w: 8}, btnRect{x: mx + 28, y: by, w: 10}
 }
 
 // okButton returns the single centered OK button rect used in info mode.
@@ -408,7 +455,9 @@ func (m *confirmModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 // on top of the body.
 func (m *confirmModal) rect(a *App) (x, y, w, h int) {
 	w = confirmModalWidth
-	h = confirmModalHeight
+	// confirmModalHeight is the one-body-row case; each extra line of a
+	// multi-line Yes/No body costs exactly one more row.
+	h = confirmModalHeight + m.confirmBodyRows() - 1
 	if m.info {
 		w = 84
 		bodyRows := len(m.lines)
@@ -422,7 +471,8 @@ func (m *confirmModal) rect(a *App) (x, y, w, h int) {
 
 // draw renders the Yes/No modal (or the info flavour).
 //
-// Rows (relY):
+// Rows (relY), for the one-line body; each extra body line pushes
+// everything from the button row down by one:
 //
 //	0   top border
 //	1   title — "<title>   esc"
@@ -454,12 +504,15 @@ func (m *confirmModal) draw(a *App) {
 		return
 	}
 
-	// Message — centered, truncated if too long.
-	msg := m.message
-	if runeLen(msg) > mw-4 {
-		msg = msg[:mw-4]
+	// Body — centered, elided if too long. elide rather than a byte
+	// slice: commit subjects reach this modal, and cutting one mid-rune
+	// would print mojibake where the safety gate's whole job is to be
+	// read. The ellipsis also SAYS that something was cut, which a bare
+	// truncation never did.
+	for i, line := range m.confirmBody() {
+		line = elide(line, mw-4)
+		drawAt(a.screen, mx+(mw-runeLen(line))/2, my+4+i, line, c.body)
 	}
-	drawAt(a.screen, mx+(mw-runeLen(msg))/2, my+4, msg, c.body)
 
 	// Buttons. Default focus is No so an accidental Enter is non-destructive.
 	no, yes := m.buttons(a)

@@ -65,6 +65,15 @@ type gitStatus struct {
 	// so a purely local repo never offers a dialog whose first dropdown
 	// would be empty.
 	HasRemote bool
+	// ConflictedFiles holds the absolute paths git reports as UNMERGED —
+	// a cherry-pick, revert, merge or rebase stopped on them and neither
+	// side has been chosen yet. Read out of the porcelain output the
+	// snapshot already has, so knowing "is this repo mid-conflict?" costs
+	// no extra fork; it gates the Resolve conflicts row (gitconflict.go).
+	// The live list the conflict picker acts on is re-read at open time —
+	// a snapshot up to ten seconds old is fine for enabling a row and far
+	// too stale to run `git add` against.
+	ConflictedFiles map[string]bool
 }
 
 // loadGitStatus inspects rootDir and returns the set of dirty file paths
@@ -115,7 +124,8 @@ func loadGitStatus(rootDir string) gitStatus {
 		// tracked branch) therefore pays nothing for this answer, which
 		// is what keeps the extra fork off the 10-second tick for every
 		// repo anyone actually works in.
-		HasRemote: upstream != "" || len(loadGitRemotes(rootDir)) > 0,
+		HasRemote:       upstream != "" || len(loadGitRemotes(rootDir)) > 0,
+		ConflictedFiles: conflictPorcelainSet(out, toplevel),
 	}
 }
 
@@ -210,6 +220,39 @@ func stagedPorcelainSet(out []byte, toplevel string) map[string]bool {
 		stagedLines = append(stagedLines, '\n')
 	}
 	return parsePorcelain(stagedLines, toplevel)
+}
+
+// conflictPorcelainSet returns the absolute paths of UNMERGED entries,
+// reusing parsePorcelain's path handling by feeding it only the unmerged
+// lines — the same trick stagedPorcelainSet plays one column over.
+//
+// Porcelain v1 spells "unmerged" in seven XY pairs rather than one flag:
+// either side may be 'U' (UU both modified, AU / UA added by one side,
+// DU / UD deleted by one side), plus the two same-letter pairs git
+// defines as conflicts even though neither column says U — AA (both
+// added) and DD (both deleted). Testing only for 'U' would silently miss
+// the add/add case, which is the common one when two branches create the
+// same file.
+func conflictPorcelainSet(out []byte, toplevel string) map[string]bool {
+	var lines []byte
+	for _, raw := range bytes.Split(out, []byte{'\n'}) {
+		if len(raw) < 4 {
+			continue
+		}
+		if !isPorcelainConflict(raw[0], raw[1]) {
+			continue
+		}
+		lines = append(lines, raw...)
+		lines = append(lines, '\n')
+	}
+	return parsePorcelain(lines, toplevel)
+}
+
+// isPorcelainConflict reports whether an XY status pair marks an
+// unmerged entry. Split out so the seven-code table can be pinned by a
+// test — it is the sort of list that quietly loses a row in a refactor.
+func isPorcelainConflict(x, y byte) bool {
+	return x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D')
 }
 
 // loadGitHasStash reports whether the repo has at least one stash entry.

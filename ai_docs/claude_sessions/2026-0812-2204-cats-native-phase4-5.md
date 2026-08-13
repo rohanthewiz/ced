@@ -1,5 +1,6 @@
 # Session: cats-native plan, Phase 4.5 — the attribution trailer
 
+- Session id: `4ccd1049-6f44-4991-a3d9-ddd4073a1e32`
 - Date: 2026-08-12
 - Branch: `main`, feature commit `5db3c91` (+ this doc)
 - Worked from the cats checkout (`~/projs/go/cats`) against the ced repo

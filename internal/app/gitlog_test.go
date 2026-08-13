@@ -310,8 +310,11 @@ func TestGitLogPress_ButtonsAndDrags(t *testing.T) {
 	a.gitLog.open = true
 	a.gitLog.commits = []gitLogCommit{{Hash: "aaaa", Short: "a1", Subject: "s"}}
 
+	// The height-drag handle is the header rule OUTSIDE the buttons —
+	// the left-anchored chain (Actions ▾ / ↑ push / ⌕ search) now runs
+	// past px+30, so the sample point sits in the title band.
 	px, py, _, _ := a.gitLogRect()
-	if got := a.gitLogPress(px+20, py); got != "gitlog" {
+	if got := a.gitLogPress(px+40, py); got != "gitlog" {
 		t.Errorf("header rule press = %q, want gitlog drag", got)
 	}
 	if got := a.gitLogPress(a.gitLogDividerX(), py+2); got != "gitlogdiv" {
@@ -387,7 +390,7 @@ func TestDrawGitLog_Smoke(t *testing.T) {
 	}
 	_, py, _, _ := a.gitLogRect()
 	header := rowText(py)
-	for _, want := range []string{"Actions ▾", "Git log · 1 commits", "⧉ hash", "⟳", "✕"} {
+	for _, want := range []string{"Actions ▾", "Git log · 1 commit", "⧉ hash", "⟳", "✕"} {
 		if !strings.Contains(header, want) {
 			t.Errorf("header row = %q, missing %q", header, want)
 		}

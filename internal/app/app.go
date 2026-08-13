@@ -302,6 +302,10 @@ func builtinMenuGroups() []menuGroup {
 			// swallow clicks, so its verbs must be menu-reachable too.
 			{label: "Git panel actions", action: (*App).menuGitPanelActions, enabled: (*App).hasGitPanelOpen},
 			{shortcut: "esc L", action: (*App).menuToggleGitLog, enabled: (*App).hasGitRepo, labelFor: (*App).gitLogToggleLabel},
+			// Search history opens the log panel itself when it's shut —
+			// it is one thought, not two — so it is enabled on any repo
+			// rather than only while the panel is up.
+			{label: "Search history…", shortcut: "esc S", action: (*App).menuGitLogSearch, enabled: (*App).hasGitRepo},
 			// Same keyboard-twin rule for the log panel's Actions ▾ button.
 			{label: "Git log actions", action: (*App).menuGitLogActions, enabled: (*App).hasGitLogOpen},
 		}},
@@ -1461,6 +1465,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleGitPanelDiff(e)
 	case *gitLogShowEvent:
 		a.handleGitLogShow(e)
+	case *gitLogFilterTickEvent:
+		a.handleGitLogFilterTick(e)
+	case *gitLogFilterEvent:
+		a.handleGitLogFilterResult(e)
 	case *gitCommitDiffEvent:
 		a.handleGitCommitDiff(e)
 	case *gitPushRefsEvent:
@@ -2047,6 +2055,14 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		a.findAllPin.handleFieldKey(a, ev)
 		return
 	}
+	// Same rule for the git log's search bar: the panel itself has no
+	// keyboard (it is furniture), but a field the user clicked into — or
+	// opened with Esc-S — is a field they are typing into. Esc gives the
+	// keyboard back, as does a click anywhere outside the panel.
+	if a.gitLog.open && a.gitLog.filter.focused {
+		a.handleGitLogFilterKey(ev)
+		return
+	}
 
 	// A half-typed chord (Esc-a waiting for its second rune) claims the
 	// next keystroke before anything else can. Checked ahead of the Esc
@@ -2603,6 +2619,13 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		}
 		if a.findAllPin != nil && !a.findAllPinContains(x, y) {
 			a.findAllPin.focus = findAllFocusList
+		}
+		// The git log's search field follows the same rule. It matters
+		// more here than for the panels above: the field sits over a
+		// docked panel, so leaving it focused after a click into the
+		// editor would silently type the user's code into a search box.
+		if a.gitLog.filter.focused && !a.gitLogContains(x, y) {
+			a.gitLog.filter.focused = false
 		}
 		// The tree follows the same click-where-you-want-to-type rule:
 		// a press outside the sidebar hands the keyboard back; a press

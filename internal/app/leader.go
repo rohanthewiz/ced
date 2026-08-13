@@ -224,6 +224,11 @@ func leaderBindings() []leaderBinding {
 		// h/H, o/O pairs already teach that shift means "the other git
 		// surface".
 		{key: 'L', action: (*App).menuToggleGitLog, label: "Git log"},
+		// 'S' searches that log's history — shifted for the same reason
+		// 'L' is, and next to it because it opens the panel it filters.
+		// Lowercase 's' is Save and nothing may sit near enough to be
+		// mistaken for it.
+		{key: 'S', action: (*App).menuGitLogSearch, label: "Search history"},
 		{key: '=', action: (*App).growBottomPanel, repeat: true, label: "Grow panel"},
 		{key: '-', action: (*App).shrinkBottomPanel, repeat: true, label: "Shrink panel"},
 		// '`' for the terminal — the key VS Code binds, minus the Ctrl.

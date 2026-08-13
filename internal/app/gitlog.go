@@ -98,6 +98,10 @@ type gitLogState struct {
 	detailHash   string
 	detailLines  []string
 	detailScroll int
+	// filter is the history-search bar (gitlogfilter.go). Zero value is
+	// "closed", so the panel behaves exactly as it did before the bar
+	// existed until something opens it.
+	filter gitLogFilter
 }
 
 // gitLogShowEvent carries one commit's freshly-fetched `git show` text
@@ -133,7 +137,11 @@ func (a *App) menuToggleGitLog() {
 			a.term.open = false
 			a.term.focused = false
 		}
-		a.refreshGitLogCommits()
+		// The EXPLICIT refresh, not the pipeline one: re-opening the
+		// panel with a filter still applied must re-run the search
+		// (the pipeline refresh deliberately leaves search results
+		// alone — see refreshGitLogCommits).
+		a.gitLogRefreshNow()
 	}
 }
 
@@ -150,16 +158,57 @@ func (a *App) gitLogToggleLabel() string {
 // by hash (the identity-preserving-refresh idea — a fetch or commit
 // reorders rows; hashes are stable). No-op while collapsed so the 10s
 // tick doesn't fork git log for a hidden surface.
+//
+// It is also a no-op while a search filter is APPLIED. This is the
+// pipeline refresh — the 10s tick, saves, file ops, finished git
+// commands — and it exists to keep a live view of HEAD honest. A
+// filtered list is not that view: it is a result the user asked for,
+// possibly at the cost of a multi-second pickaxe, and re-running that
+// query on every tick would burn the fork and shuffle rows under the
+// pointer. gitLogRefreshNow is the explicit path that does re-run it.
 func (a *App) refreshGitLogCommits() {
+	if !a.gitLog.open || a.gitLog.filter.applied != "" {
+		return
+	}
+	a.gitLog.toplevel = gitToplevel(a.rootDir)
+	commits, truncated := loadGitLogCommits(a.rootDir)
+	a.applyGitLogCommits(commits, truncated)
+}
+
+// gitLogRefreshNow is the user-initiated refresh — the ⟳ button and
+// re-opening the panel. Unlike the pipeline refresh it honors an
+// applied filter by re-running the search rather than discarding it:
+// the user pressed refresh while looking at search results and means
+// "these, again, current".
+func (a *App) gitLogRefreshNow() {
 	if !a.gitLog.open {
 		return
 	}
+	if a.gitLog.filter.open && parseGitLogQuery(a.gitLog.filter.field.String()).active() {
+		a.gitLog.toplevel = gitToplevel(a.rootDir)
+		a.gitLogFilterStopTimer()
+		a.gitLog.filter.seq++
+		a.gitLogFilterRun()
+		return
+	}
+	a.refreshGitLogCommits()
+}
+
+// applyGitLogCommits installs a freshly-loaded commit list, whatever
+// query produced it, and re-establishes everything that hangs off it:
+// the selection (by hash, so a reorder or a re-filter keeps the user on
+// the commit they were reading when it survived), the scroll offsets,
+// and the detail pane.
+//
+// Shared by the plain reload and the async search precisely so the two
+// can't drift — a search result that forgot to clamp the scroll would
+// be a blank panel for a list that shrank.
+func (a *App) applyGitLogCommits(commits []gitLogCommit, truncated bool) {
 	prevHash := ""
 	if c, ok := a.gitLogSelectedCommit(); ok {
 		prevHash = c.Hash
 	}
-	a.gitLog.commits, a.gitLog.truncated = loadGitLogCommits(a.rootDir)
-	a.gitLog.toplevel = gitToplevel(a.rootDir)
+	a.gitLog.commits, a.gitLog.truncated = commits, truncated
 	a.gitLog.selected = 0
 	for i, c := range a.gitLog.commits {
 		if c.Hash == prevHash {
@@ -448,6 +497,7 @@ const (
 	gitLogActionsLabel = " Actions ▾ "
 	gitLogCopyLabel    = " ⧉ hash "
 	gitLogPushLabel    = " ↑ push "
+	gitLogSearchLabel  = " ⌕ search "
 )
 
 // gitLogCloseRect returns the ✕ collapse button's rectangle in the
@@ -495,18 +545,51 @@ func (a *App) gitLogPushRect() btnRect {
 	return btnRect{x: act.x + act.w, y: act.y, w: runeLen(gitLogPushLabel)}
 }
 
+// gitLogSearchRect returns the ⌕ search button, next along the same
+// LEFT-anchored chain for the same reason push joined it: the ⧉/⟳/✕
+// trio's geometry stays put, and the title — which already drops out on
+// a narrow panel — absorbs the width.
+//
+// It is a TOGGLE, and the mouse's only route to the search bar. The
+// keyboard's is Esc-S, which also opens the panel; a user who is
+// already looking at the log reaches for the button instead.
+func (a *App) gitLogSearchRect() btnRect {
+	push := a.gitLogPushRect()
+	return btnRect{x: push.x + push.w, y: push.y, w: runeLen(gitLogSearchLabel)}
+}
+
 // gitLogContains reports whether (x, y) falls inside the open panel.
 func (a *App) gitLogContains(x, y int) bool {
 	px, py, pw, ph := a.gitLogRect()
 	return x >= px && x < px+pw && y >= py && y < py+ph
 }
 
+// gitLogBodyRows is how many commit / detail rows the panel can show —
+// its height less the header and less the search bar when it's open.
+// The single source every scroll clamp, hit-test, and draw loop reads,
+// so opening the filter costs the list exactly one row everywhere at
+// once.
+func (a *App) gitLogBodyRows() int {
+	_, _, _, ph := a.gitLogRect()
+	n := ph - 1 - a.gitLogFilterRows()
+	if n < 0 {
+		n = 0
+	}
+	return n
+}
+
+// gitLogBodyTop is the screen row of the panel's first body row — the
+// y-origin those same three consumers offset from.
+func (a *App) gitLogBodyTop() int {
+	_, py, _, _ := a.gitLogRect()
+	return py + 1 + a.gitLogFilterRows()
+}
+
 // gitLogClampScrolls pins both scroll offsets into range after any
 // mutation. Hard clamp, no overscroll — it's a viewer, same rationale
 // as the changes panel.
 func (a *App) gitLogClampScrolls() {
-	_, _, _, ph := a.gitLogRect()
-	visible := ph - 1 // header row
+	visible := a.gitLogBodyRows()
 	clamp := func(scroll, total int) int {
 		max := total - visible
 		if max < 0 {
@@ -528,8 +611,7 @@ func (a *App) gitLogClampScrolls() {
 // is on-screen. Called only when the selection itself moves — never
 // from generic clamping (the cursorMoved lesson).
 func (a *App) gitLogEnsureSelectedVisible() {
-	_, _, _, ph := a.gitLogRect()
-	visible := ph - 1
+	visible := a.gitLogBodyRows()
 	if a.gitLog.selected < a.gitLog.listScroll {
 		a.gitLog.listScroll = a.gitLog.selected
 	}
@@ -555,18 +637,26 @@ func (a *App) gitLogPress(x, y int) (dragMode string) {
 			a.openGitLogActions()
 		case a.gitLogPushRect().contains(x, y):
 			a.openGitPush()
+		case a.gitLogSearchRect().contains(x, y):
+			a.toggleGitLogFilter()
 		case a.gitLogCopyRect().contains(x, y):
 			if c, ok := a.gitLogSelectedCommit(); ok {
 				a.gitLogCopyHash(c)
 			}
 		case a.gitLogRefreshRect().contains(x, y):
-			a.refreshGitLogCommits()
+			a.gitLogRefreshNow()
 			a.flash("Git log refreshed")
 		case a.gitLogCloseRect().contains(x, y):
 			a.gitLog.open = false
 		default:
 			return "gitlog"
 		}
+		return ""
+	}
+	// The search bar owns its whole row, chips and all, before the
+	// divider hit-test — the divider column crosses it, and dragging a
+	// width handle from a text field would be nonsense.
+	if a.gitLogFilterPress(x, y) {
 		return ""
 	}
 	if x == a.gitLogDividerX() {
@@ -581,27 +671,55 @@ func (a *App) gitLogPress(x, y int) (dragMode string) {
 // file/line that diff row touched — "where did this change land" is the
 // history browser's version of the changes panel's jump.
 func (a *App) gitLogClick(x, y int) {
-	px, py, pw, _ := a.gitLogRect()
+	px, _, pw, _ := a.gitLogRect()
+	row := y - a.gitLogBodyTop()
+	if row < 0 {
+		return // the search bar's row — gitLogPress already routed it
+	}
 	if x >= px+a.gitLogListW(pw) {
 		now := time.Now()
 		if a.lastClick.x == x && a.lastClick.y == y && now.Sub(a.lastClick.when) < doubleClickMs {
 			a.lastClick = clickRecord{}
-			a.gitLogJumpToDetailRow(a.gitLog.detailScroll + (y - py - 1))
+			a.gitLogJumpToDetailRow(a.gitLog.detailScroll + row)
 			return
 		}
 		a.lastClick = clickRecord{x: x, y: y, when: now}
 		return
 	}
-	idx := a.gitLog.listScroll + (y - py - 1)
-	if idx < 0 || idx >= len(a.gitLog.commits) {
+	a.gitLogSelect(a.gitLog.listScroll + row)
+}
+
+// gitLogSelect moves the highlight to commit idx and fetches its
+// detail. Out-of-range indices and a re-select of the current row are
+// no-ops — the latter because a commit's content is immutable, so
+// there is nothing to refetch.
+func (a *App) gitLogSelect(idx int) {
+	if idx < 0 || idx >= len(a.gitLog.commits) || idx == a.gitLog.selected {
 		return
-	}
-	if idx == a.gitLog.selected {
-		return // re-click on the same commit: nothing to refetch
 	}
 	a.gitLog.selected = idx
 	a.gitLog.detailScroll = 0
+	a.gitLogEnsureSelectedVisible()
 	a.requestGitLogDetail(a.gitLog.commits[idx])
+}
+
+// gitLogMoveSelection steps the highlight by delta rows, clamped at
+// both ends. The keyboard path into the list (Up/Down from the search
+// field), which is what makes a filtered result reachable without a
+// mouse: search, arrow onto the hit, then Actions ▾ / the ≡ Git rows
+// act on it.
+func (a *App) gitLogMoveSelection(delta int) {
+	if len(a.gitLog.commits) == 0 {
+		return
+	}
+	target := a.gitLog.selected + delta
+	if target < 0 {
+		target = 0
+	}
+	if target >= len(a.gitLog.commits) {
+		target = len(a.gitLog.commits) - 1
+	}
+	a.gitLogSelect(target)
 }
 
 // gitLogJumpToDetailRow opens the file behind detail row idx at that
@@ -694,10 +812,11 @@ func (a *App) gitLogScroll(x, _, delta int) {
 // -----------------------------------------------------------------------------
 
 // drawGitLog paints the whole panel: header rule with the Actions,
-// ⧉ hash, ⟳, and ✕ buttons plus the title; the commit list; a vertical
-// divider; the commit detail with unified-diff coloring.
+// ↑ push, ⌕ search, ⧉ hash, ⟳, and ✕ buttons plus the title; the search
+// bar when it's open; the commit list; a vertical divider; the commit
+// detail with unified-diff coloring.
 func (a *App) drawGitLog() {
-	px, py, pw, ph := a.gitLogRect()
+	px, py, pw, _ := a.gitLogRect()
 	listW := a.gitLogListW(pw)
 	th := a.theme
 
@@ -734,19 +853,49 @@ func (a *App) drawGitLog() {
 	drawAt(a.screen, actions.x, actions.y, gitLogActionsLabel, btnSt)
 	pushBtn := a.gitLogPushRect()
 	drawAt(a.screen, pushBtn.x, pushBtn.y, gitLogPushLabel, btnSt)
+	// The search button is a TOGGLE, so it carries the on/off treatment
+	// the find bar's toggles use — lit while the bar is open, muted
+	// while it isn't — rather than the flat button style of the verbs
+	// beside it, which have no state to show.
+	searchBtn := a.gitLogSearchRect()
+	searchSt := tcell.StyleDefault.Background(th.Selection).Foreground(th.Muted)
+	if a.gitLog.filter.open {
+		searchSt = btnSt
+	}
+	drawAt(a.screen, searchBtn.x, searchBtn.y, gitLogSearchLabel, searchSt)
 
+	// "commits" becomes "matches" while a search is applied: the number
+	// is the size of the RESULT, and a title reading "12 commits" over a
+	// filtered list would be the panel misreporting the repository.
+	// The count is spelled by hand rather than through plural() because
+	// a truncated list carries a "+" between the number and the noun,
+	// and "400+ commit" would be wrong for the same reason "1 commits"
+	// is.
 	title := " Git log · " + itoa(len(a.gitLog.commits))
+	singular := len(a.gitLog.commits) == 1 && !a.gitLog.truncated
 	if a.gitLog.truncated {
 		title += "+"
 	}
-	title += " commits "
-	if tx := pushBtn.x + pushBtn.w; tx+runeLen(title) <= copyBtn.x {
+	switch {
+	case a.gitLog.filter.applied != "" && singular:
+		title += " match "
+	case a.gitLog.filter.applied != "":
+		title += " matches "
+	case singular:
+		title += " commit "
+	default:
+		title += " commits "
+	}
+	if tx := searchBtn.x + searchBtn.w; tx+runeLen(title) <= copyBtn.x {
 		drawAt(a.screen, tx, py, title, titleSt)
 	}
 
+	a.drawGitLogFilterBar()
+
 	// Body rows.
-	for row := 0; row < ph-1; row++ {
-		ry := py + 1 + row
+	bodyTop := a.gitLogBodyTop()
+	for row := 0; row < a.gitLogBodyRows(); row++ {
+		ry := bodyTop + row
 		for cx := px; cx < px+listW; cx++ {
 			a.screen.SetContent(cx, ry, ' ', nil, listBG)
 		}
@@ -768,7 +917,14 @@ func (a *App) drawGitLogListRow(row, px, ry, listW int) {
 	idx := a.gitLog.listScroll + row
 	if len(a.gitLog.commits) == 0 {
 		if row == 0 {
-			drawAt(a.screen, px+1, ry, "(no commits)",
+			// Under a filter the empty list is a SEARCH result, not a
+			// verdict on the repository — "(no commits)" over a repo
+			// full of them would read as the panel being broken.
+			empty := "(no commits)"
+			if a.gitLog.filter.applied != "" {
+				empty = "(no matching commits)"
+			}
+			drawAt(a.screen, px+1, ry, empty,
 				tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Muted))
 		}
 		return

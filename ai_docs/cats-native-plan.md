@@ -398,7 +398,59 @@ SHA**. This phase closes the specific named gaps:
    tracks the right-hand side), force-with-lease overwriting, and
    force-with-lease correctly REFUSING with "stale info" once the remote
    moved.
-2. **Git history search.** gitlog.go gains a filter bar (`textField`
+2. **Git history search.** — ✅ done 2026-08-12
+   New `gitlogfilter.go` + `gitlogfilter_test.go` (~650 LOC incl. tests).
+   All four modes as specified (`--grep -i` default · `a:` author · `p:` path
+   with `--follow` · `s:` pickaxe), 250ms debounce, results on a goroutine,
+   the prior list held until they land, and filtered rows keep every verb
+   (click = diff, Actions ▾ = cherry-pick et al.), so "search history, then
+   cherry-pick the hit" is one flow. Deviations, all deliberate:
+   - **Its own file, not a bar bolted into gitlog.go** — same file-per-
+     feature discipline as the rest of the roadmap; gitlog.go gains only
+     geometry (`gitLogBodyRows`/`gitLogBodyTop`), the ⌕ button, and one
+     press case.
+   - **The query TEXT is the only state.** The mode is parsed out of it on
+     demand and the chips REWRITE the prefix rather than setting a flag
+     beside it — a chip reading "author" over text reading `p:foo` is a bug
+     this design cannot have. Chips therefore double as the syntax legend,
+     and the empty-field placeholder spells all four prefixes.
+   - **The periodic refresh yields to an applied filter.** The 10s tick
+     exists to keep a live view of HEAD honest; a search result is not that
+     view, and re-forking a multi-second pickaxe every ten seconds (0.6s on
+     ced's own history, measured) would shuffle rows under the pointer.
+     `gitLogRefreshNow` (⟳, re-opening the panel) re-runs it explicitly;
+     `refreshGitLogCommits` stands down. `applyGitLogCommits` is the shared
+     tail both paths install results through.
+   - **Sequence-numbered results, not just a debounce**: a slow pickaxe
+     landing after a newer fast `--grep` is dropped. Same for the debounce
+     tick itself.
+   - **No spinner animation** (§6's "don't add animation"): a ` searching… `
+     word in the bar's status slot, replaced by ` N matches ` / a red
+     ` no matches `. The title switches "commits" → "matches" so a filtered
+     panel never misreports the repository, and the empty list says "(no
+     matching commits)".
+   - **Entry points**: the ⌕ header button (a toggle, lit while open), a
+     new ≡ Git row "Search history…", and **Esc-S** — `/` was unavailable
+     (Esc-/ is toggle-comment, and the panel owns no keys), and the leader
+     is the house's keyboard idiom anyway. Esc-S opens the panel too: it is
+     one thought, not two.
+   - **The field owns the keyboard only while focused**, and gives it back
+     on Esc or on a click outside the panel — stricter than the find bar,
+     because a stale focus over a docked panel would type the user's code
+     into a search box. Up/Down from inside the field walk the commit list
+     (new `gitLogSelect`/`gitLogMoveSelection`), which is the panel's first
+     keyboard route into its own rows; Tab cycles the mode.
+   - **Pickaxe pre-seed from the selection** as specified, for a single-line
+     selection only — the field is one line and could only show a mangled
+     version of a multi-line one.
+   Verified against a real repo (two authors, two files, a string added then
+   removed): each mode selects exactly its commits, the pickaxe finds BOTH
+   the appearance and the disappearance, and a term starting with `-` stays
+   a term.
+
+   The original spec follows.
+
+   gitlog.go gains a filter bar (`textField`
    primitive, like find.go). `/` or a 🔍 header button focuses it. Modes via
    clickable chip or prefix syntax: default `--grep -i` (message) ·
    `a:` author · `p:` path (follow file history) · `s:` **pickaxe `-S`**
@@ -548,9 +600,10 @@ emission pulled forward to week one** (two escape sequences, instant
 cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
-**Progress:** Phases 1, 2, 3.1, 3.2 and 4.1 are done (all 2026-08-12).
-Next is **Phase 4.2 — git history search** (the gitlog filter bar), then
-4.3–4.5. The two remaining Phase-3 items are small and unclaimed: 3.3
+**Progress:** Phases 1, 2, 3.1, 3.2, 4.1 and 4.2 are done (all 2026-08-12).
+Next is **Phase 4.3 — cherry-pick / revert polish** (pointer-anchored log
+actions, confirm modals naming the commit, and the conflict picker), then
+4.4–4.5. The two remaining Phase-3 items are small and unclaimed: 3.3
 (hover on mouse dwell) is Tier-1 only and so really belongs with Phase 5,
 and 3.4 (recent-files picker) is an hour's work whenever a breather is
 wanted.
@@ -585,9 +638,13 @@ wanted.
   bindings)
 - `internal/app/palette.go` + `formmodal.go` — the generic picker and form
   primitives every new surface reuses
-- `internal/app/findall.go`, `gitlog.go`, `gitlogactions.go`, `gitpanel.go`,
-  `gitcommitmsg.go`, `compare.go` — git suite + interactive find-all +
-  compare targets
+- `internal/app/findall.go`, `gitlog.go`, `gitlogfilter.go`,
+  `gitlogactions.go`, `gitpanel.go`, `gitcommitmsg.go`, `compare.go` — git
+  suite + interactive find-all + compare targets. `gitlogfilter.go` is the
+  pattern for any future async-query surface: parsed-from-the-text state
+  (no second source for the mode), argv built by a pure function the tests
+  pin without forking, sequence-numbered results, and a pipeline refresh
+  that stands down while a user-owned query is applied
 - `internal/app/problems.go` — the bottom-strip worklist. The pattern any
   future docked list should copy: rows/view indirection with the selection
   preserved by identity, header chips as the only filter UI, one geometry

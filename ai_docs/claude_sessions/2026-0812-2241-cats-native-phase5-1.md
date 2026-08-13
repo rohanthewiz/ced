@@ -1,5 +1,6 @@
 # Session: cats-native plan, Phase 5.1 + 5.3 — the editor learns to speak to its host
 
+- Session id: `59fed02d-f953-47f6-9d28-a54687740853`
 - Date: 2026-08-12
 - Branch: `main`, feature commit `459271f` (+ this doc)
 - Worked from the cats checkout (`~/projs/go/cats`) against the ced repo

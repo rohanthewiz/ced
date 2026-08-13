@@ -157,10 +157,11 @@ func (a *App) layoutTabs() []tabRect {
 		}
 		nameLen := len([]rune(a.tabs[i].DisplayName()))
 		out = append(out, tabRect{
-			Index:  i,
-			X:      cursor,
-			Width:  w,
-			CloseX: cursor + 1 + 2 + iconW + nameLen + 1,
+			Index:   i,
+			X:       cursor,
+			Width:   w,
+			MarkerX: cursor + 1, // one pad column, then the status slot.
+			CloseX:  cursor + 1 + 2 + iconW + nameLen + 1,
 		})
 		cursor += w
 	}
@@ -225,7 +226,7 @@ func (a *App) drawTabBar() {
 			a.screen.SetContent(cx, ty, ' ', nil, st)
 		}
 		tab := a.tabs[r.Index]
-		col := r.X + 1
+		col := r.MarkerX
 		// The leading slot carries the tab's worst news: ⊘ deleted on
 		// disk, ⚠ disagreeing with disk, ● merely unsaved. See
 		// reconcile.go for the precedence and for why one slot serves
@@ -292,8 +293,9 @@ func (a *App) drawTabOverflow() {
 
 // tabBarClick dispatches clicks in the tab bar: the leftmost menuButtonWidth
 // cells open the action menu, the overflow button opens the switcher, and
-// remaining cells switch or close tabs based on where the click landed
-// within their rendered geometry.
+// remaining cells switch, close, or (on the ⚠ slot) re-ask a tab's deferred
+// disk-conflict question, based on where the click landed within their
+// rendered geometry.
 func (a *App) tabBarClick(x, _ int) {
 	mx, _, mw, _ := a.menuButtonRect()
 	if x >= mx && x < mx+mw {
@@ -311,6 +313,17 @@ func (a *App) tabBarClick(x, _ int) {
 		if x >= r.X && x < r.X+r.Width {
 			if x == r.CloseX {
 				a.requestCloseTab(r.Index)
+				return
+			}
+			// The status slot is a click target only when there is a
+			// question behind it. ⚠ has one — the prompt the user
+			// deferred, whose only other route back was an explicit save
+			// — so clicking it re-asks. ⊘ and ● do not: a deleted file is
+			// answered by saving and an unsaved buffer by the save verb
+			// itself, and a marker that quietly WROTE on click would be
+			// the tab strip's one destructive cell. Those fall through to
+			// the switch below, which is what a click on a tab means.
+			if x == r.MarkerX && a.raiseConflictForTab(r.Index) {
 				return
 			}
 			a.switchToTab(r.Index)

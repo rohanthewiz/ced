@@ -24,6 +24,13 @@ import (
 // pad on the right — comfortable for files of any realistic length.
 const gutterWidth = 6
 
+// annMinContent is the code width an annotation column must leave
+// behind. A column that squeezed the file into twenty cells would be
+// annotating something nobody can read; below this the column is
+// dropped whole rather than shrunk, the same "all or nothing" rule the
+// git-log filter chips follow.
+const annMinContent = 24
+
 // Tab is a single open file. It owns the on-disk path, the in-memory buffer,
 // the per-tab view state (scroll position, cursor, selection anchor), the
 // cached syntax-highlight styles, and a dirty flag.
@@ -42,6 +49,17 @@ type Tab struct {
 	// re-evaluated on reload) for files over MaxHighlightBytes, where even
 	// one re-lex per typing pause is a visible freeze. See syntax.go.
 	SyntaxOff bool
+
+	// annCols is the width of the annotation column an AnnotationSource
+	// asked for, as of the LAST RENDER — zero when no source wants one.
+	// It is cached here because the geometry helpers (EnsureVisible,
+	// PosScreenCell, HitTest) run outside the draw and have to answer
+	// about the frame the user is looking at: a hit-test that used a
+	// width the screen doesn't have would map clicks to the wrong
+	// column. The cost is that turning a column on or off reaches
+	// scrolling one frame later, which nobody can perceive and which
+	// beats every alternative that lets the two disagree.
+	annCols int
 
 	// styleDefer marks the staleness above as "the grid is still aligned
 	// with the buffer, keep painting it" — the intra-line edit case, which
@@ -747,11 +765,37 @@ func (t *Tab) CenterOnCursor(viewW, viewH int) {
 	t.cursorMoved = false
 }
 
+// gutterCols is the full width to the left of the code: the line
+// numbers, plus an annotation column when a source asked for one. Every
+// piece of arithmetic that converts between buffer columns and screen
+// cells goes through it, so a column that exists on screen is a column
+// the caret math, the scrolling and the hit-test all know about.
+//
+// The line numbers keep their anchor at the editor's left edge — the
+// annotation column opens between them and the mark cell, so switching
+// it on does not slide the one column a reader navigates by.
+//
+//	│  1 │ a3f2c1 rohan  3d │▎│ func main() {
+//	└ gutterWidth ┘└ annCols ┘└ mark
+func (t *Tab) gutterCols() int { return gutterWidth + t.annCols }
+
+// AnnotationCols reports the annotation column as a half-open range of
+// cell offsets [start, end) inside the tab's render rect, as of the last
+// render. start == end means there is no column right now.
+//
+// It exists so a click on an annotation can be given its own verb: the
+// app owns the mouse router but must not re-derive where the column
+// went, which is the same argument that made the hover tooltip ask
+// PosScreenCell where a rune landed instead of recomputing the gutter.
+func (t *Tab) AnnotationCols() (start, end int) {
+	return gutterWidth, gutterWidth + t.annCols
+}
+
 // EnsureVisible scrolls the viewport so the cursor is on screen. The
 // caller passes the editor area's width and height because the Tab itself
 // doesn't know its render rect.
 func (t *Tab) EnsureVisible(viewW, viewH int) {
-	contentW := viewW - gutterWidth - 1
+	contentW := viewW - t.gutterCols() - 1
 	if contentW < 1 {
 		contentW = 1
 	}
@@ -822,8 +866,18 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		markByLine[mk.Line] = mk
 	}
 
-	contentX := x + gutterWidth + 1
-	contentW := w - gutterWidth - 1
+	// The annotation column, if a source wants one and the window can
+	// afford it. Measured here — beside the decorations, from the same
+	// window — and cached on the tab so the geometry helpers answer
+	// about what was actually painted. See annCols.
+	annW, annByLine := t.collectAnnotations(th, t.ScrollY, t.ScrollY+h-1)
+	if annW > 0 && w-gutterWidth-1-annW < annMinContent {
+		annW, annByLine = 0, nil
+	}
+	t.annCols = annW
+
+	contentX := x + t.gutterCols() + 1
+	contentW := w - t.gutterCols() - 1
 	if contentW < 1 {
 		contentW = 1
 	}
@@ -859,12 +913,33 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 			scr.SetContent(x+i, cy, r, nil, gutterStyle)
 		}
 
-		// Gutter mark column — the single cell between the numbers and
-		// the code. Blank on unmarked lines, so with no sources active
-		// the layout is pixel-identical to the pre-decoration renderer.
+		// Annotation column — text about the line rather than of it
+		// (git blame today). Drawn before the mark cell so the mark
+		// keeps its place immediately left of the code, where the eye
+		// has always found it. Clipped, never wrapped: the source sized
+		// the column, and a row that overran it would push the code.
+		if annW > 0 {
+			annStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
+			if ann, ok := annByLine[lineIdx]; ok {
+				st := annStyle.Foreground(ann.FG)
+				col := 0
+				for _, r := range ann.Text {
+					if col >= annW {
+						break
+					}
+					scr.SetContent(x+gutterWidth+col, cy, r, nil, st)
+					col += RuneVisualWidth(r, col)
+				}
+			}
+		}
+
+		// Gutter mark column — the single cell between the annotation
+		// column (when there is one) and the code. Blank on unmarked
+		// lines, so with no sources active the layout is pixel-identical
+		// to the pre-decoration renderer.
 		if mk, ok := markByLine[lineIdx]; ok {
 			markStyle := tcell.StyleDefault.Background(lineBg).Foreground(mk.FG)
-			scr.SetContent(x+gutterWidth, cy, mk.Glyph, nil, markStyle)
+			scr.SetContent(x+t.gutterCols(), cy, mk.Glyph, nil, markStyle)
 		}
 
 		// Line content: effective styles first, then the paint walk.
@@ -995,8 +1070,8 @@ func (t *Tab) CursorScreenCell(w, h int) (dx, dy int, ok bool) {
 // offset, the tab-stop arithmetic, the "scrolled out of view" answer —
 // is identical, which is why the caret flavour is now one line.
 func (t *Tab) PosScreenCell(p Position, w, h int) (dx, dy int, ok bool) {
-	contentX := gutterWidth + 1
-	contentW := w - gutterWidth - 1
+	contentX := t.gutterCols() + 1
+	contentW := w - t.gutterCols() - 1
 	if contentW < 1 {
 		contentW = 1
 	}
@@ -1015,13 +1090,16 @@ func (t *Tab) HitTest(localX, localY, w, h int) (Position, bool) {
 	if localY < 0 || localY >= h {
 		return Position{}, false
 	}
-	contentX := gutterWidth + 1
+	contentX := t.gutterCols() + 1
 	line := t.ScrollY + localY
 	if line < 0 || line >= t.Buffer.LineCount() {
 		return Position{}, false
 	}
 	if localX < contentX {
 		// Click in the gutter — treat as click at column 0 of that line.
+		// The annotation column is part of that span: a caller who wants
+		// to give it its own verb hit-tests it BEFORE asking here (see
+		// AnnotationCols), and one that doesn't gets the old behaviour.
 		return Position{Line: line, Col: 0}, true
 	}
 	runes := []rune(t.Buffer.Lines[line])

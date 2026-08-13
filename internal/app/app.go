@@ -139,6 +139,13 @@ type tabRect struct {
 	Index    int
 	X, Width int
 	CloseX   int // Cell column of the × close button.
+	// MarkerX is the leading status slot (⊘ / ⚠ / ●, see reconcile.go).
+	// It is a rect rather than a redundant "+1" in two places because it
+	// is a click target now: the ⚠ re-raises the conflict prompt a
+	// "Decide later" deferred, and a marker the hit-test located one cell
+	// away from where the painter put it would open the wrong tab's
+	// question.
+	MarkerX int
 }
 
 // clickRecord tracks the last mouse-press location and time so we can
@@ -286,6 +293,14 @@ func builtinMenuGroups() []menuGroup {
 		{title: "Git", collapsible: true, items: []menuItemDef{
 			{label: "Next change", shortcut: "esc h", action: (*App).menuNextHunk, enabled: (*App).hasDiffHunks},
 			{label: "Previous change", shortcut: "esc H", action: (*App).menuPrevHunk, enabled: (*App).hasDiffHunks},
+			// Blame sits with the other two rows that are about the file
+			// in front of you rather than about the repository
+			// (gitblame.go). The toggle shows the column; the row under
+			// it is the keyboard twin of clicking an annotation, and is
+			// what makes the verb reachable in a terminal that eats
+			// clicks.
+			{shortcut: "esc A", action: (*App).menuToggleBlame, enabled: (*App).hasGitRepo, labelFor: (*App).blameToggleLabel},
+			{label: "Blame this line…", action: (*App).menuBlameCommit, enabled: (*App).hasGitRepo},
 			{label: "Stage file", action: (*App).menuGitStageFile, enabled: (*App).hasStageableFile},
 			{label: "Unstage file", action: (*App).menuGitUnstageFile, enabled: (*App).hasUnstageableFile},
 			{label: "Commit staged", action: (*App).menuGitCommit, enabled: (*App).hasGitStaged},
@@ -1060,6 +1075,21 @@ type App struct {
 	// diff lands, and nil-map reads are safe, so no eager init needed.
 	fileDiffs map[string][]diffHunk
 
+	// The blame layer (gitblame.go). blameOn is the toggle; fileBlames
+	// holds the finished annotations per path; blameSeq is the
+	// per-path request generation that drops an answer overtaken by a
+	// newer one; blameTimer/blameStale are the settle debounce that
+	// re-blames a buffer after the typing stops. All written from the
+	// main loop only.
+	blameOn    bool
+	fileBlames map[string]*fileBlame
+	blameSeq   map[string]int
+	blameTimer *time.Timer
+	blameSig   string
+	// blamePending is a "Blame this line…" asked before any blame for
+	// that file existed — answered when the load lands.
+	blamePending *blamePendingReveal
+
 	// gitPanel is the collapsible bottom review panel (changed files +
 	// selected file's diff vs HEAD). Mutated only on the main loop;
 	// diff fetches post gitPanelDiffEvents. See gitpanel.go.
@@ -1553,6 +1583,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleHoverDwellTick(e)
 	case *gitDiffEvent:
 		a.handleGitDiff(e)
+	case *gitBlameEvent:
+		a.handleGitBlame(e)
+	case *blameTickEvent:
+		a.handleBlameTick()
 	case *customActionDoneEvent:
 		a.handleCustomActionDone(e)
 	case *pluginCmdDoneEvent:
@@ -1718,6 +1752,11 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// happens to, and the question is raised here — once that tab is
 	// frontmost and the modal slot is free. See reconcile.go.
 	a.conflictAfterEvent()
+	// And the blame column: an edit moves the lines out from under the
+	// annotations, so the settle timer re-blames the buffer once the
+	// typing stops. Cheap to skip — one map read — while the layer is
+	// off, which is most of the time. See gitblame.go.
+	a.blameAfterEvent()
 	// LAST: the cats host's picture of what this editor is doing — idle,
 	// working, or blocked on a question the user didn't ask for. Last
 	// because the two hooks above it can RAISE that question (a deferred
@@ -2884,6 +2923,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			if ev.Modifiers()&tcell.ModAlt != 0 && a.editorAltPress(x, y) {
 				return
 			}
+			// A press on a blame annotation reveals its commit instead of
+			// moving the caret, and starts no drag — for the same reason
+			// Alt+click doesn't: the gesture was aimed at the margin, and
+			// a stray wiggle afterwards must not turn it into a selection
+			// of the code it was pointing past (gitblame.go).
+			if a.blameColumnPress(x, y) {
+				return
+			}
 			a.editorPress(x, y)
 			a.dragMode = "editor"
 		}
@@ -3319,12 +3366,22 @@ func (a *App) wireTab(t *editor.Tab) {
 	// plugin's mark outranks the ambient git change bar because the
 	// user installed it deliberately, and loses to gopls because a
 	// compile error is the more urgent thing to say. See plugindeco.go.
+	// The blame source rides with them: it paints no spans and claims no
+	// mark cell, so its position in the precedence order is irrelevant —
+	// what it owns is the annotation column, which nothing else asks for.
 	t.DecoSources = append(t.DecoSources,
-		gitDiffSource{app: a}, pluginDecoSource{app: a}, lspDiagSource{app: a})
+		gitDiffSource{app: a}, gitBlameSource{app: a},
+		pluginDecoSource{app: a}, lspDiagSource{app: a})
 	// The matching-word highlight is a built-in source gated by a per-tab
 	// flag, so the preference has to ride along at open time (wordhl.go).
 	t.WordHighlight = a.wordHLEnabled
 	a.requestFileDiff(t.Path)
+	// Blame the newly opened file too, but only while the layer is on —
+	// this is a fork per file, unlike the diff, and nobody has asked to
+	// see authorship until they switch it on.
+	if a.blameOn {
+		a.requestFileBlame(t)
+	}
 }
 
 // announceTab tells the integrations a document is now open. The other
@@ -3375,6 +3432,13 @@ func (a *App) saveTabAt(idx int) bool {
 	}
 	a.refreshGitStatus()
 	a.requestFileDiff(tab.Path)
+	// A save is the one moment blame can change without the buffer
+	// moving — `git blame --contents` compares against history, and a
+	// commit made in the pane next door lands here as new authorship for
+	// lines the settle timer would never re-ask about.
+	if a.blameOn {
+		a.requestFileBlame(tab)
+	}
 	a.lspDidSave(tab)
 	// Saving a file under ~/.config/ced/themes re-reads the registry and
 	// repaints — the save-to-preview loop that stands in for a settings

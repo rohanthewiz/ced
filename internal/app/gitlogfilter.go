@@ -13,13 +13,21 @@
 // then cherry-pick the hit" is one uninterrupted flow, which is the
 // whole point of putting the search HERE instead of in a picker.
 //
-// Four search modes, because "search history" means four different
+// Five search modes, because "search history" means several different
 // questions and git answers each with a different flag:
 //
 //	(default)  --grep -i   which commit MESSAGE mentions this
 //	a:         --author -i who wrote it
 //	p:         -- <path>   what happened to this file (with --follow)
 //	s:         -S<term>    when did this STRING appear or disappear
+//	c:         <rev>       THIS commit, and the history behind it
+//
+// The last one is not really a search — it is how a commit named
+// somewhere else in the editor (a blame annotation today) gets INTO
+// this panel. The loaded history is the newest few hundred commits, and
+// the commit that wrote the line you are pointing at routinely is not
+// among them; without a way to ask for one by name, the log panel can
+// only show what it happened to have already fetched.
 //
 // The pickaxe (`s:`) is the one nothing else in the editor can answer
 // and the reason this file exists: "who deleted this line" is a
@@ -79,6 +87,7 @@ const (
 	gitLogModeAuthor
 	gitLogModePath
 	gitLogModePickaxe
+	gitLogModeCommit
 )
 
 // gitLogModeChip describes one mode: the prefix that selects it in the
@@ -99,6 +108,12 @@ var gitLogModeChips = []gitLogModeChip{
 	{gitLogModeAuthor, "a:", " author "},
 	{gitLogModePath, "p:", " path "},
 	{gitLogModePickaxe, "s:", " string "},
+	// `c:` and not `#`: a bare `#` would have been the natural spelling
+	// for a revision, but "#42" is exactly how people search a message
+	// for an issue number, and a prefix that quietly reinterpreted that
+	// query would be a trap. `c:` also keeps the whole table in one
+	// vocabulary — letter, colon, term.
+	{gitLogModeCommit, "c:", " commit "},
 }
 
 // gitLogQuery is a parsed query: which question is being asked, and the
@@ -132,6 +147,14 @@ type gitLogFilter struct {
 	// running is true between launching a search and its result
 	// landing; the only thing the "searching…" indicator reads.
 	running bool
+
+	// reveal is a hash the NEXT result should land on, set only by
+	// revealGitLogCommit. Without it a reveal would inherit
+	// applyGitLogCommits' identity rule — keep the previously selected
+	// commit if it survived the new list — and land on the old selection
+	// whenever that commit happens to be an ancestor of the one the user
+	// just asked to see.
+	reveal string
 
 	// applied is the query text the DISPLAYED list belongs to, "" while
 	// the list is the unfiltered history. It answers three questions:
@@ -199,6 +222,17 @@ func gitLogFilterArgs(q gitLogQuery) []string {
 		"-n", itoa(gitLogMaxCommits + 1), "--format=" + gitLogFormat}
 	if !q.active() {
 		return args
+	}
+	if q.mode == gitLogModeCommit {
+		// The one mode that must NOT carry --all: --all adds every ref to
+		// the rev list, which would union the whole history back in and
+		// leave the named commit buried in it. The rev is fenced behind
+		// its own `--` so a term beginning with a dash is a (bad) revision
+		// rather than an option, and the walk from it gives the panel a
+		// coherent list — this commit at the top, its ancestors under it.
+		return []string{"log", "--date=relative",
+			"-n", itoa(gitLogMaxCommits + 1), "--format=" + gitLogFormat,
+			q.term, "--"}
 	}
 	switch q.mode {
 	case gitLogModeAuthor:
@@ -345,6 +379,15 @@ func (a *App) handleGitLogFilterResult(e *gitLogFilterEvent) {
 		a.gitLog.filter.applied = e.query
 	}
 	a.applyGitLogCommits(e.commits, e.truncated)
+	if hash := a.gitLog.filter.reveal; hash != "" {
+		a.gitLog.filter.reveal = ""
+		for i, c := range a.gitLog.commits {
+			if c.Hash == hash {
+				a.gitLogSelect(i)
+				break
+			}
+		}
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -437,6 +480,46 @@ func (a *App) menuGitLogSearch() {
 		return // no repo / refused
 	}
 	a.openGitLogFilter()
+}
+
+// revealGitLogCommit brings hash into the log panel and selects it, so
+// its `git show` — metadata, stat and patch — fills the detail pane.
+// This is what a click on a blame annotation lands in (gitblame.go),
+// and the reason the `c:` mode exists.
+//
+// Two paths, and the cheap one is the common one: a commit already in
+// the loaded list is just a selection change, with no fork and no
+// disturbance to a list the user may have arranged. Only a commit the
+// panel has never heard of — which is most commits, once a file is
+// older than a few hundred — costs a query.
+func (a *App) revealGitLogCommit(hash string) {
+	if hash == "" || !a.gitIsRepo {
+		return
+	}
+	if !a.gitLog.open {
+		a.menuToggleGitLog()
+	}
+	if !a.gitLog.open {
+		return
+	}
+	for i, c := range a.gitLog.commits {
+		if c.Hash == hash {
+			a.gitLogSelect(i)
+			return
+		}
+	}
+	// Not loaded. Ask for it by name through the search bar, which is
+	// also what leaves the user somewhere they can see and undo: the bar
+	// is open, showing the query that produced the list, and Esc puts
+	// the full history back.
+	a.gitLog.filter.open = true
+	a.gitLog.filter.focused = false // the panel is the answer, not the box.
+	a.gitLog.filter.field = newTextField("c:" + hash)
+	a.gitLog.filter.reveal = hash
+	a.gitLogFilterStopTimer()
+	a.gitLog.filter.seq++
+	a.gitLogFilterRun()
+	a.gitLogClampScrolls()
 }
 
 // gitLogFilterMode is the mode the current query text selects — the
@@ -698,9 +781,20 @@ func (a *App) drawGitLogFilterBar() {
 	// which hides on focus): an empty focused box is precisely the
 	// moment the user is deciding what to type.
 	if len(a.gitLog.filter.field.value) == 0 {
-		hint := "search messages · a:author · p:path · s:string"
-		if runeLen(hint) <= end-start {
-			drawAt(a.screen, start, ry, hint, mutedSt)
+		// Longest legend that fits, not one legend that sometimes
+		// doesn't. The prefixes are the only syntax the chips cannot
+		// teach — a chip switches modes, it never shows you what to
+		// TYPE — so what degrades under pressure is the prose around
+		// them, and the prefixes themselves are the last thing to go.
+		for _, hint := range []string{
+			"search messages · a:author · p:path · s:string · c:commit",
+			"a:author · p:path · s:string · c:commit",
+			"a: p: s: c:",
+		} {
+			if runeLen(hint) <= end-start {
+				drawAt(a.screen, start, ry, hint, mutedSt)
+				break
+			}
 		}
 	}
 }

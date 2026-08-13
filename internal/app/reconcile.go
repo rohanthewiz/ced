@@ -270,6 +270,39 @@ func (a *App) openConflictModal(c *diskConflict) {
 	a.catsAsking("file changed on disk")
 }
 
+// raiseConflictNow puts the user in front of c's tab and asks the
+// question, ignoring `prompted`. It is the ON-DEMAND path — a save that
+// hit the guard, or a click on the ⚠ marker — as opposed to
+// conflictAfterEvent, which waits to be sure it isn't interrupting.
+// Both callers have the same standing: the user just performed a gesture
+// about this file, so the answer is what they are waiting for.
+func (a *App) raiseConflictNow(c *diskConflict) {
+	a.focusConflictTab(c)
+	a.openConflictModal(c)
+}
+
+// raiseConflictForTab re-asks the conflict question for the tab at idx
+// and reports whether there was one to ask. False means the caller's
+// click landed on a tab with nothing unresolved, and should be treated
+// as an ordinary click on that tab.
+//
+// This is the way back from "Decide later". Without it the marker is a
+// notice with no verb attached: the record says saves are blocked, the
+// strip says which file, and the only route to the four choices is to
+// attempt a save and be refused — which is a strange thing to have to do
+// to answer a question you were invited to defer.
+func (a *App) raiseConflictForTab(idx int) bool {
+	if idx < 0 || idx >= len(a.tabs) {
+		return false
+	}
+	c := a.conflictFor(a.tabs[idx])
+	if c == nil {
+		return false
+	}
+	a.raiseConflictNow(c)
+	return true
+}
+
 // focusConflictTab brings c's tab to the front. The compare panel and
 // every other resolution act on the ACTIVE tab, so a prompt raised for a
 // background tab (a save-all during quit, say) has to move the user
@@ -378,8 +411,7 @@ func (a *App) saveGuard(tab *editor.Tab, resume func(*App)) bool {
 	// Unlike the deferred watcher path this always raises, even on a
 	// record the user already deferred: they just asked to save, and the
 	// save cannot proceed until they answer.
-	a.focusConflictTab(c)
-	a.openConflictModal(c)
+	a.raiseConflictNow(c)
 	a.flash(fmt.Sprintf("Save blocked — %s changed on disk", filepath.Base(tab.Path)))
 	return false
 }

@@ -263,6 +263,143 @@ func TestRender_DrawsGutterMark(t *testing.T) {
 	}
 }
 
+// stubAnnotator is a canned AnnotationSource — the third primitive,
+// which unlike spans and marks makes ROOM for itself.
+type stubAnnotator struct {
+	stubSource
+	width int
+	anns  map[int]LineAnnotation
+}
+
+// Annotations returns the canned column regardless of the window.
+func (s stubAnnotator) Annotations(*Tab, theme.Theme, int, int) (int, map[int]LineAnnotation) {
+	return s.width, s.anns
+}
+
+// TestRender_AnnotationColumnMovesTheCodeAndTheGeometryTogether is the
+// contract the whole primitive rests on. The column takes cells, so the
+// code starts further right — and PosScreenCell, HitTest and
+// EnsureVisible have to agree about that, or every click lands a few
+// characters from where the user aimed and the caret drifts out of
+// view. The line NUMBERS deliberately do not move: they anchor the
+// left edge, and a column that appears should not slide them.
+func TestRender_AnnotationColumnMovesTheCodeAndTheGeometryTogether(t *testing.T) {
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer scr.Fini()
+	scr.SetSize(60, 5)
+
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer("one\ntwo\nthree")
+	const annW = 8
+	tab.DecoSources = []DecorationSource{stubAnnotator{
+		width: annW,
+		anns:  map[int]LineAnnotation{1: {Text: "a3f2c1 x", FG: tcell.ColorGreen}},
+	}}
+
+	// Before the first render nothing has been measured, so the layout is
+	// exactly the pre-annotation one.
+	if s, e := tab.AnnotationCols(); s != e {
+		t.Fatalf("unrendered tab already claims a column [%d,%d)", s, e)
+	}
+
+	tab.Render(scr, theme.Default(), 0, 0, 60, 5)
+	scr.Show()
+
+	start, end := tab.AnnotationCols()
+	if end-start != annW {
+		t.Fatalf("annotation column = [%d,%d), want %d cells", start, end, annW)
+	}
+	cells, w, _ := scr.GetContents()
+	// The annotation is painted at the column's start, on its own row.
+	if got := cells[1*w+start].Runes; len(got) == 0 || got[0] != 'a' {
+		t.Fatalf("annotation cell = %v, want the text's first rune", got)
+	}
+	if fg, _, _ := cells[1*w+start].Style.Decompose(); fg != tcell.ColorGreen {
+		t.Fatalf("annotation fg = %v, want the source's color", fg)
+	}
+	// An unannotated line leaves the column blank rather than borrowing
+	// the row above.
+	if got := cells[0*w+start].Runes; len(got) > 0 && got[0] != ' ' {
+		t.Fatalf("unannotated row should be blank, got %q", got[0])
+	}
+	// The line numbers stayed where they were…
+	if got := cells[0*w+gutterWidth-2].Runes; len(got) == 0 || got[0] != '1' {
+		t.Fatalf("line number moved: %v", cells[0*w+gutterWidth-2].Runes)
+	}
+	// …and the code moved right by exactly the column plus its mark cell.
+	if got := cells[0*w+end+1].Runes; len(got) == 0 || got[0] != 'o' {
+		t.Fatalf("code should start at %d, got %v", end+1, got)
+	}
+
+	// The three geometry helpers now answer about that same layout.
+	dx, dy, ok := tab.PosScreenCell(Position{Line: 0, Col: 0}, 60, 5)
+	if !ok || dx != end+1 || dy != 0 {
+		t.Fatalf("PosScreenCell = (%d,%d,%v), want (%d,0,true)", dx, dy, ok, end+1)
+	}
+	if pos, ok := tab.HitTest(end+1, 0, 60, 5); !ok || pos.Col != 0 {
+		t.Fatalf("HitTest on the first code cell = %+v (ok=%v), want col 0", pos, ok)
+	}
+	// A click IN the column still resolves to that line at column 0 —
+	// the pre-existing gutter behaviour, which a caller who wants to
+	// give the column its own verb overrides before asking.
+	if pos, ok := tab.HitTest(start+1, 2, 60, 5); !ok || pos.Line != 2 || pos.Col != 0 {
+		t.Fatalf("HitTest inside the column = %+v (ok=%v)", pos, ok)
+	}
+}
+
+// TestRender_AnnotationColumnYieldsOnANarrowWindow pins the refusal: a
+// column that would squeeze the code below annMinContent is dropped
+// whole rather than shrunk, because a blame stamp beside four readable
+// characters of code is not a trade anyone wants.
+func TestRender_AnnotationColumnYieldsOnANarrowWindow(t *testing.T) {
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer scr.Fini()
+	scr.SetSize(30, 3)
+
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer("package main")
+	tab.DecoSources = []DecorationSource{stubAnnotator{
+		width: 20, // 30 - 6 - 1 - 20 = 3 cells of code: not a layout.
+		anns:  map[int]LineAnnotation{0: {Text: "a3f2c1 rohan 3d"}},
+	}}
+
+	tab.Render(scr, theme.Default(), 0, 0, 30, 3)
+	scr.Show()
+
+	if s, e := tab.AnnotationCols(); s != e {
+		t.Fatalf("column survived a narrow window: [%d,%d)", s, e)
+	}
+	cells, w, _ := scr.GetContents()
+	if got := cells[0*w+gutterWidth+1].Runes; len(got) == 0 || got[0] != 'p' {
+		t.Fatalf("code should start where it always did, got %v", got)
+	}
+}
+
+// TestCollectAnnotations_FirstColumnWins: the column is a place, not a
+// stack. Two sources splitting it would each render into a fraction of
+// the width they measured themselves against.
+func TestCollectAnnotations_FirstColumnWins(t *testing.T) {
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer("one")
+	tab.DecoSources = []DecorationSource{
+		stubSource{}, // no column at all — skipped, not "a zero-width one"
+		stubAnnotator{width: 7, anns: map[int]LineAnnotation{0: {Text: "first"}}},
+		stubAnnotator{width: 40, anns: map[int]LineAnnotation{0: {Text: "second"}}},
+	}
+
+	w, anns := tab.collectAnnotations(theme.Default(), 0, 0)
+
+	if w != 7 || anns[0].Text != "first" {
+		t.Fatalf("collectAnnotations = (%d, %q), want the first source's column", w, anns[0].Text)
+	}
+}
+
 // TestRender_ExternalSpanUnderlines closes the loop on the phase-4/5
 // seam: a span from an external source (an LSP-style underline) reaches
 // the drawn cells, and coexists with syntax styling.

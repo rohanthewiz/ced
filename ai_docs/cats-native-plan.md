@@ -256,10 +256,23 @@ marker; the modal appears on next interaction. Adopt write-then-stat so
 ced's own saves never trip the watcher. At Tier 1, a suspended conflict
 reports `blocked` via the hook — the flagship phone-push scenario. ~400 LOC.
 
-**Follow-up worth doing (not blocking):** after "Decide later" the only
-route back to the prompt is an explicit save. Clicking the tab's `⚠`
-marker should re-raise it — a small tab-bar hit-test in the Phase-1
-stamped-rect idiom.
+**Follow-up — ✅ done 2026-08-13.** After "Decide later" the only route
+back to the prompt was an explicit save. The tab's `⚠` now re-raises it.
+Landed as specified (a hit-test in the Phase-1 stamped-rect idiom:
+`tabRect` grew a `MarkerX`, which the painter and the router now share
+so the cell that shows the marker is the cell that answers for it).
+Notes vs. spec:
+
+- ***Only `⚠` is a button.*** The slot's other two tenants stay inert:
+  `⊘` is answered by saving and `●` by the save verb itself, and a
+  marker that WROTE on click would be the tab strip's one destructive
+  cell — sitting one column from the filename. They fall through to the
+  tab switch a click on a tab has always meant.
+- *The raise goes through a shared `raiseConflictNow`, which the save
+  guard now calls too: both are the ON-DEMAND path (the user just
+  performed a gesture about this file) as against `conflictAfterEvent`,
+  which waits until it is sure it is not interrupting. It focuses the
+  tab first, because every resolution acts on the ACTIVE one.*
 
 ### Phase 3 — IDE smarts (~2–3 weeks; completion is the big rock)
 
@@ -795,7 +808,78 @@ SHA**. This phase closes the specific named gaps:
    trailer, the same message commits without it after the chip is clicked
    through `handleMouse`, and the button row was dumped to a
    `SimulationScreen` and read before being trusted.
-6. *(Optional, cut freely)* **Blame layer** via the decoration layer
+6. **Blame layer.** — ✅ done 2026-08-13 *(the "optional, cut freely"
+   item, taken because it was the last unclaimed one)*
+
+   *Landed as `internal/app/gitblame.go` + tests, on a NEW decoration
+   primitive it needed built first. Notes vs. spec:*
+
+   - ***The decoration layer could not carry it as it stood.** Blame is
+     TEXT the file does not contain: a `Span` can only restyle the
+     user's own characters and a `GutterMark` is one cell. So
+     `decoration.go` gained a third primitive — `LineAnnotation` +
+     `AnnotationSource` — and, unlike the other two, it MAKES ROOM: the
+     column opens between the line numbers and the mark cell, and
+     `gutterCols()` replaces the `gutterWidth` constant everywhere the
+     renderer converts between buffer columns and screen cells. That is
+     the whole risk of this item, and it is why `EnsureVisible`,
+     `PosScreenCell` and `HitTest` read a width CACHED at render time:
+     a hit-test that used a width the screen doesn't have would put the
+     caret several characters from the click.*
+   - ***It blames the BUFFER, not the file on disk*** (`git blame
+     --porcelain --contents -`, text on stdin). Blaming the saved file
+     would misattribute every line below an unsaved insertion —
+     annotations that are confidently wrong, which is worse than none.
+     Lines the user has just typed come back under the all-zero hash
+     and are marked `— you now` in the diff gutter's added color.
+   - ***The column's width is a property of the file, not the window.***
+     Measured once per result over every line. A width taken from the
+     visible rows would slide the code sideways as it scrolled.
+   - ***One heading per run, re-drawn at the top of the screen.*** The
+     first rule was "annotate only where authorship changes", and
+     looking at it killed half of that: scrolled into the middle of a
+     file written in one commit, the column was eighteen cells of
+     nothing. The run's stamp is now re-drawn on the first VISIBLE row,
+     so the top row is a heading and the rows below it are boundaries.
+     Found by dumping a real blame of a real file to a
+     `SimulationScreen` and reading it — the same pass that caught git
+     labelling uncommitted lines "External file (--contents)", the
+     mechanism leaking into the margin. Who an uncommitted line belongs
+     to is decided by the HASH, never by the name git puts on it.
+   - ***Staleness is a settle timer, and correctness depends on it***:
+     with `--contents`, every answer describes one exact revision of the
+     buffer, so results are dropped by a per-path sequence number and
+     re-asked (900ms) once typing stops. EditRev is the signature, the
+     same one auto-save uses. The previous column stays up meanwhile.
+   - ***The click needed a way to name a commit the panel never
+     loaded.*** The log holds the newest 400 across `--all`, and the
+     commit that wrote the line you are pointing at routinely is not
+     among them — so the search bar gained a fifth mode, `c:<rev>`
+     ("this commit and the history behind it"). It is the one mode that
+     must NOT carry `--all`, which would union the whole repository
+     back in and bury the commit asked for. Spelled `c:` and not `#`
+     because `#42` is how people search a message for an issue number.
+     A commit already in the list is just a selection change.
+   - ***A click on the column is not a click on the code***: it reveals
+     the commit, moves no caret and starts no drag (the Alt+click
+     rule). Every row of a run answers, including the ones whose
+     annotation is drawn further up — the column belongs to the line,
+     only the ink is shared.
+   - *Surfaces: `Esc A` (for git's own other name, `annotate` — NOT a
+     shifted twin of `a`, which is the AI namespace and a prefix rather
+     than a verb), ≡ Git → "Show/Hide blame", and ≡ Git → "Blame this
+     line…", which is the keyboard twin of the click. That row
+     deliberately does not switch the column on: it parks the question
+     and answers it when git does, because a row about ONE line that
+     turned on a whole layer would be the menu answering a question of
+     its own.*
+   - *Session-only, not persisted: it costs a `git blame` per file
+     opened, and a preference that silently forks on every open is not
+     one to restore without being asked.*
+
+   The original spec follows.
+
+   *(Optional, cut freely)* **Blame layer** via the decoration layer
    (`internal/editor/decoration.go`); click an annotation → that commit's
    diff in gitlog.
 
@@ -1025,10 +1109,11 @@ cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
 **Progress:** Phases 1, 2, 3.1, 3.2, 4.1–4.5 and **5.1, 5.3, 5.4, 5.5, 5.7**
-are done (2026-08-12); **5.6, the last of 5.8, 5.2, 3.4 and 3.3** landed
-2026-08-13. **Phases 3, 4 and 5 are closed** — 4.6 (blame) is explicitly
-optional and unclaimed. §5's item 5 is verified, and its item 2 shipped
-cats-side the same day (plus the ⌘E follow-up, cats `ed4962c`).
+are done (2026-08-12); **5.6, the last of 5.8, 5.2, 3.4, 3.3, 4.6 and
+Phase 2's `⚠` follow-up** landed 2026-08-13. **Every phase from 1 to 5 is
+now closed, with nothing unclaimed inside them.** §5's item 5 is verified,
+and its item 2 shipped cats-side the same day (plus the ⌘E follow-up,
+cats `ed4962c`).
 
 Every Phase-5 consumer now shares one shape, and it is worth stating once
 because the next one should follow it: **poll on a goroutine, cache on the
@@ -1073,12 +1158,28 @@ verb must not inherit the modal flavour's failure behaviour — the
 keyboard hover flashes "No hover info" because a person asked, and the
 same flash on mouse-rest would be noise the user cannot switch off.
 
-**Phases 3, 4 and 5 are all closed.** What remains anywhere in the
-roadmap is small and unclaimed: 4.6 (blame, optional) and Phase 2's `⚠`
-tab marker re-raising a deferred conflict prompt. Phase 6 is entirely
-upstream-gated; with §5 item 2 shipped, its critical path is now item 1
-(`clipboard.read`), which is the one ask with a whole feature behind it
-(§4 Tier 1 + native paste anywhere).
+4.6 added a sixth, and it is about where a feature is allowed to push:
+**an overlay that needs ROOM is a change to the renderer, not a
+decoration.** Spans and gutter marks compose freely because they paint
+over cells that already exist; the blame column moves the code, so
+every conversion between buffer columns and screen cells has to know
+about it, and the only safe way to keep the mouse honest is for the
+geometry helpers to read a width the renderer CACHED — geometry
+answering about the frame the user is looking at, never about the one
+being computed. Its sibling rule, learned the same afternoon: **dump
+the surface and read it.** Two of this feature's rules were wrong in a
+way no amount of reasoning caught — an empty margin where a file has
+one author, and git's own `--contents` mechanism ("External file")
+leaking into the column — and both took one look at a real render to
+see.
+
+**Phases 1 through 5 are all closed, with nothing unclaimed inside
+them.** Phase 6 is entirely upstream-gated; with §5 item 2 shipped, its
+critical path is now item 1 (`clipboard.read`), which is the one ask
+with a whole feature behind it (§4 Tier 1 + native paste anywhere).
+Still owed and not code: the ⌘ chords hand-checked end to end in
+browser-cats (the running catway is an older binary) and in the mac
+app, where the analysis says there are no menu collisions.
 
 ## 8. Verification
 
@@ -1123,6 +1224,17 @@ upstream-gated; with §5 item 2 shipped, its critical path is now item 1
   the user did not ask for: tie its lifetime to whatever summoned it,
   refuse loudly in code and silently on screen, and never let it take
   the modal slot
+- `internal/editor/decoration.go` — the three overlay primitives.
+  `Span` and `GutterMark` paint over cells that exist; `LineAnnotation`
+  (with `AnnotationSource`) opens a column and moves the code, which is
+  why it is the only one the renderer's geometry has to know about. Any
+  future margin (a coverage strip, a review comment) belongs here, and
+  should take the same all-or-nothing width and cached-geometry rules
+- `internal/app/gitblame.go` — the annotation column's one consumer, and
+  the pattern for anything that annotates a buffer from an expensive
+  external command: blame the BUFFER (never the saved file), measure the
+  column over the whole file so it cannot jitter, drop answers by
+  per-path sequence, and re-ask on a settle timer keyed to `EditRev`
 - `internal/app/problems.go` — the bottom-strip worklist. The pattern any
   future docked list should copy: rows/view indirection with the selection
   preserved by identity, header chips as the only filter UI, one geometry

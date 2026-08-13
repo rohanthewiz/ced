@@ -226,6 +226,12 @@ func leaderBindings() []leaderBinding {
 		// variant walks backwards, mirroring find's Enter/Shift-Enter.
 		{key: 'h', action: (*App).menuNextHunk, repeat: true, label: "Next change"},
 		{key: 'H', action: (*App).menuPrevHunk, repeat: true, label: "Previous change"},
+		// 'A' for Annotate — git's own other name for blame, and the
+		// letter its own command offers. It is NOT the shifted twin of
+		// 'a': that key is the AI NAMESPACE, a prefix rather than a verb,
+		// so there is no lowercase action for a capital to be the wider
+		// scope of and the h/H, f/F convention has nothing to say here.
+		{key: 'A', action: (*App).menuToggleBlame, label: "Blame"},
 		// 'g' for "git" — collapse/expand the diff review panel.
 		// '=' / '-' resize whichever bottom panel is open (grow/shrink,
 		// borrowing the browser-zoom mnemonic); silent no-ops while

@@ -559,3 +559,122 @@ func TestConflictModal_DrawsTheChoicesAndTheHint(t *testing.T) {
 		t.Fatal("the hovered choice's hint should be drawn")
 	}
 }
+
+// -----------------------------------------------------------------------------
+// The marker as a click target — the way back from "Decide later"
+// -----------------------------------------------------------------------------
+
+// twoTabConflictFixture stages the case the marker click exists for: a
+// conflict raised and deferred on one file while the user is looking at
+// another. The second tab is active on return, so a test that ends up on
+// the first has been taken there by the click.
+func twoTabConflictFixture(t *testing.T) (*App, *editor.Tab, string) {
+	t.Helper()
+	a, tab, path := guardedSaveFixture(t)
+	a.closeModal()
+	a.conflictLater(a.conflictFor(tab))
+
+	other := filepath.Join(filepath.Dir(path), "other.go")
+	if err := os.WriteFile(other, []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("seed other: %v", err)
+	}
+	openTabAtPath(t, a, other)
+	if a.activeTab != 1 {
+		t.Fatalf("fixture should leave the second tab active, activeTab = %d", a.activeTab)
+	}
+	return a, tab, path
+}
+
+// markerCell reports the rune actually painted in tab idx's status slot,
+// read back off the simulation screen rather than recomputed — the point
+// of the test is that the painter and the hit-test agree about the cell.
+func markerCell(t *testing.T, a *App, idx int) rune {
+	t.Helper()
+	a.draw()
+	a.screen.Show()
+	r := a.lastTabRects[idx]
+	cells, w, _ := a.screen.(tcell.SimulationScreen).GetContents()
+	if r.MarkerX >= w {
+		t.Fatalf("marker column %d is off a %d-wide screen", r.MarkerX, w)
+	}
+	c := cells[r.MarkerX] // row 0: the tab bar.
+	if len(c.Runes) == 0 {
+		return ' '
+	}
+	return c.Runes[0]
+}
+
+// TestTabMarkerClick_ReRaisesADeferredConflict is the follow-up the phase
+// left owed. "Decide later" is an invitation to answer in your own time,
+// and before this the only route back to the four choices was to attempt
+// a save and be refused — a strange thing to have to do to answer a
+// question you were told you could defer.
+//
+// The focus half is not incidental: every resolution acts on the ACTIVE
+// tab (compare re-reads it, Take disk reloads it), so clicking a
+// background tab's ⚠ must bring that tab forward before asking.
+func TestTabMarkerClick_ReRaisesADeferredConflict(t *testing.T) {
+	a, tab, _ := twoTabConflictFixture(t)
+
+	if got := markerCell(t, a, 0); got != conflictMarker {
+		t.Fatalf("conflicted tab's slot painted %q, want %q", got, conflictMarker)
+	}
+	a.tabBarClick(a.lastTabRects[0].MarkerX, 0)
+
+	if conflictOf(a) == nil {
+		t.Fatalf("clicking ⚠ must re-raise the prompt, modal = %T", a.modal)
+	}
+	if a.activeTab != 0 {
+		t.Fatalf("the conflicted tab must come forward, activeTab = %d", a.activeTab)
+	}
+	if a.conflictFor(tab) == nil {
+		t.Fatal("re-raising resolves nothing on its own")
+	}
+}
+
+// TestTabMarkerClick_DirtyDotIsNotAButton keeps the slot's other two
+// tenants inert. ⊘ and ● have no question behind them — a deleted file is
+// answered by saving and an unsaved buffer by the save verb — so a click
+// there is just a click on the tab. A marker that wrote to disk would be
+// the one destructive cell in the strip, and it sits one column from the
+// filename.
+func TestTabMarkerClick_DirtyDotIsNotAButton(t *testing.T) {
+	a, tab, _ := twoTabConflictFixture(t)
+	a.clearConflict(tab)
+	tab.Dirty = true
+
+	if got := markerCell(t, a, 0); got != '●' {
+		t.Fatalf("dirty tab's slot painted %q, want ●", got)
+	}
+	a.tabBarClick(a.lastTabRects[0].MarkerX, 0)
+
+	if a.modal != nil {
+		t.Fatalf("a dirty dot has nothing to ask, got modal %T", a.modal)
+	}
+	if a.activeTab != 0 {
+		t.Fatalf("the click should fall through to a tab switch, activeTab = %d", a.activeTab)
+	}
+	if !tab.Dirty {
+		t.Fatal("clicking the dot must not have saved")
+	}
+}
+
+// TestTabMarkerClick_MissesTheFilename pins the geometry the whole
+// gesture rests on: the slot is one cell wide, and the cell after it
+// belongs to the name. An off-by-one here would open the prompt when the
+// user meant to switch tabs — or, worse, quietly not open it when they
+// aimed at the marker.
+func TestTabMarkerClick_MissesTheFilename(t *testing.T) {
+	a, _, _ := twoTabConflictFixture(t)
+	markerCell(t, a, 0) // populate lastTabRects via a real draw.
+	r := a.lastTabRects[0]
+
+	a.tabBarClick(r.MarkerX+1, 0)
+
+	if a.modal != nil {
+		t.Fatalf("the cell past the marker is the tab, not the question (modal %T)", a.modal)
+	}
+	if a.activeTab != 0 {
+		t.Fatalf("it should still switch tabs, activeTab = %d", a.activeTab)
+	}
+}

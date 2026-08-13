@@ -112,6 +112,52 @@ type GutterMark struct {
 	FG    tcell.Color
 }
 
+// LineAnnotation is one line's worth of annotation TEXT, drawn in a
+// column of its own between the line numbers and the code.
+//
+// It is a third primitive rather than a use of the two above because
+// neither can carry it: a Span styles cells that already hold the
+// user's text, and a GutterMark is a single cell. "a3f2c1 rohan 3d"
+// is neither — it is text the file does not contain, and it needs
+// room made for it.
+type LineAnnotation struct {
+	Text string
+	FG   tcell.Color
+}
+
+// AnnotationSource is a DecorationSource that also owns an annotation
+// column. Width is in cells and is the SAME for every line of a render
+// (the source reports what its widest row needs), because a column
+// whose width tracked the visible rows would shift the code sideways
+// as the user scrolled — the one thing a reader's eye cannot forgive.
+//
+// Only the first source offering a non-zero width is honored. The
+// column is a place, not a stack: two sources splitting it would each
+// get a fraction of the room they measured themselves against, and
+// both would render elided nonsense.
+type AnnotationSource interface {
+	DecorationSource
+	Annotations(t *Tab, th theme.Theme, firstLine, lastLine int) (width int, byLine map[int]LineAnnotation)
+}
+
+// collectAnnotations returns the annotation column for the visible
+// window: its width and the per-line text. Zero width means no column,
+// which is the state every tab is in until a source says otherwise —
+// so a build with no annotation source renders exactly as it did
+// before this primitive existed.
+func (t *Tab) collectAnnotations(th theme.Theme, firstLine, lastLine int) (int, map[int]LineAnnotation) {
+	for _, src := range t.DecoSources {
+		as, ok := src.(AnnotationSource)
+		if !ok {
+			continue
+		}
+		if w, byLine := as.Annotations(t, th, firstLine, lastLine); w > 0 {
+			return w, byLine
+		}
+	}
+	return 0, nil
+}
+
 // DecorationSource produces spans and gutter marks for the visible line
 // window [firstLine, lastLine]. Sources are consulted once per render,
 // so producers whose data is expensive to compute (git diffs, LSP

@@ -116,6 +116,114 @@ func TestGitLogFilterArgs(t *testing.T) {
 	}
 }
 
+// TestGitLogFilterArgs_CommitModeDropsAll is the one mode whose argv is
+// not the common base, and the reason is easy to get wrong: `--all`
+// adds every ref to the rev list, so `git log --all <hash>` walks the
+// whole repository and buries the commit that was asked for. The rev
+// also has to be fenced behind `--`, like every other term here.
+func TestGitLogFilterArgs_CommitModeDropsAll(t *testing.T) {
+	args := gitLogFilterArgs(gitLogQuery{gitLogModeCommit, "a3f2c1d"})
+
+	for _, a := range args {
+		if a == "--all" {
+			t.Fatalf("commit mode must not carry --all: %v", args)
+		}
+	}
+	want := []string{"log", "--date=relative", "-n", itoa(gitLogMaxCommits + 1),
+		"--format=" + gitLogFormat, "a3f2c1d", "--"}
+	if !equalStrings(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+// TestParseGitLogQuery_CommitPrefix pins the prefix that reaches it, and
+// the collision it deliberately avoids: `#42` stays a MESSAGE search,
+// because searching a log for an issue number is at least as common as
+// naming a revision, and a prefix that quietly reinterpreted it would
+// return the wrong commits with no way to see why.
+func TestParseGitLogQuery_CommitPrefix(t *testing.T) {
+	if q := parseGitLogQuery("c:a3f2c1d"); q.mode != gitLogModeCommit || q.term != "a3f2c1d" {
+		t.Fatalf("c: query = %+v", q)
+	}
+	if q := parseGitLogQuery("#42"); q.mode != gitLogModeMessage || q.term != "#42" {
+		t.Fatalf("#42 = %+v, want a message search", q)
+	}
+	// And the chips still round-trip the mode through the text, which is
+	// the invariant that keeps a chip from disagreeing with the query.
+	if got := gitLogSetQueryMode("p:main.go", gitLogModeCommit); got != "c:main.go" {
+		t.Fatalf("mode rewrite = %q", got)
+	}
+}
+
+// TestRevealGitLogCommit_FallsBackToAQueryForAnUnloadedCommit covers the
+// path a blame click takes on any file older than the loaded history:
+// the commit is not in the list, so it is asked for by name — and the
+// hash is remembered so the RESULT lands on it rather than on whatever
+// applyGitLogCommits' identity rule would have preferred.
+func TestRevealGitLogCommit_FallsBackToAQueryForAnUnloadedCommit(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	a.gitLog.open = true
+	a.gitLog.commits = []gitLogCommit{{Hash: "1111", Short: "1111"}}
+
+	a.revealGitLogCommit("deadbee")
+	defer a.gitLogFilterStopTimer()
+
+	if !a.gitLog.filter.open {
+		t.Fatal("the query the panel is showing has to be visible")
+	}
+	if got := a.gitLog.filter.field.String(); got != "c:deadbee" {
+		t.Fatalf("filter text = %q, want c:deadbee", got)
+	}
+	if a.gitLog.filter.focused {
+		t.Fatal("the answer is the list, not the box — the keyboard stays with the panel")
+	}
+	if a.gitLog.filter.reveal != "deadbee" {
+		t.Fatalf("reveal = %q, want the hash", a.gitLog.filter.reveal)
+	}
+
+	// The result lands on the revealed commit even though the previous
+	// selection survived into the new list.
+	a.handleGitLogFilterResult(&gitLogFilterEvent{
+		seq:   a.gitLog.filter.seq,
+		query: "c:deadbee",
+		commits: []gitLogCommit{
+			{Hash: "deadbee", Short: "deadbee"},
+			{Hash: "1111", Short: "1111"},
+		},
+	})
+	c, ok := a.gitLogSelectedCommit()
+	if !ok || c.Hash != "deadbee" {
+		t.Fatalf("selected %+v, want the revealed commit", c)
+	}
+	if a.gitLog.filter.reveal != "" {
+		t.Fatal("the reveal is spent once it lands")
+	}
+}
+
+// TestRevealGitLogCommit_PrefersTheLoadedList: a commit already on
+// screen costs no fork and must not disturb a list the user may have
+// arranged with a search of their own.
+func TestRevealGitLogCommit_PrefersTheLoadedList(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	a.gitLog.open = true
+	a.gitLog.filter.applied = "a:ada"
+	a.gitLog.commits = []gitLogCommit{
+		{Hash: "1111", Short: "1111"},
+		{Hash: "2222", Short: "2222"},
+	}
+
+	a.revealGitLogCommit("2222")
+
+	if a.gitLog.selected != 1 {
+		t.Fatalf("selected index %d, want the matching row", a.gitLog.selected)
+	}
+	if a.gitLog.filter.open || a.gitLog.filter.applied != "a:ada" {
+		t.Fatal("a reveal that found its commit must leave the user's search alone")
+	}
+}
+
 // equalStrings compares two argv slices element by element.
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {

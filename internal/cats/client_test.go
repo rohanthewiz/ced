@@ -257,11 +257,22 @@ func TestWrapperWireShapes(t *testing.T) {
 	c := NewClient(s.path)
 	pane := uint32(7)
 
-	if err := c.PaneSplit(&pane, SplitVertical); err != nil {
+	if _, err := c.PaneSplit(SplitParams{Pane: &pane, Direction: SplitVertical}); err != nil {
 		t.Fatalf("split: %v", err)
 	}
 	if got := params(t, s.nextReq()); got != `{"pane":7,"direction":"v"}` {
 		t.Fatalf("split params = %s", got)
+	}
+
+	// The spawn trio is omitempty across the board: a bare split must go on
+	// the wire exactly as it did before those fields existed, or an older cats
+	// would see an empty command and try to exec nothing.
+	if _, err := c.PaneSplit(SplitParams{Direction: SplitHorizontal,
+		Cwd: "/w", Command: []string{"ced", "a.go"}}); err != nil {
+		t.Fatalf("split with argv: %v", err)
+	}
+	if got := params(t, s.nextReq()); got != `{"direction":"h","cwd":"/w","command":["ced","a.go"]}` {
+		t.Fatalf("split-with-argv params = %s", got)
 	}
 
 	// submit=false is the staged form and must be omitted, not sent as
@@ -410,5 +421,69 @@ func TestWaitForOutputOnANilClient(t *testing.T) {
 	_, _, _ = live.WaitForOutput(1, "x", false, time.Minute)
 	if live.Timeout != 0 {
 		t.Fatalf("the shared client's timeout was mutated to %v", live.Timeout)
+	}
+}
+
+// pane.split's answer is the capability signal for two things at once, so
+// both readings are pinned. A current host names the pane; an older one
+// answers `ok` with no data at all, which must decode to zero rather than to
+// an error — a caller that treated it as a failure would report a split that
+// visibly happened as one that did not.
+func TestPaneSplitResult(t *testing.T) {
+	var withData bool
+	s := startFake(t, func(req request, conn net.Conn) {
+		if withData {
+			reply(t, conn, SplitResult{Pane: 42})
+			return
+		}
+		reply(t, conn, nil)
+	})
+	c := NewClient(s.path)
+
+	withData = true
+	res, err := c.PaneSplit(SplitParams{Direction: SplitVertical})
+	if err != nil || res.Pane != 42 {
+		t.Fatalf("modern host: res=%+v err=%v", res, err)
+	}
+
+	withData = false
+	res, err = c.PaneSplit(SplitParams{Direction: SplitVertical})
+	if err != nil {
+		t.Fatalf("an older host's dataless ok is not an error: %v", err)
+	}
+	if res.Pane != 0 {
+		t.Fatalf("res = %+v, want a zero pane", res)
+	}
+}
+
+// clipboard.read carries no params and answers a text/truncated pair. An
+// empty clipboard is a successful answer with an empty string, which has to
+// stay distinguishable from a failure — "nothing copied yet" is a normal
+// state, and an editor that reported it as an error would show one every
+// time a fresh session tried the verb.
+func TestClipboardRead(t *testing.T) {
+	var payload ClipboardData
+	s := startFake(t, func(req request, conn net.Conn) {
+		reply(t, conn, payload)
+	})
+	c := NewClient(s.path)
+
+	payload = ClipboardData{Text: "hello", Truncated: true}
+	d, err := c.ClipboardRead()
+	if err != nil || d.Text != "hello" || !d.Truncated {
+		t.Fatalf("read = %+v, err = %v", d, err)
+	}
+	req := s.nextReq()
+	if req.Method != MethodClipboardRead || params(t, req) != "null" {
+		t.Fatalf("request = %s %s, want a bare clipboard.read", req.Method, params(t, req))
+	}
+
+	payload = ClipboardData{}
+	d, err = c.ClipboardRead()
+	if err != nil {
+		t.Fatalf("an empty clipboard is not an error: %v", err)
+	}
+	if d.Text != "" || d.Truncated {
+		t.Fatalf("read = %+v, want the zero value", d)
 	}
 }

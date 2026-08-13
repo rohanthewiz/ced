@@ -44,10 +44,22 @@ type ctlSpy struct {
 	// splitAdds is how many panes a split conjures — 1 in reality, 0 or 2
 	// in the tests that pin the ambiguous-diff refusal.
 	splitAdds int
+	// modernSplit makes pane.split answer with the pane it created, the way
+	// a current cats does. False is an OLDER host — ok with no data — which
+	// is the legacy listing/diff/type path, and the default here on purpose:
+	// most of this file's assertions are about that path, and it is the one
+	// that has to keep working.
+	modernSplit bool
 	// paneRows overrides what pane.list reports, for the tests that need
 	// panes carrying more than an id (an agent, a cwd). Nil falls back to
 	// panes, the plain id list the split sequence needs.
 	paneRows []cats.PaneInfo
+	// clipText is what clipboard.read answers with, and clipFails makes it
+	// refuse the way a host with no reader on PATH does. The zero values are
+	// the honest defaults: an empty clipboard, which is an ordinary answer.
+	clipText  string
+	clipTrunc bool
+	clipFails bool
 	// captureText is what `capture` answers with; waitMatched / waitText are
 	// pane.wait_for_output's verdict. Their zero values are the honest
 	// defaults: an empty pane, and a wait that never matched.
@@ -129,6 +141,13 @@ func (s *ctlSpy) serve(conn net.Conn) {
 		reply["data"] = map[string]any{"panes": rows}
 	case cats.MethodCapture:
 		reply["data"] = map[string]any{"text": s.captureText}
+	case cats.MethodClipboardRead:
+		if s.clipFails {
+			reply = map[string]any{"ok": false,
+				"error": "clipboard unavailable: no reader on this host (install wl-paste, xclip or xsel)"}
+			break
+		}
+		reply["data"] = map[string]any{"text": s.clipText, "truncated": s.clipTrunc}
 	case cats.MethodWaitOutput:
 		reply["data"] = map[string]any{"matched": s.waitMatched, "text": s.waitText}
 	case cats.MethodPaneSplit:
@@ -139,16 +158,21 @@ func (s *ctlSpy) serve(conn net.Conn) {
 		for i := 0; i < s.splitAdds; i++ {
 			s.panes = append(s.panes, uint32(100+i))
 		}
+		if s.modernSplit && s.splitAdds > 0 {
+			reply["data"] = map[string]any{"pane": 100}
+		}
 	}
-	last := req.Method
+	last, modern := req.Method, s.modernSplit
 	s.mu.Unlock()
 
 	out, _ := json.Marshal(reply)
 	_, _ = conn.Write(append(out, '\n'))
-	// send_input is the sequence's last call, and so the one an async test
-	// waits on. The refusal paths are exercised synchronously (they call
-	// catsSpawnSibling directly), so they need no signal.
-	if last == cats.MethodPaneSendIn {
+	// The sequence's last call is the one an async test waits on: send_input
+	// on the legacy path, and the split itself on the modern one, where
+	// nothing is typed at all. The refusal paths are exercised synchronously
+	// (they call catsSpawnSibling directly), so they need no signal.
+	if last == cats.MethodPaneSendIn || last == cats.MethodClipboardRead ||
+		(modern && last == cats.MethodPaneSplit) {
 		select {
 		case s.done <- struct{}{}:
 		default:
@@ -287,7 +311,7 @@ func TestCatsSplitRefusesAnAmbiguousPane(t *testing.T) {
 		s.splitAdds = adds
 		openTestFileTab(t, a, "main.go")
 
-		if _, err := catsSpawnSibling(a.cats.client, nil, cats.SplitVertical, "x\n"); err == nil {
+		if _, err := catsSpawnSibling(a.cats.client, nil, cats.SplitVertical, catsSpawn{Line: "x\n"}); err == nil {
 			t.Fatalf("adds=%d: an ambiguous diff should refuse", adds)
 		}
 		for _, m := range s.methods() {
@@ -307,7 +331,7 @@ func TestCatsSplitReportsAHostRefusal(t *testing.T) {
 	s.splitFails = true
 	openTestFileTab(t, a, "main.go")
 
-	_, err := catsSpawnSibling(a.cats.client, nil, cats.SplitHorizontal, "x\n")
+	_, err := catsSpawnSibling(a.cats.client, nil, cats.SplitHorizontal, catsSpawn{Line: "x\n"})
 	if err == nil || !strings.Contains(err.Error(), "no room to split") {
 		t.Fatalf("err = %v, want the server's own message", err)
 	}
@@ -415,7 +439,7 @@ func TestCatsSurfacesAppearOnlyInsideCats(t *testing.T) {
 
 	withCtlSpy(t, a)
 	openTestFileTab(t, a, "main.go")
-	if len(a.catsMenuItems()) != 9 || len(catsLeaderBindings(a)) != 9 {
+	if len(a.catsMenuItems()) != 10 || len(catsLeaderBindings(a)) != 10 {
 		t.Fatalf("rows=%d keys=%d", len(a.catsMenuItems()), len(catsLeaderBindings(a)))
 	}
 	found := false
@@ -444,5 +468,83 @@ func TestCatsSurfacesAppearOnlyInsideCats(t *testing.T) {
 	}
 	if n != 2 {
 		t.Fatalf("%d split rows in the context menu, want 2", n)
+	}
+}
+
+// Against a current cats the whole sequence is ONE call: the argv rides the
+// split and the answer names the pane. No listing, no diff, and — the part
+// that matters most — nothing typed at a shell, so there is no quoting and no
+// shell for a path with a quote in it to escape out of.
+func TestCatsSplitUsesTheArgvWhenTheHostReturnsItsPane(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	s := withCtlSpy(t, a)
+	s.modernSplit = true
+	path := openTestFileTab(t, a, "main.go")
+	catsExecutable = func() (string, error) { return "/opt/bin/ced", nil }
+	t.Cleanup(func() { catsExecutable = os.Executable })
+
+	a.catsSplitRight()
+	s.wait(t)
+
+	if got := strings.Join(s.methods(), " "); got != "pane.list pane.split" {
+		t.Fatalf("call sequence = %q, want the split alone (after the legacy-path snapshot)", got)
+	}
+	split, _ := s.call(cats.MethodPaneSplit)
+	var sp struct {
+		Pane      *uint32  `json:"pane"`
+		Direction string   `json:"direction"`
+		Command   []string `json:"command"`
+	}
+	if err := json.Unmarshal(split.Params, &sp); err != nil {
+		t.Fatalf("split params: %v", err)
+	}
+	if sp.Pane == nil || *sp.Pane != 9 || sp.Direction != cats.SplitHorizontal {
+		t.Fatalf("split params = %+v", sp)
+	}
+	want := []string{"/opt/bin/ced", "--root", a.rootDir, path}
+	if len(sp.Command) != len(want) {
+		t.Fatalf("command = %v, want %v", sp.Command, want)
+	}
+	for i := range want {
+		if sp.Command[i] != want[i] {
+			t.Fatalf("command = %v, want %v", sp.Command, want)
+		}
+	}
+}
+
+// The legacy path is not a leftover — it is the only thing standing between a
+// user on an older cats and an empty shell where their editor should be. An
+// `ok` with no data means BOTH that the pane is unnamed and that the argv was
+// ignored (the two shipped together), so the listing/diff/type sequence has to
+// run in full.
+func TestCatsSplitFallsBackWhenTheHostNamesNoPane(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	s := withCtlSpy(t, a) // modernSplit stays false: an older host
+	path := openTestFileTab(t, a, "main.go")
+	catsExecutable = func() (string, error) { return "/opt/bin/ced", nil }
+	t.Cleanup(func() { catsExecutable = os.Executable })
+
+	a.catsSplitRight()
+	s.wait(t)
+
+	if got, want := strings.Join(s.methods(), " "),
+		"pane.list pane.split pane.list pane.send_input"; got != want {
+		t.Fatalf("call sequence = %q, want %q", got, want)
+	}
+	// The argv is sent anyway — an older host ignores the unknown field, and
+	// omitting it would mean asking the host's vintage before every split.
+	sent, _ := s.call(cats.MethodPaneSendIn)
+	var in struct {
+		Pane uint32 `json:"pane"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(sent.Params, &in); err != nil {
+		t.Fatalf("send_input params: %v", err)
+	}
+	if in.Pane != 100 {
+		t.Fatalf("input went to pane %d, want the new one (100)", in.Pane)
+	}
+	if want := "exec '/opt/bin/ced' --root '" + a.rootDir + "' '" + path + "'\n"; in.Text != want {
+		t.Fatalf("command = %q, want %q", in.Text, want)
 	}
 }

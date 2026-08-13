@@ -357,6 +357,13 @@ func builtinMenuGroups() []menuGroup {
 		{title: "Compare", collapsible: true, items: []menuItemDef{
 			{label: "Compare with file…", action: (*App).menuCompareFile, enabled: (*App).hasComparable},
 			{label: "Compare with saved copy", action: (*App).menuCompareSaved, enabled: (*App).hasSavedCopy},
+			// Inside cats this reads the HOST's clipboard and opens the panel
+			// already populated; outside it, ced's own; and with neither it
+			// becomes the row below it (catsclip.go). One row rather than two,
+			// because "compare with what I copied" is one question — a second
+			// row would make the user choose between two clipboards they have
+			// no way to look at.
+			{label: "Compare with clipboard", action: (*App).menuCatsCompareClipboard, enabled: (*App).hasComparable},
 			{label: "Compare with pasted text", action: (*App).menuComparePaste, enabled: (*App).hasComparable},
 			{action: (*App).menuToggleCompare, enabled: (*App).hasCompareResult, labelFor: (*App).compareToggleLabel},
 		}},

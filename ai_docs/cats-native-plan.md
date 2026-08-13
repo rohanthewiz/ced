@@ -983,10 +983,43 @@ SHA**. This phase closes the specific named gaps:
    trailing blank screen rows are trimmed — trimming its interior would report
    changes the user never made.
 
-### Phase 6 — Upstream-gated polish
-Each landed ask gets its consumer: `clipboard.read` → native
-compare-with-clipboard + paste-from-system anywhere; `theme_changed` → drop
-the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords.
+### Phase 6 — Upstream-gated polish — ✅ done 2026-08-13 (for every ask that has landed)
+Each landed ask gets its consumer.
+
+**Landed, with consumers built the same day (cats `ff8c89a`):**
+
+- **`clipboard.read` → `internal/app/catsclip.go`.** "Compare with clipboard"
+  (≡ Compare) opens the panel already populated — the §4 Tier-1 zero-gesture
+  version, falling through to ced's own clipboard and then to the armed paste
+  when there is no host. "Paste from host clipboard" (≡ Cats, `Esc C v`) puts
+  it at the caret.
+  **The finding that shaped the file: the host clipboard is not always the
+  user's clipboard.** ced's copy goes out over OSC 52, which cats hands to the
+  BROWSER's clipboard; `clipboard.read` reads the machine catway RUNS on. Same
+  thing in the mac app and any local session, two different machines the moment
+  someone drives a remote catway from a laptop. So nothing reads it ambiently —
+  no background refresh of `clipBuf`, and ⌘V is left alone. An ambient sync
+  would be delightful nine times in ten and, the tenth, would replace what the
+  user copied in their browser with whatever sits on a headless build server.
+- **`theme_changed` → the poll is retired, but only once the host proves it
+  pushes.** A `theme_changed` frame carries the resolved palette straight into
+  `catsThemeArrived`; the first one sets `themeEvented`, which stands the
+  focus_changed poll down for the session. It cannot be dropped outright: the
+  event vocabulary is not enumerable over the wire, so a host too old to send
+  it is indistinguishable from one that simply has not changed theme yet, and
+  faith would leave that user's editor permanently out of step.
+- **`pane.split` returning its pane + taking an argv → `catssplit.go` is one
+  round trip.** The argv is exec'd AS the pane's process, so there is no shell,
+  no quoting, no bracketed-paste assumption and no race against a prompt; the
+  returned id makes the `pane.list` diff unnecessary. The legacy
+  list/split/list/type path stays as the fallback and is told apart with
+  nothing to probe: a zero pane means an old host, which means the argv was
+  ignored too, because both shipped in the same commit.
+
+**Still outstanding, because the ask has not landed:** `ui.notify` →
+host-drawn toasts (§5 item 4, deferred by design — the hook's `custom_status`
+covers the attention story); ⌘ routing → the Mac-app chords, which is a
+hand-check rather than code (§5 item 2).
 
 ---
 
@@ -997,16 +1030,29 @@ the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords
   menu row opens the compare panel *pre-armed* in paste-capture mode with a
   one-line instruction ("paste now"); `comparePasteTarget` /
   `comparePasteClip` (compare.go) already do the mechanics.
-- **Tier 1 (upstream-gated):** `clipboard.read` control command → ced calls
-  it via `internal/cats`, result → PostEvent → compare panel opens fully
-  populated. Zero gestures. Gate on capability probe.
+- ✅ **Tier 1 (shipped 2026-08-13, both sides):** `clipboard.read` control
+  command → ced calls it via `internal/cats`, result → PostEvent → compare
+  panel opens fully populated. Zero gestures. One menu row serves both tiers
+  (`menuCatsCompareClipboard`) rather than two: "compare with what I copied" is
+  one question, and a second row would make the user choose between two
+  clipboards they have no way to look at.
 
 ## 5. Upstream asks (cats-side — same author; separate track, all optional to Phases 1–4)
 
-1. **`clipboard.read` control command.** catapp already bridges `pbpaste`
-   into the page; needs socket exposure + a permission stance (suggest a
-   config flag and/or local-session-only) since remote panes could read the
-   host clipboard. Unlocks §4 Tier 1 + native paste.
+1. ✅ **shipped cats-side 2026-08-13 (cats `ff8c89a`)** — **`clipboard.read`
+   control command.** `internal/clipboard` reads the host clipboard with
+   pbpaste / wl-paste / xclip / xsel; the method is answered by
+   `orch.handleClipboardRead` before `app.Dispatcher` sees the name.
+
+   The permission stance landed as **structure, not a flag**: it is a control
+   TRANSPORT method (`ctlproto.MethodClipboardRead`), not a §7 command, so the
+   browser front end cannot reach it at all — the same boundary `pair` is drawn
+   against, applied to the user's clipboard rather than to credentials. No
+   config switch on top of that, deliberately: a caller already holding the
+   owner-only socket can `pane.send_input` `pbpaste` into a shell pane and
+   `capture` the answer, so a flag would gate nothing it does not already have
+   and would only make the honest path look more privileged than the dishonest
+   one. `catctl clipboard` prints the text raw so it pipes.
 2. ✅ **shipped cats-side 2026-08-13 (cats `77285f9`)** — **⌘ passthrough
    policy.** Found while building ced's 5.2: the browser gate
    (`cmd/catway/web/index.html`, `if (e.metaKey && !e.ctrlKey && e.code
@@ -1043,9 +1089,15 @@ the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords
    Worth confirming by hand; if it holds, the "needs native menu routing"
    ask shrinks to "only for chords that collide with a menu item", which
    is currently none of them.
-3. **`theme_changed` event** in the `events.subscribe` stream, payload = the
-   theme section of `ConfigGetResult`. Small. Until then: poll on
-   `focus_changed`.
+3. ✅ **shipped cats-side 2026-08-13 (cats `ff8c89a`)** — **`theme_changed`
+   event** in the `events.subscribe` stream, payload = the theme section of
+   `ConfigGetResult` (an alias, so the two can never drift). Emitted from
+   `broadcastTheme`, the one funnel `config.set` / `theme.save` /
+   `theme.delete` all reach, and deduped against the RESOLVED appearance —
+   that funnel runs after every `config.set` including one that only rebound a
+   copy-mode key, and a subscriber ACTS on an event where the browser's push is
+   merely idempotent restyling. It is cats' first SESSION-scoped event: pane 0,
+   so a pane-filtered subscription does not see it.
 4. **`ui.notify {title, body, actions}`** host-drawn toast. Nice-to-have;
    the hook's `custom_status` covers the attention story. Defer.
 5. ✅ *(Verified 2026-08-12, not built)* the hook server grants full authority
@@ -1059,18 +1111,21 @@ the poll; `ui.notify` → host-drawn toasts; ⌘ routing → full Mac-app chords
 6. *(Later, if splits feel good)* `pane.open_file` convention — cats asks
    the focused editor pane to open a path (inverse of `ced --remote`):
    "click a file anywhere in cats → opens in ced".
-7. **`pane.split` should return its new pane** (`{num, pane}`, exactly as
-   `tab.create` already does). The dispatcher has the id in hand — it is
-   `np` in `CmdPaneSplit` — and drops it. Without it a client that wants to
-   drive the new pane must diff `pane.list` before and after, which is racy
-   by construction; ced's split refuses to type anything when the diff is
-   ambiguous, so the cost today is a rare "run the editor there by hand"
-   rather than input in the wrong pane. Smallest ask on this list.
-8. **A `command` (argv) on `pane.split`**, matching `TabCreateParams`. With
-   it, "open in split" becomes ONE round trip and needs no shell in the
-   middle — no `exec`, no quoting, no bracketed-paste assumption. Bigger
-   than item 7 and strictly nicer; item 7 alone already makes the current
-   sequence correct.
+7. ✅ **shipped cats-side 2026-08-13 (cats `ff8c89a`)** — **`pane.split`
+   returns its new pane.** `{pane}`, not `{num, pane}`: a split happens inside
+   the tab the caller is already in, so naming the tab would report something
+   the caller told us. Not reply-gated — like `tab.create` the split is worth
+   performing for a caller that never listens (the browser's own split button
+   sends no id), and the result is a handle rather than the point of the call.
+8. ✅ **shipped cats-side 2026-08-13 (cats `ff8c89a`)** — **`cwd` / `command`
+   / `env` on `pane.split`**, matching `TabCreateParams` field for field and
+   sharing its validator and its workspace-lock rule (a bare split is still the
+   user asking for a shell and goes through). "Open in split" is now ONE round
+   trip with no shell in the middle.
+
+   Shipping 7 and 8 together is what made the consumer's capability check free:
+   a zero pane in the reply means an old host, which means the argv was ignored
+   too, so one field answers both questions with nothing to probe at startup.
 
 ## 6. Risks and tradeoffs
 
@@ -1110,10 +1165,11 @@ is needed.
 
 **Progress:** Phases 1, 2, 3.1, 3.2, 4.1–4.5 and **5.1, 5.3, 5.4, 5.5, 5.7**
 are done (2026-08-12); **5.6, the last of 5.8, 5.2, 3.4, 3.3, 4.6 and
-Phase 2's `⚠` follow-up** landed 2026-08-13. **Every phase from 1 to 5 is
-now closed, with nothing unclaimed inside them.** §5's item 5 is verified,
-and its item 2 shipped cats-side the same day (plus the ⌘E follow-up,
-cats `ed4962c`).
+Phase 2's `⚠` follow-up** landed 2026-08-13, and **Phase 6** the same day.
+**Every phase from 1 to 6 is now closed**, with the one caveat Phase 6 is
+defined by: it can only consume asks that have landed, and `ui.notify` (§5
+item 4) is still deferred by design. §5's items 1, 2, 3, 7 and 8 have all
+shipped cats-side; item 5 is verified; item 6 stays retired as impossible.
 
 Every Phase-5 consumer now shares one shape, and it is worth stating once
 because the next one should follow it: **poll on a goroutine, cache on the
@@ -1173,13 +1229,30 @@ one author, and git's own `--contents` mechanism ("External file")
 leaking into the column — and both took one look at a real render to
 see.
 
-**Phases 1 through 5 are all closed, with nothing unclaimed inside
-them.** Phase 6 is entirely upstream-gated; with §5 item 2 shipped, its
-critical path is now item 1 (`clipboard.read`), which is the one ask
-with a whole feature behind it (§4 Tier 1 + native paste anywhere).
-Still owed and not code: the ⌘ chords hand-checked end to end in
-browser-cats (the running catway is an older binary) and in the mac
-app, where the analysis says there are no menu collisions.
+Phase 6 added a seventh, and it is the one that decides how a client
+treats a server it did not ship with: **let the answer be the
+capability probe.** `pane.split` returning a zero pane means both "this
+host cannot name the pane" and "this host ignored your argv", because
+the two landed in one commit — so the fallback is chosen by the reply
+already in hand, with nothing asked at startup and no version number
+anywhere. `theme_changed` is the same rule where no answer exists to
+read: the event vocabulary is not enumerable over the wire, so the poll
+it replaces stands down only once a frame has PROVED the host pushes,
+and a host too old to send one keeps the old behaviour forever without
+being asked about it. The failure this avoids is the quiet one — a
+client that assumed the new shape does not error, it just silently
+stops doing the thing.
+
+Its sibling, from the clipboard: **name the place, do not name the
+concept.** "The clipboard" is one word for two machines the moment a
+browser and a catway are on different boxes, and the verb that reads
+one of them is only safe as an explicitly-requested read of that named
+place — never as an ambient answer to "what did the user copy?".
+
+**Phases 1 through 6 are all closed.** What remains is not code: the ⌘
+chords hand-checked end to end in browser-cats (the running catway is
+an older binary) and in the mac app, where the analysis says there are
+no menu collisions; and §5 item 4 (`ui.notify`), deferred on purpose.
 
 ## 8. Verification
 
@@ -1240,6 +1313,19 @@ app, where the analysis says there are no menu collisions.
   preserved by identity, header chips as the only filter UI, one geometry
   source per control, and keyboard twins (next/previous) that walk the same
   list without the panel being open
+- `internal/app/catsclip.go` — the host clipboard, and the pattern for any
+  future verb that reads something OUTSIDE the editor on the user's behalf:
+  name the place rather than the concept, never read it ambiently, and
+  snapshot the target (tab + `EditRev`) at the moment the user asked so a
+  late answer declines instead of landing where the caret drifted to
+- `internal/app/catssplit.go` — the two-vintage host. The pattern for
+  consuming any upstream ask: send the new shape unconditionally, let the
+  REPLY be the capability probe, and keep the old sequence as the branch it
+  falls into — a client that assumes the new shape does not error, it
+  silently stops working
 - `cats/internal/app/command_vocab.go` + `cats/internal/ctlproto/` +
   `cats/internal/app/events.go` — the wire vocabulary `internal/cats`
-  mirrors (hand-copied, never imported)
+  mirrors (hand-copied, never imported). `ctlproto` is also where the
+  methods that are NOT §7 commands live (`pair`, `clipboard.read`): a
+  transport method is answered before cats' dispatcher sees the name, which
+  is what keeps it off the browser's reach

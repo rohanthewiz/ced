@@ -8,9 +8,11 @@
 package app
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -261,4 +263,75 @@ func mustHostColor(t *testing.T, hex string) tcell.Color {
 		t.Fatalf("resolve %s: %v", hex, err)
 	}
 	return th.BG
+}
+
+// The host pushes its palette now: one theme_changed frame re-dresses the
+// editor with no round trip at all. This is the whole of roadmap §5 item 3
+// from the consumer's side.
+func TestCatsThemeChangedEventAppliesDirectly(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.themePinned = false
+
+	payload, err := json.Marshal(cats.ThemeChangedEvent{Name: "cats-green", Colors: hostPalette()})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	a.catsFrame(cats.Event{Name: cats.EventThemeChanged, Data: payload})
+
+	if a.themeName != catsHostThemeName {
+		t.Fatalf("themeName = %q, want the host theme", a.themeName)
+	}
+	if got, want := a.theme.BG, mustHostColor(t, "#1f2420"); got != want {
+		t.Fatalf("background = %v, want the host's %v", got, want)
+	}
+}
+
+// The event RETIRES the poll, and only the event can. A host that has pushed
+// once will push again, so asking on every focus change is spending a round
+// trip to re-learn something already on its way — but a host that has never
+// pushed may be too old to, and dropping the poll on faith would leave that
+// user's editor permanently out of step with their terminal.
+func TestCatsThemeEventRetiresThePoll(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	withCtlSpy(t, a)
+
+	// Before any event, focus_changed still drives a poll.
+	a.catsFrame(cats.Event{Name: cats.EventFocusChanged, Data: []byte(`{"pane":3}`)})
+	if a.cats.themePolledAt.IsZero() {
+		t.Fatal("without a theme_changed the poll must still run")
+	}
+	a.cats.themePolledAt = time.Time{} // clear the rate limit, not the decision
+
+	payload, _ := json.Marshal(cats.ThemeChangedEvent{Name: "cats-green", Colors: hostPalette()})
+	a.catsFrame(cats.Event{Name: cats.EventThemeChanged, Data: payload})
+	if !a.cats.themeEvented {
+		t.Fatal("a theme_changed frame should mark the host as pushing")
+	}
+
+	a.catsFrame(cats.Event{Name: cats.EventFocusChanged, Data: []byte(`{"pane":3}`)})
+	if !a.cats.themePolledAt.IsZero() {
+		t.Fatal("focus_changed polled the theme after the host proved it pushes")
+	}
+}
+
+// A palette ced cannot use (non-hex core keys) still proves the host PUSHES.
+// The mark is a statement about the host, not about one payload — treating a
+// declined palette as "no event" would put the editor back to polling for the
+// same unusable answer every time focus moved.
+func TestCatsThemeEventMarksEvenWhenThePaletteIsDeclined(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	withCtlSpy(t, a)
+
+	payload, _ := json.Marshal(cats.ThemeChangedEvent{
+		Name:   "washed",
+		Colors: map[string]string{"bg": "rgba(0,0,0,0.5)", "fg": "#ffffff"},
+	})
+	a.catsFrame(cats.Event{Name: cats.EventThemeChanged, Data: payload})
+
+	if !a.cats.themeEvented {
+		t.Fatal("a decodable frame with an unusable palette should still mark the host")
+	}
+	if _, ok := theme.Find(a.themeSpecs, catsHostThemeName); ok {
+		t.Fatal("an unusable palette must not reach the picker")
+	}
 }

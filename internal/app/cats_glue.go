@@ -50,6 +50,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
 
@@ -90,6 +91,9 @@ const (
 	// catsKindCapture carries another pane's text back to be opened in the
 	// compare panel (catscapture.go).
 	catsKindCapture
+	// catsKindClip carries the HOST's system clipboard back, plus what the
+	// user asked it for — a diff or an insertion at the caret (catsclip.go).
+	catsKindClip
 )
 
 // catsEvent is the goroutine → main-loop message for everything cats. The
@@ -120,8 +124,18 @@ type catsEvent struct {
 	paneOK bool
 
 	// catsKindCapture: another pane's text and the label it is compared under.
+	// catsKindClip reuses text for the clipboard's contents.
 	text  string
 	label string
+
+	// catsKindClip: what the read was for, whether the host cut it short, and
+	// the paste target as it stood when the user ASKED — the tab and its edit
+	// revision, so an answer that arrives into a moved buffer can decline
+	// rather than land somewhere the user was not looking (catsclip.go).
+	clipUse   catsClipUse
+	truncated bool
+	clipTab   *editor.Tab
+	clipRev   int
 }
 
 // When satisfies the tcell.Event interface.
@@ -164,6 +178,12 @@ type catsState struct {
 	hostTheme     theme.Spec
 	hostThemeOK   bool
 	themePolledAt time.Time
+	// themeEvented records that this host has pushed a theme_changed at
+	// least once, which retires the poll for the session. It is set from
+	// the stream and never cleared — a host that spoke the event before a
+	// reconnect is the same host after it, and clearing on a blip would
+	// restart the polling a working push made unnecessary.
+	themeEvented bool
 
 	// recents is the host's frecency-ranked directory list, cached
 	// because the picker that shows it runs on the main loop and a
@@ -267,6 +287,8 @@ func (a *App) handleCatsEvent(e *catsEvent) {
 		a.catsRunDone(e)
 	case catsKindCapture:
 		a.catsCaptureArrived(e)
+	case catsKindClip:
+		a.catsClipArrived(e)
 	}
 }
 
@@ -305,12 +327,19 @@ func (a *App) catsSubscribe() {
 	scr := a.screen
 	a.cats.stream = cats.Subscribe(
 		a.cats.caps.ControlSocket,
-		// Two names, two consumers: pane_notify is a sibling agent asking
-		// for a human, focus_changed is the stand-in for the theme_changed
-		// event cats does not have yet (roadmap §5 item 3). Nothing else is
-		// subscribed — an idle editor should not be woken by every title
-		// change in the session.
-		cats.SubscribeFilter{Events: []string{cats.EventPaneNotify, cats.EventFocusChanged}},
+		// Three names, three consumers: pane_notify is a sibling agent asking
+		// for a human; theme_changed is the host's appearance arriving
+		// unasked; focus_changed refreshes the pane cache and, on a cats too
+		// old to send theme_changed, still drives the theme poll that event
+		// replaces (catstheme.go). Nothing else is subscribed — an idle editor
+		// should not be woken by every title change in the session.
+		//
+		// Naming an event this host may not have costs nothing: the filter is
+		// a list the server matches names against, so an unknown one simply
+		// never matches.
+		cats.SubscribeFilter{Events: []string{
+			cats.EventPaneNotify, cats.EventThemeChanged, cats.EventFocusChanged,
+		}},
 		func(ev cats.Event) {
 			_ = scr.PostEvent(&catsEvent{when: time.Now(), kind: catsKindFrame, frame: ev})
 		},
@@ -325,6 +354,20 @@ func (a *App) catsSubscribe() {
 // anything arriving here was asked for by an older or newer version of this
 // same list.
 func (a *App) catsFrame(ev cats.Event) {
+	if ev.Name == cats.EventThemeChanged {
+		var ct cats.ThemeChangedEvent
+		if err := json.Unmarshal(ev.Data, &ct); err != nil {
+			return
+		}
+		// Mark FIRST, and mark on any decodable frame — including one whose
+		// palette we then decline (non-hex core keys). The mark is a statement
+		// about the HOST ("it will tell me"), not about this payload, and a
+		// palette ced cannot use is not a reason to go back to polling for the
+		// same palette every time focus moves.
+		a.cats.themeEvented = true
+		a.catsThemeArrived(ct)
+		return
+	}
 	if ev.Name == cats.EventFocusChanged {
 		// The theme poll's trigger. Focus moving is the cheapest available
 		// signal that a human has been driving the host, which is when a
@@ -485,6 +528,12 @@ func (a *App) catsMenuItems() []menuItemDef {
 		// The last of the agent verbs (catscapture.go): read what a sibling
 		// pane says and diff it against this buffer.
 		{label: "Compare buffer with agent pane…", shortcut: "esc C m", action: (*App).menuCatsComparePane, enabled: (*App).hasCatsComparePane},
+		// The host clipboard (catsclip.go). Only the PASTE is here: the
+		// compare half lives in the ≡ Compare group, beside the other things
+		// a buffer can be diffed against, because it has a Tier-0 path and
+		// works outside cats. This one has no fallback — ced cannot read that
+		// clipboard without the host — so it belongs in the host's own group.
+		{label: "Paste from host clipboard", shortcut: "esc C v", action: (*App).menuCatsPasteClipboard, enabled: (*App).hasCatsClipboard},
 	}
 }
 
@@ -514,6 +563,9 @@ func catsLeaderBindings(a *App) []leaderBinding {
 		// actions) would hit after a stray Shift. 'k' is what the flat
 		// table already uses for "talk to something" (the palette).
 		{key: 'k', action: (*App).menuCatsAskChat, label: "Ask cats chat"},
+		// 'v' is paste's letter everywhere, and this is a paste — from the
+		// one clipboard ⌘V cannot reach (catsclip.go).
+		{key: 'v', action: (*App).menuCatsPasteClipboard, label: "Paste host clipboard"},
 	}
 }
 

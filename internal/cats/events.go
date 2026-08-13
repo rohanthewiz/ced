@@ -51,7 +51,24 @@ const (
 	EventPaneAdded    = "pane_added"
 	EventPaneRemoved  = "pane_removed"
 	EventFocusChanged = "focus_changed"
+
+	// EventThemeChanged is the one SESSION-scoped event: it names no pane, so
+	// cats emits it with pane 0 and a pane-filtered subscription would not see
+	// it. ced subscribes by event name and never by pane, so that costs nothing
+	// here — it is written down because a later narrowing of the filter to "our
+	// own pane" would silently lose the theme.
+	EventThemeChanged = "theme_changed"
 )
+
+// ThemeChangedEvent is EventThemeChanged's payload: the host's EFFECTIVE
+// appearance after the change — resolved, with the user's per-key overrides
+// already folded in, which is exactly what config.get's theme section carries.
+//
+// It is deliberately the same type. The event and the poll it retires are two
+// deliveries of one answer, so they decode into one struct and feed one
+// consumer (catsThemeArrived); a second shape would be a second place for the
+// host→ced palette mapping to drift.
+type ThemeChangedEvent = ConfigTheme
 
 // Backoff bounds for the reconnect loop. The first retry is quick because
 // the overwhelmingly common cause is a cats that is restarting and will be

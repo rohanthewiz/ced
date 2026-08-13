@@ -119,12 +119,18 @@ func (a *App) menuCatsTerminal() {
 	}
 	client, scr := a.cats.client, a.screen
 	self := a.catsSelfPane()
-	line := ""
+	// Two spellings of "start there", for the two vintages of host. Cwd rides
+	// the split itself when the host takes one, so the shell simply STARTS in
+	// the root and its scrollback opens clean; the `cd` line is the older
+	// host's only way to say the same thing, and is still sent only when the
+	// directories actually differ.
+	spawn := catsSpawn{}
 	if cwd := a.catsPaneCwd(a.cats.self); cwd != a.rootDir {
-		line = "cd " + catsShellQuote(a.rootDir) + "\n"
+		spawn.Cwd = a.rootDir
+		spawn.Line = "cd " + catsShellQuote(a.rootDir) + "\n"
 	}
 	go func() {
-		if _, err := catsSpawnSibling(client, self, cats.SplitVertical, line); err != nil {
+		if _, err := catsSpawnSibling(client, self, cats.SplitVertical, spawn); err != nil {
 			catsPostNotice(scr, "Terminal split failed: "+err.Error())
 			return
 		}
@@ -357,7 +363,7 @@ func catsRunPane(client *cats.Client, self *uint32, reuse uint32, reuseOK bool) 
 			}
 		}
 	}
-	return catsSpawnSibling(client, self, cats.SplitVertical, "")
+	return catsSpawnSibling(client, self, cats.SplitVertical, catsSpawn{})
 }
 
 // catsRunOK reports whether the matched marker line says exit 0.

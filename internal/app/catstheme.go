@@ -55,10 +55,19 @@
 //     terminal tomorrow is still the shipped default rather than a frozen
 //     copy of one night's cats palette.
 //
-// REFRESH: cats has no theme_changed event yet (roadmap §5 item 3), so the
-// palette is re-read on focus_changed — the cheapest signal that a human has
-// been interacting with the host, which is when a theme switch happens — and
-// rate-limited, because focus moves far more often than colors do.
+// REFRESH: the host PUSHES its palette now. cats' theme_changed event carries
+// the resolved appearance, so a theme switch reaches ced as one frame with the
+// answer already in it — no round trip, and no delay while some unrelated event
+// happens to arrive.
+//
+// The focus_changed poll it replaces is still here, and deliberately: an older
+// cats never sends theme_changed, and a client that dropped the poll on faith
+// would simply stop following that host's colors, silently and forever. So the
+// poll stays armed until the first event PROVES the host speaks it, and retires
+// for the session at that moment (catsThemeEvented). Nothing is probed at
+// startup, because there is nothing to probe — the event vocabulary is not
+// enumerable over the wire — and the first push is the only evidence that
+// exists.
 
 package app
 
@@ -187,6 +196,12 @@ func catsHexColor(v string) bool {
 // that might have changed the theme" without tracking when they last asked.
 func (a *App) catsPollTheme() {
 	if !a.catsTier1() || a.screen == nil {
+		return
+	}
+	if a.cats.themeEvented {
+		// The host has pushed a theme_changed at least once, so it will push
+		// the next one too. Asking anyway would be spending a round trip to
+		// re-learn something already on its way.
 		return
 	}
 	now := time.Now()

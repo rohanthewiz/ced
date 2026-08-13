@@ -24,24 +24,36 @@
 //
 // THE SPAWN IS THREE ROUND TRIPS, AND THE MIDDLE ONE IS A DIFF
 //
+// THE SPAWN IS ONE ROUND TRIP AGAINST A CURRENT HOST, AND FOUR AGAINST AN OLD
+// ONE
+//
+//	pane.split {direction, command} ─► the host execs ced in the new pane
+//	                                   and answers with the pane's id
+//
+// That is the whole sequence now. cats' pane.split grew both halves of it at
+// once (roadmap §5 items 7 and 8): a `command` argv, exec'd AS the pane's
+// process, and a `{pane}` result. The argv means there is no shell in the
+// middle — no quoting, no bracketed-paste assumption, no race against a
+// prompt — and, because the editor IS the pane's process, quitting it closes
+// the pane rather than dropping the user at a shell they did not ask for.
+//
+// The legacy path below it is kept, and not out of politeness: a cats built
+// before that commit ignores the unknown `command` field and splits a plain
+// shell, so a client that assumed otherwise would leave the user staring at a
+// bare prompt with no editor and no error. It is the ladder's Tier-0 rule
+// applied inside a Tier-1 feature.
+//
 //	pane.list   ─► the set of pane ids that exist now
 //	pane.split  ─► the host opens a shell beside us … and tells us nothing
 //	pane.list   ─► the set again; the id that appeared is the new pane
-//	pane.send_input ─► type the ced command into that shell
+//	pane.send_input ─► type `exec ced …` into that shell
 //
-// pane.split answers `ok` with no data, unlike tab.create which returns its
-// new pane — so the id has to be recovered by diffing. That is the single
-// ugliest thing in this file and it is upstream's to fix (roadmap §5: have
-// pane.split return the pane it created). The diff is safe in the way that
-// matters — a stray third pane appearing in the same millisecond makes the
-// result AMBIGUOUS, and an ambiguous diff sends input to nobody rather than
-// to a guess (see catsNewPane).
-//
-// Why send_input rather than a command: pane.split spawns the user's shell
-// and has no argv parameter (tab.create does). So the sibling is started by
-// typing at it, which is also why the line begins with `exec` — the shell
-// replaces itself with the editor, so quitting the editor closes the pane
-// instead of dropping the user at a prompt they did not ask for.
+// The two are told apart by the split's own answer, with nothing to probe at
+// startup: a zero pane means an old server, which means the argv was ignored
+// too, because both landed in the same commit (see cats.SplitResult). The diff
+// is safe in the way that matters — a stray third pane appearing in the same
+// millisecond makes the result AMBIGUOUS, and an ambiguous diff sends input to
+// nobody rather than to a guess (see catsNewPane).
 //
 // Every step is IO, so the whole sequence runs on a goroutine and reports
 // back through catsPostNotice. Nothing here touches App state after the
@@ -96,7 +108,12 @@ func (a *App) catsOpenInSplit(direction, arrow string) {
 		a.flash("Split: cannot find this ced binary: " + err.Error())
 		return
 	}
-	line := catsSpawnLine(exe, a.rootDir, path)
+	// Both spellings of the same launch, chosen by the host at call time:
+	// an argv for a cats that can exec it, a shell line for one that cannot.
+	spawn := catsSpawn{
+		Argv: []string{exe, "--root", a.rootDir, path},
+		Line: catsSpawnLine(exe, a.rootDir, path),
+	}
 
 	client, scr := a.cats.client, a.screen
 	// A resolved self is what makes the new pane land beside THIS one. If
@@ -105,7 +122,7 @@ func (a *App) catsOpenInSplit(direction, arrow string) {
 	self := a.catsSelfPane()
 	shown := filepath.Base(path)
 	go func() {
-		if _, err := catsSpawnSibling(client, self, direction, line); err != nil {
+		if _, err := catsSpawnSibling(client, self, direction, spawn); err != nil {
 			catsPostNotice(scr, "Split failed: "+err.Error())
 			return
 		}
@@ -134,26 +151,61 @@ func (a *App) catsSplitTarget() string {
 // stays in one place — the ≡-menu convention.
 func (a *App) hasCatsSplit() bool { return a.catsTier1() && a.catsSplitTarget() != "" }
 
-// catsSpawnSibling runs the four-call sequence against the host and returns
-// the pane it created. It is a free function taking a client so the goroutine
-// never sees the App.
+// catsSpawn is what the new pane should run, said twice: Argv is exec'd as the
+// pane's process by a host that supports it, Line is typed at the shell an
+// older host spawns instead. Cwd applies to the argv path only — the shell path
+// carries its own `cd` inside Line, because there is nowhere else to put one.
 //
-// An EMPTY line means "just make me a pane": the split is the whole request,
-// so the two listings are still made (the caller wants the id — a terminal
-// pane is reused by the next run) but an unidentifiable pane is no longer a
-// failure. Nothing is going to be typed into it either way.
-func catsSpawnSibling(client *cats.Client, pane *uint32, direction, line string) (uint32, error) {
+// Both spellings are built by the caller, on the loop, before anything is
+// dialled. Deciding which to use is the host's answer to make, and it does not
+// arrive until the split has already happened — so the alternative is either a
+// second trip back to the App or a capability probe at startup, and this is
+// neither.
+//
+// The zero value means "just make me a pane", which is what the run pane wants.
+type catsSpawn struct {
+	Argv []string
+	Cwd  string
+	Line string
+}
+
+// catsSpawnSibling splits a pane and starts something in it, returning the new
+// pane's id. It is a free function taking a client so the goroutine never sees
+// the App.
+//
+// One call against a current host: the argv rides the split and the answer
+// names the pane. The listing/diff/type sequence below it runs only when that
+// answer comes back zero — an older cats, which ignored the argv too. See the
+// file comment.
+//
+// An EMPTY spawn means "just make me a pane": the split is the whole request,
+// so an unidentifiable pane is no longer a failure (the caller wants the id
+// only to reuse the pane later). Nothing is going to be typed into it either way.
+func catsSpawnSibling(client *cats.Client, pane *uint32, direction string, spawn catsSpawn) (uint32, error) {
+	// The "before" listing is the legacy path's alone, and it is taken FIRST
+	// because after the split it is no longer knowable. One extra local socket
+	// round trip on a user gesture is the price of not having to probe the
+	// host's vintage at startup — and of the probe never being wrong.
 	before, err := client.PaneList()
 	if err != nil {
 		return 0, err
 	}
-	if err := client.PaneSplit(pane, direction); err != nil {
+	res, err := client.PaneSplit(cats.SplitParams{
+		Pane: pane, Direction: direction, Cwd: spawn.Cwd, Command: spawn.Argv,
+	})
+	if err != nil {
 		return 0, err
 	}
+	if res.Pane != 0 {
+		return res.Pane, nil // the host named the pane, and ran the argv itself
+	}
+
+	// --- Legacy host: recover the id by diffing, then type at the shell. ---
 	after, err := client.PaneList()
 	if err != nil {
 		return 0, err
 	}
+	line := spawn.Line
 	target, ok := catsNewPane(before, after)
 	if !ok {
 		if line == "" {

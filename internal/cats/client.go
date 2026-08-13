@@ -52,6 +52,14 @@ const (
 	SplitHorizontal    = "h" // side by side  (cats SplitH)
 	SplitVertical      = "v" // stacked       (cats SplitV)
 	defaultCallTimeout = 3 * time.Second
+
+	// MethodClipboardRead is NOT on the §7 table: it is a control-transport
+	// method, answered by the server before its dispatcher ever sees the name,
+	// so that the browser front end cannot ask for it. From this side the
+	// difference is invisible — same envelope, same socket — and it is noted
+	// only because it is the reason this verb exists for a pane program and not
+	// for a phone paired to the same catway.
+	MethodClipboardRead = "clipboard.read"
 )
 
 // request is the outbound envelope. ID is echoed back; ced sends one request
@@ -270,14 +278,42 @@ func (c *Client) ResolvePane(handle string) (uint32, error) {
 	return 0, fmt.Errorf("cats: pane %q not found", handle)
 }
 
-// PaneSplit splits a pane, spawning a default shell in the new half.
+// SplitParams shapes a pane.split. Pane nil splits whichever pane is focused;
 // SplitHorizontal puts the panes side by side, SplitVertical stacks them.
-// Pass nil for pane to split whichever pane is focused.
-func (c *Client) PaneSplit(pane *uint32, direction string) error {
-	return c.Call(MethodPaneSplit, struct {
-		Pane      *uint32 `json:"pane,omitempty"`
-		Direction string  `json:"direction"`
-	}{pane, direction}, nil)
+//
+// Cwd/Command/Env are the same spawn trio tab.create takes: with a Command the
+// host execs that argv AS the new pane's process, so quitting it closes the
+// pane and there is no shell in the middle — no quoting, no bracketed-paste
+// assumption, no race against a prompt. Without one the pane is a shell in the
+// split pane's live directory, which is the historical behaviour.
+type SplitParams struct {
+	Pane      *uint32           `json:"pane,omitempty"`
+	Direction string            `json:"direction"`
+	Cwd       string            `json:"cwd,omitempty"`
+	Command   []string          `json:"command,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+}
+
+// SplitResult is pane.split's payload: the id of the pane it created, which it
+// also focuses.
+//
+// Pane 0 is the CAPABILITY SIGNAL, not an error. A cats older than the commit
+// that added this result answers `ok` with no data at all, which decodes to the
+// zero value — and the same commit added the Command parameter, so a zero here
+// also means the argv was ignored and the new pane is a plain shell. One field
+// therefore answers both questions a caller has, with no extra round trip and
+// nothing to probe at startup (see catsSpawnSibling, which falls back to typing
+// at that shell).
+type SplitResult struct {
+	Pane uint32 `json:"pane"`
+}
+
+// PaneSplit splits a pane and returns the pane it created. See SplitResult for
+// what a zero pane means.
+func (c *Client) PaneSplit(p SplitParams) (SplitResult, error) {
+	var r SplitResult
+	err := c.Call(MethodPaneSplit, p, &r)
+	return r, err
 }
 
 // PaneFocus focuses a pane within its tab — the click-through for a status
@@ -415,6 +451,39 @@ func (c *Client) ConfigGet() (ConfigGetResult, error) {
 	var r ConfigGetResult
 	err := c.Call(MethodConfigGet, nil, &r)
 	return r, err
+}
+
+// ClipboardData is clipboard.read's payload. Truncated marks a clipboard the
+// host cut at its own size cap (4 MiB), on a whole-rune boundary — the text is
+// usable, it is just not all of it.
+type ClipboardData struct {
+	Text      string `json:"text"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+// ClipboardRead returns the HOST machine's system clipboard — the box catway
+// runs on, read there with pbpaste/wl-paste/xclip.
+//
+// It is the one thing in this package with no Tier-0 equivalent whatsoever.
+// OSC 52 lets a pane program WRITE the clipboard and is write-only by design
+// (a terminal that answered reads would let anything that can print bytes
+// exfiltrate it), so until cats grew this verb an editor inside a pane could
+// put text on the clipboard and never, by any route, read it back.
+//
+// THE HOST CLIPBOARD IS NOT ALWAYS THE USER'S CLIPBOARD. ced's own copy goes
+// out over OSC 52, which cats delivers to the BROWSER's clipboard — the same
+// machine as the server in the mac app and in any local session, but a
+// different machine entirely when the browser is on a laptop and catway is on a
+// server. Callers must therefore treat this as an explicitly-requested read of
+// a named place, never as an ambient "what did the user copy?" — which is why
+// nothing here refreshes ced's internal clipboard behind the user's back.
+//
+// An empty string with no error is an empty clipboard, which is an ordinary
+// answer rather than a failure.
+func (c *Client) ClipboardRead() (ClipboardData, error) {
+	var d ClipboardData
+	err := c.Call(MethodClipboardRead, nil, &d)
+	return d, err
 }
 
 // PathList lists a directory server-side and, when recents is set, returns

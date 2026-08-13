@@ -297,6 +297,11 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Switch branch", action: (*App).menuGitSwitchBranch, enabled: (*App).hasGitRepo},
 			{label: "Recent branches", action: (*App).menuGitRecentBranches, enabled: (*App).hasGitRepo},
 			{shortcut: "esc g", action: (*App).menuToggleGitPanel, enabled: (*App).hasGitRepo, labelFor: (*App).gitPanelToggleLabel},
+			// The pre-commit survey (gitpanelwalk.go). It opens the panel
+			// on the way in — walking the changes and showing the panel
+			// are one thought, the same argument that lets "Search
+			// history…" open the log it filters.
+			{label: "Review all changes ▶", action: (*App).menuGitPanelReview, enabled: (*App).hasGitPanelReview},
 			// The keyboard twin of the panel's "Actions ▾" header button:
 			// the panel is mouse-driven by design, but macOS Terminal can
 			// swallow clicks, so its verbs must be menu-reachable too.
@@ -2112,6 +2117,14 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// menu / leader behavior below still runs, so Esc-Esc opens the
 		// menu and Esc-s saves whether or not carets were dropped.
 		a.clearCarets()
+		// …and for a running pre-commit survey. It belongs with these
+		// rather than inside the walk's own key handler because the
+		// handler sits BELOW this block and so never sees an Esc — and
+		// because a mode that has claimed n / p / space is exactly the
+		// thing a user reaches for Esc to get out of. The reviewed
+		// marks survive: they record what was read, not the mode that
+		// recorded it, and the header button resumes from there.
+		a.stopGitPanelWalk()
 		// A real Esc always re-opens the full leader table — chain mode
 		// (repeatable-only) is an artifact of the previous action. Note
 		// whether the window was chain-armed before clearing: a chained
@@ -2335,6 +2348,17 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// keystroke aimed at the tree must never leak into the buffer.
 	if a.treeFocus && a.sidebarShown {
 		a.handleTreeNavKey(ev)
+		return
+	}
+
+	// A running pre-commit survey owns the keyboard on the same terms:
+	// the git panel is furniture until the user starts a walk, and a
+	// walk is a pager they are driving with n / p / space. The placement
+	// is the point — every global gesture above still works from inside
+	// the survey, and a single Esc ends it (see the Esc block), so the
+	// mode can never trap the keyboard. See gitpanelwalk.go.
+	if a.gitPanel.open && a.gitPanel.walk {
+		a.handleGitPanelWalkKey(ev)
 		return
 	}
 
@@ -2650,6 +2674,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// on a tree row (sidebarClick) takes it, and moves the cursor.
 		if a.treeFocus && !a.inSidebarBlock(x) {
 			a.treeFocus = false
+		}
+		// So does a running survey — and it matters most here, because
+		// the whole reason to click out of the panel is to go fix the
+		// thing you just spotted, and a walk still holding n / p would
+		// type its verbs into that fix. The reviewed marks stay, so the
+		// header button says "Resume 3/7 ▶" when you come back.
+		if a.gitPanel.walk && !a.gitPanelContains(x, y) {
+			a.stopGitPanelWalk()
 		}
 		switch {
 		case a.splitterX() >= 0 && x == a.splitterX():

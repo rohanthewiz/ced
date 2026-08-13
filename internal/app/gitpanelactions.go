@@ -190,7 +190,32 @@ func (a *App) gitPanelActionItems(targets []gitPanelFile) []paletteItem {
 			})
 		}
 		add("Delete "+what+" from disk…", func(app *App) { app.gitPanelDelete(targets) })
-		add("Commit "+what+"…", func(app *App) { app.openCommitPrompt(targets, "") })
+		// The nudge rides on the commit row itself, where the decision
+		// is being made — "(5/7 reviewed)" is a fact about the change,
+		// not a gate on it, so the row still runs. It goes quiet once
+		// every file has been read (gitPanelReviewNudge).
+		add("Commit "+what+"…"+a.gitPanelReviewNudge(), func(app *App) {
+			app.openCommitPrompt(targets, "")
+		})
+	}
+
+	// The survey and its hunk verbs — the keyboard twins of the header
+	// button and the diff pane's chips, for the same reason every other
+	// row here has one: the panel is mouse-driven, and macOS Terminal
+	// can swallow clicks.
+	if len(a.gitPanel.files) > 0 {
+		if a.gitPanel.walk {
+			add("Stop reviewing ("+itoa(a.gitPanelReviewedCount())+"/"+itoa(len(a.gitPanel.files))+" read)",
+				(*App).stopGitPanelWalk)
+		} else if a.gitPanelReviewedCount() > 0 {
+			add("Resume review ("+itoa(a.gitPanelReviewedCount())+"/"+itoa(len(a.gitPanel.files))+" read)",
+				(*App).startGitPanelWalk)
+		} else {
+			add("Review all "+itoa(len(a.gitPanel.files))+" files ▶", (*App).startGitPanelWalk)
+		}
+	}
+	if len(a.gitPanelHunkItems()) > 0 {
+		add("Hunk actions…", (*App).openGitPanelHunks)
 	}
 
 	// The suggestion row sits next to the commit rows because that's
@@ -205,7 +230,7 @@ func (a *App) gitPanelActionItems(targets []gitPanelFile) []paletteItem {
 		})
 	}
 	if a.gitHasStaged {
-		add("Commit staged…", (*App).menuGitCommit)
+		add("Commit staged…"+a.gitPanelReviewNudge(), (*App).menuGitCommit)
 	}
 	// Push closes the sequence the commit rows above start. It names the
 	// branch rather than saying a bare "Push" because this picker is

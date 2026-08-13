@@ -77,10 +77,30 @@ func gitCommitLabel(files []gitPanelFile) string {
 // pre-fills the field — empty for a hand-written message, the agent's
 // draft when a suggestion landed. promptModal rejects an empty submit,
 // so there's no empty-message guard here.
+//
+// The ✦ AI button sits on the button row whenever an agent could
+// answer. It is the survey's terminal state (gitpanelwalk.go): the walk
+// ends on this field, and "have it drafted" has to be one click from here — a
+// reviewer who has just read seven diffs should not have to close the
+// prompt and go back to a picker to ask for the sentence describing
+// them. It does not submit; it swaps the modal for a request whose
+// answer reopens this same prompt pre-filled (chatCommitSuggestDone).
 func (a *App) openCommitPrompt(files []gitPanelFile, initial string) {
-	a.openPrompt("Commit "+gitCommitLabel(files), "message", initial, func(app *App, msg string) {
-		app.gitCommitFiles(files, msg)
-	})
+	title := "Commit " + gitCommitLabel(files)
+	commit := func(app *App, msg string) { app.gitCommitFiles(files, msg) }
+	if !a.canSuggestCommitMsg() {
+		a.openPrompt(title, "message", initial, commit)
+		return
+	}
+	// ✦ (U+2726), not the ✨ the roadmap sketched: drawAt advances one
+	// CELL per rune, and U+2728 is East-Asian-Wide — it would render two
+	// cells wide and shift the rest of the button row right by one,
+	// through the modal's border. Every glyph ced draws is narrow for
+	// this reason.
+	a.openPromptExtra(title, "message", initial, "[ ✦ AI ]", func(app *App) {
+		app.closeModal()
+		app.gitPanelSuggestCommit(files)
+	}, commit)
 }
 
 // gitCommitFiles commits the given targets, or the index when there are

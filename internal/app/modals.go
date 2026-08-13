@@ -127,6 +127,17 @@ type promptModal struct {
 	hint     string
 	field    textField
 	callback func(*App, string)
+
+	// extraLabel / extraRun are an OPTIONAL third button on the button
+	// row, for a prompt whose value can be produced as well as typed.
+	// One caller today: the commit prompt's ✦ AI button, which is the
+	// terminal state of the pre-commit survey — the walk ends on the
+	// message field, and drafting the message has to be reachable from
+	// there rather than from a picker two gestures back
+	// (gitpanelwalk.go). Empty label = no button, and the modal is
+	// exactly what it always was.
+	extraLabel string
+	extraRun   func(*App)
 }
 
 // openPrompt shows a single-line text input modal. title is the heading,
@@ -138,6 +149,22 @@ func (a *App) openPrompt(title, hint, initial string, callback func(*App, string
 		hint:     hint,
 		field:    newTextField(initial),
 		callback: callback,
+	})
+}
+
+// openPromptExtra is openPrompt with one more button on the button row.
+// extraRun runs INSTEAD of submitting — it is a way to fill the field,
+// not a second way to confirm — so it closes the modal itself if that
+// is what it needs (the AI draft reopens the prompt when the answer
+// lands).
+func (a *App) openPromptExtra(title, hint, initial, extraLabel string, extraRun func(*App), callback func(*App, string)) {
+	a.openModal(&promptModal{
+		title:      title,
+		hint:       hint,
+		field:      newTextField(initial),
+		callback:   callback,
+		extraLabel: extraLabel,
+		extraRun:   extraRun,
 	})
 }
 
@@ -176,6 +203,23 @@ func (m *promptModal) buttons(a *App) (cancel, ok btnRect) {
 	return btnRect{x: mx + 14, y: my + 6, w: 10}, btnRect{x: mx + 30, y: my + 6, w: 8}
 }
 
+// extraButton returns the optional third button's rect, zero-width when
+// there is none. It sits right of OK in the space the fixed Cancel / OK
+// pair leaves at the end of the row — btnRect.contains is false for
+// w == 0, so the drawer and the hit-test drop out together.
+func (m *promptModal) extraButton(a *App) btnRect {
+	if m.extraLabel == "" {
+		return btnRect{}
+	}
+	mx, my, mw, _ := m.rect(a)
+	w := runeLen(m.extraLabel)
+	x := mx + mw - 2 - w
+	if _, ok := m.buttons(a); x < ok.x+ok.w+1 {
+		return btnRect{}
+	}
+	return btnRect{x: x, y: my + 6, w: w}
+}
+
 // fieldSpan returns the input row and its [start, end) columns.
 func (m *promptModal) fieldSpan(a *App) (y, start, end int) {
 	mx, my, mw, _ := m.rect(a)
@@ -201,6 +245,11 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		return
 	case ok.contains(x, y):
 		m.submit(a)
+		return
+	case m.extraButton(a).contains(x, y):
+		if m.extraRun != nil {
+			m.extraRun(a)
+		}
 		return
 	}
 	fy, start, end := m.fieldSpan(a)
@@ -245,6 +294,9 @@ func (m *promptModal) draw(a *App) {
 	cancel, ok := m.buttons(a)
 	drawButton(a.screen, cancel.x, cancel.y, "[ Cancel ]", c.bg, a.theme.Text, false)
 	drawButton(a.screen, ok.x, ok.y, "[  OK  ]", c.bg, a.theme.Accent, true)
+	if extra := m.extraButton(a); extra.w > 0 {
+		drawButton(a.screen, extra.x, extra.y, m.extraLabel, c.bg, a.theme.AccentSoft, false)
+	}
 }
 
 // -----------------------------------------------------------------------------

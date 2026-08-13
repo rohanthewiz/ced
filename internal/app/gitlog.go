@@ -295,6 +295,13 @@ func parseGitLogCommits(out []byte) []gitLogCommit {
 
 // gitToplevel returns the repo's worktree root, "" on any failure —
 // the base `git show` diff paths resolve against.
+//
+// Three callers now, all for one reason: rootDir is routinely a
+// SUBDIRECTORY of the repo, while what git reports (a `show` diff's
+// paths, porcelain's paths, the a/… b/… paths inside a patch) is
+// relative to the root. loadGitStatusFiles joins against it, and
+// runGitApplyPatch RUNS from it — `git apply` resolves a work-tree
+// patch's paths against the current directory.
 func gitToplevel(rootDir string) string {
 	if rootDir == "" {
 		return ""

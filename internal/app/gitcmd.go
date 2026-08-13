@@ -118,6 +118,41 @@ func gitNoEditorEnv() []string {
 	return append(os.Environ(), "GIT_EDITOR=true")
 }
 
+// runGitApplyPatch pipes a patch to `git apply` and reports the outcome
+// through the same done-event every other write command uses. args are
+// the mode flags (--cached, -R, --index) that decide WHERE the patch
+// lands; see gitHunkApplyArgs, which is the only thing that builds them.
+//
+// It runs at the repo's TOPLEVEL rather than at rootDir, and that is
+// not a detail. The a/… b/… paths inside a patch are relative to the
+// work-tree root; `git apply` in index mode resolves them from the root
+// but in work-tree mode resolves them from the CURRENT DIRECTORY — and
+// ced routinely opens a SUBDIRECTORY of a repo as its root. Running
+// from the toplevel makes both modes agree with the paths git itself
+// wrote into the patch. Same lesson as stageFilePath's absolute paths,
+// from the other end.
+//
+// Stdin, not a temp file: the patch is a few hundred bytes that came
+// from this process, and a file would only add a cleanup path that can
+// fail.
+func (a *App) runGitApplyPatch(label, patch string, args ...string) {
+	if a.screen == nil || a.rootDir == "" || patch == "" {
+		return
+	}
+	scr := a.screen
+	root := a.rootDir
+	go func() {
+		dir := gitToplevel(root)
+		if dir == "" {
+			dir = root
+		}
+		cmd := exec.Command("git", append([]string{"-C", dir, "apply"}, args...)...)
+		cmd.Stdin = strings.NewReader(patch)
+		out, err := cmd.CombinedOutput()
+		_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out})
+	}()
+}
+
 // runGitCmdSeq runs several git subcommands in order on ONE goroutine,
 // stopping at the first failure and posting a single done-event for the
 // whole set. Verbs that are two git calls in the user's head but one

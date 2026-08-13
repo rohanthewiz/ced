@@ -142,16 +142,27 @@ func TestLoadGitPanelDiff_ModifiedAndUntracked(t *testing.T) {
 	repo, file := panelRepo(t)
 	writeFileT(t, file, "one\nCHANGED\n")
 
-	lines := loadGitPanelDiff(repo, gitPanelFile{Path: file, Rel: "f.txt", Code: " M"})
+	lines, side := loadGitPanelDiff(repo, gitPanelFile{Path: file, Rel: "f.txt", Code: " M"})
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "-two") || !strings.Contains(joined, "+CHANGED") {
 		t.Fatalf("diff missing change lines:\n%s", joined)
 	}
+	// An unstaged edit came from `git diff` alone, so it is addressable
+	// by the hunk verbs and carries no section marker.
+	if side != sideUnstaged {
+		t.Fatalf("side = %v, want sideUnstaged", side)
+	}
+	if strings.Contains(joined, gitPanelStagedMarker) || strings.Contains(joined, gitPanelUnstagedMarker) {
+		t.Fatalf("one-sided diff should carry no section marker:\n%s", joined)
+	}
 
 	newFile := filepath.Join(repo, "fresh.txt")
 	writeFileT(t, newFile, "alpha\nbeta\n")
-	lines = loadGitPanelDiff(repo, gitPanelFile{Path: newFile, Rel: "fresh.txt", Code: "??"})
+	lines, side = loadGitPanelDiff(repo, gitPanelFile{Path: newFile, Rel: "fresh.txt", Code: "??"})
 	joined = strings.Join(lines, "\n")
+	if side != sideNone {
+		t.Fatalf("untracked side = %v, want sideNone (nothing to apply against)", side)
+	}
 	if !strings.Contains(joined, "+alpha") || !strings.Contains(joined, "+beta") {
 		t.Fatalf("untracked fallback missing +lines:\n%s", joined)
 	}
@@ -517,8 +528,12 @@ func TestHandleMouse_GitPanelHeaderDrag(t *testing.T) {
 	a.gitPanel.files = []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
 	_, py, _, _ := a.gitPanelRect()
 
-	// Bare rule, clear of both header buttons.
-	grab := a.gitPanelActionsRect()
+	// Bare rule, clear of every header button — Actions ▾, the survey
+	// button beside it, and the ✕ at the far end.
+	grab := a.gitPanelReviewRect()
+	if grab.w == 0 {
+		grab = a.gitPanelActionsRect()
+	}
 	gx := grab.x + grab.w + 1
 	a.handleMouse(tcell.NewEventMouse(gx, py, tcell.Button1, 0))
 	if a.dragMode != "gitpanel" {

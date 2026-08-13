@@ -538,7 +538,83 @@ SHA**. This phase closes the specific named gaps:
    (`--abort`) / Continue (`--continue`, enabled once markers are gone).
    Tier 1 reports `blocked` — a merge conflict is exactly the phone-push
    moment. ~200 LOC.
-4. **One-gesture pre-commit survey.** gitpanel already has diff-vs-HEAD +
+4. **One-gesture pre-commit survey.** — ✅ done 2026-08-12
+   New `gitpanelwalk.go` + `gitpanelhunks.go` (+ tests, ~1300 LOC incl.
+   tests), plus the header button, the review column, and the commit
+   prompt's new ✦ AI button. All four parts as specified. Deviations and
+   findings, all deliberate:
+   - **Walk mode steps the panel's EXISTING selection**, rather than
+     carrying a second index: "the file being reviewed" and "the file
+     whose diff is on screen" are then the same variable and cannot
+     disagree. What walk mode adds is the keyboard (`n`/`p`/space/
+     Enter/`q`/`h`/`a`/`r`) and the rule that LEAVING a file marks it
+     read.
+   - **Reviewed marks outlive the walk** and are keyed by path, pruned
+     on refresh like `checked` — so the survey survives the thing it
+     exists for (click into the editor, fix what you spotted) and the
+     button offers `Resume 3/7 ▶`. A press outside the panel ends the
+     walk, the same mouse-first focus rule the terminal and chat
+     composer follow; Esc ends it as a side effect in the Esc block,
+     where the walk's own handler (below the leader block) never sees
+     one.
+   - **The wheel reads the change set as one document**: at the end of a
+     file's diff, one more notch steps to the next file. The detent is
+     free — the notch that REACHES the edge clamps and does nothing
+     else. It never ENDS the survey, because a commit modal must not
+     appear in answer to a scroll; `n` and Enter do that.
+   - **The diff pane now fetches git's TWO diffs, not the union.** This
+     is what the hunk verbs required: a hunk of `git diff HEAD` belongs
+     to neither the index nor the work tree once a file is half-staged
+     — and staging one hunk is precisely what MAKES it half-staged, so
+     the union supports exactly one hunk-stage per file. `git diff` and
+     `git diff --cached` are asked separately; for the (overwhelmingly
+     common) one-sided file the bytes are IDENTICAL to the union's and
+     nothing changed, and a mixed file gets two labelled sections. The
+     union survives as the fallback for shapes neither question claimed
+     (it, and the untracked synthesis, report `sideNone` — readable,
+     not applicable).
+   - **Verbs are gated by what git actually checks.** Unstaged hunks can
+     always be staged (`apply --cached`) and reverted (`apply -R`);
+     staged hunks can always be unstaged (`apply --cached -R`); reverting
+     a staged hunk needs `apply --index -R`, which requires index and
+     work tree to agree — so on a mixed file that row is withheld rather
+     than offered and rejected.
+   - **`git apply` runs at the repo TOPLEVEL.** A patch's `a/… b/…`
+     paths are work-tree-root-relative, and `git apply` resolves them
+     from the CURRENT DIRECTORY in work-tree mode — while ced routinely
+     opens a subdirectory of a repo. Same lesson as 4.3's absolute-path
+     finding, from the other end; pinned by a subdirectory-root test.
+   - **Chips ride at the right edge of the hunk HEADER row**, not in the
+     one-cell gutter the spec imagined — three verbs don't fit one
+     column, and body rows would put click targets over the code being
+     read. `gitPanelHunkChipsAt` is called by the drawer AND the click
+     router (the btnRect rule), and withholds the strip entirely on a
+     pane too narrow to carry it; `Hunk actions…` is the Tier-0 twin.
+   - **The commit prompt grew an optional third button** rather than
+     becoming its own modal: `promptModal` is a generic house primitive
+     and an extra button is a general extension of it — unlike
+     formModal, whose rows are a config type (4.1's call). It fills the
+     field, it does not submit. The glyph is ✦ (U+2726), not ✨:
+     `drawAt` advances one CELL per rune and U+2728 is East-Asian-Wide,
+     so it would shift the button row through the modal's border.
+   - **The nudge goes quiet at 0 reviewed and at all-reviewed**, so the
+     one state it describes still registers; it never gates the commit.
+   - The walk's terminal commit targets the REVIEWED set, unless ticks
+     exist — an explicit selection outranks an inferred one.
+   Found on the way: the header title was drawn from the end of
+   `Actions ▾`, i.e. straight over any button added beside it. Labels
+   now yield to controls, pinned by a test.
+   Verified against real repos: staging one hunk of a two-hunk file
+   leaves the other alone and turns the file mixed, the second hunk is
+   still stageable from the mixed view, unstage takes one hunk back out
+   without touching the work tree, revert removes one hunk from the work
+   tree only, and the whole thing works with ced rooted in a
+   subdirectory. Panels and dialogs were dumped to a `SimulationScreen`
+   and read before being trusted.
+
+   The original spec follows.
+
+   gitpanel already has diff-vs-HEAD +
    per-file checkboxes + Actions. Add:
    - **Walk mode**: "Review all ▶" header button (+ `n`/`p`, wheel) stepping
      file-to-file through every changed file's diff, `3/7 files` indicator.
@@ -668,10 +744,10 @@ emission pulled forward to week one** (two escape sequences, instant
 cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
-**Progress:** Phases 1, 2, 3.1, 3.2, 4.1, 4.2 and 4.3 are done (all
-2026-08-12). Next is **Phase 4.4 — the one-gesture pre-commit survey**
-(walk mode through every changed file's diff, reviewed checkmarks, hunk
-verbs, ending on the commit-message field), then 4.5 (`commitMsgTrailer`).
+**Progress:** Phases 1, 2, 3.1, 3.2, 4.1, 4.2, 4.3 and 4.4 are done (all
+2026-08-12). Next is **Phase 4.5** (`commitMsgTrailer` config key + the
+clickable `[trailer: on]` chip beside the AI button, ~60 LOC), which
+closes Phase 4 — 4.6 (blame) is explicitly optional. Then Phase 5.
 The two remaining Phase-3 items are small and unclaimed: 3.3 (hover on
 mouse dwell) is Tier-1 only and so really belongs with Phase 5, and 3.4
 (recent-files picker) is an hour's work whenever a breather is wanted.

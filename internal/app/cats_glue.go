@@ -83,6 +83,13 @@ const (
 	// and this is how its outcome — success or the server's own error —
 	// gets in front of the user without each one inventing an event kind.
 	catsKindNotice
+	// catsKindRunDone is a notice PLUS the bookkeeping a finished run needs:
+	// the hook badge has to come down and the pane it used is worth
+	// remembering, neither of which a bare notice can do (catsrun.go).
+	catsKindRunDone
+	// catsKindCapture carries another pane's text back to be opened in the
+	// compare panel (catscapture.go).
+	catsKindCapture
 )
 
 // catsEvent is the goroutine → main-loop message for everything cats. The
@@ -104,7 +111,17 @@ type catsEvent struct {
 	theme   cats.ConfigTheme // catsKindTheme
 	recents []string         // catsKindRecents
 	panes   []cats.PaneInfo  // catsKindPanes
-	notice  string           // catsKindNotice
+	notice  string           // catsKindNotice, catsKindRunDone
+
+	// catsKindRunDone: how it went, and which pane it went in (paneOK false
+	// when the pane could not be identified, so it is not remembered).
+	runOK  bool
+	pane   uint32
+	paneOK bool
+
+	// catsKindCapture: another pane's text and the label it is compared under.
+	text  string
+	label string
 }
 
 // When satisfies the tcell.Event interface.
@@ -159,6 +176,23 @@ type catsState struct {
 	// non-negotiable rather than merely tidy. See catsagents.go.
 	panes         []cats.PaneInfo
 	panesPolledAt time.Time
+
+	// The run pane (catsrun.go). runActive counts runs in flight — a count
+	// rather than a flag for the same reason projectSearchActive is one — and
+	// is what puts the editor's own pane in the `working` state, so cats
+	// raises its "finished" notification when the last one lands. runPane is
+	// the pane the last run used, reused by the next one so a session of a
+	// dozen runs does not end in a dozen panes.
+	runActive int
+	runLabel  string
+	runSeq    int
+	runPane   uint32
+	runPaneOK bool
+
+	// lastRunCmd / lastRunFile prefill the run prompt, but only while the
+	// user is still on the file the command was run for. See catsRunInitial.
+	lastRunCmd  string
+	lastRunFile string
 
 	// lastState / lastStatus are what the reporter last sent. Reporting on
 	// change is not just economy: every report is a potential toast or
@@ -229,6 +263,10 @@ func (a *App) handleCatsEvent(e *catsEvent) {
 		if e.notice != "" {
 			a.flash(e.notice)
 		}
+	case catsKindRunDone:
+		a.catsRunDone(e)
+	case catsKindCapture:
+		a.catsCaptureArrived(e)
 	}
 }
 
@@ -375,6 +413,13 @@ func (a *App) catsSelfState() (state, status string) {
 	if a.modal != nil && a.cats.asking != "" {
 		return cats.StateBlocked, a.cats.asking
 	}
+	if a.cats.runActive > 0 {
+		// A run outranks the other two working states because it is the one
+		// the user deliberately walked away from — the whole reason the wait
+		// in catsrun.go exists is so the working→idle edge pages them when it
+		// lands.
+		return cats.StateWorking, "run: " + a.cats.runLabel
+	}
 	if a.chat.turnActive {
 		return cats.StateWorking, a.chatAgent().name + " is working"
 	}
@@ -425,12 +470,21 @@ func (a *App) catsMenuItems() []menuItemDef {
 		// half needs no row of its own: the host's places are merged into
 		// ≡ → File → Recent folders…, where a user already looks for them.
 		{label: "Open project in new cats tab…", shortcut: "esc C p", action: (*App).menuCatsOpenProject, enabled: (*App).hasCatsProjects},
+		// The real-pty pair (catsrun.go). Both stay enabled below Tier 1,
+		// where they fall back to ced's own terminal panel rather than
+		// refusing — the ladder's rule is that the FEATURE survives the
+		// downgrade, not that the row does.
+		{label: "Terminal in a cats pane", shortcut: "esc C t", action: (*App).menuCatsTerminal, enabled: (*App).hasCatsTerminal},
+		{label: "Run file in a cats pane…", shortcut: "esc C x", action: (*App).menuCatsRunFile, enabled: (*App).hasCatsRun},
 		// The sibling agents (catsagents.go). Focus first — it is the row
 		// with no precondition beyond an agent existing, and the one the
 		// status-bar segment's click duplicates.
 		{label: "Focus agent pane…", shortcut: "esc C a", action: (*App).catsFocusAgent, enabled: (*App).hasCatsAgents},
 		{label: "Send selection to agent…", shortcut: "esc C s", action: (*App).menuCatsSendSelection, enabled: (*App).hasCatsSelectionSend},
 		{label: "Ask cats chat about selection", shortcut: "esc C k", action: (*App).menuCatsAskChat, enabled: (*App).hasCatsSelectionSend},
+		// The last of the agent verbs (catscapture.go): read what a sibling
+		// pane says and diff it against this buffer.
+		{label: "Compare buffer with agent pane…", shortcut: "esc C m", action: (*App).menuCatsComparePane, enabled: (*App).hasCatsComparePane},
 	}
 }
 
@@ -448,6 +502,11 @@ func catsLeaderBindings(a *App) []leaderBinding {
 		{key: 'r', action: (*App).catsSplitRight, label: "Split right"},
 		{key: 'd', action: (*App).catsSplitDown, label: "Split down"},
 		{key: 'p', action: (*App).menuCatsOpenProject, label: "Project in new tab"},
+		{key: 't', action: (*App).menuCatsTerminal, label: "Terminal pane"},
+		// 'x' for execute: 'r' is the split and 'run' has no free initial
+		// left, while x is the letter every launcher already uses for it.
+		{key: 'x', action: (*App).menuCatsRunFile, label: "Run file in a pane"},
+		{key: 'm', action: (*App).menuCatsComparePane, label: "Compare with a pane"},
 		{key: 'a', action: (*App).catsFocusAgent, label: "Focus agent pane"},
 		{key: 's', action: (*App).menuCatsSendSelection, label: "Send selection to agent"},
 		// 'k' rather than 'c' for chat: 'c' would be the obvious letter,
@@ -468,7 +527,7 @@ func catsLeaderHint(a *App) string {
 	if !a.catsTier1() {
 		return "Cats — the host's control socket is not answering"
 	}
-	return "Cats  r split → · d split ↓ · p project tab · a focus agent · s send selection · k ask chat"
+	return "Cats  r/d split →↓ · p project tab · t terminal · x run file · a focus agent · s send · k chat · m compare"
 }
 
 // catsPostNotice hands one phrase from a background cats goroutine to the

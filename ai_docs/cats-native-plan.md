@@ -81,7 +81,11 @@ they PostEvent; only the main loop mutates):
 - `detect.go` — env sniff + socket probe → `Caps` struct, parsed pane ID.
 - `client.go` — newline-JSON control-socket client; typed wrappers for the
   verbs ced uses: `PaneSplit`, `TabCreate`, `PaneSendInput`, `Read`,
-  `ConfigGet`, `PathList`, `ChatSend`, `PaneList`, `PaneFocus`. Wire structs
+  `Capture`, `WaitForOutput`, `ConfigGet`, `PathList`, `ChatSend`,
+  `PaneList`, `PaneFocus`. `WaitForOutput` dials through a COPY of the
+  client with a wider timeout — it rides the unary envelope but resolves
+  only on a match, and widening the shared client would leave every
+  unrelated call waiting minutes on a dead socket. Wire structs
   are hand-copied minimal mirrors of `cats/internal/app/command_vocab.go` —
   do **NOT** import the cats module; ced stays buildable standalone.
 - `events.go` — long-lived `events.subscribe` stream goroutine, reconnect
@@ -718,9 +722,26 @@ SHA**. This phase closes the specific named gaps:
    <root> <file>`: `--root` is a new ced flag, because a file path alone
    would root the sibling at the file's parent instead of this project.
    Shared-buffer over `internal/remote` remains a stretch goal.
-6. **Real terminal panes.** Tier 1 "Terminal" spawns a real PTY sibling via
-   `pane.split`/`tab.create` (grsh remains Tier 0). "Run file" uses
-   `pane.wait_for_output` to badge success/failure via the hook.
+6. ✅ **done 2026-08-13** — **Real terminal panes** (`catsrun.go`). "Terminal
+   in a cats pane" splits a real pty running the user's own shell, sent a `cd`
+   only when the inherited cwd is not the project root; grsh remains the
+   Tier-0 terminal and the row falls back to opening it. "Run file in a cats
+   pane…" prompts with a guessed command (per-file memory of the last one),
+   runs it as `sh -c 'cd <root> && ( <cmd> ); printf "\n<marker>%s\n" "$?"'`
+   and watches for the marker with `pane.wait_for_output` — the exit code
+   comes back in ced's status bar, while the in-flight `working` state makes
+   cats raise its own "finished" notification on the working→idle edge (a
+   failed run is NOT `blocked`: blocked means a question, and a channel that
+   pages for answers too gets muted). Three details carry the design: the
+   marker's format string (`%s` where the pattern needs `[0-9]+`) is what
+   stops the shell's ECHO of the command from satisfying the wait it just
+   started; the marker is pid+sequence unique so an old one in the scrollback
+   cannot; and the command runs in a subshell so an `exit`/`exec` inside it
+   cannot take the reporting line with it. The run pane is remembered and
+   reused — unless an agent has claimed it since. Tier-0 fallback: the
+   command is staged, unsubmitted, on ced's own terminal input line.
+   *Verified live: `capture` and `pane.wait_for_output` against the running
+   catway; the exit-code protocol against a real `/bin/sh`.*
 7. ✅ **done 2026-08-12** — **Frecency navigation.** `path.list` recents are
    merged into ≡ → File → **Recent folders…** (`catsfrecency.go`): ced's own
    places first (they carry tab counts and were recorded by this program),
@@ -730,17 +751,21 @@ SHA**. This phase closes the specific named gaps:
    projects. "Open project in new cats tab…" spawns an independent ced
    elsewhere via `tab.create` (an argv, so no shell and nothing to quote).
    *Verified live: 34 host recents → 24 rows.*
-8. **Agents as collaborators.** *Three of four done 2026-08-12*
-   (`catsagents.go`): ✅ status-bar segment naming the sibling that most
+8. ✅ **done 2026-08-13** — **Agents as collaborators.** *Three quarters
+   2026-08-12* (`catsagents.go`): ✅ status-bar segment naming the sibling that most
    wants attention ("claude: blocked +1", ranked blocked > working > idle,
    click → `pane.focus`, our own pane excluded because the hook reporter
    makes cats call it the agent "ced"); ✅ "Send selection to agent…" →
    `pane.send_input` with a `path:12-40` reference and **submit false**,
    permanently (cats paste-encodes, so a multi-line selection lands intact);
    ✅ "Ask cats chat about selection" → `chat.send` with the same quote.
-   **Still unclaimed:** `capture` a sibling pane into a read-only compare
-   tab (diff an agent's proposal against your buffer without leaving the
-   editor).
+   ✅ *2026-08-13* — **"Compare buffer with agent pane…"** (`catscapture.go`):
+   `capture` (scope recent, 2000 lines, unwrapped, no ansi) feeds the compare
+   panel as the OLD side, so an agent's proposal is diffed against the buffer
+   without leaving the editor. Agent panes are the offer when there are any,
+   every other pane when there are none, our own in neither. Only the capture's
+   trailing blank screen rows are trimmed — trimming its interior would report
+   changes the user never made.
 
 ### Phase 6 — Upstream-gated polish
 Each landed ask gets its consumer: `clipboard.read` → native
@@ -835,9 +860,10 @@ emission pulled forward to week one** (two escape sequences, instant
 cats-integration payoff), and Phase 3.2–3.4 slotting in wherever a breather
 is needed.
 
-**Progress:** Phases 1, 2, 3.1, 3.2, 4.1–4.5, and **5.1, 5.3, 5.4, 5.5, 5.7
-and three quarters of 5.8** are done (all 2026-08-12). **Phase 4 is closed**
-— 4.6 (blame) is explicitly optional and unclaimed. §5's item 5 is verified.
+**Progress:** Phases 1, 2, 3.1, 3.2, 4.1–4.5 and **5.1, 5.3, 5.4, 5.5, 5.7**
+are done (2026-08-12); **5.6 and the last of 5.8** landed 2026-08-13.
+**Phase 4 is closed** — 4.6 (blame) is explicitly optional and unclaimed.
+§5's item 5 is verified.
 
 Every Phase-5 consumer now shares one shape, and it is worth stating once
 because the next one should follow it: **poll on a goroutine, cache on the
@@ -846,13 +872,19 @@ pane list are all read by main-loop code (a picker, a draw call), and none
 of them may dial a socket there. Refresh points are the stream's own events
 (`focus_changed`, `pane_notify`), each behind a rate limit.
 
-**What is left in Phase 5:** **5.2 (the ⌘ table)**, independent of everything
-and gated on the Mac app's routing; **5.6 (real terminal panes)**, which
-wants `pane.wait_for_output` and the same spawn plumbing 5.5 built; and
-**5.8's fourth quarter** — `capture` a sibling pane into a read-only compare
-tab. The two remaining Phase-3 items are small and unclaimed: 3.3 (hover on
-mouse dwell) is Tier-1 only and can be built on this client, and 3.4
-(recent-files picker) is an hour's work whenever a breather is wanted.
+5.6 added a second shape worth naming, because the pane verbs need it:
+**spawn, then watch.** A control call that creates something (a split) is
+answered before the thing inside it is ready, and nothing in the API reports
+a child process's exit — so a pane is driven by typing a self-describing
+command at it and waiting for the marker it prints. The wait is what turns
+"the editor typed something somewhere" into a result the hook can page a
+human about.
+
+**What is left in Phase 5: 5.2 (the ⌘ table) alone**, independent of
+everything and gated on the Mac app's routing. The two remaining Phase-3
+items are small and unclaimed: 3.3 (hover on mouse dwell) is Tier-1 only and
+can be built on this client, and 3.4 (recent-files picker) is an hour's work
+whenever a breather is wanted.
 
 ## 8. Verification
 

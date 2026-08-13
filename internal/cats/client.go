@@ -42,6 +42,8 @@ const (
 	MethodPaneList     = "pane.list"
 	MethodPaneSendIn   = "pane.send_input"
 	MethodRead         = "read"
+	MethodCapture      = "capture"
+	MethodWaitOutput   = "pane.wait_for_output"
 	MethodTabCreate    = "tab.create"
 	MethodChatSend     = "chat.send"
 	MethodConfigGet    = "config.get"
@@ -314,6 +316,83 @@ func (c *Client) Read(pane uint32, anchor, cursor [2]uint32, rect bool) (string,
 		Rect   bool      `json:"rect,omitempty"`
 	}{pane, anchor, cursor, rect}, &r)
 	return r.Text, err
+}
+
+// Capture scopes (cats CaptureParams.Scope). Visible is the on-screen
+// viewport; Recent is the last Lines rows of scrollback plus the active
+// screen, with Lines 0 meaning the whole buffer.
+const (
+	CaptureVisible uint8 = 0
+	CaptureRecent  uint8 = 1
+)
+
+// Capture extracts a pane's buffer text — whole rows, no coordinates, which
+// is what "show me what that pane says" wants and what `read` (a selection
+// between two points) cannot answer.
+//
+// ansi is deliberately not exposed: every consumer here puts the text in a
+// ced buffer, and VT escapes in a diff would be noise the user cannot see
+// past. unwrap rejoins soft-wrapped lines, which is what makes a captured
+// 200-column agent transcript diffable against a source file.
+func (c *Client) Capture(pane uint32, scope uint8, lines uint32, unwrap bool) (string, error) {
+	var r struct {
+		Text string `json:"text"`
+	}
+	err := c.Call(MethodCapture, struct {
+		Pane   uint32 `json:"pane"`
+		Scope  uint8  `json:"scope,omitempty"`
+		Lines  uint32 `json:"lines,omitempty"`
+		Unwrap bool   `json:"unwrap,omitempty"`
+	}{pane, scope, lines, unwrap}, &r)
+	return r.Text, err
+}
+
+// MaxWaitTimeout mirrors cats' own cap on a single wait (command_vocab.go).
+// A longer request is clamped server-side, so asking for more only misleads
+// the caller sizing its own round-trip budget.
+const MaxWaitTimeout = 10 * time.Minute
+
+// waitSlack is how much longer the CALL is allowed to take than the wait it
+// carries. pane.wait_for_output rides the ordinary unary envelope but resolves
+// only when the pane's output matches — so the client's own timeout has to sit
+// above the server's, or every wait would end as a client-side timeout with no
+// idea whether the thing being waited on ever happened.
+const waitSlack = 5 * time.Second
+
+// WaitForOutput blocks until the pane's output matches pattern, the timeout
+// elapses, or the pane exits. matched false is not an error: it is the honest
+// answer "that never appeared", which a caller reports differently from "the
+// host refused to look".
+//
+// The wait is matched against the pane's LIVE output as it streams, seeded
+// once with what is already on screen — so a marker printed by a command that
+// scrolls away in the same instant is still caught. That property is the whole
+// reason this is a control-API verb rather than a capture-and-poll loop here.
+func (c *Client) WaitForOutput(pane uint32, pattern string, regex bool, timeout time.Duration) (matched bool, text string, err error) {
+	if c == nil {
+		// Every other verb reaches this check inside Call; this one dials
+		// through a copy of the client, so it has to ask first.
+		return false, "", errors.New("cats: no control socket")
+	}
+	if timeout <= 0 || timeout > MaxWaitTimeout {
+		timeout = MaxWaitTimeout
+	}
+	// A COPY of the client with a wider budget, never a mutation: a Client is
+	// shared across goroutines by design (see the type comment), and widening
+	// the shared one would leave every unrelated call waiting minutes for a
+	// dead socket.
+	waiter := &Client{Socket: c.Socket, Timeout: timeout + waitSlack}
+	var r struct {
+		Matched bool   `json:"matched"`
+		Text    string `json:"text,omitempty"`
+	}
+	err = waiter.Call(MethodWaitOutput, struct {
+		Pane      uint32 `json:"pane"`
+		Pattern   string `json:"pattern"`
+		Regex     bool   `json:"regex,omitempty"`
+		TimeoutMs uint32 `json:"timeout_ms,omitempty"`
+	}{pane, pattern, regex, uint32(timeout / time.Millisecond)}, &r)
+	return r.Matched, r.Text, err
 }
 
 // TabCreate opens a new tab and returns its number and root pane id.

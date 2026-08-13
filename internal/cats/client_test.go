@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -316,5 +317,98 @@ func TestPaneListAgentFields(t *testing.T) {
 	p := panes[0]
 	if p.Agent != "claude" || p.AgentState != "blocked" || p.Cwd != "/w" || !p.Focused {
 		t.Fatalf("got %+v", p)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// capture and pane.wait_for_output
+// -----------------------------------------------------------------------------
+
+// capture asks for whole rows of a pane's buffer, unwrapped and without VT
+// styling — the shape every consumer here needs, because the text ends up in
+// a ced buffer being diffed.
+func TestCaptureWireShape(t *testing.T) {
+	s := startFake(t, func(req request, conn net.Conn) {
+		reply(t, conn, map[string]string{"text": "line one\nline two\n"})
+	})
+	text, err := NewClient(s.path).Capture(7, CaptureRecent, 2000, true)
+	if err != nil || text != "line one\nline two\n" {
+		t.Fatalf("capture → %q, %v", text, err)
+	}
+	req := s.nextReq()
+	if req.Method != MethodCapture {
+		t.Fatalf("method = %s", req.Method)
+	}
+	// ansi is absent because it is never sent: escapes in a diff are noise.
+	if got := params(t, req); got != `{"pane":7,"scope":1,"lines":2000,"unwrap":true}` {
+		t.Fatalf("capture params = %s", got)
+	}
+}
+
+// The wait's timeout crosses the wire in milliseconds and is clamped to the
+// server's own cap — asking for more only makes this side's arithmetic
+// disagree with the server's.
+func TestWaitForOutputWireShapeAndClamp(t *testing.T) {
+	s := startFake(t, func(req request, conn net.Conn) {
+		reply(t, conn, map[string]any{"matched": true, "text": "[ced run 1.2] exit:0"})
+	})
+	c := NewClient(s.path)
+
+	matched, text, err := c.WaitForOutput(7, "exit:[0-9]+", true, 2*time.Second)
+	if err != nil || !matched || text != "[ced run 1.2] exit:0" {
+		t.Fatalf("wait → %v, %q, %v", matched, text, err)
+	}
+	req := s.nextReq()
+	if req.Method != MethodWaitOutput {
+		t.Fatalf("method = %s", req.Method)
+	}
+	if got := params(t, req); got != `{"pane":7,"pattern":"exit:[0-9]+","regex":true,"timeout_ms":2000}` {
+		t.Fatalf("wait params = %s", got)
+	}
+
+	// Zero and over-cap both become the cap.
+	for _, d := range []time.Duration{0, time.Hour} {
+		if _, _, err := c.WaitForOutput(7, "x", false, d); err != nil {
+			t.Fatalf("wait(%v): %v", d, err)
+		}
+		want := `{"pane":7,"pattern":"x","timeout_ms":` +
+			strconv.Itoa(int(MaxWaitTimeout/time.Millisecond)) + `}`
+		if got := params(t, s.nextReq()); got != want {
+			t.Fatalf("wait(%v) params = %s, want %s", d, got, want)
+		}
+	}
+}
+
+// matched=false is an ANSWER, not an error: the marker never appeared. A
+// caller reports that differently from a socket that refused, so the two must
+// not arrive looking the same.
+func TestWaitForOutputTimeoutIsNotAnError(t *testing.T) {
+	s := startFake(t, func(req request, conn net.Conn) {
+		reply(t, conn, map[string]any{"matched": false})
+	})
+	matched, _, err := NewClient(s.path).WaitForOutput(7, "x", false, time.Second)
+	if err != nil {
+		t.Fatalf("a clean timeout must not be an error: %v", err)
+	}
+	if matched {
+		t.Fatal("matched should be false")
+	}
+}
+
+// The wait dials through a COPY of the client, so the nil check every other
+// verb gets inside Call has to be made explicitly — a nil client here would
+// otherwise panic instead of degrading.
+func TestWaitForOutputOnANilClient(t *testing.T) {
+	var c *Client
+	if _, _, err := c.WaitForOutput(1, "x", false, time.Second); err == nil {
+		t.Fatal("a nil client must report, not panic")
+	}
+	// And the shared client is never widened by a wait: a Client is shared
+	// across goroutines, so a minutes-long timeout leaking into it would make
+	// every unrelated call hang on a dead socket.
+	live := NewClient("/nonexistent/socket")
+	_, _, _ = live.WaitForOutput(1, "x", false, time.Minute)
+	if live.Timeout != 0 {
+		t.Fatalf("the shared client's timeout was mutated to %v", live.Timeout)
 	}
 }

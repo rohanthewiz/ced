@@ -100,16 +100,12 @@ func (a *App) catsOpenInSplit(direction, arrow string) {
 
 	client, scr := a.cats.client, a.screen
 	// A resolved self is what makes the new pane land beside THIS one. If
-	// the handle never resolved, nil means "split the focused pane", which
-	// is us in every case where the user just clicked a menu row.
-	var self *uint32
-	if a.cats.selfOK {
-		id := a.cats.self
-		self = &id
-	}
+	// the handle never resolved, catsSelfPane's nil means "split the focused
+	// pane", which is us in every case where the user just clicked a row.
+	self := a.catsSelfPane()
 	shown := filepath.Base(path)
 	go func() {
-		if err := catsSpawnSibling(client, self, direction, line); err != nil {
+		if _, err := catsSpawnSibling(client, self, direction, line); err != nil {
 			catsPostNotice(scr, "Split failed: "+err.Error())
 			return
 		}
@@ -138,33 +134,48 @@ func (a *App) catsSplitTarget() string {
 // stays in one place — the ≡-menu convention.
 func (a *App) hasCatsSplit() bool { return a.catsTier1() && a.catsSplitTarget() != "" }
 
-// catsSpawnSibling runs the four-call sequence against the host. It is a
-// free function taking a client so the goroutine never sees the App.
-func catsSpawnSibling(client *cats.Client, pane *uint32, direction, line string) error {
+// catsSpawnSibling runs the four-call sequence against the host and returns
+// the pane it created. It is a free function taking a client so the goroutine
+// never sees the App.
+//
+// An EMPTY line means "just make me a pane": the split is the whole request,
+// so the two listings are still made (the caller wants the id — a terminal
+// pane is reused by the next run) but an unidentifiable pane is no longer a
+// failure. Nothing is going to be typed into it either way.
+func catsSpawnSibling(client *cats.Client, pane *uint32, direction, line string) (uint32, error) {
 	before, err := client.PaneList()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := client.PaneSplit(pane, direction); err != nil {
-		return err
+		return 0, err
 	}
 	after, err := client.PaneList()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	target, ok := catsNewPane(before, after)
 	if !ok {
+		if line == "" {
+			// The pane is there and empty, which is exactly what was asked
+			// for; we simply cannot name it. A caller that wanted to reuse it
+			// later gets a fresh split next time instead.
+			return 0, nil
+		}
 		// The split itself SUCCEEDED — there is now an empty shell beside
 		// the user. Saying so is the honest report: they can type the
 		// command themselves, and a bare "failed" would send them looking
 		// for a pane that is already there.
-		return fmt.Errorf("split opened, but its pane could not be identified — run the editor there by hand")
+		return 0, fmt.Errorf("split opened, but its pane could not be identified — run the editor there by hand")
+	}
+	if line == "" {
+		return target, nil
 	}
 	// submit: the newline is already in the line, and the shell needs the
 	// press to run it. This is the one place ced puts words in something
 	// else's mouth AND presses enter — legitimate because the something
 	// else is a shell we just created for exactly this purpose.
-	return client.PaneSendInput(target, line, true)
+	return target, client.PaneSendInput(target, line, true)
 }
 
 // catsNewPane finds the pane that appeared between two pane.list snapshots.

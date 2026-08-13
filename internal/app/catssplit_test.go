@@ -44,7 +44,17 @@ type ctlSpy struct {
 	// splitAdds is how many panes a split conjures — 1 in reality, 0 or 2
 	// in the tests that pin the ambiguous-diff refusal.
 	splitAdds int
-	done      chan struct{}
+	// paneRows overrides what pane.list reports, for the tests that need
+	// panes carrying more than an id (an agent, a cwd). Nil falls back to
+	// panes, the plain id list the split sequence needs.
+	paneRows []cats.PaneInfo
+	// captureText is what `capture` answers with; waitMatched / waitText are
+	// pane.wait_for_output's verdict. Their zero values are the honest
+	// defaults: an empty pane, and a wait that never matched.
+	captureText string
+	waitMatched bool
+	waitText    string
+	done        chan struct{}
 }
 
 // ctlCall is one request the spy saw, with its params left raw so a test
@@ -108,11 +118,19 @@ func (s *ctlSpy) serve(conn net.Conn) {
 	reply := map[string]any{"ok": true}
 	switch req.Method {
 	case cats.MethodPaneList:
+		if s.paneRows != nil {
+			reply["data"] = map[string]any{"panes": s.paneRows}
+			break
+		}
 		rows := make([]map[string]any, 0, len(s.panes))
 		for _, p := range s.panes {
 			rows = append(rows, map[string]any{"pane": p})
 		}
 		reply["data"] = map[string]any{"panes": rows}
+	case cats.MethodCapture:
+		reply["data"] = map[string]any{"text": s.captureText}
+	case cats.MethodWaitOutput:
+		reply["data"] = map[string]any{"matched": s.waitMatched, "text": s.waitText}
 	case cats.MethodPaneSplit:
 		if s.splitFails {
 			reply = map[string]any{"ok": false, "error": "no room to split"}
@@ -269,7 +287,7 @@ func TestCatsSplitRefusesAnAmbiguousPane(t *testing.T) {
 		s.splitAdds = adds
 		openTestFileTab(t, a, "main.go")
 
-		if err := catsSpawnSibling(a.cats.client, nil, cats.SplitVertical, "x\n"); err == nil {
+		if _, err := catsSpawnSibling(a.cats.client, nil, cats.SplitVertical, "x\n"); err == nil {
 			t.Fatalf("adds=%d: an ambiguous diff should refuse", adds)
 		}
 		for _, m := range s.methods() {
@@ -289,7 +307,7 @@ func TestCatsSplitReportsAHostRefusal(t *testing.T) {
 	s.splitFails = true
 	openTestFileTab(t, a, "main.go")
 
-	err := catsSpawnSibling(a.cats.client, nil, cats.SplitHorizontal, "x\n")
+	_, err := catsSpawnSibling(a.cats.client, nil, cats.SplitHorizontal, "x\n")
 	if err == nil || !strings.Contains(err.Error(), "no room to split") {
 		t.Fatalf("err = %v, want the server's own message", err)
 	}
@@ -397,7 +415,7 @@ func TestCatsSurfacesAppearOnlyInsideCats(t *testing.T) {
 
 	withCtlSpy(t, a)
 	openTestFileTab(t, a, "main.go")
-	if len(a.catsMenuItems()) != 6 || len(catsLeaderBindings(a)) != 6 {
+	if len(a.catsMenuItems()) != 9 || len(catsLeaderBindings(a)) != 9 {
 		t.Fatalf("rows=%d keys=%d", len(a.catsMenuItems()), len(catsLeaderBindings(a)))
 	}
 	found := false

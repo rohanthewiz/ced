@@ -308,12 +308,37 @@ func (t *Tab) Save() error {
 	return nil
 }
 
+// readDiskState performs the guarded read every reload path shares:
+// readTextFile's size / binary / BOM / line-ending work, plus the stat
+// whose mtime the caller records. One implementation, two consumers —
+// Reload installs what it returns as the new baseline and ReloadAsEdit
+// adopts it as an edit — because a second copy of the guards would drift
+// exactly where a user would notice it: a file that grew past
+// MaxOpenBytes, or turned binary, while we held it open.
+func (t *Tab) readDiskState() (text string, bom bool, ending string, mtime time.Time, err error) {
+	text, bom, ending, err = readTextFile(t.Path)
+	if err != nil {
+		return "", false, "", time.Time{}, err
+	}
+	info, err := os.Stat(t.Path)
+	if err != nil {
+		return "", false, "", time.Time{}, err
+	}
+	return text, bom, ending, info.ModTime(), nil
+}
+
 // Reload re-reads the file from disk into the buffer. Cursor and anchor
 // are clamped to the new content (so the user keeps roughly their place
 // instead of getting snapped to line 0); ScrollY is left alone and gets
 // clamped on the next render. Dirty is cleared and the syntax cache is
 // invalidated. Image tabs decode the file again instead of replacing
 // the text buffer.
+//
+// It re-seeds the baseline, so it is the answer when the DISK is the
+// authority: the user asked for the file back, or an external writer
+// replaced it (via ReloadUndoable). A rewrite ced itself caused goes
+// through ReloadAsEdit instead — see that method for why the difference
+// matters.
 func (t *Tab) Reload() error {
 	if t.Path == "" {
 		return fmt.Errorf("no path set for tab")
@@ -336,11 +361,7 @@ func (t *Tab) Reload() error {
 	// Same guards and decoding as the open path: a file can grow past the
 	// limit, turn binary, or change its line endings while we hold it
 	// open, and a reload is exactly when we'd find out.
-	text, bom, ending, err := readTextFile(t.Path)
-	if err != nil {
-		return err
-	}
-	info, err := os.Stat(t.Path)
+	text, bom, ending, mtime, err := t.readDiskState()
 	if err != nil {
 		return err
 	}
@@ -352,7 +373,7 @@ func (t *Tab) Reload() error {
 	t.Carets = nil      // …and with them every secondary caret, for the same reason.
 	t.Dirty = false
 	t.DiskGone = false
-	t.Mtime = info.ModTime()
+	t.Mtime = mtime
 	// Re-evaluated, not sticky: a file that grew past the limit while we
 	// held it open should stop highlighting, and one that shrank should
 	// start again.
@@ -403,6 +424,101 @@ func (t *Tab) ReloadUndoable() error {
 	// snapshotCost wants to measure the entry against.
 	t.pushUndoEntry(before, t.undoTop())
 	return nil
+}
+
+// ReloadAsEdit re-reads the file and adopts it as an EDIT rather than as a
+// new baseline: ONE structural undo step, and the history underneath it is
+// left completely intact.
+//
+// It is the third member of the Reload family, and the distinction between
+// the three is the whole reason this exists:
+//
+//	Reload          the USER asked for the disk version — history is
+//	                meaningless, so initUndo resets both stacks and the
+//	                revert anchor.
+//	ReloadUndoable  a FOREIGN writer changed the file and the editor took
+//	                it on the user's behalf — same reset, but the user's
+//	                text is left one Undo away because taking it silently
+//	                is only defensible if it's reversible.
+//	ReloadAsEdit    CED'S OWN WRITE coming back — format-on-save's
+//	                `gofmt -w`, a plugin's in-place rewrite. Nothing about
+//	                the file became a new baseline; the editor rewrote the
+//	                user's own text while they were still working on it,
+//	                so it is an edit like any other and the history it sits
+//	                on top of must survive.
+//
+// That last case is what auto-save turned into a bug: with the formatter
+// running on every idle pause, a plain Reload wiped the undo stack every
+// couple of seconds and undo appeared to be broken.
+//
+// Returns whether the buffer actually changed. An unchanged file — the
+// common case, since gofmt on already-formatted code rewrites nothing —
+// files NO undo entry and bumps no EditRev, which is what keeps the
+// repeating background runs from filling the stack with no-op steps.
+func (t *Tab) ReloadAsEdit() (changed bool, err error) {
+	// Nothing to snapshot: an image tab holds no text history, and a
+	// pathless tab has no file to re-read. Same delegation ReloadUndoable
+	// makes, so the three entry points can't disagree about the edges.
+	if t.Path == "" || t.IsImage() || t.Buffer == nil {
+		return false, t.Reload()
+	}
+	// Same guards and decoding as the open path (see readDiskState): a
+	// file can grow past the limit or turn binary while we hold it open,
+	// and there is no reason a formatter's output gets a weaker check than
+	// a user's. A failure leaves the buffer and the history untouched —
+	// ReloadUndoable's "nothing to unwind" contract.
+	text, bom, ending, mtime, err := t.readDiskState()
+	if err != nil {
+		return false, err
+	}
+	// The write is ours either way, so the tab adopts its mtime whether or
+	// not the bytes moved. Skipping this on the unchanged path would leave
+	// the tab looking like "someone else wrote your file" to the reconcile
+	// tick and the save guard (app/reconcile.go).
+	t.Mtime = mtime
+	t.DiskGone = false
+	if t.Buffer.String() == text {
+		// Encoding can still have been normalised out from under us even
+		// when the text matches, so those are adopted too — but nothing
+		// user-visible changed, so no undo step and no EditRev bump.
+		t.BOM, t.LineEnding = bom, ending
+		return false, nil
+	}
+
+	// The view is captured BEFORE the swap and put back after. RestoreView
+	// rather than assigning the cursor directly, because the scroll offset
+	// is part of what's being preserved — every other cursor write sets
+	// cursorMoved, which would have the next Render scroll the viewport to
+	// the caret and undo the point of capturing it.
+	cursor, anchor := t.Cursor, t.Anchor
+	scrollY, scrollX := t.ScrollY, t.ScrollX
+
+	// One structural snapshot, then the Buffer is written directly — the
+	// ApplyMultiEdit shape (multiedit.go). That is how this stays exactly
+	// one undo step WITHOUT touching undoSuppress, which belongs to the
+	// multi-caret fan-out alone. pushUndo also invalidates redo, which is
+	// correct: this is a new edit.
+	t.pushUndo(undoGroupStructural)
+	// Secondary carets were positioned against the text being replaced.
+	t.Carets = nil
+	t.Buffer = NewBuffer(text)
+	t.BOM, t.LineEnding = bom, ending
+	// The buffer matches the file again, so the tab is clean — an
+	// auto-save that re-wrote it a moment later would be writing the same
+	// bytes back. (An Undo from here recomputes Dirty against the on-open
+	// original, which correctly marks the tab dirty: the user just asked
+	// for text the file no longer holds.)
+	t.Dirty = false
+	// Re-evaluated, not sticky — same reasoning as Reload.
+	t.SyntaxOff = len(text) > MaxHighlightBytes
+	// Structural by definition: a reformat moves lines, so the style grid's
+	// rows no longer line up with the buffer's. This is the InvalidateStyles
+	// default the syntax layer asks of any mutator that can't prove
+	// otherwise.
+	t.InvalidateStyles()
+	t.EditRev++
+	t.RestoreView(cursor, anchor, scrollY, scrollX)
+	return true, nil
 }
 
 // HasSelection reports whether the tab currently has a non-empty selection.

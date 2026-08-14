@@ -67,6 +67,11 @@ The goals, in order:
 - **Format on save** — opt-in per-project via `.ced/format.json`
   with a first-run trust prompt so cloning a repo never silently
   executes its commands. See [Format on save](#format-on-save).
+- **Auto-save** — dirty buffers are written after you pause for five
+  seconds, and immediately when you leave: switch tabs, or click away
+  from the terminal window entirely. Undo history survives all of it.
+  Toggle it in `≡`; change the pause with `"autosavedelay": "10s"` in
+  `~/.config/ced/config.json`.
 - **AI, optional** — inline ghost-text completions from GitHub Copilot,
   plus a chat panel that talks to Copilot, Claude Code, or Gemini over
   ACP: your code as context, and file edits you approve one at a time.
@@ -706,6 +711,12 @@ you save, because the file has changed since you trusted it.
    was reformatted.
 5. If the configured binary isn't installed, it's a silent no-op.
    You don't have to install everyone's formatter to clone the repo.
+
+**Undo still works across it.** The reformat lands as one undo step on
+top of your history, so `Esc u` takes the formatting back and pressing it
+again keeps walking back through your own edits. A run that changed
+nothing adds no step at all. This matters most with auto-save on, where
+the formatter runs every time you pause.
 
 ### Sharing vs. ignoring
 

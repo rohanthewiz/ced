@@ -179,6 +179,56 @@ func TestSwitchToTab_RecordsNavigationOnce(t *testing.T) {
 	}
 }
 
+// TestSwitchToTab_FlushesDepartingTab pins the in-editor twin of losing
+// window focus: a file you can no longer see should not still own a
+// countdown. Being the single funnel is what lets this live in one
+// place and cover every switching surface.
+func TestSwitchToTab_FlushesDepartingTab(t *testing.T) {
+	useTestTrustFile(t)
+	a := newTestApp(t, t.TempDir())
+	a.autoSaveEnabled = true
+	t.Cleanup(a.stopAutoSave)
+	leaving := openScratch(t, a, "a.txt", "a\n")
+	openScratch(t, a, "b.txt", "b\n")
+
+	a.activeTab = 0
+	leaving.InsertString("edited ")
+	want := leaving.Buffer.String()
+
+	a.switchToTab(1)
+
+	if leaving.Dirty {
+		t.Fatal("the departing tab should have been flushed")
+	}
+	got, _ := os.ReadFile(leaving.Path)
+	if string(got) != want {
+		t.Fatalf("disk = %q, want the departing buffer %q", got, want)
+	}
+}
+
+// TestSwitchToTab_NoFlushWhenAutoSaveOff pins that the ≡ toggle wins
+// here too — the flush is auto-save, not a separate feature.
+func TestSwitchToTab_NoFlushWhenAutoSaveOff(t *testing.T) {
+	useTestTrustFile(t)
+	a := newTestApp(t, t.TempDir())
+	a.autoSaveEnabled = false
+	leaving := openScratch(t, a, "a.txt", "a\n")
+	openScratch(t, a, "b.txt", "b\n")
+
+	a.activeTab = 0
+	leaving.InsertString("edited ")
+
+	a.switchToTab(1)
+
+	if !leaving.Dirty {
+		t.Fatal("with auto-save off, switching tabs must write nothing")
+	}
+	got, _ := os.ReadFile(leaving.Path)
+	if string(got) != "a\n" {
+		t.Fatalf("disk changed with auto-save off: %q", got)
+	}
+}
+
 // TestNextPrevTab_Wrap pins the wrap. With the strip scrolled, next/prev
 // is a gesture repeated without looking, and stopping dead at the end
 // reads as a stuck key.

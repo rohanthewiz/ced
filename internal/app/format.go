@@ -404,6 +404,10 @@ func (a *App) execFormatterChain(tabPath string, cmds [][]string, quiet bool) {
 	if !quiet {
 		a.flash(label + "…")
 	}
+	// Recorded BEFORE the goroutine starts, so the reconcile tick can
+	// never observe the window between the formatter's write and the
+	// done-event that adopts its mtime. See formatRunBegin.
+	a.formatRunBegin(tabPath)
 	go func() {
 		var err error
 		for _, argv := range cmds {
@@ -474,6 +478,10 @@ func (a *App) handleFormatDone(e *formatDoneEvent) {
 	if e == nil {
 		return
 	}
+	// First act, before any early return: the run is over either way, and
+	// a count that leaked would suppress the reconcile tick for that file
+	// forever.
+	a.formatRunEnd(e.tabPath)
 	if e.err != nil {
 		if !e.quiet {
 			a.flash(fmt.Sprintf("%s failed: %v", e.label, e.err))
@@ -501,16 +509,77 @@ func (a *App) handleFormatDone(e *formatDoneEvent) {
 			}
 			return
 		}
-		if err := tab.Reload(); err != nil {
+		// ReloadAsEdit, never Reload: the formatter's write is the tail of
+		// the user's own save, not news from outside, so adopting it must
+		// not reset the undo baseline. A plain Reload here destroyed the
+		// whole history on every quiet auto-save — roughly every idle
+		// pause in a Go file — which read as undo being broken.
+		changed, err := tab.ReloadAsEdit()
+		if err != nil {
 			a.flash(fmt.Sprintf("%s ran but reload failed: %v", e.label, err))
 			return
 		}
 		if !e.quiet {
-			a.flash(fmt.Sprintf("Formatted with %s", e.label))
+			// The user pressed Save and is owed an answer either way:
+			// silence after the "goimports…" flash reads as a hang. But
+			// only a run that moved bytes may claim it formatted anything.
+			if changed {
+				a.flash(fmt.Sprintf("Formatted with %s", e.label))
+			} else {
+				a.flash(fmt.Sprintf("%s: already formatted", e.label))
+			}
 		}
 		return
 	}
 	// Tab was closed before the formatter finished — silent no-op.
+}
+
+// formatRunBegin / formatRunEnd / formatRunning track how many formatter
+// runs are in flight per file path.
+//
+// They exist for one race. The formatter rewrites the file from a
+// goroutine, and the background tree tick can stat that file in the
+// window before formatDoneEvent reaches the loop — where an mtime WE
+// caused looks exactly like somebody else's edit. On a clean tab that
+// cost the undo history (reconcile takes the disk copy via
+// ReloadUndoable); on a dirty one it was worse, recording a conflict that
+// suspends auto-save and raises a modal about ced's own write.
+//
+// A count rather than a flag, because a chain (gopls imports, then gofmt)
+// and a re-save can overlap on one path. Main-loop only: incremented
+// before the goroutine starts, decremented as handleFormatDone's first
+// act, so no locking is needed.
+//
+// Deliberately NOT consulted by saveGuard / autoSaveGuard: those have the
+// same theoretical window, but hitting it needs a keypress inside ~100ms
+// and the failure mode is a prompt rather than lost history. Teaching
+// every guard about formatter internals costs more than it buys.
+func (a *App) formatRunBegin(path string) {
+	if path == "" {
+		return
+	}
+	if a.formatRuns == nil {
+		a.formatRuns = map[string]int{}
+	}
+	a.formatRuns[path]++
+}
+
+// formatRunEnd drops one in-flight run for path, deleting the entry at
+// zero so the map can't accumulate one key per file ever formatted.
+func (a *App) formatRunEnd(path string) {
+	if path == "" || a.formatRuns == nil {
+		return
+	}
+	if n := a.formatRuns[path] - 1; n > 0 {
+		a.formatRuns[path] = n
+	} else {
+		delete(a.formatRuns, path)
+	}
+}
+
+// formatRunning reports whether a formatter is mid-write on path.
+func (a *App) formatRunning(path string) bool {
+	return a.formatRuns[path] > 0
 }
 
 // formatHash exposes the current project's format.json hash for tests

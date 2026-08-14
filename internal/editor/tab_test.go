@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -298,6 +299,223 @@ func TestTab_ReloadUndoable_FailureLeavesBufferAlone(t *testing.T) {
 	}
 	if got := tab.Buffer.String(); got != mine {
 		t.Fatalf("failed reload changed the buffer: %q", got)
+	}
+}
+
+// reloadAsEditFixture opens a real file as a Tab. The shared setup for
+// the ReloadAsEdit tests, which all need a path a formatter could
+// plausibly have rewritten underneath them.
+func reloadAsEditFixture(t *testing.T, initial string) (*Tab, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(path, []byte(initial), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tab, err := NewTab(path)
+	if err != nil {
+		t.Fatalf("NewTab: %v", err)
+	}
+	return tab, path
+}
+
+// TestTab_ReloadAsEdit_PreservesUndoHistory is the regression this
+// method exists for. Format-on-save used to adopt the formatter's
+// rewrite with a plain Reload, whose initUndo nils both stacks — so with
+// auto-save on, the user's entire history was destroyed on every idle
+// pause and undo appeared to be broken. The whole history must survive,
+// with the reformat sitting on top of it as one step.
+func TestTab_ReloadAsEdit_PreservesUndoHistory(t *testing.T) {
+	tab, path := reloadAsEditFixture(t, "one\n")
+	tab.InsertString("two\n")
+	first := tab.Buffer.String()
+	tab.InsertString("three\n")
+	typed := tab.Buffer.String()
+	depth := tab.UndoDepth()
+
+	if err := os.WriteFile(path, []byte("formatted\n"), 0644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	changed, err := tab.ReloadAsEdit()
+	if err != nil {
+		t.Fatalf("ReloadAsEdit: %v", err)
+	}
+	if !changed {
+		t.Fatal("rewritten content must report changed")
+	}
+	if got := tab.Buffer.String(); got != "formatted\n" {
+		t.Fatalf("buffer = %q, want the formatted text", got)
+	}
+	if got := tab.UndoDepth(); got != depth+1 {
+		t.Fatalf("undo depth = %d, want %d — the reformat is exactly one step", got, depth+1)
+	}
+
+	// One press takes back the reformat…
+	if !tab.Undo() || tab.Buffer.String() != typed {
+		t.Fatalf("first undo = %q, want the typed text %q", tab.Buffer.String(), typed)
+	}
+	// …and the history underneath it is still there, which is the point.
+	if !tab.Undo() || tab.Buffer.String() != first {
+		t.Fatalf("second undo = %q, want %q", tab.Buffer.String(), first)
+	}
+	// The revert anchor was never re-seeded, so Revert still means "the
+	// file as I opened it" rather than "before the last reformat".
+	if !tab.RevertFile() || tab.Buffer.String() != "one\n" {
+		t.Fatalf("revert = %q, want the on-open text", tab.Buffer.String())
+	}
+}
+
+// TestTab_ReloadAsEdit_IdenticalContentIsNoOp pins the rule that keeps a
+// repeating background formatter from filling the undo stack: gofmt on
+// already-formatted code rewrites nothing, and a run that moved no bytes
+// must cost no undo step and no EditRev bump. The mtime is still adopted
+// — the write was ours either way, and leaving it stale would make the
+// reconcile tick read it as somebody else's edit.
+func TestTab_ReloadAsEdit_IdenticalContentIsNoOp(t *testing.T) {
+	tab, path := reloadAsEditFixture(t, "same\n")
+	tab.InsertString("mine ")
+	if err := tab.Save(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	text, depth, rev, stale := tab.Buffer.String(), tab.UndoDepth(), tab.EditRev, tab.StyleStale
+
+	// Rewrite the identical bytes with a newer mtime, exactly as a
+	// no-change formatter run leaves things.
+	future := time.Now().Add(2 * time.Second)
+	if err := os.WriteFile(path, []byte(text), 0644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	changed, err := tab.ReloadAsEdit()
+	if err != nil {
+		t.Fatalf("ReloadAsEdit: %v", err)
+	}
+	if changed {
+		t.Fatal("identical content must report unchanged")
+	}
+	if tab.UndoDepth() != depth {
+		t.Fatalf("undo depth moved from %d to %d on a no-op reload", depth, tab.UndoDepth())
+	}
+	if tab.EditRev != rev {
+		t.Fatalf("EditRev moved from %d to %d on a no-op reload", rev, tab.EditRev)
+	}
+	if tab.StyleStale != stale {
+		t.Fatal("a no-op reload must not invalidate the style grid")
+	}
+	if !tab.Mtime.Equal(future) {
+		t.Fatalf("mtime = %v, want the write's %v", tab.Mtime, future)
+	}
+}
+
+// TestTab_ReloadAsEdit_PreservesView pins that adopting a reformat does
+// not move the user's viewport. RestoreView (not a plain cursor write)
+// is what makes that true: it clamps into the new buffer, keeps both
+// scroll offsets, and leaves cursorMoved false so the next Render can't
+// yank a reader back to their caret.
+func TestTab_ReloadAsEdit_PreservesView(t *testing.T) {
+	tab, path := reloadAsEditFixture(t, "a\nb\nc\nd\ne\nf\n")
+	tab.Cursor = Position{Line: 5, Col: 1}
+	tab.Anchor = tab.Cursor
+	tab.ScrollY, tab.ScrollX = 3, 2
+	tab.cursorMoved = false
+
+	// A shorter file, so the cursor has to clamp rather than survive.
+	if err := os.WriteFile(path, []byte("a\nb\n"), 0644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if _, err := tab.ReloadAsEdit(); err != nil {
+		t.Fatalf("ReloadAsEdit: %v", err)
+	}
+	if tab.Cursor.Line >= len(tab.Buffer.Lines) {
+		t.Fatalf("cursor line %d escaped the shortened buffer (%d lines)",
+			tab.Cursor.Line, len(tab.Buffer.Lines))
+	}
+	if tab.ScrollY != 3 || tab.ScrollX != 2 {
+		t.Fatalf("scroll = (%d,%d), want the captured (3,2)", tab.ScrollY, tab.ScrollX)
+	}
+	if tab.cursorMoved {
+		t.Fatal("cursorMoved must stay false — the captured scroll is part of what's preserved")
+	}
+}
+
+// TestTab_ReloadAsEdit_CaretsFollowTheContent pins both halves of the
+// multi-caret rule. A changed file moves every column the carets were
+// measured against, so they go; an unchanged one moved nothing, and
+// dropping a column of carets every idle pause would be its own bug.
+func TestTab_ReloadAsEdit_CaretsFollowTheContent(t *testing.T) {
+	tab, path := reloadAsEditFixture(t, "x\ny\n")
+	tab.Carets = []Caret{{Cursor: Position{Line: 1}, Anchor: Position{Line: 1}}}
+	if _, err := tab.ReloadAsEdit(); err != nil { // identical content
+		t.Fatalf("ReloadAsEdit: %v", err)
+	}
+	if len(tab.Carets) != 1 {
+		t.Fatal("an unchanged file moved nothing — the carets must survive")
+	}
+
+	if err := os.WriteFile(path, []byte("xx\nyy\n"), 0644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if _, err := tab.ReloadAsEdit(); err != nil {
+		t.Fatalf("ReloadAsEdit: %v", err)
+	}
+	if tab.Carets != nil {
+		t.Fatal("changed content invalidates every secondary caret's position")
+	}
+}
+
+// TestTab_ReloadAsEdit_ClearsDirty pins the flag that stops a feedback
+// loop: the buffer now matches disk, and a tab left dirty would bump
+// EditRev, re-arm the auto-save timer, save, format, reload — forever.
+func TestTab_ReloadAsEdit_ClearsDirty(t *testing.T) {
+	tab, path := reloadAsEditFixture(t, "seed\n")
+	tab.InsertString("typing ")
+	if err := os.WriteFile(path, []byte("formatted\n"), 0644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if _, err := tab.ReloadAsEdit(); err != nil {
+		t.Fatalf("ReloadAsEdit: %v", err)
+	}
+	if tab.Dirty {
+		t.Fatal("the buffer matches disk — the tab must be clean")
+	}
+	// And undoing it correctly goes dirty again: the buffer now holds
+	// text the file does not.
+	if !tab.Undo() || !tab.Dirty {
+		t.Fatal("undoing a reformat must leave the tab needing a save")
+	}
+}
+
+// TestTab_ReloadAsEdit_GuardsRunOnReRead pins that the formatter's
+// output gets no weaker check than the user's: a file that turned binary
+// is refused, and a refusal leaves the buffer and the history untouched.
+func TestTab_ReloadAsEdit_GuardsRunOnReRead(t *testing.T) {
+	tab, path := reloadAsEditFixture(t, "text\n")
+	tab.InsertString("mine ")
+	mine, depth := tab.Buffer.String(), tab.UndoDepth()
+
+	if err := os.WriteFile(path, []byte("bin\x00ary\n"), 0644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	changed, err := tab.ReloadAsEdit()
+	if err == nil {
+		t.Fatal("expected a refusal for a file that turned binary")
+	}
+	if changed {
+		t.Fatal("a refused reload changed nothing, so it must report unchanged")
+	}
+	if tab.Buffer.String() != mine || tab.UndoDepth() != depth {
+		t.Fatal("a refused reload must leave the buffer and the history alone")
+	}
+}
+
+// TestTab_ReloadAsEdit_NoPath delegates to Reload for an untitled tab —
+// there is no file to re-read, so it must fail the same way.
+func TestTab_ReloadAsEdit_NoPath(t *testing.T) {
+	tab := &Tab{Buffer: NewBuffer("")}
+	if _, err := tab.ReloadAsEdit(); err == nil {
+		t.Fatal("expected error reloading untitled tab")
 	}
 }
 

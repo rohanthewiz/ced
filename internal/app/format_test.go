@@ -9,9 +9,11 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -302,6 +304,129 @@ func TestHandleFormatDone_ReloadsCleanBuffer(t *testing.T) {
 
 	if got := tab.Buffer.String(); got != "formatted\n" {
 		t.Fatalf("buffer after reload: got %q, want %q", got, "formatted\n")
+	}
+}
+
+// TestHandleFormatDone_PreservesUndoHistory is the regression pin for
+// the bug that made undo look broken: the formatter's write is the tail
+// of the user's own save, so adopting it must not reset the undo
+// baseline. With a plain Reload here, every quiet auto-save — roughly
+// every idle pause in a Go file — nilled both stacks.
+func TestHandleFormatDone_PreservesUndoHistory(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "main.go")
+	if err := os.WriteFile(target, []byte("first\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tab := openTabAtPath(t, a, target)
+	tab.InsertString("typed ")
+	typed := tab.Buffer.String()
+	tab.Dirty = false // the state a save leaves behind
+	if err := os.WriteFile(target, []byte("formatted\n"), 0644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+
+	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt"})
+
+	if got := tab.Buffer.String(); got != "formatted\n" {
+		t.Fatalf("buffer = %q, want the formatted text", got)
+	}
+	if !tab.CanUndo() {
+		t.Fatal("the undo stack must survive a format-on-save reload")
+	}
+	if !tab.Undo() || tab.Buffer.String() != typed {
+		t.Fatalf("undo = %q, want the typing back %q", tab.Buffer.String(), typed)
+	}
+}
+
+// TestHandleFormatDone_QuietPreservesUndoHistory is the auto-save twin,
+// and the path that actually bit — an explicit Save at least tells you
+// something happened, while the quiet run silently emptied the stack.
+func TestHandleFormatDone_QuietPreservesUndoHistory(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "main.go")
+	if err := os.WriteFile(target, []byte("first\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tab := openTabAtPath(t, a, target)
+	tab.InsertString("typed ")
+	tab.Dirty = false
+	if err := os.WriteFile(target, []byte("formatted\n"), 0644); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+
+	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt", quiet: true})
+
+	if !tab.CanUndo() {
+		t.Fatal("a quiet format-on-save must not cost the undo stack")
+	}
+	if a.statusMsg != "" {
+		t.Fatalf("quiet run flashed %q", a.statusMsg)
+	}
+}
+
+// TestHandleFormatDone_UnchangedAddsNoUndoStep pins the rule that keeps
+// the background cadence from filling the stack: a formatter run that
+// moved no bytes files no undo step, and says so rather than claiming it
+// formatted something.
+func TestHandleFormatDone_UnchangedAddsNoUndoStep(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "main.go")
+	if err := os.WriteFile(target, []byte("already\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tab := openTabAtPath(t, a, target)
+	depth, rev := tab.UndoDepth(), tab.EditRev
+
+	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt"})
+
+	if tab.UndoDepth() != depth || tab.EditRev != rev {
+		t.Fatalf("a no-op format moved the stack (%d→%d) or EditRev (%d→%d)",
+			depth, tab.UndoDepth(), rev, tab.EditRev)
+	}
+	if !strings.Contains(a.statusMsg, "already formatted") {
+		t.Fatalf("status = %q, want it to say the file was already formatted", a.statusMsg)
+	}
+}
+
+// TestFormatRunTracking_ClearedOnDone pins the in-flight bookkeeping the
+// reconcile tick reads. A count that leaked would suppress external-change
+// detection for that file forever, so it must be cleared on every exit
+// path — including the formatter-failed one.
+func TestFormatRunTracking_ClearedOnDone(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "main.go")
+
+	a.formatRunBegin(target)
+	if !a.formatRunning(target) {
+		t.Fatal("a begun run must read as in flight")
+	}
+	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt", err: errors.New("boom")})
+	if a.formatRunning(target) {
+		t.Fatal("a failed run must still clear its in-flight mark")
+	}
+	if len(a.formatRuns) != 0 {
+		t.Fatalf("formatRuns kept %d entries — the map must not accumulate keys", len(a.formatRuns))
+	}
+
+	// Overlapping runs on one path (a chain plus a re-save) are counted,
+	// so the first completion must not un-suppress the second.
+	a.formatRunBegin(target)
+	a.formatRunBegin(target)
+	a.formatRunEnd(target)
+	if !a.formatRunning(target) {
+		t.Fatal("one of two in-flight runs finished — the path is still being written")
+	}
+	a.formatRunEnd(target)
+	if a.formatRunning(target) {
+		t.Fatal("both runs finished — the path must be clear")
 	}
 }
 

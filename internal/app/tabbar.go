@@ -346,6 +346,12 @@ func (a *App) switchToTab(idx int) {
 	if from, ok := a.currentNavLoc(); ok && from.path != a.tabs[idx].Path {
 		a.recordNav(from)
 	}
+	// Being the one funnel is what lets the departing tab be flushed from
+	// exactly here: leaving a file is the in-editor twin of leaving the
+	// window, and a tab you can no longer see should not still own a
+	// countdown. Every switching surface — clicks, Esc-, / Esc-., the
+	// switcher, the overflow button — gets it for free. See autosave.go.
+	a.autoSaveDepartingTab(a.activeTab)
 	a.activeTab = idx
 	// Being the one funnel is also why the recent-files ring is touched
 	// here rather than in each surface: a tab switched to by ANY means is

@@ -88,6 +88,10 @@ func newTestApp(t *testing.T, root string) *App {
 	// built by hand here, so the zero value would put every test in a
 	// state the product never ships in.
 	a.sessionEnabled = true
+	// Same reason: a zero autoSaveDelay would arm a timer that fires
+	// immediately. autoSaveInterval's fallback also covers this, so the
+	// two together mean no test can ever depend on the zero value.
+	a.autoSaveDelay = defaultAutoSaveDelay
 	a.setActiveFolder(tree.Root.Path)
 	a.width, a.height = scr.Size()
 	// Kill the LSP integration for tests: openFile would otherwise

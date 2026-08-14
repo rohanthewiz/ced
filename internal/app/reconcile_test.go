@@ -90,6 +90,36 @@ func TestReconcile_CleanTabTakesDiskUndoably(t *testing.T) {
 	}
 }
 
+// TestReconcile_SkipsTabWithFormatInFlight covers the one mtime change
+// that is NOT external news: our own formatter mid-write. The tick can
+// land in the window between the `-w` write and the done-event that
+// adopts its mtime, where measuring costs either the undo history (clean
+// tab, taken via ReloadUndoable) or a spurious ⚠ conflict about ced's own
+// write (dirty tab). Both are wrong answers to a question that shouldn't
+// be asked yet.
+func TestReconcile_SkipsTabWithFormatInFlight(t *testing.T) {
+	a, tab, path := reconcileFixture(t)
+	a.formatRunBegin(path)
+	externalWrite(t, path, "package main // formatter\n", 60)
+
+	a.reconcileOpenTabsWithDisk()
+
+	if got := tab.Buffer.String(); got != "package main\n" {
+		t.Fatalf("a tab mid-format must not be reloaded, buffer = %q", got)
+	}
+	if a.conflictFor(tab) != nil {
+		t.Fatal("our own pending write must never be recorded as a conflict")
+	}
+
+	// Once the run is over the tick is honest again — the guard suppresses
+	// the window, not the mechanism.
+	a.formatRunEnd(path)
+	a.reconcileOpenTabsWithDisk()
+	if got := tab.Buffer.String(); got != "package main // formatter\n" {
+		t.Fatalf("after the run ended the tick should reconcile, buffer = %q", got)
+	}
+}
+
 // TestReconcile_DirtyTabRecordsConflictAndKeepsMtime is the second row,
 // and the mtime assertion is the load-bearing one: the pre-Phase-2 code
 // adopted the disk mtime here purely to stop the per-tick re-flash,

@@ -333,6 +333,31 @@ func TestPluginCommand_ReloadRespectsDirtyBuffer(t *testing.T) {
 	}
 }
 
+// TestPluginCommand_ReloadPreservesUndoHistory pins that adopting a
+// plugin's in-place rewrite costs one undo step, not the whole stack.
+// OutputReload was the one plugin output mode that ate your history —
+// OutputReplace has always been a single undoable edit, and these are
+// the same promise from the user's side.
+func TestPluginCommand_ReloadPreservesUndoHistory(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	tab := openScratch(t, a, "x.txt", "on disk\n")
+	tab.InsertString("mine ")
+	mine := tab.Buffer.String()
+	tab.Dirty = false // the plugin only reloads a clean buffer
+
+	if err := os.WriteFile(tab.Path, []byte("rewritten by plugin\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	a.reloadPluginTarget(tab.Path, "Fixer")
+
+	if !strings.Contains(tab.Buffer.String(), "rewritten by plugin") {
+		t.Fatalf("buffer = %q, want the plugin's rewrite", tab.Buffer.String())
+	}
+	if !tab.Undo() || tab.Buffer.String() != mine {
+		t.Fatalf("one undo should take the rewrite back, got %q", tab.Buffer.String())
+	}
+}
+
 // TestRunPluginCommand_SelectionGuard pins the one precondition worth
 // enforcing: a selection filter with nothing selected would run over
 // empty input and then replace an empty range.

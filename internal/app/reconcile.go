@@ -116,6 +116,14 @@ func (a *App) reconcileOpenTabsWithDisk() {
 		if tab.Path == "" {
 			continue
 		}
+		// Our own formatter is mid-write on this file. Its mtime is about
+		// to move for a reason that is not an external edit, and the
+		// done-event adopts it — so measuring here would either take the
+		// disk copy back (costing the undo history) or record a conflict
+		// about ced's own write. See format.go's formatRunBegin.
+		if a.formatRunning(tab.Path) {
+			continue
+		}
 		info, err := os.Stat(tab.Path)
 		if os.IsNotExist(err) {
 			if !tab.DiskGone {

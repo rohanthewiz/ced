@@ -1011,9 +1011,19 @@ type App struct {
 	// autoSaveSig is the last-seen sum of every tab's EditRev, the
 	// cheap "did any buffer mutate since we last looked?" signature
 	// autoSaveAfterEvent compares against. See autosave.go.
+	// autoSaveDelay is the resolved "autosavedelay" preference. Zero
+	// means "nothing resolved onto this App yet" (a hand-built App, or a
+	// config that never loaded) and reads as the shipped default — see
+	// autoSaveInterval, which is the only thing that may read this field.
 	autoSaveEnabled bool
 	autoSaveTimer   *time.Timer
 	autoSaveSig     int
+	autoSaveDelay   time.Duration
+
+	// formatRuns counts formatter runs in flight per file path, so the
+	// reconcile tick can tell ced's own pending write from an external
+	// one. See format.go's formatRunBegin.
+	formatRuns map[string]int
 
 	// commitTrailer mirrors the persisted "commitmsgtrailer" preference
 	// (≡ Git toggle, default on): whether a commit message the chat
@@ -1277,6 +1287,17 @@ func New(rootDir string) (*App, error) {
 	// that don't support it simply ignore the enable sequence — the paste
 	// then arrives as raw keys, the same as before, so it degrades safely.
 	scr.EnablePaste()
+	// Focus reporting: the terminal tells us when the user leaves the
+	// window, which is when a pending auto-save should be flushed rather
+	// than left sitting on a countdown (autosave.go). Best-effort by
+	// construction — tcell only emits CSI ?1004h on a mouse-capable /
+	// XTerm-like terminal, macOS Terminal.app never reports focus at all,
+	// and tmux needs `focus-events on`. A terminal that doesn't answer
+	// simply never sends the event and the idle timer stays the only
+	// path, which is exactly why the flush must never BE the only path.
+	// No DisableFocus in Close: Fini restores the terminal's modes, the
+	// same reason EnablePaste has no counterpart there.
+	scr.EnableFocus()
 
 	th := theme.Default()
 	scr.SetStyle(tcell.StyleDefault.Background(th.BG).Foreground(th.Text))
@@ -1324,7 +1345,7 @@ func New(rootDir string) (*App, error) {
 	// pinned command palette and the expand-all button keep everything one
 	// click away.
 	a.seedMenuFoldDefault()
-	a.flash("Welcome — click a file to open · click  ≡  for the menu")
+	a.welcomeIfQuiet()
 	a.startTreeRefresh()
 	// Bind the remote-open socket before any file is opened, so a
 	// `ced --wait` racing this startup finds a listener rather than
@@ -1398,6 +1419,7 @@ func (a *App) loadUserConfig() {
 		a.tree.ExecMarks = cfg.ExecMarks
 	}
 	a.autoSaveEnabled = cfg.AutoSave
+	a.autoSaveDelay = cfg.AutoSaveDelay
 	a.wordHLEnabled = cfg.WordHL
 	a.applyWordHighlight() // no-op at startup; matters when the config is re-read
 	a.termDockLeft = cfg.TermDock == userconfig.TermDockLeft
@@ -1570,6 +1592,11 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handlePaste(e)
 	case *tcell.EventMouse:
 		a.handleMouse(e)
+	case *tcell.EventFocus:
+		// Read only Focused. tcell's NewEventFocus leaves the embedded
+		// *EventTime nil (unlike the key and mouse constructors), so
+		// calling When() on one of these panics.
+		a.autoSaveOnFocusChange(e.Focused)
 	case *autoScrollEvent:
 		a.handleAutoScroll()
 	case *autoSaveEvent:
@@ -3296,6 +3323,22 @@ func (a *App) activeTabPtr() *editor.Tab {
 func (a *App) flash(msg string) {
 	a.statusMsg = msg
 	a.statusUntil = time.Now().Add(statusFlashFor)
+}
+
+// welcomeIfQuiet greets a new workspace, but only when startup has
+// nothing more important to say.
+//
+// The guard is the point. userconfig deliberately REPORTS a typo'd key
+// rather than ignoring it — a silently dropped value is one the user
+// believes is in effect — and loadUserConfig flashes that report. An
+// unconditional greeting here overwrote it, which made the whole
+// contract a no-op: the reader never saw the message, and the setting
+// they misspelled stayed quietly inactive.
+func (a *App) welcomeIfQuiet() {
+	if a.statusMsg != "" {
+		return
+	}
+	a.flash("Welcome — click a file to open · click  ≡  for the menu")
 }
 
 // OpenFile opens the file at path in a new tab — or switches to it if

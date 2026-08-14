@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestDefaults pins the documented default — icons mode "auto" — so a
@@ -1134,6 +1135,76 @@ func TestLoad_FindAllDock(t *testing.T) {
 				t.Errorf("FindAllDock = %q, want %q", cfg.FindAllDock, c.want)
 			}
 		})
+	}
+}
+
+// TestLoad_AutoSaveDelay covers the idle-window key. It is the one key
+// here with two different failure answers, deliberately: a typo is LOUD
+// (a silently ignored value is one the user believes is in effect), but
+// a value merely out of range is CLAMPED in silence, because "50ms" is
+// still a coherent expression of "save aggressively" and refusing the
+// whole config over it would help nobody.
+func TestLoad_AutoSaveDelay(t *testing.T) {
+	cases := []struct {
+		name    string
+		json    string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"absent", `{}`, DefaultAutoSaveDelay, false},
+		{"empty", `{"autosavedelay": ""}`, DefaultAutoSaveDelay, false},
+		{"duration", `{"autosavedelay": "12s"}`, 12 * time.Second, false},
+		{"millis", `{"autosavedelay": "2500ms"}`, 2500 * time.Millisecond, false},
+		{"minutes", `{"autosavedelay": "1m"}`, time.Minute, false},
+		{"bare seconds", `{"autosavedelay": "30"}`, 30 * time.Second, false},
+		{"padded", `{"autosavedelay": "  8s  "}`, 8 * time.Second, false},
+		{"below floor", `{"autosavedelay": "10ms"}`, MinAutoSaveDelay, false},
+		{"above ceiling", `{"autosavedelay": "1h"}`, MaxAutoSaveDelay, false},
+		{"garbage", `{"autosavedelay": "soon"}`, DefaultAutoSaveDelay, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(c.json), 0644); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			cfg, err := Load(path)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, c.wantErr)
+			}
+			if cfg.AutoSaveDelay != c.want {
+				t.Errorf("AutoSaveDelay = %v, want %v", cfg.AutoSaveDelay, c.want)
+			}
+		})
+	}
+}
+
+// TestSaveAutoSave_RoundTripsDelayKey pins the interaction that made the
+// value a string rather than a JSON number: saveKey rewrites the whole
+// file through a map[string]any, so flipping the ≡ auto-save toggle must
+// leave a hand-written autosavedelay exactly as the user typed it.
+func TestSaveAutoSave_RoundTripsDelayKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := `{"icons": "off", "autosavedelay": "12s", "somethingnew": "keep me"}`
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveAutoSave(path, false); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if cfg.AutoSave {
+		t.Fatal("the toggle did not persist")
+	}
+	if cfg.AutoSaveDelay != 12*time.Second {
+		t.Fatalf("AutoSaveDelay = %v, want the hand-written 12s", cfg.AutoSaveDelay)
+	}
+	raw, _ := os.ReadFile(path)
+	if !strings.Contains(string(raw), "keep me") {
+		t.Fatalf("unknown key dropped: %s", raw)
 	}
 }
 

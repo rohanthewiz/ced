@@ -12,13 +12,18 @@
 // queue, so all tab state is still mutated from event dispatch only:
 //
 //	edit → EditRev bump → autoSaveAfterEvent re-arms timer
-//	                       └─ idle autoSaveDelay ─► autoSaveEvent → save dirty tabs
+//	                       └─ idle autoSaveInterval ─► autoSaveEvent → save dirty tabs
+//
+// The timer is not the only trigger. Leaving — the terminal window losing
+// focus, or switching to another tab — flushes what is pending straight
+// away (autoSaveOnFocusChange, autoSaveDepartingTab), which is what lets
+// the idle window be long enough to stay out of the user's way.
 //
 // Design decisions worth knowing before touching this:
 //
-//   - Auto-saves are SILENT. No "Saved main.go" flash — with a 2s
-//     idle trigger the status bar would flicker constantly. The
-//     dirty dot disappearing from the tab is the feedback.
+//   - Auto-saves are SILENT. No "Saved main.go" flash — on an idle
+//     trigger the status bar would flicker constantly. The dirty dot
+//     disappearing from the tab is the feedback.
 //   - Auto-saves still run format-on-save, but in quiet mode: the
 //     builtin goimports/gofmt pass keeps working (that's the point
 //     of having both features), while trust prompts, install offers,
@@ -45,12 +50,30 @@ import (
 	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
-// autoSaveDelay is how long the user must be idle (no buffer
-// mutations anywhere) before dirty tabs are written out. Two seconds
-// matches the "I finished a statement and paused" rhythm — short
-// enough that work is always on disk, long enough that we're not
-// saving on every keystroke boundary.
-const autoSaveDelay = 2 * time.Second
+// defaultAutoSaveDelay is how long the user must be idle (no buffer
+// mutations anywhere) before dirty tabs are written out, when nothing
+// else has been resolved onto the App. Five seconds matches the "I
+// finished a thought and looked away" rhythm; the user's own value comes
+// from the "autosavedelay" config key, and the canonical default and its
+// clamp live in userconfig so the shipped number is stated exactly once.
+//
+// Named default…, NOT autoSaveDelay: App carries a field by that name,
+// and a package const sharing it would have every unqualified mention
+// inside a method silently resolve to the const — the field would be
+// written and never read.
+const defaultAutoSaveDelay = userconfig.DefaultAutoSaveDelay
+
+// autoSaveInterval is the resolved idle window: the user's configured
+// value, or the shipped default when nothing has been resolved onto this
+// App yet (tests build App as a struct literal, where the zero value
+// would arm a timer that fires immediately). Split out from armAutoSave
+// so the fallback is testable without waiting on a timer.
+func (a *App) autoSaveInterval() time.Duration {
+	if a.autoSaveDelay > 0 {
+		return a.autoSaveDelay
+	}
+	return defaultAutoSaveDelay
+}
 
 // autoSaveEvent is posted by the debounce timer when the idle window
 // elapses. Carries no payload — the handler re-derives which tabs
@@ -98,7 +121,7 @@ func (a *App) armAutoSave() {
 		a.autoSaveTimer.Stop()
 	}
 	scr := a.screen
-	a.autoSaveTimer = time.AfterFunc(autoSaveDelay, func() {
+	a.autoSaveTimer = time.AfterFunc(a.autoSaveInterval(), func() {
 		_ = scr.PostEvent(&autoSaveEvent{when: time.Now()})
 	})
 }
@@ -126,24 +149,87 @@ func (a *App) handleAutoSave() {
 		return
 	}
 	saved := false
-	for i, t := range a.tabs {
-		// autoSaveGuard is diskChangedSinceLoad's louder successor: the
-		// same measurement, but a positive answer now RECORDS a conflict
-		// (reconcile.go) instead of merely skipping this tick. The record
-		// suspends auto-save for that tab, marks it ⚠ in the strip, and
-		// queues the prompt for the user's next visit to the file — the
-		// background save stays silent, but the question stops waiting on
-		// a reconcile tick to be asked.
-		if !autoSavable(t) || !a.autoSaveGuard(t) {
-			continue
-		}
-		if a.autoSaveTab(i) {
+	for i := range a.tabs {
+		if a.autoSaveTabIfEligible(i) {
 			saved = true
 		}
 	}
 	// One status refresh for the whole batch — refreshGitStatus forks
 	// git, so per-tab calls would multiply that cost for no benefit.
 	if saved {
+		a.refreshGitStatus()
+	}
+}
+
+// autoSaveTabIfEligible writes the tab at idx if it is dirty, writable
+// and unconflicted, and reports whether it actually wrote.
+//
+// It is the shared body of the idle flush and both focus flushes, so
+// there is still exactly ONE answer to "is this tab safe to write in the
+// background" — three copies of that predicate pair would be one refactor
+// away from disagreeing.
+//
+// autoSaveGuard is diskChangedSinceLoad's louder successor: the same
+// measurement, but a positive answer RECORDS a conflict (reconcile.go)
+// instead of merely skipping. The record suspends auto-save for that tab,
+// marks it ⚠ in the strip, and queues the prompt for the user's next
+// visit to the file — the background save stays silent, but the question
+// stops waiting on a reconcile tick to be asked.
+func (a *App) autoSaveTabIfEligible(idx int) bool {
+	if idx < 0 || idx >= len(a.tabs) {
+		return false
+	}
+	t := a.tabs[idx]
+	if !autoSavable(t) || !a.autoSaveGuard(t) {
+		return false
+	}
+	return a.autoSaveTab(idx)
+}
+
+// autoSaveOnFocusChange flushes pending auto-saves when the terminal
+// window loses focus. Leaving the editor is the clearest "I'm done for
+// now" a terminal can report, and acting on it is what lets the idle
+// window be long enough to stay out of the user's way.
+//
+// It deliberately owns no save logic: handleAutoSave already knows every
+// rule that applies (a modal or the menu open means defer, autoSaveGuard
+// means an unresolved disk conflict, autoSavable means the tab is worth
+// and safe to writing), and a second write path would be one refactor
+// away from disagreeing with the first about which of those still hold.
+//
+// Gated on the ≡ toggle, because a focus-out write IS an auto-save and
+// "off" means don't write behind my back — which losing focus does not
+// make less true.
+//
+// Regaining focus does nothing at all. The countdown is armed by EDITS,
+// not by attention, so there is nothing pending that coming back would
+// change. (Reconciling with disk on focus-IN is tempting — it would catch
+// "I came back from the shell where I ran git checkout" instantly — but
+// it can raise a conflict modal the moment you look at the window, which
+// is its own decision to make.)
+func (a *App) autoSaveOnFocusChange(focused bool) {
+	if focused || !a.autoSaveEnabled {
+		return
+	}
+	// Stop first, then flush: this IS the countdown's payload arriving
+	// early. The order matters — handleAutoSave re-arms the timer when a
+	// modal makes it defer, and stopping afterwards would cancel that
+	// fresh one and strand the work until the next edit.
+	a.stopAutoSave()
+	a.handleAutoSave()
+}
+
+// autoSaveDepartingTab flushes the tab the user is leaving. The
+// in-editor twin of losing window focus: a file you can no longer see
+// should not still own a countdown. Same guards as every other
+// auto-save, including the modal deferral — which matters here
+// specifically because focusConflictTab (reconcile.go) calls
+// switchToTab on its way to opening the conflict prompt.
+func (a *App) autoSaveDepartingTab(idx int) {
+	if !a.autoSaveEnabled || a.modal != nil || a.menuOpen {
+		return
+	}
+	if a.autoSaveTabIfEligible(idx) {
 		a.refreshGitStatus()
 	}
 }

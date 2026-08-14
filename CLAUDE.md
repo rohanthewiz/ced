@@ -282,6 +282,12 @@ BYTES rather than by entry count. House rules:
   AND `UndoDepth`, because trimUndo can shrink a stack without the buffer
   changing. `UndoDepth` is the only thing about the stack that's exported,
   and that is what it's for.
+- **`Tab.ReloadAsEdit` is the second thing on the `pushUndo(structural)`
+  + direct-Buffer route**, and for the same reason: it files its own
+  single snapshot, which is exactly the arrangement that makes touching
+  `undoSuppress` unnecessary. It is how a rewrite ced ITSELF caused
+  (format-on-save, a plugin) is adopted — one step on top of the history
+  rather than `Reload`'s reset of it. See the format-on-save section.
 
 ### File IO guards and round-trip (editor/fileio.go)
 The two edges of a Tab's life, grouped because they're the same question
@@ -2000,15 +2006,63 @@ explicit Save. Tests stub the app-level `builtinCommandsFor` var
 (newTestApp sets it nil) so saves never exec the dev machine's Go
 tools — keep that in place.
 
+Two rules about the formatter's output coming back:
+
+- **CED'S OWN WRITE COMING BACK IS AN EDIT, NEVER A NEW BASELINE.**
+  `handleFormatDone` adopts it through `Tab.ReloadAsEdit` — ONE
+  structural undo step on top of the preserved history, and *nothing at
+  all* when the bytes match. `Tab.Reload` re-seeds the baseline
+  (`initUndo` nils both stacks) and is reached from the app only via
+  `ReloadUndoable`, which is what an EXTERNAL writer earns. That
+  distinction is the whole reason there are three Reload methods; do not
+  collapse them. It is also not a style point: with a plain `Reload`
+  here, auto-save destroyed the user's entire undo history on every idle
+  pause in a Go file, which reads as undo simply being broken. Plugin
+  in-place rewrites (`reloadPluginTarget`) go the same way.
+- **A run in flight suppresses the reconcile tick for that path**
+  (`formatRunBegin`/`formatRunEnd`/`formatRunning`, a per-path COUNT
+  because a chain and a re-save overlap). The formatter writes from a
+  goroutine, so the tick can stat the file in the window before
+  `formatDoneEvent` adopts its mtime — where a write WE caused reads as
+  somebody else's, costing the history on a clean tab and raising a ⚠
+  conflict about ced's own write on a dirty one. The save guards are
+  deliberately NOT taught about this: same window, but hitting it needs
+  a keypress inside ~100ms and the failure mode is a prompt, not lost
+  work.
+
 ### Auto-save (app/autosave.go)
 Debounce mirrors the LSP didChange pattern: `autoSaveAfterEvent` runs
 after every dispatch, compares the sum of all tabs' EditRevs, and
-(re)arms a 2s `time.AfterFunc` that posts `autoSaveEvent`. Saves are
+(re)arms a `time.AfterFunc` that posts `autoSaveEvent`. Saves are
 silent (no flash), run format-on-save in quiet mode, defer while any
 modal/menu is open, and skip tabs whose disk file changed after load
 (explicit Save remains the overwrite path). The ≡ toggle persists via
 `userconfig.SaveAutoSave`, which round-trips unknown JSON keys — don't
 replace that with a struct marshal. Default is ON.
+
+- **The idle window is 5s and configurable** (`"autosavedelay"`, a
+  duration string or bare seconds, clamped to `[500ms, 5m]`). It has NO
+  ≡ row — the menu is for verbs, and a duration would need a picker of
+  canned values to have any menu shape at all. A typo is reported (the
+  rule every other key follows: a silently ignored value is one the user
+  believes is in effect); a value merely out of range is clamped in
+  silence. All reads go through `autoSaveInterval()`, which maps the zero
+  value to the default — tests build `App` as a struct literal, and
+  `time.AfterFunc(0, …)` fires immediately.
+- **LEAVING FLUSHES, which is what lets the window be that long.** The
+  terminal losing focus (`autoSaveOnFocusChange`, off `scr.EnableFocus`
+  + `*tcell.EventFocus`) and switching tabs (`autoSaveDepartingTab`, in
+  `switchToTab` because it is the single funnel) both write immediately.
+  Neither owns any save logic — both go through `autoSaveTabIfEligible`
+  / `handleAutoSave`, so there is exactly one answer to "is this tab safe
+  to write in the background", including the modal deferral. Both are
+  gated on the ≡ toggle: a focus-out write IS an auto-save. Focus-IN
+  deliberately does nothing (the countdown is armed by edits, not by
+  attention). **Focus reporting is best-effort and must never be the only
+  path to disk** — macOS Terminal.app never reports it, tmux needs
+  `focus-events on` — so the timer stays the backstop. Never call
+  `When()` on a `*tcell.EventFocus`: tcell's constructor leaves the
+  embedded `*EventTime` nil and it panics.
 
 ### Terminal panel (app/terminal.go)
 An embedded grsh session (github.com/rohanthewiz/grsh — the module's

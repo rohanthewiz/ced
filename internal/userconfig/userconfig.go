@@ -21,6 +21,10 @@
 //	{"icons": "off"}        // force-off, even if a Nerd Font is installed
 //	{"autosave": "on"}      // default; save dirty buffers after an idle pause
 //	{"autosave": "off"}     // only explicit ≡ → Save writes to disk
+//	{"autosavedelay": "5s"} // default; how long that idle pause is.
+//	                        // A duration string or a bare number of
+//	                        // seconds, clamped to [500ms, 5m]. No ≡ row —
+//	                        // hand-edited only.
 //	{"termdock": "bottom"}  // default; terminal panel is a bottom strip
 //	{"termdock": "left"}    // terminal docks as a vertical strip on the
 //	                        // left; the file tree flips to the right
@@ -85,7 +89,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // IconsMode is the user's preference for Nerd Font icons in the file
@@ -120,6 +126,55 @@ const (
 	FindAllDockRight FindAllDock = "right"
 )
 
+// Auto-save timing. The default is the idle pause the feature is tuned
+// for; the floor and the ceiling are the range a hand-edited value is
+// clamped into.
+//
+// The floor is not arbitrary. Every auto-save also runs format-on-save
+// (which execs a formatter), an LSP didSave, and a git-status refresh, so
+// a sub-half-second setting is a fork bomb wearing a preference's
+// clothes. The ceiling is where it stops being auto-save at all — and
+// what makes a long delay comfortable is the focus-out flush
+// (app/autosave.go), not a bigger number here.
+const (
+	DefaultAutoSaveDelay = 5 * time.Second
+	MinAutoSaveDelay     = 500 * time.Millisecond
+	MaxAutoSaveDelay     = 5 * time.Minute
+)
+
+// parseAutoSaveDelay reads the "autosavedelay" value. A duration string
+// ("5s", "800ms", "1m") is the documented form; a bare number is accepted
+// as seconds for the same reason the commitmsgtrailer tag is matched
+// case-insensitively — a user who writes what they meant should get it.
+// An empty value returns 0, which the caller reads as "key absent".
+// Clamping is the caller's job so this stays a parser.
+func parseAutoSaveDelay(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	if d, err := time.ParseDuration(s); err == nil {
+		return d, nil
+	}
+	if secs, err := strconv.Atoi(s); err == nil {
+		return time.Duration(secs) * time.Second, nil
+	}
+	return 0, fmt.Errorf("invalid duration %q", s)
+}
+
+// clampAutoSaveDelay pins d into the supported range. A value outside it
+// is honoured at the nearest end rather than rejected — see the constants
+// above for why the ends are where they are.
+func clampAutoSaveDelay(d time.Duration) time.Duration {
+	if d < MinAutoSaveDelay {
+		return MinAutoSaveDelay
+	}
+	if d > MaxAutoSaveDelay {
+		return MaxAutoSaveDelay
+	}
+	return d
+}
+
 // Config is the resolved, validated form of config.json. Callers get a
 // fully-populated Config back from Load — defaults are filled in for
 // any field the file omitted, so consumers never need to nil-check.
@@ -131,6 +186,13 @@ type Config struct {
 	// is opinionated toward "your work is always on disk", and the
 	// ≡ menu toggle (which persists here) is the escape hatch.
 	AutoSave bool
+
+	// AutoSaveDelay is how long the user must be idle before that write
+	// happens, already parsed and clamped. Hand-edited only: unlike
+	// AutoSave there is no ≡ row, because the menu is for verbs and a
+	// duration is a tuning knob — it would need a picker of canned values
+	// to have any menu shape at all, for a setting nobody adjusts twice.
+	AutoSaveDelay time.Duration
 
 	// TermDock is the terminal panel's home edge. Defaults to the
 	// bottom strip; "left" selects the alternate layout (terminal
@@ -267,7 +329,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
+	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -277,8 +339,13 @@ func Defaults() Config {
 // field reason: a missing key must mean "keep the default", and JSON
 // false is indistinguishable from absent on a plain bool.
 type fileFormat struct {
-	Icons       string `json:"icons,omitempty"`
-	AutoSave    string `json:"autosave,omitempty"`
+	Icons string `json:"icons,omitempty"`
+	// AutoSaveDelay is a string for the same absent-field reason as the
+	// on/off keys, plus one of its own: saveKey writes every value into a
+	// map[string]any as a string, so a JSON number would be the one key
+	// here that couldn't survive a ≡ toggle rewriting the file.
+	AutoSave      string `json:"autosave,omitempty"`
+	AutoSaveDelay string `json:"autosavedelay,omitempty"`
 	TermDock    string `json:"termdock,omitempty"`
 	FindAllDock string `json:"findalldock,omitempty"`
 	ExecMarks   string `json:"execmarks,omitempty"`
@@ -633,6 +700,23 @@ func Load(path string) (Config, error) {
 			"%s: commitmsgtrailer must be \"on\" or \"off\" (got %q)",
 			path, ff.CommitMsgTrailer,
 		)
+	}
+
+	// A typo is LOUD (the rule every key above follows — a silently
+	// ignored value is one the user believes is in effect), but a value
+	// merely out of range is CLAMPED in silence: "50ms" is still a
+	// coherent expression of "save aggressively", so honouring the intent
+	// at the floor beats refusing the whole config over it.
+	switch d, perr := parseAutoSaveDelay(ff.AutoSaveDelay); {
+	case perr != nil:
+		return Defaults(), fmt.Errorf(
+			"%s: autosavedelay must be a duration like \"5s\" or a number of seconds (got %q)",
+			path, ff.AutoSaveDelay,
+		)
+	case d == 0:
+		// field omitted — keep default
+	default:
+		cfg.AutoSaveDelay = clampAutoSaveDelay(d)
 	}
 
 	// Any non-blank value is accepted as-is — see Config.ChatModel,

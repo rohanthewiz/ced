@@ -315,6 +315,11 @@ func (a *App) applyPluginEdit(e *pluginCmdDoneEvent, out string) {
 // reloadPluginTarget re-reads a file a plugin rewrote in place. Refuses
 // to trample a dirty buffer, the same call format-on-save makes: the
 // user's unsaved edits outrank a plugin's opinion about the file.
+//
+// Adopted through ReloadAsEdit, so the rewrite is ONE undo step on top of
+// the history rather than a new baseline — the same promise the
+// OutputReplace path already made, closing the gap where OutputReload was
+// the one plugin output mode that ate your undo stack.
 func (a *App) reloadPluginTarget(path, label string) {
 	tab := a.tabForPath(path)
 	if tab == nil {
@@ -324,10 +329,14 @@ func (a *App) reloadPluginTarget(path, label string) {
 		a.flash(label + " ran — kept your edits (file on disk changed)")
 		return
 	}
-	if err := tab.Reload(); err != nil {
+	if _, err := tab.ReloadAsEdit(); err != nil {
 		a.flash(fmt.Sprintf("%s ran but reload failed: %v", label, err))
 		return
 	}
+	// Deliberately not gated on `changed`, unlike format-on-save's flash:
+	// "Formatted with X" is a claim about the file, while this is an
+	// acknowledgement that a command the user invoked completed. A linter
+	// with --fix that finds nothing has not failed.
 	a.flash(label + " ✓")
 }
 

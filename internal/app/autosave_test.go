@@ -10,8 +10,11 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/userconfig"
 )
@@ -148,6 +151,154 @@ func TestHandleAutoSave_SkipsExternallyChangedFile(t *testing.T) {
 	got, _ := os.ReadFile(target)
 	if string(got) != "package main\n" {
 		t.Fatalf("auto-save clobbered an external edit: %q", got)
+	}
+}
+
+// TestFocusLost_FlushesPendingAutoSave pins the trigger that makes a
+// long idle window comfortable: leaving the terminal window is the
+// clearest "I'm done for now" a terminal can report, so the pending save
+// happens then rather than waiting out the rest of the countdown.
+func TestFocusLost_FlushesPendingAutoSave(t *testing.T) {
+	a, target := autoSaveFixture(t)
+	tab := a.tabs[0]
+	tab.InsertString("// edited\n")
+	want := tab.Buffer.String()
+
+	// Through handleEvent, so the dispatch wiring is pinned too — and
+	// note the event is built as a literal: tcell.NewEventFocus leaves
+	// the embedded *EventTime nil, so When() on one of these panics.
+	a.handleEvent(&tcell.EventFocus{Focused: false})
+
+	if tab.Dirty {
+		t.Fatal("losing focus should have flushed the pending save")
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != want {
+		t.Fatalf("disk = %q, want the buffer %q", got, want)
+	}
+}
+
+// TestFocusGained_DoesNothing pins the other half: the countdown is
+// armed by edits, not by attention, so coming back has nothing pending
+// that it should change.
+func TestFocusGained_DoesNothing(t *testing.T) {
+	a, target := autoSaveFixture(t)
+	a.tabs[0].InsertString("// edited\n")
+
+	a.handleEvent(&tcell.EventFocus{Focused: true})
+
+	if !a.tabs[0].Dirty {
+		t.Fatal("regaining focus must not write anything")
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != "package main\n" {
+		t.Fatalf("disk changed on focus-in: %q", got)
+	}
+}
+
+// TestFocusLost_RespectsDisabledToggle pins that a focus-out write IS an
+// auto-save: the ≡ toggle means "don't write behind my back", which
+// losing focus does not make less true.
+func TestFocusLost_RespectsDisabledToggle(t *testing.T) {
+	a, target := autoSaveFixture(t)
+	a.autoSaveEnabled = false
+	a.tabs[0].InsertString("// edited\n")
+
+	a.handleEvent(&tcell.EventFocus{Focused: false})
+
+	if !a.tabs[0].Dirty {
+		t.Fatal("disabled auto-save must not write on focus loss")
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != "package main\n" {
+		t.Fatalf("disk changed with auto-save off: %q", got)
+	}
+}
+
+// TestFocusLost_DefersWhileModalOpen pins that the flush obeys the same
+// guards rather than bypassing them — it reuses handleAutoSave precisely
+// so it cannot drift from the idle path — and that the work is not lost:
+// the deferral re-arms the countdown.
+func TestFocusLost_DefersWhileModalOpen(t *testing.T) {
+	a, target := autoSaveFixture(t)
+	a.tabs[0].InsertString("// edited\n")
+	a.modal = &confirmModal{}
+
+	a.handleEvent(&tcell.EventFocus{Focused: false})
+
+	if !a.tabs[0].Dirty {
+		t.Fatal("a focus flush must not write under an open modal")
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != "package main\n" {
+		t.Fatalf("disk changed under an open modal: %q", got)
+	}
+	if a.autoSaveTimer == nil {
+		t.Fatal("the deferred flush must leave a countdown armed, or the work strands")
+	}
+}
+
+// TestAutoSaveInterval_ResolvesConfiguredValueAndDefault pins the
+// zero-value mapping. A hand-built App (every test) or a config that
+// never loaded would otherwise arm time.AfterFunc(0), which fires
+// immediately — auto-save on every keystroke.
+func TestAutoSaveInterval_ResolvesConfiguredValueAndDefault(t *testing.T) {
+	a, _ := autoSaveFixture(t)
+
+	a.autoSaveDelay = 12 * time.Second
+	if got := a.autoSaveInterval(); got != 12*time.Second {
+		t.Fatalf("interval = %v, want the configured 12s", got)
+	}
+	a.autoSaveDelay = 0
+	if got := a.autoSaveInterval(); got != defaultAutoSaveDelay {
+		t.Fatalf("interval = %v, want the default %v", got, defaultAutoSaveDelay)
+	}
+}
+
+// TestLoadUserConfig_AppliesAutoSaveDelay pins the app-level plumbing:
+// the parsed, clamped preference has to reach the field armAutoSave
+// reads, or the key is a setting that loads and does nothing.
+func TestLoadUserConfig_AppliesAutoSaveDelay(t *testing.T) {
+	cfgDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfgDir)
+	cfgPath := filepath.Join(cfgDir, "ced", "config.json")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// icons:"off" keeps Resolve from shelling out to font detection.
+	if err := os.WriteFile(cfgPath, []byte(`{"icons":"off","autosavedelay":"17s"}`+"\n"), 0644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	a := newTestApp(t, t.TempDir())
+
+	a.loadUserConfig()
+
+	if got := a.autoSaveInterval(); got != 17*time.Second {
+		t.Fatalf("interval = %v, want the configured 17s", got)
+	}
+}
+
+// TestWelcomeIfQuiet_YieldsToAConfigError pins that a config typo is
+// actually seen. userconfig deliberately reports an unparseable key
+// rather than ignoring it, and an unconditional startup greeting
+// overwrote that message — leaving the user with a setting they believe
+// is in effect and nothing on screen to say it isn't.
+func TestWelcomeIfQuiet_YieldsToAConfigError(t *testing.T) {
+	a, _ := autoSaveFixture(t)
+
+	// Nothing pending: the greeting is the useful thing to say.
+	a.statusMsg = ""
+	a.welcomeIfQuiet()
+	if !strings.Contains(a.statusMsg, "Welcome") {
+		t.Fatalf("status = %q, want the greeting on a quiet start", a.statusMsg)
+	}
+
+	// A config complaint outranks it.
+	problem := "config: autosavedelay must be a duration like \"5s\""
+	a.flash(problem)
+	a.welcomeIfQuiet()
+	if a.statusMsg != problem {
+		t.Fatalf("status = %q, want the config error to survive", a.statusMsg)
 	}
 }
 

@@ -117,10 +117,11 @@ above, both found by reading the wire rather than by trying it:**
 
 - **⌘E and ⌘click are not in the table.** ⌘E's picker does not exist yet
   (3.4) — ***added 2026-08-13 once 3.4 built it***, so the table is nine
-  chords plus ⌘E; its Esc twin is `Esc B`. ⌘E is deliberately NOT on
-  cats' `CMD_TO_PANE` allowlist yet, so browser-cats still keeps it for
-  the browser and the chord is live in kitty/Ghostty/WezTerm only — the
-  same armed-but-host-gated state every row here started in.
+  chords plus ⌘E; its Esc twin is `Esc B`. It was off cats'
+  `CMD_TO_PANE` allowlist at first — the same armed-but-host-gated state
+  every row here started in — ***added there the same afternoon, cats
+  `ed4962c`*** (see §5's follow-up note), so browser-cats forwards it now
+  and the chord is live everywhere the rest of the table is.
   ⌘click *cannot* exist: SGR mouse reports carry three modifier
   bits — shift 4, meta/alt 8, ctrl 16 — and none of them is super, so
   cats' encoder drops the Command modifier before writing the report and

@@ -65,19 +65,20 @@
 //
 // In kitty, Ghostty and WezTerm, where ced is talking to the emulator
 // directly — and, since cats 77285f9, in browser-cats for the chords on
-// its CMD_TO_PANE allowlist (⌘S ⌘P ⌘⇧P ⌘F ⌘⇧F ⌘D ⌘G ⌘/), forwarded only
-// to a pane whose kitty flags are non-zero. Before that commit its front
-// end forwarded ⌘C and ⌘Z and nothing else, so this whole table was armed
-// and dark; the table did not change when the gate opened, which is the
-// point of arming it early.
+// its CMD_TO_PANE allowlist (⌘S ⌘P ⌘⇧P ⌘E ⌘F ⌘⇧F ⌘D ⌘G ⌘/), forwarded
+// only to a pane whose kitty flags are non-zero. Before that commit its
+// front end forwarded ⌘C and ⌘Z and nothing else, so this whole table was
+// armed and dark; the table did not change when the gate opened, which is
+// the point of arming it early. ⌘E reached that allowlist a few hours
+// later (cats ed4962c) — the one row here bound after the gate had
+// already opened, and it needed no change on this side either.
 //
 // What is still the HOST's to decide, per chord: ⌘W ⌘T ⌘L ⌘R ⌘N ⌘Q stay
-// the browser's on purpose, ⌘E is not on the allowlist yet, and in the
-// mac app Cocoa resolves ⌘ menu equivalents before the WebView sees them
-// (catapp's menus claim none of these, so they are expected to fall
-// through — worth confirming by hand). A chord this table binds and a
-// host declines to forward is a chord that does nothing, never a chord
-// that does the wrong thing.
+// the browser's on purpose, and in the mac app Cocoa resolves ⌘ menu
+// equivalents before the WebView sees them (catapp's menus claim none of
+// these, so they are expected to fall through — worth confirming by
+// hand). A chord this table binds and a host declines to forward is a
+// chord that does nothing, never a chord that does the wrong thing.
 
 package app
 
@@ -142,10 +143,11 @@ func metaAccels() []metaAccel {
 		// ⌘E is the recent-files ring (recentfiles.go), added once 3.4
 		// gave it a picker to open — the VS Code / GoLand spelling, where
 		// the gesture people actually perform is ⌘E-Enter to flip back to
-		// the previous file. Its Esc twin is Esc-B. It stays OFF cats'
-		// CMD_TO_PANE allowlist today, so in browser-cats it is one of the
-		// chords the browser still keeps; kitty, Ghostty and WezTerm have
-		// it now.
+		// the previous file. Its Esc twin is Esc-B. It was bound here after
+		// cats' allowlist had already closed, and cats added KeyE to it the
+		// same afternoon (ed4962c), so it is now live wherever the rest of
+		// this table is: kitty, Ghostty, WezTerm, and browser-cats over a
+		// pane that asked for the kitty protocol.
 		{key: 'e', action: (*App).menuRecentFiles, label: "Recent files"},
 		// Deliberately NOT bound:
 		//   ⌘C / ⌘V / ⌘Z — handled directly in handleKey, and older than

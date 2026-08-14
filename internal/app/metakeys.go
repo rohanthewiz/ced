@@ -74,11 +74,19 @@
 // already opened, and it needed no change on this side either.
 //
 // What is still the HOST's to decide, per chord: ⌘W ⌘T ⌘L ⌘R ⌘N ⌘Q stay
-// the browser's on purpose, and in the mac app Cocoa resolves ⌘ menu
-// equivalents before the WebView sees them (catapp's menus claim none of
-// these, so they are expected to fall through — worth confirming by
-// hand). A chord this table binds and a host declines to forward is a
-// chord that does nothing, never a chord that does the wrong thing.
+// the browser's on purpose. The cats mac app was confirmed by hand on
+// 2026-08-14 to pass this layer through — Cocoa resolves ⌘ menu key
+// equivalents before the WebView, and catapp's menus claim none of these
+// chords, so they reach the same handler the browser front end uses.
+//
+// A browser, however, DOES claim some of them for its own menus, and
+// resolves those before the page: ⌘E is on cats' allowlist and still
+// never arrives, because the browser takes it first and cats cannot
+// preventDefault an event it is not offered. So the layer is live in the
+// mac app and only partly live in a browser, per chord, and which chords
+// is the host's answer to give — not ced's and not cats'. Either way a
+// chord this table binds and a host declines to forward is a chord that
+// does nothing, never a chord that does the wrong thing.
 
 package app
 

@@ -1082,14 +1082,31 @@ hand-check rather than code (§5 item 2).
    CANVAS for a text selection it cannot have, so the browser loses
    nothing measurable. The kitty-flags gate is unchanged.
 
-   Still open: the **mac app**, and it may already be free. Cocoa resolves
-   ⌘ *menu key equivalents* before the WebView, but catapp's menus claim
-   only ⌘H ⌥⌘H ⌘Q, Edit's ⌘Z ⇧⌘Z ⌘X ⌘C ⌘V ⌘A and View's ⌘+ ⌘= ⌘- ⌘0 —
-   none of which collides with `CMD_TO_PANE`, so those chords should fall
-   through the responder chain to the WebView and hit the same handler.
-   Worth confirming by hand; if it holds, the "needs native menu routing"
-   ask shrinks to "only for chords that collide with a menu item", which
-   is currently none of them.
+   ✅ **The mac app was free — confirmed by hand 2026-08-14.** Cocoa
+   resolves ⌘ *menu key equivalents* before the WebView, but catapp's
+   menus claim only ⌘H ⌥⌘H ⌘Q, Edit's ⌘Z ⇧⌘Z ⌘X ⌘C ⌘V ⌘A and View's
+   ⌘+ ⌘= ⌘- ⌘0 — none of which collides with `CMD_TO_PANE` — so the
+   chords fall through the responder chain to the WebView and hit the
+   same handler. **The "⌘ passthrough needs native menu routing" ask is
+   therefore withdrawn**, and shrinks to "only for a chord that collides
+   with a menu item", which today is none of them.
+
+   The same hand-check turned up the mirror-image finding, and it is the
+   one that matters for how this set gets chosen: **⌘E does NOT reach the
+   page in a browser**, even though `KeyE` is on the allowlist and the
+   running bundle embeds it (verified against the installed binary, not
+   the source). The browser claims the chord for a menu item of its own
+   and resolves it before the page — so cats never receives the keydown
+   and cannot `preventDefault` what it is never offered. Same mechanism
+   as Cocoa's, opposite outcome, because catapp has no ⌘E menu item and a
+   browser does.
+
+   The lesson for the allowlist: it was curated by *what the browser
+   loses*, and the operative question is *what the browser will hand
+   over* — a different and host-specific list. A chord on `CMD_TO_PANE`
+   that the host resolves natively is simply inert there, which is the
+   benign failure (nothing happens in the pane, the host does its own
+   thing) rather than the harmful one. Untested per chord, per browser.
 3. ✅ **shipped cats-side 2026-08-13 (cats `ff8c89a`)** — **`theme_changed`
    event** in the `events.subscribe` stream, payload = the theme section of
    `ConfigGetResult` (an alias, so the two can never drift). Emitted from

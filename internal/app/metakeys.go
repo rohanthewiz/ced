@@ -79,14 +79,19 @@
 // equivalents before the WebView, and catapp's menus claim none of these
 // chords, so they reach the same handler the browser front end uses.
 //
-// A browser, however, DOES claim some of them for its own menus, and
-// resolves those before the page: ⌘E is on cats' allowlist and still
-// never arrives, because the browser takes it first and cats cannot
-// preventDefault an event it is not offered. So the layer is live in the
-// mac app and only partly live in a browser, per chord, and which chords
-// is the host's answer to give — not ced's and not cats'. Either way a
-// chord this table binds and a host declines to forward is a chord that
-// does nothing, never a chord that does the wrong thing.
+// In Chrome the layer is live too, with exactly one hole: ⌘S ⌘P ⌘F ⌘D ⌘G
+// ⌘/ all arrive, and ⌘E does not. ⌘E is a Chrome menu item resolved
+// before the page is offered the keydown, so cats cannot preventDefault
+// an event it never receives and its allowlist gets no vote. That a chord
+// has a menu binding is NOT the test — ⌘S ⌘P ⌘F ⌘D ⌘G are Chrome menu
+// items as well and Chrome dispatches those to the page first, the same
+// courtesy that lets any web editor claim ⌘S. ⌘E is the exception.
+//
+// So: fully live in kitty/Ghostty/WezTerm and the mac app, live in Chrome
+// but for ⌘E — where the Esc twin (Esc-B) is the way in. A chord this
+// table binds and a host declines to forward is a chord that does
+// nothing, never a chord that does the wrong thing, which is why the row
+// stays bound regardless of who is hosting.
 
 package app
 

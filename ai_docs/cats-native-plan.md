@@ -1091,22 +1091,32 @@ hand-check rather than code (§5 item 2).
    therefore withdrawn**, and shrinks to "only for a chord that collides
    with a menu item", which today is none of them.
 
-   The same hand-check turned up the mirror-image finding, and it is the
-   one that matters for how this set gets chosen: **⌘E does NOT reach the
-   page in a browser**, even though `KeyE` is on the allowlist and the
-   running bundle embeds it (verified against the installed binary, not
-   the source). The browser claims the chord for a menu item of its own
-   and resolves it before the page — so cats never receives the keydown
-   and cannot `preventDefault` what it is never offered. Same mechanism
-   as Cocoa's, opposite outcome, because catapp has no ⌘E menu item and a
-   browser does.
+   The same hand-check turned up one hole, and only one: **⌘E does not
+   reach the page in Chrome**, even though `KeyE` is on the allowlist and
+   the running bundle embeds it (verified against the installed binary,
+   not the source). Chrome claims the chord for a menu item of its own
+   and resolves it before the page, so cats never receives the keydown
+   and cannot `preventDefault` what it is never offered — the same
+   mechanism as Cocoa's, opposite outcome, because catapp has no ⌘E menu
+   item and Chrome does.
 
-   The lesson for the allowlist: it was curated by *what the browser
-   loses*, and the operative question is *what the browser will hand
-   over* — a different and host-specific list. A chord on `CMD_TO_PANE`
-   that the host resolves natively is simply inert there, which is the
-   benign failure (nothing happens in the pane, the host does its own
-   thing) rather than the harmful one. Untested per chord, per browser.
+   **Everything else arrives.** ⌘S ⌘P ⌘F ⌘D ⌘G were hand-checked in
+   Chrome and the mac app on 2026-08-14 and reach the editor in both, so
+   the ⌘ accelerator layer is fully live in every host that matters:
+   kitty, Ghostty, WezTerm, catapp, and Chrome-but-for-⌘E. Note that
+   those five are Chrome menu items too (Save Page As, Print, Find,
+   Bookmark, Find Next) — **a menu binding is not the disqualifier**;
+   Chrome dispatches the keydown to the page first and honours
+   `preventDefault`, which is what lets any web editor claim ⌘S. ⌘E is
+   the exception to that, not an instance of it, and `Esc B` is the way
+   in when it bites.
+
+   Standing rule for the next chord added: the allowlist was curated by
+   *what the browser loses*, which is a proxy for the question that
+   decides delivery — *will the host hand it over*. The proxy held for
+   every chord but ⌘E. Press a new entry in a real browser rather than
+   reasoning it in; the failure is benign (inert in that host, never
+   wrong) but silent.
 3. ✅ **shipped cats-side 2026-08-13 (cats `ff8c89a`)** — **`theme_changed`
    event** in the `events.subscribe` stream, payload = the theme section of
    `ConfigGetResult` (an alias, so the two can never drift). Emitted from

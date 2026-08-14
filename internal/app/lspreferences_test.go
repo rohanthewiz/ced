@@ -329,6 +329,17 @@ func TestHandleLSPReferences_OpensPanel(t *testing.T) {
 	if m.rows[0].label != "main.go:2" {
 		t.Errorf("label = %q, want main.go:2", m.rows[0].label)
 	}
+	// The display order is derived from the rows, not implied by them: a
+	// panel that skipped rebuildView would open saying every row had been
+	// dismissed.
+	if len(m.view) != len(m.rows) {
+		t.Errorf("view = %d rows, want all %d showing", len(m.view), len(m.rows))
+	}
+	// And the filter box seeds with the symbol, like the two search lists —
+	// inert until edited, so it hides nothing it just found.
+	if got := m.filter.String(); got != "counter" {
+		t.Errorf("filter = %q, want the symbol pre-filled", got)
+	}
 }
 
 // TestHandleLSPReferences_TitleReportsTruncation pins the honesty

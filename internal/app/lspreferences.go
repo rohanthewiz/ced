@@ -278,7 +278,16 @@ func (a *App) handleLSPReferences(e *lspReferencesEvent) {
 		heading:   "References to",
 		truncated: e.truncated,
 		rows:      a.projectSearchRows(a.referenceHits(e.locs)),
+		// The symbol IS text every row contains, so the panel's filter box
+		// seeds with it like the two search lists do (findall.go's seed
+		// rule) — narrowing a long reference list to the calls in one
+		// package is then a few keystrokes rather than a second question.
+		filter: newTextField(e.query),
+		seed:   e.query,
 	}
+	// The display order is derived, not implied by rows: without this the
+	// panel opens with an empty view and says every row was dismissed.
+	m.rebuildView()
 	a.openModal(m)
 	m.ensureRowVisible(a)
 }

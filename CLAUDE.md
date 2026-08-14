@@ -590,6 +590,19 @@ Search group, or ↓ from the find bar. House rules:
   display column by subtracting the trim. No width table, nothing to
   drift. Two hits on one line are two rows — the list is occurrences,
   not lines.
+- **The filter box is SEEDED with the query and the seed is INERT**
+  (`findAllModal.seed`, `filterNeedle`). It opens holding the search
+  expression, caret at the end, so `/` plus a keystroke carries the same
+  question on instead of restating it — but while the box still holds
+  exactly the seed it narrows nothing, because a row's display text is
+  compacted (the bullet above) and a query carrying a tab, or one that
+  matched inside the indentation, is not literally present in its own
+  results. Filtering by it would open the list empty on the very search
+  that filled it. One edit hands filtering back to the ordinary contains
+  rule. Seeding belongs to producers whose query IS text the rows carry
+  (in-file search, project search, references); the workspace-edit
+  RECEIPT leaves it empty, since its query is a label ("Rename foo →
+  bar") that would narrow to nothing the moment it was touched.
 - **ONLY A SELECTION SEARCHES SILENTLY** (`findAllSelectionQuery`);
   everything else asks. A highlighted single-line region is the user
   pointing at the exact text, so a prompt there could only be answered

@@ -867,6 +867,60 @@ func TestFindAll_FilterNarrowsView(t *testing.T) {
 	}
 }
 
+// TestFindAll_FilterSeedsWithTheQuery pins the pre-fill: the box opens
+// holding the search expression with the caret at its end, so "/" plus a
+// keystroke keeps narrowing the same question instead of restating it —
+// and the seed itself narrows nothing, so the list opens whole.
+func TestFindAll_FilterSeedsWithTheQuery(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+
+	if got := m.filter.String(); got != "count" {
+		t.Fatalf("filter = %q, want the query pre-filled", got)
+	}
+	if m.filter.cursor != len("count") {
+		t.Errorf("caret = %d, want the end of the seed (%d)", m.filter.cursor, len("count"))
+	}
+	if len(m.view) != len(m.rows) {
+		t.Fatalf("the seed must narrow nothing: view %d of %d rows", len(m.view), len(m.rows))
+	}
+
+	// Typing on carries the question forward: "count" → "count++" is one
+	// of the four hits.
+	typeFindAllFilter(a, m, "++")
+	if len(m.view) != 1 {
+		t.Fatalf("extending the seed should narrow to the one hit, got %d", len(m.view))
+	}
+	// …and backing out to the seed restores the whole answer.
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyBackspace2, 0, tcell.ModNone))
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyBackspace2, 0, tcell.ModNone))
+	if len(m.view) != len(m.rows) {
+		t.Fatalf("back at the seed: view %d of %d rows", len(m.view), len(m.rows))
+	}
+}
+
+// TestFindAll_SeededFilterSurvivesAnUncompactableQuery is why the seed is
+// inert rather than just another filter string. A row's display text has
+// its indentation stripped, so a query that matched inside that
+// indentation is not present in its own results — filtering by it would
+// open the list empty on the very search that filled it.
+func TestFindAll_SeededFilterSurvivesAnUncompactableQuery(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "\tcount")
+
+	if len(m.rows) == 0 {
+		t.Fatal("precondition: the indented occurrences should be found")
+	}
+	if len(m.view) != len(m.rows) {
+		t.Fatalf("the seed must not hide its own rows: view %d of %d", len(m.view), len(m.rows))
+	}
+	// One edit and the ordinary contains rule takes over, tab and all.
+	typeFindAllFilter(a, m, "x")
+	if len(m.view) != 0 {
+		t.Fatalf("an edited filter should apply normally, got %d rows", len(m.view))
+	}
+}
+
 func TestFindAll_DismissRowShrinksWorklist(t *testing.T) {
 	a, _ := seedFindAllApp(t)
 	m := openFindAllT(t, a, "count")

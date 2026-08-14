@@ -475,6 +475,16 @@ func TestApplyServerEdit_ReportsInTheFindAllPanel(t *testing.T) {
 		t.Errorf("row text = %q, want the NEW text — the receipt shows what it is now",
 			m.rows[0].text)
 	}
+	if len(m.view) != len(m.rows) {
+		t.Errorf("view = %d rows, want all %d showing", len(m.view), len(m.rows))
+	}
+	// The two search lists seed their filter box with the query; this one
+	// must not. Its query is a LABEL ("Rename foo → bar"), so a pre-filled
+	// box would hold a phrase that narrows the receipt to nothing the
+	// moment it is touched.
+	if got := m.filter.String(); got != "" {
+		t.Errorf("filter = %q, want an empty box on a receipt", got)
+	}
 }
 
 // TestApplyWorkspaceEdit_RollsBackOnAFailedWrite pins the atomicity story.

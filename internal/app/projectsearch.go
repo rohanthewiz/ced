@@ -156,6 +156,12 @@ func (a *App) handleProjectSearch(e *projectSearchEvent) {
 		project:   true,
 		truncated: e.truncated,
 		rows:      a.projectSearchRows(e.hits),
+		// Same pre-fill as the in-file list: the box arrives holding the
+		// expression, inert until edited (findall.go's seed rule). It
+		// matters more here — narrowing a whole-tree answer in the box
+		// costs nothing, re-running the walk costs a walk.
+		filter: newTextField(e.query),
+		seed:   e.query,
 	}
 	m.rebuildView()
 	// Same replacement rule as showFindAll: a fresh list supersedes a

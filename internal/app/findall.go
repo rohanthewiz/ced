@@ -42,8 +42,10 @@
 // grew the popup into an optional results PANEL: pin it (◇ / p) and the
 // same object moves from the modal slot into App.findAllPin, where it
 // survives editor clicks and edits like the git panels do — plus a
-// filter box narrowing the view, per-row dismissal (a worklist you burn
-// down), replace-across-survivors through the workspace-edit machinery
+// filter box narrowing the view (pre-filled with the search expression,
+// so the question carries on from where it was asked), per-row dismissal
+// (a worklist you burn down), replace-across-survivors through the
+// workspace-edit machinery
 // (one undo gesture), a re-run button, and stale-row dimming when the
 // buffer moves under the list. Unpinned, the peek contract above is
 // untouched.
@@ -161,6 +163,15 @@ type findAllModal struct {
 	// filter narrows the DISPLAYED rows (never re-runs the search) —
 	// a second, cheaper question asked of results already in hand.
 	filter textField
+	// seed is what the filter box was PRE-FILLED with at open: the search
+	// expression itself, so the list arrives holding the question it just
+	// answered and typing on carries straight on narrowing it, rather than
+	// starting from an empty box that first has to be re-typed.
+	//
+	// While the box still holds exactly the seed it narrows NOTHING — see
+	// filterNeedle. Producers whose query is not text the rows contain
+	// (the workspace-edit receipt, whose query is a LABEL) leave it empty.
+	seed string
 	// replace holds the replacement text for "Replace in N results".
 	replace textField
 
@@ -318,9 +329,14 @@ func (a *App) showFindAll(query string) {
 	}
 
 	m := &findAllModal{
-		query:         query,
-		tabIdx:        a.activeTab,
-		rows:          findAllRowsFor(tab.Buffer, matches),
+		query:  query,
+		tabIdx: a.activeTab,
+		rows:   findAllRowsFor(tab.Buffer, matches),
+		// The filter box opens holding the search expression, caret at the
+		// end, so "/" and another keystroke keeps narrowing the same
+		// question instead of restating it. Inert until edited — see seed.
+		filter:        newTextField(query),
+		seed:          query,
 		origin:        tab.Cursor,
 		originAnchor:  tab.Anchor,
 		originScrollY: tab.ScrollY,
@@ -402,7 +418,7 @@ func (m *findAllModal) rebuildView() {
 	if m.selected >= 0 && m.selected < len(m.view) {
 		prev = m.view[m.selected]
 	}
-	needle := strings.ToLower(strings.TrimSpace(m.filter.String()))
+	needle := m.filterNeedle()
 	m.view = m.view[:0]
 	for i := range m.rows {
 		if m.rows[i].dismissed {
@@ -428,6 +444,28 @@ func (m *findAllModal) rebuildView() {
 	if m.selected < 0 {
 		m.selected = 0
 	}
+}
+
+// filterNeedle is the text the view is currently narrowed by, folded for
+// a case-insensitive match, or "" when the box is doing nothing.
+//
+// The box does nothing in two cases, and the second is the reason this is
+// a method rather than an inline TrimSpace. An empty box is the obvious
+// one. The other is a box still holding exactly the SEED — the query the
+// search was run with — because a display row is compacted (leading
+// indentation stripped, interior tabs rendered as one space), so a query
+// carrying a tab, or one that matched inside the indentation, is not
+// literally present in its own results. Filtering by it would open the
+// list empty on the very search that produced every row in it. Editing
+// the box by a single rune hands filtering over to the ordinary contains
+// rule; in the overwhelmingly common case the two agree anyway, since a
+// row's text does contain the query that found it.
+func (m *findAllModal) filterNeedle() string {
+	s := m.filter.String()
+	if s == m.seed { // covers the empty box when nothing was seeded
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // viewRow returns the row behind view position vi, or nil.
@@ -1220,7 +1258,7 @@ func (m *findAllModal) draw(a *App) {
 	}
 	if len(m.view) == 0 && vis > 0 {
 		msg := "no rows match — edit the filter, or ⟳ to re-run"
-		if m.filter.String() == "" {
+		if m.filterNeedle() == "" {
 			msg = "every row dismissed — ⟳ re-runs the search"
 		}
 		drawStatusText(a.screen, mx+2, my+4, mw-4, msg, c.muted)

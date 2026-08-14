@@ -120,6 +120,34 @@ func TestProjectSearch_OpensTheFindAllPanelInProjectMode(t *testing.T) {
 	}
 }
 
+// TestProjectSearch_FilterSeedsWithTheQuery pins the pre-fill at the
+// wider scope: the box arrives holding the expression, narrowing nothing
+// until it is edited. It earns its place here twice over — narrowing the
+// answer in the box costs nothing, while restating the question costs a
+// whole-tree walk.
+func TestProjectSearch_FilterSeedsWithTheQuery(t *testing.T) {
+	a, root := projectSearchApp(t)
+	runProjectSearch(t, a, root, "needle", []string{"alpha.go", "sub/bravo.go"})
+
+	m, ok := a.modal.(*findAllModal)
+	if !ok {
+		t.Fatalf("expected the find-all panel, got %T", a.modal)
+	}
+	if got := m.filter.String(); got != "needle" {
+		t.Fatalf("filter = %q, want the query pre-filled", got)
+	}
+	if len(m.view) != len(m.rows) {
+		t.Fatalf("the seed must narrow nothing: view %d of %d rows", len(m.view), len(m.rows))
+	}
+	// A replaced filter narrows to the file whose path carries it — rows
+	// match on their label as well as their text.
+	m.filter = newTextField("bravo")
+	m.rebuildView()
+	if len(m.view) == 0 || len(m.view) >= len(m.rows) {
+		t.Fatalf("an edited filter should narrow: %d of %d", len(m.view), len(m.rows))
+	}
+}
+
 // TestProjectSearch_WalkingRowsOpensNothing pins the deliberate departure
 // from the in-file list. Previewing across files would open a file per
 // keystroke — firing didOpen, plugin hooks and a syntax pass each time,

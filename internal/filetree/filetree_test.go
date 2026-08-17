@@ -1131,3 +1131,144 @@ func TestRender_IconsEnabledFolderOpenSwitches(t *testing.T) {
 		t.Fatalf("expanded alpha row missing FolderOpen: %q", expanded)
 	}
 }
+
+// TestContentWidth_MatchesWhatRenderDraws is the anti-drift test for the
+// auto-fit measurement: whatever ContentWidth reports must be exactly the
+// number of columns the renderer needs, so a panel sized to it truncates
+// nothing and wastes nothing. Rendering into a screen exactly that wide
+// and one column narrower proves both halves at once.
+func TestContentWidth_MatchesWhatRenderDraws(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "internal"))
+	mustMkdir(t, filepath.Join(root, "internal", "app"))
+	mustWrite(t, filepath.Join(root, "internal", "app", "a-rather-long-name.go"), "package app")
+
+	tr, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Expand down to the deepest row — the one that sets the width.
+	internal := findChild(tr.Root, "internal")
+	tr.Toggle(internal)
+	tr.Toggle(findChild(internal, "app"))
+
+	want := tr.ContentWidth()
+	cells, w := renderAndCollect(t, tr, want, 20)
+	y := findRowY(cells, w, 20, "a-rather-long-name.go")
+	if y < 0 {
+		t.Fatalf("row truncated at the reported width %d", want)
+	}
+	// The last column must be in use: a wider answer than necessary would
+	// hand the tree columns the editor could have kept.
+	if txt := rowText(cells, w, y); txt[len(txt)-1] == ' ' {
+		t.Fatalf("width %d is one too many; row = %q", want, txt)
+	}
+	// One column narrower and the same row must lose its tail.
+	cells, w = renderAndCollect(t, tr, want-1, 20)
+	if findRowY(cells, w, 20, "a-rather-long-name.go") >= 0 {
+		t.Fatalf("width %d should have truncated the deepest row", want-1)
+	}
+}
+
+// TestContentWidth_TracksExpansionNotScroll pins the two scoping choices:
+// expanding a folder is what changes the answer (that's the gesture
+// auto-fit reacts to), and scrolling never does — a panel that resized
+// while the user wheeled past a long name would shift the editor's
+// columns for no reason.
+func TestContentWidth_TracksExpansionNotScroll(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "d"))
+	mustWrite(t, filepath.Join(root, "d", "quite-a-long-file-name-here.go"), "x")
+	for i := 0; i < 30; i++ {
+		mustWrite(t, filepath.Join(root, "pad"+string(rune('a'+i))+".txt"), "x")
+	}
+
+	tr, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	collapsed := tr.ContentWidth()
+	tr.Toggle(findChild(tr.Root, "d"))
+	expanded := tr.ContentWidth()
+	if expanded <= collapsed {
+		t.Fatalf("expanding should widen: collapsed %d, expanded %d", collapsed, expanded)
+	}
+
+	// Scroll the long row off the top of a short viewport: the tree still
+	// needs the same room.
+	tr.Render(newSimScreen(t, 20, 6), theme.Default(), 0, 0, 20, 6)
+	tr.Scroll(10)
+	if got := tr.ContentWidth(); got != expanded {
+		t.Fatalf("scrolling changed the width: got %d, want %d", got, expanded)
+	}
+}
+
+// TestContentWidth_CountsIconsAndExecMarks documents that the measurement
+// follows the same render-time gates the drawing does — turning icons on
+// or the '*' marker off changes what a row occupies, so it has to change
+// what the panel is sized to.
+func TestContentWidth_CountsIconsAndExecMarks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no Unix execute bit on Windows")
+	}
+	root := t.TempDir()
+	mustWriteMode(t, filepath.Join(root, "run.sh"), "#!/bin/sh\n", 0o755)
+
+	tr, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	plain := tr.ContentWidth()
+	tr.IconsEnabled = true
+	withIcons := tr.ContentWidth()
+	if withIcons != plain+3 { // glyph + the two spaces after it
+		t.Fatalf("icons should add 3 columns: %d → %d", plain, withIcons)
+	}
+	tr.ExecMarks = false
+	if got := tr.ContentWidth(); got != withIcons-1 {
+		t.Fatalf("dropping the '*' should lose a column: %d → %d", withIcons, got)
+	}
+}
+
+// TestContentWidth_MeasuresHeaderBlock keeps the two header rows in the
+// answer: a project whose own name is longer than any child would
+// otherwise be the one row auto-fit truncated.
+func TestContentWidth_MeasuresHeaderBlock(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "a-project-with-a-very-long-directory-name")
+	mustMkdir(t, root)
+	mustWrite(t, filepath.Join(root, "a.go"), "x")
+
+	tr, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got, want := tr.ContentWidth(), runeLen(" "+tr.Root.Name); got != want {
+		t.Fatalf("ContentWidth = %d, want the project row's %d", got, want)
+	}
+}
+
+// TestContentWidth_NilSafe — the app calls this from its draw path, where
+// a nil tree is the defensive case every sidebar helper already handles.
+func TestContentWidth_NilSafe(t *testing.T) {
+	var tr *Tree
+	if got := tr.ContentWidth(); got != 0 {
+		t.Fatalf("nil tree width = %d, want 0", got)
+	}
+	if got := (&Tree{}).ContentWidth(); got != 0 {
+		t.Fatalf("rootless tree width = %d, want 0", got)
+	}
+}
+
+// newSimScreen builds a sized SimulationScreen for tests that only need
+// somewhere for Render to draw (so ScrollY gets clamped against a real
+// viewport) rather than the painted cells.
+func newSimScreen(t *testing.T, w, h int) tcell.Screen {
+	t.Helper()
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatalf("scr.Init: %v", err)
+	}
+	t.Cleanup(scr.Fini)
+	scr.SetSize(w, h)
+	return scr
+}

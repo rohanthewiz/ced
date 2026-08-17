@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -357,8 +358,6 @@ func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, a
 			scr.SetContent(cx, y, ' ', nil, tcell.StyleDefault.Background(bg))
 		}
 	}
-	indent := strings.Repeat("  ", item.Depth)
-
 	// Compute the row-level foreground via this priority cascade
 	// (highest wins last):
 	//
@@ -391,36 +390,13 @@ func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, a
 		rowStyle = rowStyle.Bold(true)
 	}
 
-	// Build the left chunk (indent + chevron + space) and right chunk
-	// (name, with a trailing slash for dirs). Both render in rowStyle;
-	// only the glyph between them gets its own colour.
-	var prefix, suffix string
-	if item.Node.IsDir {
-		chev := "▸"
-		if item.Node.Expanded {
-			chev = "▾"
-		}
-		prefix = " " + indent + chev + " "
-		suffix = item.Node.Name + "/"
-	} else {
-		prefix = " " + indent + "  "
-		suffix = item.Node.Name
-		// ls -F style marker: an executable file gets a trailing '*',
-		// mirroring the directory's '/'. It rides the row's own style
-		// so it inherits the dirty/muted/normal fg — deliberately NOT
-		// a new colour, which would collide with the git palette.
-		// Gated on execMarks so the ≡ view toggle can hide it.
-		if execMarks && item.Node.IsExec {
-			suffix += "*"
-		}
-	}
+	prefix, glyph, tail := nodeRowSegments(item, withIcons, execMarks)
 
-	if !withIcons {
-		drawString(scr, x, y, w, prefix+suffix, rowStyle)
+	if glyph == "" {
+		drawString(scr, x, y, w, prefix+tail, rowStyle)
 		return
 	}
 
-	glyph := icons.For(item.Node.Name, item.Node.IsDir, item.Node.Expanded)
 	glyphFg := icons.ColorFor(item.Node.Name, item.Node.IsDir, fg)
 	// Dirty files keep their per-language glyph colour — the language
 	// hue is the at-a-glance cue, and the name turning Modified is
@@ -431,11 +407,94 @@ func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, a
 	}
 
 	drawString(scr, x, y, w, prefix, rowStyle)
-	px := len([]rune(prefix))
+	px := runeLen(prefix)
 	drawString(scr, x+px, y, w-px, glyph, glyphStyle)
-	gx := len([]rune(glyph))
-	drawString(scr, x+px+gx, y, w-px-gx, "  "+suffix, rowStyle)
+	gx := runeLen(glyph)
+	drawString(scr, x+px+gx, y, w-px-gx, tail, rowStyle)
 }
+
+// nodeRowSegments builds the three text chunks a row is painted from: the
+// indent + chevron prefix, the optional Nerd Font glyph (its own segment
+// because it takes its own per-language colour), and the tail carrying
+// the name. An empty glyph means "icons off" — then prefix+tail is the
+// whole row.
+//
+// This is the ONE construction of a row's text, shared by drawNodeRow and
+// ContentWidth. A second copy in the measurer would drift, and the
+// auto-fit width would then be wrong by a column or two in exactly the
+// cases that matter most (deep nesting, icons on, an executable's '*').
+func nodeRowSegments(item flatNode, withIcons, execMarks bool) (prefix, glyph, tail string) {
+	indent := strings.Repeat("  ", item.Depth)
+	if item.Node.IsDir {
+		chev := "▸"
+		if item.Node.Expanded {
+			chev = "▾"
+		}
+		prefix = " " + indent + chev + " "
+		tail = item.Node.Name + "/"
+	} else {
+		prefix = " " + indent + "  "
+		tail = item.Node.Name
+		// ls -F style marker: an executable file gets a trailing '*',
+		// mirroring the directory's '/'. It rides the row's own style
+		// so it inherits the dirty/muted/normal fg — deliberately NOT
+		// a new colour, which would collide with the git palette.
+		// Gated on execMarks so the ≡ view toggle can hide it.
+		if execMarks && item.Node.IsExec {
+			tail += "*"
+		}
+	}
+	if !withIcons {
+		return prefix, "", tail
+	}
+	// The two spaces belong to the tail so the glyph segment is exactly
+	// the glyph — drawNodeRow offsets the tail by the glyph's own width.
+	return prefix, icons.For(item.Node.Name, item.Node.IsDir, item.Node.Expanded), "  " + tail
+}
+
+// ContentWidth reports how many columns the tree would need to draw all
+// of its currently visible rows untruncated, header block included. The
+// app's auto-fit (app/treeautofit.go) sizes the sidebar from it.
+//
+// Two scoping decisions worth keeping:
+//
+//   - It measures EVERY expanded row, not just the scroll window. A
+//     window-scoped measure (the word-highlighter's rule) would make the
+//     panel breathe in and out as the user wheels past a long filename,
+//     shifting the editor's columns under a gesture that changed nothing
+//     about the tree. Expanding and collapsing a folder is deliberate;
+//     scrolling is not. The walk is bounded in practice because the tree
+//     is lazy — rows only exist for folders the user opened by hand.
+//   - It counts RUNES, because drawString advances exactly one column
+//     per rune. Both measure and paint therefore make the same
+//     (terminal-dependent) assumption about glyph width, so they can't
+//     disagree about whether a row fits.
+func (t *Tree) ContentWidth() int {
+	if t == nil || t.Root == nil {
+		return 0
+	}
+	// The header block Render draws above the list: the all-caps label
+	// and the project name, both with the same one-column gutter.
+	w := runeLen(" EXPLORER")
+	if n := runeLen(" " + t.Root.Name); n > w {
+		w = n
+	}
+	flat := make([]flatNode, 0, 128)
+	for _, c := range t.Root.Children {
+		flattenInto(c, 0, &flat)
+	}
+	for _, item := range flat {
+		prefix, glyph, tail := nodeRowSegments(item, t.IconsEnabled, t.ExecMarks)
+		if n := runeLen(prefix) + runeLen(glyph) + runeLen(tail); n > w {
+			w = n
+		}
+	}
+	return w
+}
+
+// runeLen is the column count drawString will consume for s — one column
+// per rune, matching what it actually does.
+func runeLen(s string) int { return utf8.RuneCountInString(s) }
 
 // drawString writes s left-aligned within [x, x+w). Excess content is
 // truncated; short content is implicitly padded by the row's pre-painted bg.

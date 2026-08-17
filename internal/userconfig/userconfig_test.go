@@ -1372,3 +1372,75 @@ func TestRemote_LoadAndSave(t *testing.T) {
 		t.Fatal("unknown key was dropped by the save round-trip")
 	}
 }
+
+// TestDefaultsTreeAutoFitOn pins the documented default: the sidebar
+// sizes itself to the file tree unless the user opts out (or drags the
+// splitter, which writes the opt-out for them).
+func TestDefaultsTreeAutoFitOn(t *testing.T) {
+	if !Defaults().TreeAutoFit {
+		t.Fatal("Defaults().TreeAutoFit = false, want true")
+	}
+}
+
+// TestLoadTreeAutoFitValues exercises the recognised treeautofit values
+// and the absent-field default, mirroring the execmarks table.
+func TestLoadTreeAutoFitValues(t *testing.T) {
+	cases := map[string]bool{
+		`{"treeautofit":"on"}`:    true,
+		`{"treeautofit":"off"}`:   false,
+		`{"treeautofit":" OFF "}`: false, // case/whitespace tolerant
+		`{}`:                      true,  // omitted field keeps the default
+	}
+	for body, want := range cases {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", body, err)
+		}
+		if cfg.TreeAutoFit != want {
+			t.Errorf("Load(%s).TreeAutoFit = %v, want %v", body, cfg.TreeAutoFit, want)
+		}
+	}
+}
+
+// TestLoadTreeAutoFitInvalid mirrors the execmarks rule: a typo'd value is
+// an error the caller can flash, not a silent fallback — a preference the
+// user believes is off has to be off.
+func TestLoadTreeAutoFitInvalid(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"treeautofit":"sometimes"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("invalid treeautofit value should error")
+	}
+}
+
+// TestSaveTreeAutoFit_RoundTripsAndPreserves makes the same unknown-key
+// guarantee for the new key that every other Save* helper makes — it
+// matters here because a splitter drag writes this one behind the user's
+// back and must not eat the rest of their config.
+func TestSaveTreeAutoFit_RoundTripsAndPreserves(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	seed := "{\n  \"icons\": \"on\",\n  \"future-key\": 42\n}\n"
+	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveTreeAutoFit(path, false); err != nil {
+		t.Fatalf("SaveTreeAutoFit: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load after save: %v", err)
+	}
+	if cfg.TreeAutoFit || cfg.Icons != IconsOn {
+		t.Fatalf("round trip lost values: treeautofit=%v icons=%q", cfg.TreeAutoFit, cfg.Icons)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "future-key") {
+		t.Fatal("unknown key was dropped by the save round-trip")
+	}
+}

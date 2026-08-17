@@ -236,6 +236,12 @@ func builtinMenuGroups() []menuGroup {
 			// Keyboard focus for the tree (treenav.go) — sits under the
 			// row that shows/hides it, same subject one step deeper.
 			{label: "Focus file tree", shortcut: "esc T", action: (*App).menuFocusTree, enabled: alwaysTrue},
+			// Auto-fit sits under the tree rows it governs, above the
+			// exec-marks row: all three are about the sidebar, and this
+			// one is the only path back after a splitter drag turned it
+			// off (the drag persists the change, so it outlives the
+			// session). See treeautofit.go.
+			{action: (*App).menuToggleTreeAutoFit, enabled: alwaysTrue, labelFor: (*App).treeAutoFitToggleLabel},
 			{action: (*App).menuToggleExecMarks, enabled: alwaysTrue, labelFor: (*App).execMarksToggleLabel},
 			{action: (*App).menuToggleWordHighlight, enabled: alwaysTrue, labelFor: (*App).wordHighlightToggleLabel},
 			{shortcut: "esc `", action: (*App).menuToggleTerminal, enabled: alwaysTrue, labelFor: (*App).termToggleLabel},
@@ -842,7 +848,16 @@ type App struct {
 	// sidebarWidth is the live width of the file-explorer block (file tree
 	// + 1-cell splitter on its right edge), in screen cells. The user can
 	// drag the splitter to change it within [minSidebarWidth, width-minEditorAfterDrag].
+	// While treeAutoFit is on it is DERIVED from the tree's own content
+	// instead (autoFitSidebar, called from draw) — the drag is what turns
+	// that off, since the two can't both own the number.
 	sidebarWidth int
+
+	// treeAutoFit lets the sidebar size itself to the file tree's longest
+	// row whenever the editor can spare the columns. Persisted as
+	// "treeautofit" (default on); dragging the splitter writes it off.
+	// See treeautofit.go.
+	treeAutoFit bool
 
 	clipBuf string
 	// fileClipPath is the absolute path armed by a Copy file/folder
@@ -1425,6 +1440,7 @@ func (a *App) loadUserConfig() {
 		a.tree.IconsEnabled = icons.Resolve(cfg.Icons)
 		a.tree.ExecMarks = cfg.ExecMarks
 	}
+	a.treeAutoFit = cfg.TreeAutoFit
 	a.autoSaveEnabled = cfg.AutoSave
 	a.autoSaveDelay = cfg.AutoSaveDelay
 	a.wordHLEnabled = cfg.WordHL
@@ -2797,11 +2813,19 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// panel reshapes live as the user drags. The width the mouse implies
 	// depends on which edge the block hugs.
 	if leftDown && a.dragMode == "sidebar" {
+		want := x + 1
 		if a.treeOnRight() {
-			a.resizeSidebar(a.width - x)
-		} else {
-			a.resizeSidebar(x + 1)
+			want = a.width - x
 		}
+		// A drag is the user stating a width, so it takes ownership of the
+		// number back from auto-fit (which would otherwise overwrite it on
+		// the next expand). Gated on the splitter actually MOVING: a press
+		// with a pixel of jitter isn't a statement about anything, and this
+		// writes a preference to disk.
+		if want != a.sidebarWidth {
+			a.lockTreeAutoFit()
+		}
+		a.resizeSidebar(want)
 		return
 	}
 
@@ -4147,6 +4171,11 @@ func (a *App) draw() {
 	}
 
 	if a.sidebarShown {
+		// Auto-fit first: it may change sidebarWidth, and every rect
+		// helper below (tab bar, editor, panels, splitter) reads that. A
+		// width derived after the fact would be one frame late — the row
+		// the user just expanded would sit truncated until the next event.
+		a.autoFitSidebar()
 		// Re-sync the active-file highlight from the current tab every
 		// draw so the bold row stays correct no matter which path
 		// switched tabs (open, tab-bar click, close, nav back/forward).

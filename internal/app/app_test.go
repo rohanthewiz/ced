@@ -88,8 +88,15 @@ func newTestApp(t *testing.T, root string) *App {
 	// built by hand here, so the zero value would put every test in a
 	// state the product never ships in.
 	a.sessionEnabled = true
-	// Same reason: a zero autoSaveDelay would arm a timer that fires
-	// immediately. autoSaveInterval's fallback also covers this, so the
+	// treeAutoFit deliberately stays OFF here (the zero value) even though
+	// the product ships it on: with it on, every draw would re-derive
+	// sidebarWidth under the tests that pin sidebar geometry, and a
+	// splitter-drag test would persist the resulting lock into the
+	// developer's real config.json. The auto-fit tests turn it on
+	// themselves, with XDG_CONFIG_HOME pointed at a temp dir.
+	//
+	// Same reason as sessionEnabled above: a zero autoSaveDelay would arm a
+	// timer that fires immediately. autoSaveInterval's fallback also covers this, so the
 	// two together mean no test can ever depend on the zero value.
 	a.autoSaveDelay = defaultAutoSaveDelay
 	a.setActiveFolder(tree.Root.Path)
@@ -1937,7 +1944,7 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 // every section expanded: the pinned top zone contributes two rows (the
 // command palette + the expand/collapse-all toggle), fourteen collapsible
 // groups each contribute a header row (14) plus their action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 137 total. The
+// Quit renders headerless behind a divider (its 1 row) — 138 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1945,16 +1952,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 143 {
-		t.Errorf("modalHeight = %d, want 143", h)
+	if h != 144 {
+		t.Errorf("modalHeight = %d, want 144", h)
 	}
-	if got := len(items); got != 137 {
-		t.Errorf("row count = %d, want 137 (2 top-zone + 121 group actions + 14 headers)", got)
+	if got := len(items); got != 138 {
+		t.Errorf("row count = %d, want 138 (2 top-zone + 122 group actions + 14 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (140) — headers separate the
+	// one setting off the headerless Quit group (141) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 140}
+	wantDiv := []int{2, 5, 141}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2282,8 +2289,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 146 { // 143 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 146", h)
+	if h != 147 { // 144 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 147", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

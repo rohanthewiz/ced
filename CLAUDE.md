@@ -129,8 +129,9 @@ internal/app/gitstatusreport.go git's own `git status` report, on demand, in the
 internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PTY)
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
+internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, locked by a drag
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
+internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
 internal/theme/theme.go       Theme struct (tcell colors) + Default() fallback
 internal/theme/palette.go     Canonical color keys + the 8-core derivation table
@@ -2391,7 +2392,56 @@ dividers `[2, 5, 140]`. **Adding a menu row means updating those pins**
 ### Sidebar splitter drag
 A drag is detected when a press lands at exactly `x == splitterX()`.
 Min widths: `minSidebarWidth = 18`, `minEditorAfterDrag = 40`. Don't
-let the editor shrink below that.
+let the editor shrink below that. A drag that MOVES the splitter also
+turns auto-fit off — see the next section for why.
+
+### File-tree auto-fit (app/treeautofit.go + filetree's ContentWidth)
+The sidebar sizes itself to the tree's longest row, so expanding
+`internal/app/` stops truncating the names inside it. House rules:
+
+- **`sidebarWidth` is a preference OR derived, never both.** That's the
+  tension the whole feature turns on: auto-fit re-derives the width every
+  frame (`autoFitSidebar`, called at the top of `draw` **before any rect
+  helper is read** — a width derived afterwards paints the row the user
+  just expanded truncated and leaves it that way until the next event),
+  and a splitter drag states one. So a drag that actually MOVES the
+  splitter calls `lockTreeAutoFit`: auto-fit off, persisted, with the
+  flash naming the ≡ row that undoes it. Without that handoff the next
+  expanded folder silently overwrites the drag, which reads as the
+  splitter being broken rather than as a feature. The lock is gated on
+  the width actually changing — a press with a pixel of jitter is not a
+  statement about anything, and this writes to disk.
+- **Grows only, and only into room the editor won't miss.** The floor is
+  `defaultSidebarWidth` (a panel that also shrink-wrapped a shallow tree
+  would move the editor twice per expand/collapse, and 30 columns is the
+  width ced ships with — nobody wants it back); the cap is
+  `autoFitMinEditor` (80 — deliberately far above `minEditorAfterDrag`'s
+  40, because a DRAG is the user asking for a narrow editor while this
+  happens on its own), further capped to `1/autoFitMaxShareDen` of the
+  band, since the editor's floor alone would hand a 240-column terminal's
+  tree 160 columns. Too narrow for the editor's floor at the DEFAULT
+  sidebar width → auto-fit does nothing at all. That last clause is the
+  "if there is reasonable room" half of the feature.
+- **The measurement shares the renderer's row construction.**
+  `nodeRowSegments` is the ONE place a row's text is built, read by both
+  `drawNodeRow` and `Tree.ContentWidth`; a second copy would drift and the
+  fitted width would be a column or two wrong in exactly the cases that
+  matter (deep nesting, icons on, an executable's `*`). It counts RUNES
+  because `drawString` advances one column per rune, so measure and paint
+  make the same assumption about glyph width.
+- **It measures every expanded row, NOT the scroll window** — the one
+  place the word-highlighter's window-scoping rule is deliberately not
+  followed. A window-scoped measure makes the panel breathe as the user
+  wheels past a long filename, shifting the editor's columns for a gesture
+  that changed nothing about the tree. Expanding is deliberate; scrolling
+  isn't. The walk is bounded in practice because the tree is lazy — rows
+  exist only for folders somebody opened by hand.
+- `"treeautofit"` is the persisted key (default on) with a ≡ **View** row
+  under the tree rows it governs, and no leader key (a once-a-session
+  action, and the flat table is out of letters). `newTestApp` leaves it
+  OFF: on, every draw would re-derive `sidebarWidth` under the tests that
+  pin sidebar geometry, and a splitter-drag test would persist the lock
+  into the developer's real config.json.
 
 ## Build / run
 

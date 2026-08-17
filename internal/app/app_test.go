@@ -32,6 +32,7 @@ import (
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/format"
+	"github.com/rohanthewiz/ced/internal/gonotes"
 	"github.com/rohanthewiz/ced/internal/icons"
 	"github.com/rohanthewiz/ced/internal/mcp"
 	"github.com/rohanthewiz/ced/internal/theme"
@@ -131,6 +132,15 @@ func newTestApp(t *testing.T, root string) *App {
 	// and the zero value would have every test asserting on the
 	// opted-out shape of a feature nobody opted out of.
 	a.commitTrailer = true
+	// The GoNotes capture posts to a server outside ced entirely, so
+	// pin the seam at a refusal: without it a developer running GoNotes
+	// on the default port would have every test that exercises the
+	// gesture write fixture text into their real notes database.
+	prevNotes := gonotesCreate
+	gonotesCreate = func(gonotes.Note) (gonotes.Result, error) {
+		return gonotes.Result{}, errors.New("gonotes disabled in tests")
+	}
+	t.Cleanup(func() { gonotesCreate = prevNotes })
 	// Same paranoia for MCP: nothing in the app auto-connects today, but
 	// a stub launcher means a future eager path can't spawn whatever
 	// servers the developer has declared in ~/.config/ced/mcp.json.
@@ -1942,9 +1952,9 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 
 // TestMenuLayout_NoCustomActions pins down the baseline geometry with
 // every section expanded: the pinned top zone contributes two rows (the
-// command palette + the expand/collapse-all toggle), fourteen collapsible
-// groups each contribute a header row (14) plus their action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 138 total. The
+// command palette + the expand/collapse-all toggle), fifteen collapsible
+// groups each contribute a header row (15) plus their action rows, and
+// Quit renders headerless behind a divider (its 1 row) — 141 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -1952,16 +1962,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 144 {
-		t.Errorf("modalHeight = %d, want 144", h)
+	if h != 147 {
+		t.Errorf("modalHeight = %d, want 147", h)
 	}
-	if got := len(items); got != 138 {
-		t.Errorf("row count = %d, want 138 (2 top-zone + 122 group actions + 14 headers)", got)
+	if got := len(items); got != 141 {
+		t.Errorf("row count = %d, want 141 (2 top-zone + 124 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (141) — headers separate the
+	// one setting off the headerless Quit group (144) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 141}
+	wantDiv := []int{2, 5, 144}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2289,8 +2299,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 147 { // 144 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 147", h)
+	if h != 150 { // 147 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 150", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

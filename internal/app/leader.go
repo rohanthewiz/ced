@@ -185,7 +185,7 @@ func leaderBindings() []leaderBinding {
 		// touches lives one rune deeper: the panel itself, context, the
 		// model and backend pickers, skills, and MCP tools.
 		{key: 'a', sub: aiLeaderBindings(), name: "AI", label: "AI…",
-			hint: "AI  c chat · s skills · a attach · f file · m model · b backend · t tools"},
+			hint: "AI  c chat · z summarize · n note · s skills · a attach · f file · m model · b backend · t tools"},
 		// 'x' for eXtensions — the plugin namespace, and the codebase's
 		// only DYNAMIC prefix: its sub-table is whatever leader keys the
 		// user's installed plugins asked for (plugins.go).
@@ -356,6 +356,17 @@ func aiLeaderBindings() []leaderBinding {
 		// 'c' for chat — focus-or-toggle, the same gesture Esc-` uses for
 		// the terminal, so an open-but-unfocused panel is one key away.
 		{key: 'c', action: (*App).leaderChat, label: "Chat"},
+		// 'z' for summariZe — the letter the word offers once 's' is
+		// spoken for by skills and 'm' by the model picker. Distinctive
+		// enough to remember, and it collides with the top-level undo
+		// alias on purpose: the prefix already said which world you're
+		// in (summarize.go).
+		{key: 'z', action: (*App).menuSummarize, label: "Summarize"},
+		// 'n' for note — the capture-to-GoNotes gesture (gonotes.go). It
+		// is in the AI namespace rather than the flat table for two
+		// reasons: the flat table's 'n' is New file, and the title the
+		// note needs is the one thing here the agent can draft.
+		{key: 'n', action: (*App).menuSendToNotes, label: "Send to GoNotes"},
 		{key: 's', action: (*App).menuUseSkill, label: "Use skill"},
 		// 'a' doubles the prefix: Esc-a-a is "attach what I'm looking
 		// at", the namespace's most-reached-for verb, and a doubled

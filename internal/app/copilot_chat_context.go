@@ -271,6 +271,18 @@ func (a *App) chatAttachTab(path string) *editor.Tab {
 // binary) are the caller's to surface — a failed attachment must be
 // visible, not silently dropped from a prompt the user thinks carries it.
 func (a *App) chatAttachContent(at chatAttach) (body string, truncated bool, err error) {
+	return a.attachContent(at, chatAttachMaxBytes)
+}
+
+// attachContent is chatAttachContent's body with the cap as a
+// parameter, because a second consumer resolves the SAME thing to a
+// different budget: a note capture (gonotes.go) sends the text to a
+// database rather than into a prompt turn, so it pays no token cost and
+// can carry a whole file. Everything else about the resolution is
+// identical — buffer before disk, whole-line ranges, the binary refusal
+// — and two copies of that would drift exactly where a user would
+// notice (unsaved edits reaching one surface and not the other).
+func (a *App) attachContent(at chatAttach, limit int) (body string, truncated bool, err error) {
 	var lines []string
 	if t := a.chatAttachTab(at.path); t != nil {
 		lines = t.Buffer.Lines
@@ -298,8 +310,8 @@ func (a *App) chatAttachContent(at chatAttach) (body string, truncated bool, err
 		lines = lines[from:to]
 	}
 	body = strings.Join(lines, "\n")
-	if len(body) > chatAttachMaxBytes {
-		return truncateAtLine(body, chatAttachMaxBytes), true, nil
+	if limit > 0 && len(body) > limit {
+		return truncateAtLine(body, limit), true, nil
 	}
 	return body, false, nil
 }

@@ -556,16 +556,32 @@ func (a *App) chatAgentTextSince(mark int) string {
 // is the difference between Enter committing a message and Enter
 // committing a markdown fence.
 func commitSubject(text string) string {
+	return agentOneLine(text, "commit message:")
+}
+
+// agentOneLine is commitSubject's body with the throat-clearing labels
+// as a parameter. A second caller needs exactly this reduction against a
+// different label — the GoNotes note title (gonotes.go) — and the
+// failure it prevents is the same one: a single-line input field is
+// about to receive whatever the agent felt like writing, and a fenced
+// block or a "Title:" prefix would be committed or saved verbatim.
+//
+// Labels must be given lowercase; the match is case-insensitive because
+// the capitalisation is the agent's whim, not information.
+func agentOneLine(text string, labels ...string) string {
 	for _, ln := range strings.Split(text, "\n") {
 		ln = strings.TrimSpace(ln)
 		if ln == "" || strings.HasPrefix(ln, "```") {
 			continue
 		}
-		if i := strings.Index(strings.ToLower(ln), "commit message:"); i >= 0 {
-			ln = strings.TrimSpace(ln[i+len("commit message:"):])
-			if ln == "" {
-				continue
+		for _, label := range labels {
+			if i := strings.Index(strings.ToLower(ln), label); i >= 0 {
+				ln = strings.TrimSpace(ln[i+len(label):])
+				break
 			}
+		}
+		if ln == "" {
+			continue
 		}
 		ln = strings.TrimLeft(ln, "-*• \t")
 		ln = strings.Trim(ln, "`")

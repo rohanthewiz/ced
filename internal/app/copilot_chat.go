@@ -227,6 +227,13 @@ type chatState struct {
 	// see gitcommitmsg.go.
 	commitSuggest *commitSuggestReq
 
+	// noteTitle is the in-flight "suggest a title for this note" turn
+	// (the GoNotes capture's ✦ button), nil when the panel is just
+	// chatting. Same shape and same lifetime as commitSuggest above —
+	// turn-scoped, generation-checked, dies with the connection. See
+	// gonotes.go.
+	noteTitle *noteTitleReq
+
 	// permQueue is the pending session/request_permission requests in
 	// arrival order; the head is what the permission picker shows.
 	// permModal is that picker while it is up — tracked so teardown can
@@ -666,8 +673,10 @@ func (a *App) chatDisconnect() {
 	a.chat.modelPickWanted = false
 	a.chat.embeddedContext = false
 	// A commit-message request belongs to the turn that asked; the next
-	// connection's first answer must not be mistaken for its draft.
+	// connection's first answer must not be mistaken for its draft. Same
+	// for a GoNotes title request (gonotes.go).
 	a.chat.commitSuggest = nil
+	a.chat.noteTitle = nil
 	// modelPref deliberately survives — it's the persisted preference,
 	// re-applied by the next handshake. So do the pending attachments:
 	// they're editor-side context for a message the user hasn't sent
@@ -813,6 +822,7 @@ func (a *App) handleChatTurnDone(e *chatTurnDoneEvent) {
 	if e.err != nil {
 		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: a.chatAgent().name + " chat: " + e.err.Error()})
 		a.chatCommitSuggestDone(e)
+		a.chatNoteTitleDone(e)
 		return
 	}
 	if e.stopReason == "cancelled" {
@@ -822,6 +832,12 @@ func (a *App) handleChatTurnDone(e *chatTurnDoneEvent) {
 	// prompt instead of leaving it as transcript prose — see
 	// gitcommitmsg.go. A no-op for every ordinary turn.
 	a.chatCommitSuggestDone(e)
+	// Same arrangement for a GoNotes capture's title (gonotes.go). The
+	// two are mutually exclusive in practice — each is armed by a
+	// gesture that refuses while a turn is active — but both are
+	// consulted unconditionally so neither can strand a request that
+	// somehow outlived its own turn.
+	a.chatNoteTitleDone(e)
 }
 
 // chatInterrupt is the ⏹ button / the mouse-first stand-in for Ctrl+C:

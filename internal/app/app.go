@@ -472,6 +472,15 @@ func builtinMenuGroups() []menuGroup {
 			{shortcut: "esc a a", action: (*App).menuChatAttachCurrent, enabled: (*App).hasFileTab, labelFor: (*App).chatAttachActionLabel},
 			{label: "Attach file to chat…", shortcut: "esc a f", action: (*App).menuChatAttachFile, enabled: (*App).hasFinder},
 			{action: (*App).menuChatClearAttachments, enabled: (*App).hasChatAttachments, labelFor: (*App).chatClearAttachLabel},
+			// The one READING verb in a group otherwise made of
+			// toggles and pickers (summarize.go). It sits under the
+			// attach rows because it is what those attachments are
+			// for: "put this in front of the model" then "and tell me
+			// what it says". Agent-agnostic like the chat toggle above
+			// it — the group is the editor's AI block, not a Copilot
+			// feature list — and the label names what it will cover,
+			// since a selection changes the question completely.
+			{shortcut: "esc a z", action: (*App).menuSummarize, enabled: (*App).canSummarize, labelFor: (*App).summarizeLabel},
 			// Keyboard twin of the transcript's trailing ⧉ button, for
 			// the same reason the git panel has one: the panel is
 			// mouse-driven, but macOS Terminal can swallow clicks.
@@ -501,6 +510,17 @@ func builtinMenuGroups() []menuGroup {
 			{shortcut: "esc a s", action: (*App).menuUseSkill, enabled: alwaysTrue, labelFor: (*App).skillsMenuLabel},
 			{label: "Open skill…", action: (*App).menuOpenSkill, enabled: (*App).hasSkills},
 			{label: "Reload skills", action: (*App).menuReloadSkills, enabled: alwaysTrue},
+		}},
+		// GoNotes capture (gonotes.go) — the selected text, or the whole
+		// file, saved as a new note in the user's running GoNotes
+		// server. Its own group for the reason MCP, Skills and Plugins
+		// each have one: it is a separate system ced talks to, not a
+		// feature of any subsystem here. The row stays clickable
+		// whatever state that server is in — availability is discovered
+		// by trying, and a row that dimmed whenever GoNotes was
+		// restarted would be wrong exactly when the user asked.
+		{title: "Notes", collapsible: true, items: []menuItemDef{
+			{shortcut: "esc a n", action: (*App).menuSendToNotes, enabled: (*App).canSendToNotes, labelFor: (*App).sendToNotesLabel},
 		}},
 		// Declarative plugins (plugins.go) — the user's own shell
 		// commands bound to menu rows, leader keys, editor events and a
@@ -1656,6 +1676,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handlePluginEditTick(e)
 	case *zipDoneEvent:
 		a.handleZipDone(e)
+	case *gonotesDoneEvent:
+		a.handleGonotesDone(e)
 	case *pasteDoneEvent:
 		a.handlePasteDone(e)
 	case *gitCmdDoneEvent:

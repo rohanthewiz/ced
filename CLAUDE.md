@@ -94,6 +94,9 @@ internal/app/copilot_ghost.go Copilot phase 2: doc sync + inline completions (gh
 internal/app/copilot_chat.go  Copilot phase 3: ACP chat panel (left strip, streaming turns)
 internal/app/chatagent.go     Chat backend registry + ≡ picker (Copilot / Claude Code / Gemini)
 internal/app/copilot_chat_context.go  Chat context: file / selection attachments
+internal/app/summarize.go     AI summarize: selection-or-file, one visible chat turn
+internal/gonotes/gonotes.go   GoNotes v1 REST client: env credentials, shared token cache
+internal/app/gonotes.go       Capture selection/file as a GoNotes note (+ AI-drafted title)
 internal/app/copilot_chat_perm.go     Phase 4: permission prompts + agent fs read/write
 internal/lsp/acp.go           ACP framing (ndjson) + onRequest hook over the same Client
 internal/lsp/ndjson.go        StartNDJSON — generic ndjson process launcher (ACP + MCP), env-aware
@@ -1367,6 +1370,123 @@ context" to "you could go look"; don't add one. House rules:
   current-or-selection, attach-file picker, clear). Attaching opens the
   panel — context you can't see is context you can't trust.
 
+### Summarize with AI (app/summarize.go)
+The AI namespace's one READING verb: what does the selected text — or
+the whole file, when nothing is selected — actually say. Esc-a-z, ≡
+Copilot. House rules:
+
+- **It owns almost nothing, and that is the point.** What text goes out
+  is a `chatAttach`, so the payload comes from the open BUFFER including
+  unsaved edits, is capped with the cut announced, and takes whichever
+  wire shape the agent advertised. Where the answer goes is the chat
+  panel as a normal visible turn (the gitPanelSuggestCommit rule) —
+  **not a modal**: a summary is prose of unknown length the user will
+  read beside the code, scroll, copy and ask a follow-up about, which is
+  a transcript, not a dialog. Whether the agent can answer is
+  `chatUnavailableReason`, surfaced rather than dimmed away. Nothing
+  here claims the answer afterwards; what is left is the target rule and
+  the prompt.
+- **`selectionOrFileTarget` is the SHARED target resolver** — selection
+  beats file, the same narrower-question-wins rule `chatAutoAttachment`
+  follows — and both verbs built on it (this one, the GoNotes capture)
+  go through it, so "the current text" can never mean two things. The
+  verb is a parameter only because the REFUSAL has to name it: "open a
+  saved file" alone reads as a complaint about the editor.
+- **`chatAttachOnce`, not `chatAddAttachment`.** The latter is the
+  user's own attach gesture, so it flashes and opens the panel; here the
+  attachment is machinery serving a verb the user named, and the
+  duplicate case is the COMMON one — with auto-context on (the shipped
+  default) the active file is already synthesized for every turn, so a
+  flash saying so would be noise on the default configuration.
+- **The prompt asks for prose, unlike the commit-message prompt.** That
+  answer had to land in a single-line field, so over-specifying was
+  cheaper than parsing what came back; this one lands in a transcript
+  that word-wraps prose and hard-wraps fenced code. The only real
+  constraints are LENGTH (the panel is a narrow strip) and that the
+  answer DESCRIBE the text rather than review it — "what does this do"
+  is the question, and a list of suggested improvements is a different
+  one the user can now ask as a follow-up, in the panel already open in
+  front of them.
+- Agent-agnostic, like the chat toggle beside it. The ≡ row is in the
+  Copilot group because that group IS the editor's AI block, and its
+  label names what it will cover — a selection changes the question
+  completely, and that has to be visible before a click spends a turn.
+  Leader is **Esc-a-z**: summariZe, the letter the word offers once 's'
+  is skills and 'm' is the model picker.
+
+### GoNotes capture (internal/gonotes + app/gonotes.go)
+The selected text — or the whole file — saved as a new note in the
+user's running GoNotes server, with the title typed or agent-drafted.
+Esc-a-n, ≡ Notes. House rules:
+
+- **THE SELECTION IS THE BODY, VERBATIM.** Nothing is prepended to it: a
+  note is a document the user will open and edit later, and a header ced
+  invented is the first thing they would have to delete. Provenance goes
+  in the note's DESCRIPTION (`ced: <project>/<path>:<lines>`), which is
+  where GoNotes shows a subtitle and where it stays out of the text. The
+  project name is part of it — a bare path means nothing in a notes
+  database fed by a dozen repositories. Every capture is tagged `ced` so
+  the set is findable.
+- **The text comes from the BUFFER** (`attachContent`, shared with the
+  chat attachments — `chatAttachContent` is now the 64KB wrapper over
+  it). You capture what you are looking at, unsaved edits included;
+  saving the stale on-disk copy of a file the user just changed is the
+  one failure here nobody would notice until much later. The note cap is
+  far higher than the chat one because the cost model is different: this
+  text goes to a database, not into a prompt turn, so it pays no tokens.
+- **HTTP, not the database.** GoNotes' bytdb files are SINGLE-WRITER —
+  a second writer is not a race to be careful about, it is a file that
+  won't open — so the server that owns them is the only safe path to
+  them. Same conclusion GoNotes' own TUI reached for its cats-hosted
+  mode. Stdlib only, no SDK, no CGO.
+- **Every knob is an ENVIRONMENT VARIABLE, and they are GoNotes' own**
+  (`GONOTES_URL`, `GONOTES_USER` / `GONOTES_SYNC_USERNAME`,
+  `GONOTES_PASSWORD` / `GONOTES_SYNC_PASSWORD_B64`,
+  `GONOTES_TOKEN_FILE`). A ced config key would be a second place to say
+  the same thing and a second place for it to be wrong, and it would put
+  a credential in a file ced writes. The JWT cache is the SHARED
+  `~/.gonotes/.api_token`, so a user who signed in through the GoNotes
+  TUI is already signed in here; writing it back is best-effort, 0600
+  under a 0700 parent.
+- **One login, one retry, never a loop.** The cached token is tried
+  first (the common case costs no extra round trip) and only a 401
+  spends a login. A wrong password re-sent forever is worse than one
+  visible failure. No credentials at all is `ErrNoCredentials`, which
+  names the variables rather than repeating "unauthorized".
+- **AVAILABILITY IS DISCOVERED BY TRYING.** Nothing probes at startup
+  and the ≡ row never dims on the server's state: GoNotes is a separate
+  process the user starts and stops, so a row that vanished whenever it
+  was restarted would be wrong exactly when the user asked. A failure
+  therefore opens the INFO MODAL rather than flashing — those messages
+  carry the address dialed and the server's own words, and "connection
+  refused" is only actionable once you can read which URL refused.
+  Success is a flash; nothing is lost either way, since the text is
+  still in the buffer.
+- **Nothing saves without an Enter, and the agent is a REASON, not a
+  gate.** The ✦ button sits on the prompt whatever state the agent is in
+  and says why when it can't ask (`commitDraftBlockedReason`, the
+  menuCopilotAuth rule); a drafted title only ever pre-fills the field.
+  The suggestion is a normal visible chat turn claimed by generation +
+  transcript mark (`noteTitleReq`) — the same staleness discipline as
+  the commit draft, and it yields the modal slot to a pending permission
+  prompt for the same reason.
+- **The `[private: off]` chip is on EVERY note prompt**, unlike the
+  commit prompt's trailer chip, which appears only on a draft: privacy
+  is a statement about the TEXT being captured, equally true whoever
+  wrote its title. It is per-invocation (no persisted key) and travels
+  with `noteTitleReq`, so a re-draft doesn't re-arm what the user just
+  switched off. `alt+p` is its chord, `alt+a` the ✦ button's, both named
+  in the hint — a modal owns the keyboard, so the ≡ menu is unreachable
+  from inside a prompt.
+- **`agentOneLine` is the shared reduction** behind `commitSubject` and
+  the note title: a single-line input field is about to receive whatever
+  the agent felt like writing, and a fence or a "Title:" prefix would be
+  saved verbatim. Its own ≡ group ("Notes") for the reason MCP, Skills
+  and Plugins each have one — a separate system ced talks to, not a
+  feature of any subsystem here. `gonotesCreate` is a package var;
+  newTestApp pins it at a refusal so no test run can write fixture text
+  into a developer's real notes database.
+
 ### MCP servers (internal/mcp + app/mcp.go)
 Model Context Protocol support. **One inventory, two consumers** — hold
 onto that and the rest follows:
@@ -2384,8 +2504,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 121 group actions + 14 headers (137), height 143,
-dividers `[2, 5, 140]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 124 group actions + 15 headers (141), height 147,
+dividers `[2, 5, 144]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

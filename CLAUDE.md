@@ -1766,8 +1766,9 @@ the shared part. House rules:
   line past EOF clamps.
 
 ### Git status report (app/gitstatusreport.go)
-The ≡ Git group's "Git status…" row: git's own long-form report, forked on
-demand and shown in the info modal. House rules:
+The ≡ Git group's "Git status…" row — and the same row in the changes
+panel's `Actions ▾` picker: git's own long-form report, forked on demand
+and shown in the info modal. House rules:
 
 - **It exists for what the porcelain snapshot DROPS.** gitstatus.go asks
   `status --porcelain` and keeps two answers — which files changed, and
@@ -1803,6 +1804,14 @@ demand and shown in the info modal. House rules:
   real answer, and it is the one a user suspicious of the tree's colors is
   asking for. No leader key (the flat table is out of letters); the ≡ row
   gets the command palette for free.
+- **The panel's Actions row reuses `menuGitStatus`**, one spelling of the
+  verb (the menuGitCommit precedent). It is the only row in that picker
+  about the REPOSITORY rather than the selection, which is exactly why it
+  belongs there — the panel draws the change set and structurally cannot
+  draw the rest of git's answer. It is the one row NOT subject to the
+  picker's omit-when-it-would-no-op rule: a clean panel is the case where
+  "nothing to commit, working tree clean" is the answer being asked for,
+  so an otherwise-empty Actions list now offers this instead of flashing.
 
 ### Remote open (internal/remote + app/remote.go)
 `ced --remote <file>` hands a file to an instance already running on that

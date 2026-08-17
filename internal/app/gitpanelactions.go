@@ -9,7 +9,8 @@
 // button in the panel header (and the matching ≡ menu row) gathers the
 // ticked files and offers everything that can be done to them — stage,
 // unstage, discard, delete, open, copy paths — plus the commit rows
-// (see gitcommitmsg.go) and the two selection helpers.
+// (see gitcommitmsg.go), git's own status report (gitstatusreport.go),
+// and the two selection helpers.
 //
 // The split of labour with gitpanel.go: that file owns the panel's
 // state, geometry, and pixels; this one owns what the checkboxes are
@@ -238,6 +239,16 @@ func (a *App) gitPanelActionItems(targets []gitPanelFile) []paletteItem {
 	// sends it.
 	if a.hasGitPushTarget() && a.gitBranch != "" {
 		add("Push "+a.gitBranch+"…", (*App).openGitPush)
+	}
+	// The one row here that is about the REPOSITORY rather than about the
+	// selection, which is exactly why it belongs in this list: the panel
+	// draws the change set and structurally cannot draw the rest of git's
+	// answer — a stopped cherry-pick, a detached HEAD, an unpushed branch
+	// with no upstream. It sits at the end of the repo-level block the
+	// commit and push rows already form, and reuses the ≡ row's action so
+	// there is one spelling of the verb (gitstatusreport.go).
+	if a.gitIsRepo {
+		add("Git status…", (*App).menuGitStatus)
 	}
 	if n := a.gitPanelCheckedCount(); n < len(a.gitPanel.files) {
 		add("Select all ("+itoa(len(a.gitPanel.files))+")", (*App).gitPanelSelectAll)

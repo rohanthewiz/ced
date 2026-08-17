@@ -201,9 +201,12 @@ func TestGitPanelActionItems_SelectionRows(t *testing.T) {
 	}
 }
 
-// TestOpenGitPanelActions_EmptyPanelFlashes pins the degenerate case: a
-// clean repo has no files, no index, and nothing to select, so the
-// button must say so rather than opening an empty picker.
+// TestOpenGitPanelActions_EmptyPanelFlashes pins the degenerate case:
+// with no files, no index, nothing to select and no repository, every
+// row is inapplicable, so the button must say so rather than opening an
+// empty picker. (A clean REPO is no longer degenerate — it still offers
+// the status report, which is pinned by
+// TestGitPanelActionItems_StatusRow.)
 func TestOpenGitPanelActions_EmptyPanelFlashes(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.gitPanel.open = true
@@ -214,6 +217,33 @@ func TestOpenGitPanelActions_EmptyPanelFlashes(t *testing.T) {
 	}
 	if a.statusMsg == "" {
 		t.Fatal("empty panel must flash why nothing happened")
+	}
+}
+
+// TestGitPanelActionItems_StatusRow pins the one repo-level read in the
+// list: it is offered in a repository whatever the selection is — even a
+// clean panel with nothing ticked, where "nothing to commit, working
+// tree clean" is precisely the answer being asked for — and never
+// outside one, where there is no status to report.
+func TestGitPanelActionItems_StatusRow(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+
+	// A clean panel: no files, no ticks, no index.
+	if got := actionLabels(a.gitPanelActionItems(nil)); !strings.Contains(got, "Git status…") {
+		t.Errorf("clean panel missing the status row: %s", got)
+	}
+
+	// And alongside the per-file verbs when there IS a selection.
+	files := []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
+	a.gitPanel.files = files
+	if got := actionLabels(a.gitPanelActionItems(files)); !strings.Contains(got, "Git status…") {
+		t.Errorf("selection rows missing the status row: %s", got)
+	}
+
+	a.gitIsRepo = false
+	if got := actionLabels(a.gitPanelActionItems(files)); strings.Contains(got, "Git status") {
+		t.Errorf("outside a repo the status row must not appear: %s", got)
 	}
 }
 

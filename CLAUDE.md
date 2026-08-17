@@ -125,6 +125,7 @@ internal/app/cats_glue.go     Tier detection, the state reporter, sibling-agent 
 internal/app/gitcommitmsg.go  Commit the panel's selection + agent-drafted messages
 internal/app/gitlog.go        Git log panel: commit list + `git show` detail (Esc-L)
 internal/app/gitlogactions.go Git log verbs: cherry-pick, revert, reset, branch/tag, copies
+internal/app/gitstatusreport.go git's own `git status` report, on demand, in the info modal
 internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PTY)
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
@@ -1764,6 +1765,45 @@ the shared part. House rules:
   confined to rootDir). Best-effort: history may have moved on, so a
   line past EOF clamps.
 
+### Git status report (app/gitstatusreport.go)
+The ≡ Git group's "Git status…" row: git's own long-form report, forked on
+demand and shown in the info modal. House rules:
+
+- **It exists for what the porcelain snapshot DROPS.** gitstatus.go asks
+  `status --porcelain` and keeps two answers — which files changed, and
+  how far HEAD is from its upstream — which is what the tree colors, the
+  changes panel and the status bar are built from. The narrative header is
+  everything else: the sequencer's state (a stopped cherry-pick, a rebase
+  in progress, the still-unmerged paths), what HEAD detached from, whether
+  there is an upstream at all. Re-deriving that would mean parsing four
+  more surfaces. Hence long format, deliberately NOT `--short`: the short
+  form IS the panel's list, so a row producing it would say nothing new.
+- **Two `-c` overrides, both about the surface it lands on.**
+  `color.status=false` because a user with `color.ui = always` would get
+  raw SGR drawn as text in a modal that parses no ANSI;
+  `advice.statusHints=false` because those `(use "git restore …")` lines
+  name shell commands for verbs that are ROWS IN THIS VERY MENU, and the
+  info modal doesn't scroll, so every advice line costs a line of report.
+- **The body is capped to the WINDOW and the cut is named.** openInfo
+  draws every line it is handed and `centeredRect` doesn't clamp, so rows
+  past the bottom would be painted off-screen and lost. The remainder goes
+  in the last surviving row (the project-search rule): a silently short
+  status reads exactly like a clean one, which is the single wrong answer
+  a status can give.
+- **An arriving report DECLINES an occupied modal slot** and flashes
+  instead. The round trip is milliseconds, so what this guards is not a
+  dialog the user opened meanwhile but one that arrived unprompted (a chat
+  permission request, a disk-conflict warning) — openModal replaces rather
+  than refuses, so stealing the slot would silently drop that modal's
+  pending reply. A report is re-runnable; a dropped permission answer
+  leaves an agent stuck.
+- Failures are SURFACED (the write-side contract in gitcmd.go) rather than
+  swallowed the way the background snapshot's are — the user asked for
+  this one. Enabled on any repo, clean included: "nothing to commit" is a
+  real answer, and it is the one a user suspicious of the tree's colors is
+  asking for. No leader key (the flat table is out of letters); the ≡ row
+  gets the command palette for free.
+
 ### Remote open (internal/remote + app/remote.go)
 `ced --remote <file>` hands a file to an instance already running on that
 project; `ced --wait <file>` does the same and blocks until the editor is
@@ -2334,8 +2374,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 106 group actions + 14 headers (122), height 128,
-dividers `[2, 5, 125]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 121 group actions + 14 headers (137), height 143,
+dividers `[2, 5, 140]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

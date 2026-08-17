@@ -301,6 +301,13 @@ func builtinMenuGroups() []menuGroup {
 			// clicks.
 			{shortcut: "esc A", action: (*App).menuToggleBlame, enabled: (*App).hasGitRepo, labelFor: (*App).blameToggleLabel},
 			{label: "Blame this line…", action: (*App).menuBlameCommit, enabled: (*App).hasGitRepo},
+			// git's own report (gitstatusreport.go). It opens the
+			// repo-level block because it is the read those verbs act on
+			// — and it is the only surface that carries what the tree
+			// colors, the changes panel and the status bar all drop: what
+			// the sequencer is in the middle of, and what a bare commit
+			// would record.
+			{label: "Git status…", action: (*App).menuGitStatus, enabled: (*App).hasGitStatusReport},
 			{label: "Stage file", action: (*App).menuGitStageFile, enabled: (*App).hasStageableFile},
 			{label: "Unstage file", action: (*App).menuGitUnstageFile, enabled: (*App).hasUnstageableFile},
 			{label: "Commit staged", action: (*App).menuGitCommit, enabled: (*App).hasGitStaged},
@@ -1637,6 +1644,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handlePasteDone(e)
 	case *gitCmdDoneEvent:
 		a.handleGitCmdDone(e)
+	case *gitStatusReportEvent:
+		a.handleGitStatusReport(e)
 	case *gitPanelDiffEvent:
 		a.handleGitPanelDiff(e)
 	case *gitLogShowEvent:

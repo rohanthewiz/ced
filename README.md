@@ -78,6 +78,16 @@ The goals, in order:
   Installing an agent's binary is the whole opt-in; without one the
   editor never mentions AI. See
   [AI features](#ai-features-chat-agents--copilot-completions).
+- **Summarize what you're reading** — highlight a region (or nothing, for
+  the whole file) and `Esc a z` asks your chat agent what it says. The
+  answer streams into the panel beside the code, so you can scroll it,
+  copy it, and ask the obvious follow-up. See
+  [Summarize](#10-summarize-what-youre-reading).
+- **Send to [GoNotes](https://github.com/rohanthewiz/gonotes)** — the
+  selection (or the whole file) saved as a new note in your running
+  GoNotes server, with a title you type or one the agent drafts. Reuses
+  the credentials GoNotes' own tools already use; nothing to configure if
+  you've signed in once. See [Send to GoNotes](#send-to-gonotes).
 - **MCP servers** — declare Model Context Protocol servers once in
   `~/.config/ced/mcp.json` (the same format Claude Desktop uses) and
   they're handed to whichever chat agent you run, plus browsable and
@@ -258,6 +268,8 @@ seconds to pick one.
 | Combo       | Action                          |
 | ----------- | ------------------------------- |
 | `Esc a c`   | Chat panel (focus, or toggle)   |
+| `Esc a z`   | Summarize selection / file      |
+| `Esc a n`   | Send to GoNotes as a note       |
 | `Esc a s`   | Use skill in chat               |
 | `Esc a a`   | Attach current file / selection |
 | `Esc a f`   | Attach file…                    |
@@ -1091,6 +1103,37 @@ Notes:
 - The pickers rescan every time you open them, so a skill you just wrote
   is already in the list.
 
+### 10. Summarize what you're reading
+
+**≡ → Copilot → Summarize…**, or `Esc a z`.
+
+The one *reading* verb in the AI menu: it asks whichever agent you're
+running what the code in front of you actually says.
+
+**Selection beats file.** Highlight a region and it summarizes those
+lines; highlight nothing and it takes the whole file. The menu row tells
+you which before you click it:
+
+```
+Summarize main.go…                 # nothing selected
+Summarize selection (24 lines)…    # a region highlighted
+```
+
+The answer arrives as a **normal chat turn** in the panel — not a popup.
+That's deliberate: a summary is prose of unknown length that you'll want
+to read beside the code, scroll back through, copy out, and ask the
+obvious follow-up about ("what calls that?"). All of which the panel
+already does, and a dialog doesn't.
+
+What goes out is what you're looking at, **including unsaved edits** —
+the same rule chat attachments follow, so a summary is never of the
+stale copy on disk. The prompt asks for a description, not a review; if
+you want the review, ask for it as a follow-up in the panel that's now
+open in front of you.
+
+If the agent is still starting up, the request is queued and sent the
+moment it's ready — you don't have to press the key twice.
+
 ### Turning it off
 
 Every switch lives in the `≡ → Copilot` menu and persists to
@@ -1125,6 +1168,89 @@ actually install a binary and sign in. Note that `"copilot": "off"` is a
 kill switch for **GitHub's binary only**: it stops the completions
 sidecar and the Copilot chat backend, but Claude Code and Gemini are
 gated purely by their binary being on `$PATH`.
+
+## Send to GoNotes
+
+[GoNotes](https://github.com/rohanthewiz/gonotes) is a self-hosted
+note-taking app — markdown notes with categories, tags and full-text
+search, in a browser or a terminal UI. ced can drop the text you're
+looking at straight into it.
+
+**≡ → Notes → Send … to GoNotes…**, or `Esc a n`.
+
+**The selection is the note.** Highlight a region and that text becomes
+the note's body, verbatim — nothing prepended, nothing wrapped around
+it. Highlight nothing and you get the whole file. Where it came from
+(project, path, line range) goes in the note's *description* instead, so
+the body stays clean enough to edit later, and every capture is tagged
+`ced` so the set is findable.
+
+A prompt asks for the title, pre-filled with something usable already:
+
+```
+┌─ New GoNotes note ───────────────────────────────────────────┐
+│ title   ·   alt+a = ✦ AI   ·   alt+p = private               │
+│ internal/app/find.go:120-148                                 │
+│                          [private: off]  [ ✦ AI ]  OK Cancel │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- **`[ ✦ AI ]`** (or `alt+a`) hands the text to your chat agent and asks
+  it to name the note. The answer only ever *pre-fills* this field —
+  nothing is saved until you press Enter — and the request is a normal
+  visible turn in the chat panel, so you can watch it and stop it.
+- **`[private: off]`** (or `alt+p`) routes the note into GoNotes'
+  private database, which is encrypted at rest when you've set
+  `GONOTES_ENCRYPTION_KEY`. It's a per-note decision, not a setting.
+
+Like the summarize verb, the body comes from your **buffer**, unsaved
+edits included.
+
+### Setup
+
+ced talks to a **running GoNotes server** over its REST API — not to the
+database files, which are single-writer and belong to whatever process
+has them open. So: start GoNotes (or the macOS app), and ced will find
+it on `http://localhost:8444`.
+
+Credentials are the **same environment variables GoNotes' own tools
+read**, so there's nothing ced-specific to configure:
+
+| Variable | Meaning |
+| -------- | ------- |
+| `GONOTES_URL` | Server address. Default `http://localhost:8444`. |
+| `GONOTES_USER` | Username (`GONOTES_SYNC_USERNAME` also accepted). |
+| `GONOTES_PASSWORD` | Password (`GONOTES_SYNC_PASSWORD_B64` also accepted). |
+| `GONOTES_TOKEN_FILE` | JWT cache. Default `~/.gonotes/.api_token`. |
+
+**If you've signed in once with the GoNotes TUI, you're already signed
+in here** — the token cache is shared. Otherwise export the username and
+password and ced will log in on the first capture and cache the token
+for the rest.
+
+There is no ced config key for any of this, deliberately: a second place
+to say the same thing is a second place for it to be wrong, and your
+password has no business in a file ced writes.
+
+### When it doesn't work
+
+ced never pings GoNotes in the background and the menu row never dims —
+the server is a separate process you start and stop, so a row that
+vanished whenever you restarted it would be wrong exactly when you asked
+for it. Instead, a failed send opens a dialog with the reason and the
+address that was tried:
+
+```
+Could not save the note.
+
+GoNotes at http://localhost:8444: connection refused
+
+Server: http://localhost:8444  (override with GONOTES_URL)
+```
+
+Nothing is lost when that happens — the text is still in your buffer.
+The usual causes are the server not running, or no credentials, which
+says so by name and tells you which variables to set.
 
 ## Themes
 
@@ -1205,6 +1331,7 @@ nothing else: you get one warning, and the rest of the registry loads.
 │   ├── lsp/                  # JSON-RPC client (gopls, Copilot sidecar, ACP chat, MCP)
 │   ├── mcp/                  # MCP inventory (mcp.json) + stdio client
 │   ├── skills/               # SKILL.md inventory (~/.claude/skills et al)
+│   ├── gonotes/              # GoNotes REST client (send a selection as a note)
 │   ├── clipboard/            # OSC 52 clipboard with tmux passthrough
 │   ├── customactions/        # Loader for ~/.config/ced/actions.json
 │   ├── format/               # Format-on-save config + trust store

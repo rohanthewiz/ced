@@ -135,9 +135,19 @@ func (a *App) centeredRect(w, h int) (x, y, ww, hh int) {
 // label it can ever show — a click target that resizes as you toggle it
 // slides out from under the pointer, the same rule that right-anchors
 // the push dialog's Force button.
+//
+// key is the extra's KEYBOARD twin, fired as Alt+<key> while the prompt
+// has the keyboard. Every mouse affordance in this editor owes one
+// (macOS Terminal + tmux swallows clicks), and a prompt cannot borrow
+// the ≡ menu for it — the modal owns the keyboard, so the menu is
+// unreachable from here. Alt is safe for exactly the find bar's reason:
+// this surface consumes the keystroke, so handleKey's Alt+rune leader
+// branch never sees it, including in tmux where "Esc a" arrives folded
+// as Alt+a. Zero means no chord.
 type promptExtra struct {
 	label func(*App) string
 	width int
+	key   rune
 	run   func(*App)
 }
 
@@ -207,9 +217,13 @@ func (m *promptModal) submit(a *App) {
 }
 
 // handleKey processes keyboard input while the prompt modal is open:
-// Enter submits; Esc cancels; everything else is standard single-line
-// editing handled by the shared textField.
+// Enter submits; Esc cancels; Alt+<key> fires the matching extra;
+// everything else is standard single-line editing handled by the shared
+// textField.
 func (m *promptModal) handleKey(a *App, ev *tcell.EventKey) {
+	if ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune && m.fireExtraKey(a, ev.Rune()) {
+		return
+	}
 	switch ev.Key() {
 	case tcell.KeyEsc:
 		a.closeModal()
@@ -218,6 +232,23 @@ func (m *promptModal) handleKey(a *App, ev *tcell.EventKey) {
 	default:
 		m.field.handleKey(ev)
 	}
+}
+
+// fireExtraKey runs the extra bound to r, reporting whether it consumed
+// the keystroke. Deliberately NOT gated on extraRects: a chord cannot
+// mislead the way a truncated button would, so an extra the terminal is
+// too narrow to DRAW is still reachable from the keyboard — which is the
+// one place the narrow-terminal degradation costs nothing.
+func (m *promptModal) fireExtraKey(a *App, r rune) bool {
+	for _, e := range m.extras {
+		if e.key != 0 && e.key == r {
+			if e.run != nil {
+				e.run(a)
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // buttons returns the Cancel / OK button rects — the one geometry source

@@ -375,13 +375,26 @@ func TestCommitPromptAIButton(t *testing.T) {
 		t.Fatal("the extra button belongs right of OK")
 	}
 
-	// With no agent the prompt is exactly what it always was.
+	// A dead agent does NOT take the button away — it answers with a
+	// reason instead. A vanished affordance is a dead end: the user has
+	// nothing to click and nothing telling them what to install.
 	a.closeModal()
 	a.chat.dead = true
 	a.openCommitPrompt(a.gitPanel.files, "")
 	pm = a.modal.(*promptModal)
-	if len(pm.extras) != 0 || len(pm.extraRects(a)) != 0 {
-		t.Fatal("no agent, no button")
+	if len(pm.extras) == 0 || len(pm.extraRects(a)) == 0 {
+		t.Fatal("a dead agent should still leave the ✦ button on the row")
+	}
+	pm.field.insertString("half-typed")
+	pm.extras[0].run(a)
+	if a.modal != pm {
+		t.Fatalf("a refusal closed the prompt (modal = %T) and lost the message", a.modal)
+	}
+	if a.statusMsg == "" {
+		t.Fatal("the refusal said nothing — the whole point of keeping the button")
+	}
+	if got := pm.field.String(); got != "half-typed" {
+		t.Errorf("field = %q, want the typed message untouched", got)
 	}
 }
 

@@ -350,6 +350,26 @@ func (a *App) chatReady() bool {
 	return a.chat.client != nil && !a.chat.dead && a.chat.sessionID != ""
 }
 
+// chatUnavailableReason says why the chat agent cannot answer right
+// now, "" when it can. ONE spelling of that sentence, because more than
+// one surface has to say it: the panel opener, and any action that
+// OFFERS the agent and therefore owes a reason rather than a vanished
+// affordance (the menuCopilotAuth rule — a dead end is worse than a no).
+//
+// It reports on what is KNOWN, so a caller that wants an honest answer
+// about a binary nobody has looked for yet calls chatEnsureStarted
+// first: a missing binary is only discovered by trying.
+func (a *App) chatUnavailableReason() string {
+	if !a.chatAgentEnabled() {
+		return "Copilot is disabled — use ≡ → Enable Copilot first"
+	}
+	if a.chat.dead {
+		def := a.chatAgent()
+		return def.name + " chat unavailable — install " + def.binary + " on PATH, then " + chatAgentRetryHint
+	}
+	return ""
+}
+
 // chatEnsureStarted kicks off the async ACP agent start: spawn the
 // active backend's binary (chatagent.go), run the ACP initialize
 // handshake, and open a session. Missing binary marks the integration
@@ -1322,14 +1342,16 @@ func (a *App) leaderChat() {
 // can't see would leave the user with no way to know it worked.
 // Idempotent: an already-open panel just takes focus back.
 func (a *App) chatOpenPanel() {
-	if !a.chatAgentEnabled() {
-		a.flash("Copilot is disabled — use ≡ → Enable Copilot first")
+	if why := a.chatUnavailableReason(); why != "" {
+		a.flash(why)
 		return
 	}
 	a.chatEnsureStarted()
-	if a.chat.dead {
-		def := a.chatAgent()
-		a.flash(def.name + " chat unavailable — install " + def.binary + " on PATH, then " + chatAgentRetryHint)
+	// Asked again: starting is what DISCOVERS a missing binary, so the
+	// first attempt on a machine without the agent installed only has an
+	// honest answer after it.
+	if why := a.chatUnavailableReason(); why != "" {
+		a.flash(why)
 		return
 	}
 	a.chat.open = true

@@ -1702,7 +1702,33 @@ rules:
   changes length; the target must not). The modal WIDENS to carry them
   (`promptModal.width`) — and refuses to on a terminal too narrow,
   where `extraRects` sheds extras from the left instead of painting a
-  truncated click target.
+  truncated click target. Each extra carries an **Alt chord**
+  (`promptExtra.key` → `fireExtraKey`: `alt+a` drafts, `alt+t` flips the
+  chip), safe for the find bar's reason — the modal consumes the
+  keystroke, so handleKey's Alt+rune leader branch never sees it, tmux's
+  folded "Esc a" included. It is not optional garnish: the ≡ menu, where
+  every other keyboard twin lives, is unreachable from a surface that
+  owns the keyboard, so without the chord these buttons would be
+  mouse-only on the one terminal that eats clicks. The chord fires even
+  when the button was SHED for width — a key can't lie about its target
+  the way a truncated button can — and `commitPromptHint` names it in
+  the subtitle, the prompt's only discovery surface.
+- **AGENT AVAILABILITY IS A REASON, NOT A GATE.** The ✦ button sits on
+  every commit prompt in a repo, and the Suggest rows on every change,
+  whatever state the agent is in; `commitDraftBlockedReason` (over
+  `chatUnavailableReason`, the one spelling shared with
+  `chatOpenPanel`) is what says no. That's the menuCopilotAuth rule, and
+  three things force it here: a verdict of "not installed" is only
+  DISCOVERED by starting the agent, so hiding the button pre-emptively
+  hides it from the very machine that needs the message most; a user
+  whose configured backend has no binary on PATH (`"chatagent"` naming
+  an agent they never installed) otherwise gets a commit dialog with no
+  AI affordance and nothing at all to explain the absence; and the
+  reason names the binary, which the absence cannot. The refusal is
+  checked BEFORE the modal closes — a no must not cost the user the
+  message they had already typed. `canSuggestCommitMsg` is therefore
+  down to the one question that makes the ACTION meaningless rather than
+  merely unavailable: is this a repository.
 
 ### Git log panel (app/gitlog.go + gitlogactions.go)
 A JetBrains-style history browser (Esc-L) in the SAME bottom strip as

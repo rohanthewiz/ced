@@ -107,13 +107,24 @@ func (a *App) openCommitPromptDraft(files []gitPanelFile, draft string, trailer 
 // message came from the agent; trailer is the attribution decision for
 // THIS commit.
 //
-// The ✦ AI button sits on the button row whenever an agent could
-// answer. It is the survey's terminal state (gitpanelwalk.go): the walk
-// ends on this field, and "have it drafted" has to be one click from here — a
-// reviewer who has just read seven diffs should not have to close the
-// prompt and go back to a picker to ask for the sentence describing
-// them. It does not submit; it swaps the modal for a request whose
-// answer reopens this same prompt pre-filled (chatCommitSuggestDone).
+// The ✦ AI button sits on the button row of every commit prompt in a
+// repository. It is the survey's terminal state (gitpanelwalk.go): the
+// walk ends on this field, and "have it drafted" has to be one click
+// from here — a reviewer who has just read seven diffs should not have
+// to close the prompt and go back to a picker to ask for the sentence
+// describing them. It does not submit; it swaps the modal for a request
+// whose answer reopens this same prompt pre-filled
+// (chatCommitSuggestDone).
+//
+// AGENT AVAILABILITY IS A REASON, NOT A GATE. The button used to appear
+// only while canSuggestCommitMsg held, which meant a machine whose
+// configured agent binary wasn't installed showed a commit prompt with
+// no AI affordance and nothing to explain the absence — the dead end the
+// menuCopilotAuth rule exists to forbid. It is now always on the row and
+// says why when it can't ask (commitDraftBlockedReason), which is also
+// the only honest arrangement for a verdict that is DISCOVERED by
+// trying: an agent nobody has started yet is not yet known to be
+// missing.
 func (a *App) openCommitPromptWith(files []gitPanelFile, initial string, drafted, trailer bool) {
 	title := "Commit " + gitCommitLabel(files)
 	// Captured by the closures below, so the chip, the ✦ re-draft and
@@ -142,7 +153,14 @@ func (a *App) openCommitPromptWith(files []gitPanelFile, initial string, drafted
 	extras := []promptExtra{{
 		label: func(*App) string { return "[ ✦ AI ]" },
 		width: runeLen("[ ✦ AI ]"),
+		key:   'a',
 		run: func(app *App) {
+			// Checked BEFORE the modal closes: a refusal must not cost
+			// the user the message they had already started typing.
+			if why := app.commitDraftBlockedReason(); why != "" {
+				app.flash(why)
+				return
+			}
 			app.closeModal()
 			app.gitPanelSuggestCommit(files, trailerOn)
 		},
@@ -156,11 +174,20 @@ func (a *App) openCommitPromptWith(files []gitPanelFile, initial string, drafted
 		extras = append(extras, promptExtra{
 			label: func(*App) string { return commitTrailerChipLabel(trailerOn) },
 			width: commitTrailerChipWidth,
+			key:   't',
 			run:   func(*App) { trailerOn = !trailerOn },
 		})
 	}
-	a.openPromptExtras(title, "message", initial, extras, commit)
+	a.openPromptExtras(title, commitPromptHint, initial, extras, commit)
 }
+
+// commitPromptHint is the prompt's subtitle. It names the ✦ chord
+// because the modal owns the keyboard: the ≡ menu — where every other
+// keyboard twin in this editor is discovered — is unreachable from
+// inside a prompt, so the hint row is the only place the chord can be
+// advertised. Kept short enough to fit promptModalWidth unwidened, since
+// the hint is drawn before extras decide whether the box grows.
+const commitPromptHint = "message   ·   alt+a = ✦ AI draft"
 
 // commitTrailerChipLabel spells the state in words rather than a tick:
 // the chip is small, and "on"/"off" needs no glyph decoding and no
@@ -277,17 +304,46 @@ type gitCommitDiffEvent struct {
 // When satisfies the tcell.Event interface.
 func (e *gitCommitDiffEvent) When() time.Time { return e.when }
 
-// canSuggestCommitMsg gates the picker row: an agent has to be allowed
-// to run (the Copilot kill switch) and not already known-unavailable.
-// A dead agent is still offered while it has never been started — the
-// first attempt is what discovers the binary.
+// canSuggestCommitMsg reports whether asking an agent for a message is
+// MEANINGFUL here, which is only a question about the repository: there
+// is no message to draft for a directory git knows nothing about.
+//
+// Agent availability is deliberately absent. It belongs to
+// commitDraftBlockedReason, which is consulted when the affordance is
+// USED, because the two answers are different things to say: "there is
+// nothing here to describe" hides a row, while "the agent you configured
+// isn't installed" has to be said out loud (the menuCopilotAuth rule).
+// Folding the second into this predicate is what left a commit prompt
+// with no AI button and no explanation on a machine missing the binary.
 func (a *App) canSuggestCommitMsg() bool {
-	return a.gitIsRepo && a.chatAgentEnabled() && !a.chat.dead
+	return a.gitIsRepo
 }
 
-// hasSuggestableCommit gates the ≡ row: an agent that can run, plus
-// something to describe — the panel's selection, or the index. Without
-// either there is no change to draft a message for.
+// commitDraftBlockedReason explains why the ✦ button cannot ask right
+// now, "" when it can. Callers check it BEFORE closing the prompt — a
+// refusal must not cost the user the message they had already typed.
+//
+// It starts the agent as a side effect, which is what makes the answer
+// honest: a missing binary is only discovered by trying (chatEnsureStarted
+// is idempotent and returns before spawning anything once a verdict
+// exists).
+func (a *App) commitDraftBlockedReason() string {
+	a.chatEnsureStarted()
+	if why := a.chatUnavailableReason(); why != "" {
+		return why
+	}
+	if a.chat.turnActive {
+		return a.chatAgent().name + " is answering — ⏹ to stop it first"
+	}
+	return ""
+}
+
+// hasSuggestableCommit gates the ≡ row: a repository, plus something to
+// describe — the panel's selection, or the index. Without either there is
+// no change to draft a message for. Like the prompt's button it does NOT
+// consult the agent: the row is the keyboard twin of that button, and a
+// row that vanishes when a binary is missing is a dead end rather than an
+// answer.
 func (a *App) hasSuggestableCommit() bool {
 	return a.canSuggestCommitMsg() && (len(a.gitPanelTargets()) > 0 || a.gitHasStaged)
 }

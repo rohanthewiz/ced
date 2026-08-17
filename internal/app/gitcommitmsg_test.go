@@ -57,28 +57,38 @@ func TestCommitSuggestPrompt_CarriesFilesAndDiff(t *testing.T) {
 	}
 }
 
-// TestGitPanelActionItems_CommitAndSuggest pins the two new rows: a
-// Commit row for the ticked set is always offered, and the Suggest row
-// appears only when an agent could actually answer.
+// TestGitPanelActionItems_CommitAndSuggest pins the two rows: a Commit
+// row for the ticked set, and a Suggest row beside it whenever there is a
+// change to describe. The Suggest row does NOT wait on a live agent — an
+// unavailable one is explained when the row is picked, where the reason
+// can name the binary to install; a row that isn't there explains nothing.
 func TestGitPanelActionItems_CommitAndSuggest(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.gitIsRepo = true
 	a.gitPanel.files = []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
 	a.gitPanel.selected = 0
 
-	// Chat dead (newTestApp's default): no suggestion is possible.
+	// Chat dead (newTestApp's default): still offered, still named.
 	got := actionLabels(a.gitPanelActionItems(a.gitPanelTargets()))
 	if !strings.Contains(got, "Commit a.go…") {
 		t.Errorf("commit row missing: %s", got)
 	}
-	if strings.Contains(got, "Suggest commit message") {
-		t.Errorf("suggest row offered with a dead agent: %s", got)
+	if !strings.Contains(got, "Suggest commit message for a.go (Copilot)") {
+		t.Errorf("suggest row missing with a dead agent: %s", got)
 	}
 
 	wireChat(a)
 	got = actionLabels(a.gitPanelActionItems(a.gitPanelTargets()))
 	if !strings.Contains(got, "Suggest commit message for a.go (Copilot)") {
 		t.Errorf("suggest row missing: %s", got)
+	}
+
+	// Nothing to describe: nothing to draft.
+	a.gitPanel.files = nil
+	a.gitPanel.selected = 0
+	a.gitHasStaged = false
+	if got := actionLabels(a.gitPanelActionItems(nil)); strings.Contains(got, "Suggest commit message") {
+		t.Errorf("suggest row offered with no change: %s", got)
 	}
 }
 
@@ -527,8 +537,11 @@ func TestMenuToggleCommitTrailer_PersistsAndSeedsThePrompt(t *testing.T) {
 	}
 }
 
-// TestHasSuggestableCommit pins the ≡ row's gate: something to describe
-// (a panel selection or a non-empty index) AND an agent that can run.
+// TestHasSuggestableCommit pins the ≡ row's gate: a repository with
+// something to describe — a panel selection or a non-empty index. Agent
+// availability is deliberately NOT part of it: an unavailable agent owes
+// the user a reason (commitDraftBlockedReason), and a row that disappears
+// instead is a dead end.
 func TestHasSuggestableCommit(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.gitIsRepo = true
@@ -541,7 +554,113 @@ func TestHasSuggestableCommit(t *testing.T) {
 		t.Error("disabled with a staged change and a live agent")
 	}
 	a.chat.dead = true
+	if !a.hasSuggestableCommit() {
+		t.Error("a dead agent should leave the row offering a reason, not hide it")
+	}
+	a.gitIsRepo = false
 	if a.hasSuggestableCommit() {
-		t.Error("enabled with a dead agent")
+		t.Error("enabled outside a repository")
+	}
+}
+
+// TestCommitDraftBlockedReason pins what the ✦ button says when it
+// can't ask: the Copilot kill switch, an agent already known missing
+// (named, with the binary to install), and a turn still streaming.
+// Silence is the one wrong answer — the button stays on the row
+// precisely so it can explain itself.
+func TestCommitDraftBlockedReason(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	wireChat(a)
+	if why := a.commitDraftBlockedReason(); why != "" {
+		t.Errorf("a live agent is not blocked, got %q", why)
+	}
+
+	a.chat.turnActive = true
+	if why := a.commitDraftBlockedReason(); !strings.Contains(why, "⏹") {
+		t.Errorf("mid-turn reason = %q, want the stop gesture named", why)
+	}
+	a.chat.turnActive = false
+
+	a.chat.dead = true
+	why := a.commitDraftBlockedReason()
+	def := a.chatAgent()
+	if !strings.Contains(why, def.name) || !strings.Contains(why, def.binary) {
+		t.Errorf("dead reason = %q, want the agent and its binary named", why)
+	}
+
+	a.chat.dead = false
+	a.copilot.enabled = false
+	if why := a.commitDraftBlockedReason(); why == "" {
+		t.Error("the Copilot kill switch must be explained, not silent")
+	}
+}
+
+// TestCommitPromptExtras_AltChords pins the keyboard twins for the two
+// buttons on the row. The modal owns the keyboard, so the ≡ menu — where
+// every other twin lives — is unreachable from here; without these chords
+// the AI draft and the trailer override would be mouse-only, on the one
+// terminal (macOS Terminal + tmux) that swallows clicks.
+func TestCommitPromptExtras_AltChords(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	wireChat(a)
+	files := []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
+
+	a.openCommitPromptDraft(files, "Add the thing", true)
+	pm := a.modal.(*promptModal)
+
+	// alt+t is the chip: it flips attribution and never touches the field.
+	pm.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModAlt))
+	if got := pm.extras[1].label(a); got != "[trailer: off]" {
+		t.Errorf("after alt+t the chip reads %q", got)
+	}
+	if got := pm.field.String(); got != "Add the thing" {
+		t.Errorf("alt+t typed into the field: %q", got)
+	}
+
+	// alt+a is the ✦ button: it asks the agent, which closes the prompt
+	// and opens the panel the answer will stream into. (What the request
+	// carries is TestCommitTrailer_SurvivesTheRedraft's business; the diff
+	// here comes from a path no repository holds.)
+	pm.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModAlt))
+	if a.modal != nil {
+		t.Fatalf("alt+a left %T open; the ask replaces the prompt", a.modal)
+	}
+	if !a.chat.open {
+		t.Error("the ask must open the panel it streams into")
+	}
+	if !strings.Contains(a.statusMsg, "commit message") {
+		t.Errorf("status = %q, want the ask announced", a.statusMsg)
+	}
+
+	// A bare rune is still text, chords or no chords.
+	a.openCommitPrompt(files, "")
+	pm = a.modal.(*promptModal)
+	pm.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone))
+	if got := pm.field.String(); got != "a" {
+		t.Errorf("plain 'a' should type, field = %q", got)
+	}
+}
+
+// TestCommitPromptHint_NamesTheChord pins the prompt's one discovery
+// surface: a modal cannot borrow the ≡ menu's hint column, so the chord
+// has to be in the subtitle, and it has to fit the unwidened box.
+func TestCommitPromptHint_NamesTheChord(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	wireChat(a)
+	a.openCommitPrompt([]gitPanelFile{{Path: "/p/a.go", Rel: "a.go"}}, "")
+	pm := a.modal.(*promptModal)
+	if !strings.Contains(pm.hint, "alt+a") {
+		t.Errorf("hint = %q, want the chord named", pm.hint)
+	}
+	if n := runeLen(pm.hint); n > promptModalWidth-4 {
+		t.Errorf("hint is %d cells wide, past the %d the box has", n, promptModalWidth-4)
+	}
+	pm.draw(a)
+	a.screen.Show()
+	if !strings.Contains(screenText(a), "alt+a") {
+		t.Error("the chord is not on screen")
 	}
 }

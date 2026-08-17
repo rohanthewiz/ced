@@ -115,6 +115,29 @@ func TestHostIdentAfterEventLifecycle(t *testing.T) {
 	}
 }
 
+// TestHostIdentCloseClearsThenPops pins the exit contract: the title is
+// cleared BEFORE the stack pop. A terminal without a title stack ignores
+// the pop, so the empty OSC 2 is the only thing that stops the pane
+// keeping "somefile.go · ced" after ced is gone; a terminal with a stack
+// overwrites it with the restored title a byte later. Reversing the order
+// would put the stale title back on every stackless terminal.
+func TestHostIdentCloseClearsThenPops(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	got := captureIdent(a)
+
+	a.hostIdentClose()
+
+	if len(*got) != 2 {
+		t.Fatalf("expected clear + pop, got %q", *got)
+	}
+	if (*got)[0] != "\x1b]2;\x07" {
+		t.Fatalf("first sequence should be an empty OSC 2 title, got %q", (*got)[0])
+	}
+	if (*got)[1] != "\x1b[23;0t" {
+		t.Fatalf("second sequence should be XTPOPTITLE, got %q", (*got)[1])
+	}
+}
+
 // TestHostIdentNilWriterIsOff proves the tests-and-degradation contract:
 // with no writer installed nothing panics and nothing is tracked.
 func TestHostIdentNilWriterIsOff(t *testing.T) {

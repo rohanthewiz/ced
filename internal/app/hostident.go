@@ -57,13 +57,34 @@ func (a *App) hostIdentInit() {
 	a.hostIdentAfterEvent()
 }
 
-// hostIdentClose pops the title pushed at init so the user's terminal
-// gets its previous title back. Called from Close; a nil writer (tests,
-// or an App that never ran hostIdentInit) makes it a no-op.
+// hostIdentClose hands the title back on the way out: an EMPTY OSC 2
+// first, then the pop matching init's push. Called from Close; a nil
+// writer (tests, or an App that never ran hostIdentInit) makes it a
+// no-op.
+//
+// The order is the whole point, because the two sequences serve two
+// different terminals and the pop is the one that can be ignored:
+//
+//   - A terminal WITH a title stack (xterm, tmux, cats) applies the pop
+//     and restores whatever the title was before ced launched — the
+//     clear is overwritten a byte later and costs nothing.
+//   - A terminal WITHOUT one (Terminal.app, plenty of emulators, and any
+//     mux that doesn't proxy 22/23t) silently drops both the push and the
+//     pop, so before this the pane kept the last file ced had open,
+//     forever — a shell prompt labeled "app.go · ced" long after ced
+//     exited. The empty title is what those terminals actually act on;
+//     most then fall back to their own default, and a shell that reports
+//     its title re-labels the pane on its next prompt.
+//
+// Clearing FIRST and popping second is therefore strictly better than
+// either alone: nothing is lost where the stack works, and a stale lie is
+// removed where it doesn't. OSC 7 is deliberately not re-emitted — the
+// cwd ced reported is still true of the shell that gets the pane back.
 func (a *App) hostIdentClose() {
 	if a.hostIdentWrite == nil {
 		return
 	}
+	_ = a.hostIdentWrite(osc2TitleSeq(""))
 	// XTPOPTITLE.
 	_ = a.hostIdentWrite("\x1b[23;0t")
 }

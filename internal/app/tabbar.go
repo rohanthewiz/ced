@@ -14,7 +14,7 @@
 // dozen files and the tabs simply ran off the screen — including,
 // routinely, the ACTIVE one, which then had no affordance at all. There
 // was also no key binding to switch tabs, of any kind, which in an editor
-// whose own notes say macOS Terminal can swallow Button3 meant the tab
+// whose own notes say macOS Terminal can swallow right-click meant the tab
 // strip could become entirely unreachable.
 //
 // The model now:

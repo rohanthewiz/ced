@@ -408,7 +408,7 @@ func (a *App) renameFolderLabel() string {
 // menuDeleteFolder removes the editor's active folder (the same folder
 // the New File entry targets) and everything inside it. Lives in the
 // main menu so folder deletion has a discoverable, non-right-click
-// path — macOS Terminal eats Button3, and the project's CLAUDE.md
+// path — macOS Terminal eats right-click, and the project's CLAUDE.md
 // rule says every file action must be reachable from the ≡ menu.
 //
 // The project root is never deletable — hasActiveSubfolder gates the

@@ -1749,13 +1749,28 @@ func TestHandleMouse_ShiftStickyForWheel(t *testing.T) {
 }
 
 // TestHandleMouse_RightClickOpensMenu falls back to the main menu when the
-// right-click isn't on a tree row.
+// right-click isn't on a tree row. It sends ButtonSecondary because that
+// is what tcell v2 decodes a right press into (Button3 is the middle
+// button there) — the earlier Button3 version of this test passed while
+// real right-clicks did nothing.
 func TestHandleMouse_RightClickOpensMenu(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	ev := tcell.NewEventMouse(60, 5, tcell.Button3, tcell.ModNone)
+	ev := tcell.NewEventMouse(60, 5, tcell.ButtonSecondary, tcell.ModNone)
 	a.handleMouse(ev)
 	if !a.menuOpen {
 		t.Fatal("right-click outside tree should open the main menu")
+	}
+}
+
+// TestHandleMouse_MiddleClickIsNotRightClick pins the tcell v2 button
+// numbering: Button3 is the MIDDLE button and must not open the menu —
+// that mapping is exactly the bug that hid right-click for so long.
+func TestHandleMouse_MiddleClickIsNotRightClick(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	ev := tcell.NewEventMouse(60, 5, tcell.Button3, tcell.ModNone)
+	a.handleMouse(ev)
+	if a.menuOpen {
+		t.Fatal("middle-click (Button3) must not open the main menu")
 	}
 }
 

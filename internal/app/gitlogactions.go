@@ -187,7 +187,7 @@ func (a *App) openGitLogResetPicker(c gitLogCommit) {
 // subject by where it landed, so the picker's query field would be a
 // text box asking a question the gesture just answered. The picker
 // remains the Tier-0 fallback under "Actions ▾" and the ≡ row, because
-// macOS Terminal and tmux both eat Button3 and a verb reachable only by
+// macOS Terminal and tmux both eat right-click and a verb reachable only by
 // right-click is a verb some users do not have.
 //
 // A right-click on a commit row SELECTS it first — right-clicking row

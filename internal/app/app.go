@@ -2760,9 +2760,18 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// body it opens the editor's own context menu (contextmenu.go);
 	// everywhere else it falls through to the main action menu so users
 	// have a redundant mouse-only path to it. Note: macOS Terminal + tmux
-	// often swallows Button3, which is why every action here also lives
-	// in the main ≡ menu.
-	if btn&tcell.Button3 != 0 {
+	// often swallow the right button, which is why every action here also
+	// lives in the main ≡ menu.
+	//
+	// ButtonSecondary (Button2), NOT Button3. tcell v1 numbered the
+	// buttons the X11 way (3 = right); tcell v2 deliberately reversed
+	// them — Button2 is the right/secondary button and Button3 is the
+	// MIDDLE one (see tcell's mouse.go). This branch checked Button3 for a
+	// long time, so right-click never reached it in any terminal and a
+	// middle-click opened the menu instead; the "Terminal eats Button3"
+	// lore was masking it. Traced live under cats, whose PTY carried the
+	// SGR right press (`\x1b[<2;x;yM`) exactly as it should.
+	if btn&tcell.ButtonSecondary != 0 {
 		if a.tryTreeContextClick(x, y) {
 			return
 		}

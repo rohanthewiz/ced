@@ -37,10 +37,18 @@ branches — removing them makes the keyboard menu and every leader
 unreachable inside tmux.
 
 **Every file action also lives in the main ≡ menu.** macOS Terminal +
-tmux often swallows Button3 (right-click), so the editor cannot rely on
+tmux often swallows right-click, so the editor cannot rely on
 right-click as the only path to anything. Tree right-click is a redundant
 shortcut, not a primary surface — when adding new file-management
 features, make sure they're reachable from the main menu first.
+
+**Right-click is `tcell.ButtonSecondary` (Button2), NOT `Button3`.** tcell
+v2 reversed v1's X11 numbering: Button2 is the right button and Button3 is
+the MIDDLE one. The dispatch in `handleMouse` checked Button3 for a long
+time, so real right-clicks did nothing in every terminal (middle-click
+opened the menu) while the "Terminal swallows it" lore took the blame.
+Tests must send `ButtonSecondary` to simulate a right press — a Button3
+test passes against code that never sees a right-click.
 
 ## Module / repo
 

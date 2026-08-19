@@ -138,6 +138,7 @@ internal/app/gitlog.go        Git log panel: commit list + `git show` detail (Es
 internal/app/gitlogactions.go Git log verbs: cherry-pick, revert, reset, branch/tag, copies
 internal/app/gitstatusreport.go git's own `git status` report, on demand, in the info modal
 internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PTY)
+internal/app/runexec.go       Run an executable: dir picker → staged line in the terminal
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, locked by a drag
@@ -2404,6 +2405,46 @@ the panel exists. House rules:
   problem") and is the one row there needing no language server —
   `go build` and `grep -n` are the providers.
 
+### Run an executable (app/runexec.go)
+The tree's `*` marker (execmarks.go) and the terminal panel, joined: right-
+click an executable → "Run in terminal…", pick a working directory, and the
+command lands on the panel's input line. Also the ≡ **File** row (the
+right-click-swallowed rule), no leader key. House rules:
+
+- **IT STAGES, IT DOES NOT SUBMIT.** Same rule as catsRunInPanel and as
+  handing a selection to an agent — the editor may COMPOSE a command, the
+  user presses Enter. Here it is structural rather than merely careful: an
+  execute bit says how to START a program and nothing about what to pass
+  it, so a row that fired immediately could never run a script that takes
+  a flag. Re-running is the panel's own history (Up), which keeps the
+  edited line, arguments and all — hence no per-file command memory.
+- **THE `cd` IS PART OF THE STAGED LINE, because grsh has no subshell.**
+  v1's language has no `( … )` grouping ("there is no subshell to run them
+  in") and its `cd` builtin chdirs the WHOLE editor process by design, so a
+  scoped cd is not available; wrapping in `sh -c '…'` would bury the
+  command inside quotes where arguments cannot be typed. So the cd leads
+  the line — visible, editable, and FIRST, which is also what makes typed
+  arguments land after the command. Joined with `&&` (catsRunScript's
+  argument) and omitted entirely when the shell is already there
+  (menuCatsTerminal's pointless-cd rule), which is what stops a second run
+  stacking a redundant one.
+- **The directory picker widens into the frecency list, it does not build
+  one** (the findall-reuse rule). Rows run most-specific-first — the file's
+  own directory, the project root, wherever the shell currently is — then
+  ced's own recent folders and the host's cdx-ranked history through
+  `catsRecentFolders`, so this picker and "Open project" can never disagree
+  about which directories exist. Deduped on `session.Normalize` (the folder
+  store's key) and pruned to what still exists. ONE candidate is not a
+  choice, so a workspace with nothing else to offer stages straight away.
+- **The command is relative to the chosen directory when it sits inside
+  it**, absolute when it does not (catsRelPath's rule) — and the `./` is
+  load-bearing, since a bare `tool.sh` is a PATH lookup. `shellArg` quotes
+  only what needs it, unlike `catsShellQuote`'s unconditional form: this
+  line is read and edited by a person.
+- **The execute bit is re-checked live**, never trusted from the tree node
+  (stamped at the last reload) — a `chmod -x` in the very panel this row
+  feeds must refuse rather than stage something that only fails oddly.
+
 ### Named themes (internal/theme + app/theme.go)
 Ten shipped palettes plus `~/.config/ced/themes/*.json`, switchable live
 from ≡ → Theme. House rules:
@@ -2512,8 +2553,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 124 group actions + 15 headers (141), height 147,
-dividers `[2, 5, 144]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 125 group actions + 15 headers (142), height 148,
+dividers `[2, 5, 145]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

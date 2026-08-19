@@ -565,6 +565,14 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuZipFolder, enabled: alwaysTrue, labelFor: (*App).zipFolderLabel},
 			{label: "Copy relative path", action: (*App).menuCopyRelativePath, enabled: (*App).hasFileTab},
 			{label: "Copy absolute path", action: (*App).menuCopyAbsolutePath, enabled: (*App).hasFileTab},
+			// Running the open file in the terminal panel (runexec.go).
+			// A File row rather than a View one — View holds the panel's
+			// toggles, this one is a verb about the FILE, and it belongs
+			// with the other rows that act on it. Its ≡ twin in the tree
+			// is the right-click row; this is the path that survives a
+			// terminal which eats right-click. No leader key: the flat
+			// table is out of mnemonic letters.
+			{action: (*App).menuRunExecutable, enabled: (*App).hasRunnableTab, labelFor: (*App).runExecutableLabel},
 		}},
 		{title: "Edit", collapsible: true, items: []menuItemDef{
 			{label: "Copy selection", shortcut: "cmd+c", action: (*App).menuCopy, enabled: (*App).hasSelection},

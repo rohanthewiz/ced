@@ -44,6 +44,18 @@ type Node struct {
 	IsExec bool
 }
 
+// IsExecFile reports whether a stat result describes a file the user could
+// run: a REGULAR file carrying any execute bit. It is exported because two
+// callers need the same answer and a second spelling would drift — the tree's
+// reload stamps Node.IsExec with it (driving the ls -F '*' marker), and the
+// app's "Run in terminal" verb re-checks it against the live file before it
+// hands anything to a shell. Directories and symlinks are excluded for the
+// reason the marker excludes them: a directory's traversal bit is not what a
+// user reads as "executable", and a symlink reports its own non-regular mode.
+func IsExecFile(info os.FileInfo) bool {
+	return info.Mode().IsRegular() && info.Mode()&0o111 != 0
+}
+
 // Tree owns the root node and the most recently rendered flat list of
 // visible rows. Click hit-testing maps a screen row index back to the Node
 // drawn at that row.
@@ -167,7 +179,7 @@ func (n *Node) reload() error {
 		isExec := false
 		if !e.IsDir() {
 			if info, err := e.Info(); err == nil {
-				isExec = info.Mode().IsRegular() && info.Mode()&0o111 != 0
+				isExec = IsExecFile(info)
 			}
 		}
 		if old, ok := existing[e.Name()]; ok && old.IsDir == e.IsDir() {

@@ -907,6 +907,17 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	items = append(items, contextItem{label: "Zip", action: ctxZip})
 	items = append(items, contextItem{label: "Copy rel path", action: ctxCopyRelativePath})
 	items = append(items, contextItem{label: "Copy abs path", action: ctxCopyAbsolutePath})
+	// Run sits LAST, and only on a file the tree has already marked
+	// executable (runexec.go). Appended rather than placed at the top for
+	// the same reason Paste is appended: it is a conditional row, not part
+	// of the fixed vocabulary the user learns positions in. The ellipsis is
+	// the house signal that the row asks something first — here, which
+	// directory to run in — and the answer is STAGED on the terminal's
+	// input line rather than submitted, so a mis-click costs a keystroke
+	// rather than a process.
+	if !n.IsDir && n.IsExec {
+		items = append(items, contextItem{label: "Run in terminal…", action: ctxRunExecutable})
+	}
 
 	cx, cy := a.placeContext(x, y, len(items))
 	a.openModal(&contextModal{x: cx, y: cy, node: n, items: items})

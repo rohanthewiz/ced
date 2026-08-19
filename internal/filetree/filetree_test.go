@@ -1272,3 +1272,37 @@ func newSimScreen(t *testing.T, w, h int) tcell.Screen {
 	scr.SetSize(w, h)
 	return scr
 }
+
+// TestIsExecFile pins the shared execute-bit question both the tree's
+// '*' marker and the app's Run verb ask: any execute bit on a REGULAR
+// file counts, a plain file does not, and a directory never does
+// (its traversal bit is not what a user reads as "executable").
+func TestIsExecFile(t *testing.T) {
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "run.sh")
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write exec: %v", err)
+	}
+	plain := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(plain, []byte("hi\n"), 0o644); err != nil {
+		t.Fatalf("write plain: %v", err)
+	}
+
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{exe, true},
+		{plain, false},
+		{dir, false},
+	}
+	for _, c := range cases {
+		info, err := os.Stat(c.path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", c.path, err)
+		}
+		if got := IsExecFile(info); got != c.want {
+			t.Errorf("IsExecFile(%s) = %v, want %v", filepath.Base(c.path), got, c.want)
+		}
+	}
+}

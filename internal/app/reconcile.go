@@ -18,11 +18,11 @@
 // A: reconcileOpenTabsWithDisk runs on the background refresh tick and
 // applies this matrix:
 //
-//	 disk      buffer   behaviour
-//	 -------   ------   -------------------------------------------------
-//	 newer     clean    reload — but UNDOABLY, and say so
-//	 newer     dirty    record a conflict; ⚠ marker; raise the prompt
-//	 deleted   any      keep the buffer, ⊘ marker; a save recreates it
+//	disk      buffer   behaviour
+//	-------   ------   -------------------------------------------------
+//	newer     clean    reload — but UNDOABLY, and say so
+//	newer     dirty    record a conflict; ⚠ marker; raise the prompt
+//	deleted   any      keep the buffer, ⊘ marker; a save recreates it
 //
 // B: saveGuard stats before every write. If the file grew a newer mtime
 // than the one the tab loaded, the write is ABORTED and the same prompt

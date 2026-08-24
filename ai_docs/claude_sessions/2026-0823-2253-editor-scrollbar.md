@@ -251,9 +251,27 @@ Tree header rows 0–1 stay clean, and
 `copilot_chat_context_test.go` now renders in full with the bar in the
 column beside it.
 
-## Note for next time
+## The gofmt tidy-up (same day, separate change)
 
-`internal/app/reconcile.go`, `internal/app/tabbar.go` and
-`internal/app/hostident_test.go` are gofmt-unclean on `main` and were
-before this session — `gofmt -l internal/app` flags them on every run.
-Left alone deliberately; worth one tidy-up commit of its own.
+`internal/app/{reconcile,tabbar}.go` and `internal/app/hostident_test.go`
+were gofmt-unclean on `main` before this session and got their own pass.
+Two more turned up once the scan widened past `internal/app`:
+`internal/editor/syntax.go` and the capture tool's `main.go`. `gofmt -l .`
+is now empty across the repo.
+
+All of it was whitespace except **tabbar.go**, which needed a content
+change to come out well. Its doc comment is an ASCII diagram immediately
+followed by a bullet list, and that adjacency makes gofmt's doc printer
+indent BOTH by an extra tab — reproduced in isolation:
+
+```
+code block alone      → normalized to one tab, pretty
+list alone            → left exactly as written
+code block + list     → both gain a tab, every time
+```
+
+A plain prose line between the two ("The three rules behind it:") makes
+gofmt leave the whole comment alone. Worth remembering: **a diagram
+directly followed by a bullet list in a doc comment will drift under
+gofmt** — this codebase's comments are full of both, so separate them
+with a sentence.

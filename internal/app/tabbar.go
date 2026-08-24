@@ -19,9 +19,11 @@
 //
 // The model now:
 //
-//	 ≡ │ main.go × │ app.go × │ tab.go ×          … │ +4 │
-//	   └── tabScroll ──┴── drawn while they fit ──┘  └ hidden count,
-//	                                                   click to pick
+//	≡ │ main.go × │ app.go × │ tab.go ×          … │ +4 │
+//	  └── tabScroll ──┴── drawn while they fit ──┘  └ hidden count,
+//	                                                  click to pick
+//
+// The three rules behind it:
 //
 //   - tabScroll is the index of the leftmost DRAWN tab. It is derived,
 //     never a user setting: ensureActiveTabVisible pushes it just far

@@ -19,16 +19,16 @@
 // it's asking for the re-lex less often, and making the answer we paint
 // from in the meantime indistinguishable from a fresh one:
 //
-//	    intra-line edit          structural edit
-//	   (typing, backspace)     (Enter, paste, undo,
-//	          │                 line ops, reload…)
-//	          ▼                        │
-//	   patch the grid                  │
-//	   in place, defer                 ▼
-//	          │                  re-lex on the
-//	          │                  next render
-//	          ▼
-//	   ── SyntaxSettle idle ──►  re-lex on the next render
+//	 intra-line edit          structural edit
+//	(typing, backspace)     (Enter, paste, undo,
+//	       │                 line ops, reload…)
+//	       ▼                        │
+//	patch the grid                  │
+//	in place, defer                 ▼
+//	       │                  re-lex on the
+//	       │                  next render
+//	       ▼
+//	── SyntaxSettle idle ──►  re-lex on the next render
 //
 // Two rules make that safe:
 //

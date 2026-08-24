@@ -28,11 +28,11 @@ func captureIdent(a *App) *[]string {
 func TestFileURLPath(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"/Users/me/projs", "/Users/me/projs"},
-		{"/tmp/a b", "/tmp/a%20b"},                    // space encodes
-		{"/x/naïve", "/x/na%C3%AFve"},                 // unicode encodes byte-wise
-		{"/x/semi;colon", "/x/semi%3Bcolon"},          // reserved encodes
-		{"/x/esc\x1bseq", "/x/esc%1Bseq"},             // control bytes can't break the OSC
-		{"/a-b._~/ok", "/a-b._~/ok"},                  // unreserved passes through
+		{"/tmp/a b", "/tmp/a%20b"},           // space encodes
+		{"/x/naïve", "/x/na%C3%AFve"},        // unicode encodes byte-wise
+		{"/x/semi;colon", "/x/semi%3Bcolon"}, // reserved encodes
+		{"/x/esc\x1bseq", "/x/esc%1Bseq"},    // control bytes can't break the OSC
+		{"/a-b._~/ok", "/a-b._~/ok"},         // unreserved passes through
 	}
 	for _, c := range cases {
 		if got := fileURLPath(c.in); got != c.want {

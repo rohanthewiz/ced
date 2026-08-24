@@ -1,6 +1,6 @@
 # Session: a scrollbar, and how much of the file is below you
 
-- Date: 2026-08-23
+- Date: 2026-08-23 (part two, the file tree, 2026-08-24)
 - Branch: `main`
 - Repo: ced (`~/projs/go/ced`)
 - Session id: `f05eb6db-6e10-43d6-b3f3-56d5e6c19fcd`
@@ -157,3 +157,103 @@ One near-miss worth recording: the 745-line reading looked wrong against
 `.claude/skills/run-ced/capture/main.go`, not the repo's own. The skill
 warns about this ("matches paths, not just filenames") and it still cost
 a round trip. Type more of the path.
+
+
+---
+
+# Part two: the same bar on the file tree, sharing a column
+
+> Now add a similar scrollbar to the file tree, but share the last column
+
+"Share" is the whole brief. The editor's bar reserves its column; this
+one is painted **over** the tree's own last column after `Tree.Render`,
+so `sidebarRect` is untouched and the tree keeps its full drawing width.
+
+## What sharing bought, and what it cost
+
+**Bought: the bar can come and go.** It appears only while the list
+overflows. The editor's bar structurally cannot do that — its column is
+reserved, so appearing and disappearing would move the editor's right
+edge and re-flow the code on an edit that had nothing to do with layout.
+This one costs no layout at all, so a tree with nothing to scroll gets
+its column back instead of wearing a full-height thumb over its names.
+Two bars, opposite answers to the same question, one reason.
+
+**Cost: the longest row's final rune sits under the bar.** Predicted
+while designing it, and the very first live capture caught it in this
+repo: auto-fit had widened the sidebar to fit
+`copilot_chat_context_test.go`, and the bar then sat on its final `o` —
+
+```
+  copilot_chat_context_test.g│
+```
+
+Auto-fit exists precisely to stop that truncation, so `autoFitSidebar`
+now asks for one column more while the bar is up
+(`want = ContentWidth() + 1 + treeScrollbarCols()`). It cannot oscillate:
+widening changes no ROW count, and the bar's verdict is about rows. With
+auto-fit **off** (a width the user dragged) nothing compensates and the
+bar simply overlays — that is the honest price of sharing, and dragging
+one column wider is the out.
+
+That `treeScrollbarCols` helper has exactly one caller, and deliberately
+is NOT read by `sidebarRect`. If it ever gains a second caller that
+subtracts it from a rect, the feature has quietly become "reserved" and
+this whole section is wrong.
+
+## Other decisions
+
+- **It spans the LIST band only.** The EXPLORER label and the project
+  name scroll with nothing, and the project name is itself a click
+  target. `Tree.ListRows` is that split's one spelling — `Render` reads
+  it too, so the "2" now lives in exactly one place instead of two.
+- **`Tree.MaxScroll` / `Tree.RowCount`** mirror the editor's for the same
+  one-formula reason (`clampScroll` calls `maxTreeScroll`). No overscroll
+  pad here, deliberately: a tree has no "read the bottom comfortably"
+  problem, and scrolling into blank space would just lose rows.
+- **The hit-test runs before `sidebarClick`** — a press must not select
+  the node under the thumb — and after the splitter cases, because the
+  two columns are adjacent and the splitter is the one the user aims at
+  by feel.
+- **One config key for both bars.** The ≡ row became *Hide scrollbars* /
+  *Show scrollbars*. This is one feature at two surfaces (the
+  find-in-file / find-in-project rule), and the single argument for
+  turning a bar off — give me the width back — does not even apply to the
+  tree's. Both bars also share `scrollbarMetrics` and `scrollbarGrab`, so
+  a thumb of a given size can never mean two things.
+
+## Files (part two)
+
+```
+internal/app/scrollbar.go       + the tree half: rect, thumb, press, drag,
+                                  draw, treeScrollbarCols; label → "scrollbars"
+internal/app/scrollbar_test.go  + 6 tests
+internal/app/treeautofit.go     the one-column allowance
+internal/app/app.go             draw call, drag continuation, press case
+internal/filetree/filetree.go   MaxScroll, RowCount, ListRows, maxTreeScroll;
+                                Render now goes through ListRows
+internal/filetree/filetree_test.go  + 2 tests
+internal/userconfig/userconfig.go   the key's doc now covers both surfaces
+README.md / CLAUDE.md           both sections rewritten for two surfaces
+```
+
+## Verification
+
+`make test` (`-race`) and `go vet ./...` green. Live, both bars in one
+frame on `internal/app` (200-odd rows, `scrollbar.go` open):
+
+| bar | thumb | why |
+|---|---|---|
+| tree | rows 2–10 of the list band | ~210 rows through 42 |
+| editor | 3 rows | ~470 lines through 42 |
+
+Tree header rows 0–1 stay clean, and
+`copilot_chat_context_test.go` now renders in full with the bar in the
+column beside it.
+
+## Note for next time
+
+`internal/app/reconcile.go`, `internal/app/tabbar.go` and
+`internal/app/hostident_test.go` are gofmt-unclean on `main` and were
+before this session — `gofmt -l internal/app` flags them on every run.
+Left alone deliberately; worth one tidy-up commit of its own.

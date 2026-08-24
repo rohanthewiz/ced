@@ -261,6 +261,10 @@ func flattenInto(n *Node, depth int, out *[]flatNode) {
 	}
 }
 
+// treeHeaderRows is how many rows Render spends above the file list: the
+// all-caps EXPLORER label and the project name.
+const treeHeaderRows = 2
+
 // Render draws the tree into the rectangle (x, y, w, h). Each visible row
 // is also remembered (in t.visible) so HitTest can map a click back to a
 // node without re-walking the tree.
@@ -294,11 +298,10 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		flattenInto(c, 0, &flat)
 	}
 
-	listTop := y + 2
-	listH := h - 2
-	if listH < 0 {
-		listH = 0
-	}
+	// Through ListRows so the header's row count has exactly one
+	// spelling — the sidebar's scrollbar reads the same split.
+	off, listH := t.ListRows(h)
+	listTop := y + off
 	t.clampScroll(len(flat), listH)
 
 	visible := make([]*Node, 0, listH)
@@ -523,17 +526,65 @@ func drawString(scr tcell.Screen, x, y, w int, s string, st tcell.Style) {
 
 // clampScroll keeps ScrollY within bounds for the current visible-row count.
 func (t *Tree) clampScroll(total, viewH int) {
-	if total <= viewH {
-		t.ScrollY = 0
-		return
-	}
-	max := total - viewH
-	if t.ScrollY > max {
-		t.ScrollY = max
+	if t.ScrollY > maxTreeScroll(total, viewH) {
+		t.ScrollY = maxTreeScroll(total, viewH)
 	}
 	if t.ScrollY < 0 {
 		t.ScrollY = 0
 	}
+}
+
+// maxTreeScroll is the largest ScrollY that keeps the last row on
+// screen. Unlike the editor's viewport there is no overscroll pad: a
+// file tree has no "read the bottom comfortably" problem, and letting
+// the list scroll into blank space would just lose rows.
+func maxTreeScroll(total, viewH int) int {
+	if total <= viewH {
+		return 0
+	}
+	return total - viewH
+}
+
+// MaxScroll reports the largest ScrollY the tree will hold for a list
+// band of viewH rows — the same number clampScroll enforces.
+//
+// Exported for the sidebar's scrollbar (app/scrollbar.go), which has to
+// place its thumb against exactly the range the wheel can reach. Two
+// copies of the arithmetic would drift, and the symptom is a thumb that
+// can't be dragged to the bottom of a tree the wheel scrolls to happily.
+func (t *Tree) MaxScroll(viewH int) int {
+	return maxTreeScroll(t.RowCount(), viewH)
+}
+
+// RowCount is how many rows the list has in total, at the current
+// expansion — what the scrollbar measures its thumb against. It walks
+// the tree, like ContentWidth does, which is bounded in practice because
+// the tree is lazy: rows exist only under folders somebody opened.
+func (t *Tree) RowCount() int {
+	if t == nil || t.Root == nil {
+		return 0
+	}
+	flat := make([]flatNode, 0, 128)
+	for _, c := range t.Root.Children {
+		flattenInto(c, 0, &flat)
+	}
+	return len(flat)
+}
+
+// ListRows splits a render rect of h rows the way Render does: the
+// offset of the first list row from the top of the rect, and how many
+// rows the list gets under the two-row header (the EXPLORER label and
+// the project name).
+//
+// It exists so nothing outside this package has to hard-code that "2".
+// The scrollbar spans the LIST, not the header — those two rows scroll
+// with nothing, and the project name is itself a click target.
+func (t *Tree) ListRows(h int) (offset, rows int) {
+	rows = h - treeHeaderRows
+	if rows < 0 {
+		rows = 0
+	}
+	return treeHeaderRows, rows
 }
 
 // HitTest maps a click within the tree's render rectangle to a Node.

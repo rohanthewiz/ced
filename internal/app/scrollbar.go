@@ -22,6 +22,10 @@
 //	│              │ │ ← track
 //	└──────────────┴─┘
 //	                ^ scrollbarRect: one column, ex+ew
+//
+// The file tree gets the same bar on different terms: it SHARES the
+// tree's own last column instead of reserving one, which is what lets it
+// come and go with the content. See treeScrollbarRect.
 package app
 
 import (
@@ -42,6 +46,11 @@ const (
 	// glyph would spill into the code beside it.
 	scrollbarTrackRune = '│'
 	scrollbarThumbRune = '█'
+
+	// treeScrollbarMinWidth is the tree width below which the sidebar's
+	// bar stays away. The tree's column is SHARED, so at that size the
+	// bar would be sitting on a meaningful share of every name.
+	treeScrollbarMinWidth = 12
 )
 
 // scrollbarCols is the number of columns the bar claims out of the
@@ -288,16 +297,184 @@ func (a *App) drawScrollbar() {
 	}
 }
 
-// menuToggleScrollbar flips the bar from the ≡ View group and persists
+// -----------------------------------------------------------------------------
+// The file tree's bar
+// -----------------------------------------------------------------------------
+//
+// Same thumb, same drag, same page-on-track — and one deliberate
+// difference: it SHARES the tree's rightmost column rather than
+// reserving one, which is what the two rules below follow from.
+
+// treeScrollbarRect is the sidebar bar's screen rectangle, or a zero
+// width when there is no bar. It spans the LIST band only: the EXPLORER
+// header and the project-name row scroll with nothing, and the project
+// name is itself a click target.
+//
+// The column is SHARED — it is the tree's own last column, painted over
+// after Render rather than subtracted from sidebarRect. The tree keeps
+// its full drawing width, and the cost is that the longest row's final
+// rune sits under the bar. That trade is what buys the second rule:
+//
+// **The bar appears only while the list overflows.** The editor's bar
+// can't do that (its column is reserved, so coming and going would move
+// the editor's right edge and re-flow the code on an unrelated edit);
+// this one costs no layout at all, so a tree with nothing to scroll gets
+// its column back instead of a full-height thumb sitting on the names.
+func (a *App) treeScrollbarRect() (x, y, w, h int) {
+	if !a.scrollbarShown || !a.sidebarShown || a.tree == nil {
+		return 0, 0, 0, 0
+	}
+	sx, sy, sw, sh := a.sidebarRect()
+	if sw < treeScrollbarMinWidth {
+		return 0, 0, 0, 0
+	}
+	off, rows := a.tree.ListRows(sh)
+	if rows <= 0 || a.tree.RowCount() <= rows {
+		return 0, 0, 0, 0 // nothing off-screen: the column stays the tree's
+	}
+	return sx + sw - 1, sy + off, 1, rows
+}
+
+// treeScrollbarCols is 1 while the sidebar's bar is on screen, 0
+// otherwise. It is NOT read by sidebarRect — the column is shared, so
+// the tree keeps its full drawing width either way. The one caller is
+// auto-fit (treeautofit.go), which asks for one extra column so the
+// longest name doesn't end up under the bar: auto-fit exists precisely
+// to stop the tree truncating names, and a bar sitting on the last rune
+// of the row it just widened to fit would undo that.
+//
+// With auto-fit OFF (the width the user dragged) nothing compensates and
+// the bar simply overlays. That is what "shared" costs, and dragging one
+// column wider is the out.
+func (a *App) treeScrollbarCols() int {
+	if _, _, w, _ := a.treeScrollbarRect(); w > 0 {
+		return 1
+	}
+	return 0
+}
+
+// treeScrollbarContains reports whether (x, y) lands on the sidebar's
+// bar. The router must ask before sidebarClick, which would otherwise
+// select whatever node the user grabbed the thumb on.
+func (a *App) treeScrollbarContains(x, y int) bool {
+	sx, sy, sw, sh := a.treeScrollbarRect()
+	return sw > 0 && x == sx && y >= sy && y < sy+sh
+}
+
+// treeScrollbarThumb resolves the tree's thumb against the live rect —
+// the sidebar twin of scrollbarThumb, and it shares scrollbarMetrics, so
+// the two bars can never disagree about what a thumb of a given size
+// means.
+func (a *App) treeScrollbarThumb() (trackY, trackH, thumbY, thumbH, maxScroll int, ok bool) {
+	_, sy, sw, sh := a.treeScrollbarRect()
+	if sw == 0 || sh <= 0 {
+		return 0, 0, 0, 0, 0, false
+	}
+	total := a.tree.RowCount()
+	maxScroll = a.tree.MaxScroll(sh)
+	thumbY, thumbH = scrollbarMetrics(total, sh, sh, a.tree.ScrollY, maxScroll)
+	return sy, sh, thumbY, thumbH, maxScroll, true
+}
+
+// treeScrollbarPress handles a left press on the sidebar's bar and
+// reports the drag mode it starts ("treescroll" on the thumb, "" on the
+// track, which pages toward the press). Same verbs as the editor's bar.
+func (a *App) treeScrollbarPress(x, y int) string {
+	trackY, trackH, thumbY, thumbH, _, ok := a.treeScrollbarThumb()
+	if !ok {
+		return ""
+	}
+	rel := y - trackY
+	if rel >= thumbY && rel < thumbY+thumbH {
+		a.scrollbarGrab = rel - thumbY
+		return "treescroll"
+	}
+	page := trackH
+	if rel < thumbY {
+		page = -page
+	}
+	// Tree.Scroll applies the zero floor; Render's clampScroll applies
+	// the ceiling — the pair every other tree scroll gesture goes through.
+	a.tree.Scroll(page)
+	return ""
+}
+
+// dragTreeScrollbarTo moves the tree's viewport so the thumb tracks the
+// pointer, honouring the grab offset taken at press time.
+func (a *App) dragTreeScrollbarTo(y int) {
+	trackY, trackH, _, thumbH, maxScroll, ok := a.treeScrollbarThumb()
+	if !ok {
+		return
+	}
+	free := trackH - thumbH
+	if free <= 0 || maxScroll <= 0 {
+		return
+	}
+	want := y - trackY - a.scrollbarGrab
+	if want < 0 {
+		want = 0
+	}
+	if want > free {
+		want = free
+	}
+	a.tree.ScrollY = (want*maxScroll + free/2) / free
+	if a.tree.ScrollY < 0 {
+		a.tree.ScrollY = 0
+	}
+	if a.tree.ScrollY > maxScroll {
+		a.tree.ScrollY = maxScroll
+	}
+}
+
+// drawTreeScrollbar paints the sidebar's bar OVER the column the tree
+// just drew — which is why it must run after Tree.Render, and not only
+// for the usual settle reason (Render is where clampScroll lands
+// ScrollY): anything painted before it would simply be overwritten.
+//
+// The track keeps the sidebar's own background rather than the editor's,
+// so the shared column still reads as part of the panel.
+func (a *App) drawTreeScrollbar() {
+	sx, _, sw, _ := a.treeScrollbarRect()
+	if sw == 0 {
+		return
+	}
+	trackY, trackH, thumbY, thumbH, _, ok := a.treeScrollbarThumb()
+	if !ok {
+		return
+	}
+	thumbFG := a.theme.Muted
+	if a.dragMode == "treescroll" {
+		thumbFG = a.theme.Accent
+	}
+	trackStyle := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(a.theme.Subtle)
+	thumbStyle := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(thumbFG)
+	for row := 0; row < trackH; row++ {
+		r, st := scrollbarTrackRune, trackStyle
+		if row >= thumbY && row < thumbY+thumbH {
+			r, st = scrollbarThumbRune, thumbStyle
+		}
+		a.screen.SetContent(sx, trackY+row, r, nil, st)
+	}
+}
+
+// menuToggleScrollbar flips BOTH bars from the ≡ View group and persists
 // the choice. Both directions take effect on the very next draw, since
-// the column is derived per frame rather than stored.
+// each bar is derived per frame rather than stored.
+//
+// One key, not two. The preference the user is expressing is "do I want
+// scrollbars" — the editor's and the tree's are one feature at two
+// surfaces, the way find-in-file and find-in-project are one question at
+// two scopes, and answering them separately would be a trap. A second key
+// would also be a setting almost nobody has a reason to flip: the tree's
+// bar shares its column, so the one argument for turning a bar off (give
+// me the width back) does not apply to it.
 func (a *App) menuToggleScrollbar() {
 	a.closeMenu()
 	a.scrollbarShown = !a.scrollbarShown
 	if a.scrollbarShown {
-		a.flash("Editor scrollbar on")
+		a.flash("Scrollbars on")
 	} else {
-		a.flash("Editor scrollbar off")
+		a.flash("Scrollbars off")
 	}
 	if err := userconfig.SaveScrollbar(userconfig.DefaultPath(), a.scrollbarShown); err != nil {
 		a.flash("config: " + err.Error())
@@ -308,7 +485,7 @@ func (a *App) menuToggleScrollbar() {
 // state it's in — the toggle-in-place rule every other View row follows.
 func (a *App) scrollbarToggleLabel() string {
 	if a.scrollbarShown {
-		return "Hide editor scrollbar"
+		return "Hide scrollbars"
 	}
-	return "Show editor scrollbar"
+	return "Show scrollbars"
 }

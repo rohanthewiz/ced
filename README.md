@@ -318,21 +318,25 @@ collapses back to a single caret, so you can never be left typing into
 lines you aren't looking at. The status bar says how many carets are
 live whenever there's more than one.
 
-### Scrollbar
+### Scrollbars
 
-The editor body's rightmost column is a vertical scrollbar. Its thumb is
-sized to the share of the file that fits on screen, so a glance answers
-"how much is below?" — a long file gets a stub, a file that fits gets a
-full-height thumb.
+The editor body's rightmost column is a vertical scrollbar, and the file
+tree has one down its own right edge. The thumb is sized to the share of
+the content that fits on screen, so a glance answers "how much is
+below?" — a long file gets a stub, a file that fits gets a full-height
+thumb.
 
-- **Drag the thumb** to move through the file; dragging past either end
-  parks there.
+- **Drag the thumb** to move; dragging past either end parks there.
 - **Click the track** above or below the thumb to page toward it.
-- The wheel works over the bar exactly as it does over the code.
+- The wheel works over either bar exactly as it does over the content.
 
-It costs the editor one column. Turn it off from `≡` → **Hide editor
-scrollbar**; it persists as `"scrollbar": "off"` in
-`~/.config/ced/config.json`.
+The two differ in one way. The editor's bar costs it a column, so it is
+always there. The tree's *shares* its last column instead, so it appears
+only when there are more rows than fit — and auto-fit widens the sidebar
+by one to keep the longest name out from under it.
+
+Turn both off from `≡` → **Hide scrollbars**; it persists as
+`"scrollbar": "off"` in `~/.config/ced/config.json`.
 
 ### Matching word highlight
 

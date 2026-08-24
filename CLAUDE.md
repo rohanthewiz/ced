@@ -142,7 +142,7 @@ internal/app/runexec.go       Run an executable: dir picker → staged line in t
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, locked by a drag
-internal/app/scrollbar.go     Editor scrollbar: reserved column, thumb metrics, drag/page
+internal/app/scrollbar.go     Scrollbars: editor (reserved column) + tree (shared column)
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
 internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, scrollbar, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
@@ -2613,11 +2613,15 @@ The sidebar sizes itself to the tree's longest row, so expanding
   pin sidebar geometry, and a splitter-drag test would persist the lock
   into the developer's real config.json.
 
-### Editor scrollbar (app/scrollbar.go)
+### Scrollbars (app/scrollbar.go)
 
-One reserved column down the editor's right edge, carrying a thumb whose
-HEIGHT says how much of the file fits on screen and whose POSITION says
-where in it you are — and which drags. House rules:
+A thumb whose HEIGHT says how much of the content fits on screen and
+whose POSITION says where in it you are — and which drags. Two surfaces
+on ONE preference, and the interesting part is the single difference
+between them: the editor's bar RESERVES its column, the file tree's
+SHARES the tree's own last one. Everything below follows from that.
+
+House rules, editor bar first:
 
 - **It DISPLACES the editor, it does not float over it** (the Find-all
   dock's rule). `editorRect` subtracts `scrollbarCols()`, which is what
@@ -2677,6 +2681,45 @@ where in it you are — and which drags. House rules:
   down by. `newTestApp` leaves the bar OFF, the treeAutoFit precedent:
   on, it would shift `editorRect` by a column under every test that pins
   editor geometry.
+
+And the file tree's:
+
+- **IT SHARES THE TREE'S LAST COLUMN**, painted over after `Tree.Render`
+  rather than subtracted from `sidebarRect`. The tree keeps its full
+  drawing width; the cost is that the longest row's final rune can end up
+  under the bar. That is the trade the next rule buys.
+- **So it appears only while the list overflows**, which the editor's bar
+  structurally cannot do. There, coming and going would move the editor's
+  right edge and re-flow the code on an edit that had nothing to do with
+  layout; here it costs no layout at all, so a tree with nothing to
+  scroll gets its column back instead of wearing a full-height thumb over
+  its names. Two bars, opposite answers, one reason.
+- **Auto-fit is the ONE thing that compensates** (`treeScrollbarCols`,
+  read only by `autoFitSidebar`): it asks for one column more while the
+  bar is up, because auto-fit exists precisely to stop the tree
+  truncating names and a bar sitting on the last rune of the row it just
+  widened to fit would undo that. It cannot oscillate — widening changes
+  no ROW count, and the bar's verdict is about rows. With auto-fit off
+  (a width the user dragged) nothing compensates and the bar simply
+  overlays; dragging one column wider is the out.
+- **It spans the LIST band only**, never the two header rows: those
+  scroll with nothing, and the project name is itself a click target.
+  `Tree.ListRows` is that split's one spelling — `Render` reads it too,
+  so the "2" lives in exactly one place.
+- **`Tree.MaxScroll` / `Tree.RowCount` mirror the editor's** for the same
+  one-formula reason, and there is deliberately NO overscroll pad here: a
+  tree has no "read the bottom comfortably" problem, and scrolling into
+  blank space would just lose rows.
+- **The hit-test runs before `sidebarClick`**, or a press would select
+  whatever node the user grabbed the thumb on — and after the splitter
+  cases, because the two columns are adjacent and the splitter is the one
+  the user aims at by feel.
+- Both bars share `scrollbarMetrics` and `scrollbarGrab`, so a thumb of a
+  given size can never mean two things, and both go through the same
+  `"scrollbar"` key: this is one feature at two surfaces (the
+  find-in-file / find-in-project rule), and the single argument for
+  turning a bar off — give me the width back — does not even apply to the
+  tree's.
 
 ## Build / run
 

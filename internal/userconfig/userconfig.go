@@ -40,10 +40,10 @@
 //	{"treeautofit": "off"}  // the sidebar keeps whatever width it has —
 //	                        // set by dragging the splitter. Dragging the
 //	                        // splitter also writes this key off.
-//	{"scrollbar": "on"}     // default; a draggable vertical scrollbar on
-//	                        // the editor's right edge, thumb sized to the
-//	                        // share of the file that fits on screen
-//	{"scrollbar": "off"}    // no bar — the editor keeps that column of
+//	{"scrollbar": "on"}     // default; draggable vertical scrollbars on
+//	                        // the editor and the file tree, thumb sized
+//	                        // to the share of the content on screen
+//	{"scrollbar": "off"}    // no bars — the editor keeps that column of
 //	                        // code width
 //	{"copilot": "on"}       // default; run copilot-language-server when
 //	                        // it's installed (silent no-op when absent)
@@ -229,12 +229,14 @@ type Config struct {
 	TreeAutoFit bool
 
 	// Scrollbar controls whether the editor body reserves its rightmost
-	// column for a draggable scrollbar. Defaults to on: "how much of this
-	// file am I looking at" has no other answer in a terminal editor, and
-	// the status bar's line count can't show it at a glance. Off is here
-	// because the bar costs a column of code width, which a user on an
-	// 80-column terminal may well want back. Persisted by the ≡ view
-	// toggle, same as ExecMarks.
+	// column for a draggable scrollbar, and whether the file tree paints
+	// one over its own last column. Defaults to on: "how much of this am
+	// I looking at" has no other answer in a terminal editor, and the
+	// status bar's line count can't show it at a glance. Off is here
+	// because the editor's bar costs a column of code width, which a user
+	// on an 80-column terminal may well want back. One key for both
+	// surfaces — see app/scrollbar.go. Persisted by the ≡ view toggle,
+	// same as ExecMarks.
 	Scrollbar bool
 
 	// WordHL controls whether the editor tints the other visible

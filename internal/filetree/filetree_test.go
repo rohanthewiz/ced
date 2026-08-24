@@ -15,6 +15,7 @@
 package filetree
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -359,6 +360,63 @@ func TestClampScroll_AllCases(t *testing.T) {
 		if tr.ScrollY != c.expect {
 			t.Errorf("%s: ScrollY=%d want %d", c.label, tr.ScrollY, c.expect)
 		}
+	}
+}
+
+// TestMaxScroll_MatchesClampScroll pins the exported ceiling against the
+// clamp it was pulled out of: the sidebar's scrollbar places its thumb
+// against exactly this number, so a drift between the two would show up
+// as a thumb that can't be dragged to the bottom of a tree the wheel
+// scrolls to happily. Unlike the editor's there is no overscroll pad.
+func TestMaxScroll_MatchesClampScroll(t *testing.T) {
+	cases := []struct {
+		label string
+		files int
+		viewH int
+		want  int
+	}{
+		{"list fits", 5, 10, 0},
+		{"list exactly fits", 10, 10, 0},
+		{"list overflows", 25, 10, 15},
+		{"no band at all", 25, 0, 25},
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		for i := 0; i < c.files; i++ {
+			if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%03d.txt", i)), []byte("x"), 0o644); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+		}
+		tr, err := New(dir)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if got := tr.RowCount(); got != c.files {
+			t.Fatalf("%s: RowCount = %d, want %d", c.label, got, c.files)
+		}
+		if got := tr.MaxScroll(c.viewH); got != c.want {
+			t.Errorf("%s: MaxScroll(%d) = %d, want %d", c.label, c.viewH, got, c.want)
+		}
+		tr.ScrollY = 9999
+		tr.clampScroll(c.files, c.viewH)
+		if tr.ScrollY != c.want {
+			t.Errorf("%s: clampScroll capped at %d, want MaxScroll's %d", c.label, tr.ScrollY, c.want)
+		}
+	}
+}
+
+// TestListRows_SplitsOffTheHeader pins the one number the scrollbar
+// needed out of this package: the file list starts two rows down (the
+// EXPLORER label and the project name) and gets whatever is left.
+func TestListRows_SplitsOffTheHeader(t *testing.T) {
+	tr := &Tree{}
+	if off, rows := tr.ListRows(20); off != 2 || rows != 18 {
+		t.Errorf("ListRows(20) = (%d, %d), want (2, 18)", off, rows)
+	}
+	// A rect too short for the header must report no list rather than a
+	// negative band — Render loops on this count.
+	if off, rows := tr.ListRows(1); off != 2 || rows != 0 {
+		t.Errorf("ListRows(1) = (%d, %d), want (2, 0)", off, rows)
 	}
 }
 

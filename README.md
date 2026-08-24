@@ -318,6 +318,22 @@ collapses back to a single caret, so you can never be left typing into
 lines you aren't looking at. The status bar says how many carets are
 live whenever there's more than one.
 
+### Scrollbar
+
+The editor body's rightmost column is a vertical scrollbar. Its thumb is
+sized to the share of the file that fits on screen, so a glance answers
+"how much is below?" — a long file gets a stub, a file that fits gets a
+full-height thumb.
+
+- **Drag the thumb** to move through the file; dragging past either end
+  parks there.
+- **Click the track** above or below the thumb to page toward it.
+- The wheel works over the bar exactly as it does over the code.
+
+It costs the editor one column. Turn it off from `≡` → **Hide editor
+scrollbar**; it persists as `"scrollbar": "off"` in
+`~/.config/ced/config.json`.
+
 ### Matching word highlight
 
 Rest the cursor in an identifier and every other instance of it on

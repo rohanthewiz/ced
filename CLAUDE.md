@@ -142,8 +142,9 @@ internal/app/runexec.go       Run an executable: dir picker → staged line in t
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, locked by a drag
+internal/app/scrollbar.go     Editor scrollbar: reserved column, thumb metrics, drag/page
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
+internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, scrollbar, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
 internal/theme/theme.go       Theme struct (tcell colors) + Default() fallback
 internal/theme/palette.go     Canonical color keys + the 8-core derivation table
@@ -2611,6 +2612,71 @@ The sidebar sizes itself to the tree's longest row, so expanding
   OFF: on, every draw would re-derive `sidebarWidth` under the tests that
   pin sidebar geometry, and a splitter-drag test would persist the lock
   into the developer's real config.json.
+
+### Editor scrollbar (app/scrollbar.go)
+
+One reserved column down the editor's right edge, carrying a thumb whose
+HEIGHT says how much of the file fits on screen and whose POSITION says
+where in it you are — and which drags. House rules:
+
+- **It DISPLACES the editor, it does not float over it** (the Find-all
+  dock's rule). `editorRect` subtracts `scrollbarCols()`, which is what
+  keeps every existing call site — hit-testing, the hover tooltip, drag
+  auto-scroll, Alt+click, the context menu — ignorant that the bar
+  exists. A thumb painted on top of the last column would cover a
+  character on every row it crossed, and that column is the one
+  `Tab.Render` already uses for the horizontal-overflow arrow.
+- **The column is NOT conditioned on the file overflowing.** A bar that
+  came and went as the buffer grew past the bottom row would move the
+  editor's right edge — re-flowing everything the user was reading — on
+  an edit that had nothing to do with layout. A short file gets a
+  FULL-HEIGHT thumb instead, which is the honest way to say "this is all
+  of it". The two cases that do give the column back are no tab open
+  (there is no scroll position to report) and a band too narrow for
+  `scrollbarMinEditor` (at that size the code is the scarce thing).
+- **It sits at `ex+ew`, INSIDE a right-docked Find-all list.** The bar
+  belongs to the editor, so it stays welded to the editor's edge wherever
+  that edge moved to — which is why `findAllModal.rect` is the one call
+  site that had to learn about it (`ex + ew + scrollbarCols()`). A second
+  surface that positions itself against the band's right edge has to do
+  the same.
+- **`Tab.MaxScroll` is exported so there is ONE ceiling.** The thumb is
+  placed against exactly the range the wheel can reach, including
+  `clampScroll`'s overscroll pad; a second copy of that arithmetic would
+  drift, and the symptom is a thumb that cannot be dragged to the end of
+  a file the wheel scrolls to happily. `clampScroll` now calls it.
+- **Thumb HEIGHT is measured against the file, thumb POSITION against
+  `MaxScroll`.** The pad is blank space below the last line: counting it
+  in the height would shrink the thumb to claim there is more file than
+  there is, while ignoring it in the position would leave the thumb a few
+  rows short of the bottom at the end of travel. `scrollbarMetrics` is a
+  pure function for that reason — three degenerate cases (empty buffer,
+  file shorter than the window, thumb as tall as the track), each one a
+  place a division could panic.
+- **Press on the thumb DRAGS, press on the track PAGES.** Paging is the
+  reversible answer: a mis-aimed page is one press back, while jumping
+  the thumb to the pointer has thrown away the position the user was
+  reading from with nothing to restore it. The grab offset
+  (`scrollbarGrab`) is taken at press time so the thumb slides with the
+  pointer instead of snapping its top edge under it.
+- **The hit-test runs BEFORE the editor catch-all** in `handleMouse`, the
+  same reason every panel's does: the column is inside the editor's
+  y-band, so an unasked press would move the caret to whatever line the
+  user grabbed the thumb on. The wheel needs no such case — `scrollAt`'s
+  catch-all already scrolls the active tab for that y range.
+- **`drawScrollbar` runs AFTER `Tab.Render`**, never before: Render is
+  where `EnsureVisible` and `clampScroll` settle `ScrollY`, so a bar
+  drawn ahead of it reports the previous frame's position on any tick
+  that moved the cursor.
+- `"scrollbar"` is the persisted key (default on) with a ≡ **View** row
+  and no leader key (the flat table is out of letters, and this is a
+  once-a-session decision about how much code width to spend). The row
+  sits with the two dock toggles rather than up with the tree rows,
+  because the rows above it are pinned above the fold on a 24-row window
+  (`TestMenuLayout_TerminalRowsAboveTheFold`) with no slack to push them
+  down by. `newTestApp` leaves the bar OFF, the treeAutoFit precedent:
+  on, it would shift `editorRect` by a column under every test that pins
+  editor geometry.
 
 ## Build / run
 

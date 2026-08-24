@@ -1200,6 +1200,46 @@ func TestTab_clampScroll_BoundsScroll(t *testing.T) {
 	}
 }
 
+// TestTab_MaxScroll_MatchesClampScroll pins the extracted ceiling against
+// the clamp it was pulled out of: the scrollbar places its thumb against
+// exactly this number, so a drift between the two would show up as a
+// thumb that cannot be dragged to the end of a file the wheel scrolls to
+// happily. Also covers the two shapes the formula has to get right — a
+// file shorter than the viewport (no travel at all) and the overscroll
+// pad that lets the last line come up to the middle of the screen.
+func TestTab_MaxScroll_MatchesClampScroll(t *testing.T) {
+	cases := []struct {
+		name  string
+		lines int
+		viewH int
+		want  int
+	}{
+		{"file shorter than the viewport", 5, 20, 0},
+		{"file exactly the viewport", 20, 20, 10},       // + viewH/2 overscroll
+		{"long file", 200, 20, 190},                     // 200 - 20 + 10
+		{"tiny viewport keeps a floor of 3", 50, 4, 49}, // 50 - 4 + 3
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// No trailing newline: NewBuffer keeps the empty line after a
+			// final \n, which would make every count here one too many.
+			tab := &Tab{Buffer: NewBuffer(strings.TrimSuffix(strings.Repeat("x\n", c.lines), "\n"))}
+			if got := tab.Buffer.LineCount(); got != c.lines {
+				t.Fatalf("fixture has %d lines, want %d", got, c.lines)
+			}
+			if got := tab.MaxScroll(c.viewH); got != c.want {
+				t.Fatalf("MaxScroll(%d) = %d, want %d", c.viewH, got, c.want)
+			}
+			// clampScroll must land on the same number from above.
+			tab.ScrollY = 99999
+			tab.clampScroll(c.viewH)
+			if tab.ScrollY != c.want {
+				t.Errorf("clampScroll capped at %d, want MaxScroll's %d", tab.ScrollY, c.want)
+			}
+		})
+	}
+}
+
 // TestTab_ScrollH_AdjustsAndClamps confirms that ScrollH adds the delta
 // and never lets ScrollX go negative — mirroring how Scroll behaves for
 // the vertical axis.

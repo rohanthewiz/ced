@@ -1257,15 +1257,17 @@ func (t *Tab) ScrollH(deltaCols int) {
 	}
 }
 
-// clampScroll keeps ScrollY inside a sensible range for the current viewport
-// height. The max is "last line still on screen, plus a small overscroll
-// pad" so the user can scroll the bottom of the file up to the middle of
-// the viewport — which feels much better than abruptly stopping when the
-// last line hits the bottom row.
-func (t *Tab) clampScroll(viewH int) {
-	if t.ScrollY < 0 {
-		t.ScrollY = 0
-	}
+// MaxScroll reports the largest ScrollY that clampScroll will allow for a
+// viewport of viewH rows: "last line still on screen, plus a small
+// overscroll pad" so the user can pull the bottom of the file up to the
+// middle of the viewport — which feels much better than abruptly stopping
+// when the last line hits the bottom row.
+//
+// Exported because the scrollbar has to place its thumb against exactly
+// the range the wheel can reach (app/scrollbar.go). Two copies of this
+// arithmetic would drift, and the symptom would be a thumb that can't be
+// dragged to the end of a file the wheel scrolls to happily.
+func (t *Tab) MaxScroll(viewH int) int {
 	overscroll := viewH / 2
 	if overscroll < 3 {
 		overscroll = 3
@@ -1274,7 +1276,16 @@ func (t *Tab) clampScroll(viewH int) {
 	if max < 0 {
 		max = 0
 	}
-	if t.ScrollY > max {
+	return max
+}
+
+// clampScroll keeps ScrollY inside the range MaxScroll describes for the
+// current viewport height.
+func (t *Tab) clampScroll(viewH int) {
+	if t.ScrollY < 0 {
+		t.ScrollY = 0
+	}
+	if max := t.MaxScroll(viewH); t.ScrollY > max {
 		t.ScrollY = max
 	}
 }

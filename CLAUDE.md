@@ -70,6 +70,7 @@ internal/editor/highlight.go  Chroma → []tcell.Style per line
 internal/editor/syntax.go     Re-lex settle policy + the style-grid patch
 internal/app/syntax.go        The settle timer that wakes the loop for the re-lex
 internal/app/tabbar.go        Tab strip: scroll, overflow button, switching
+internal/app/tablabel.go      Tab labels: the basename, widened only when two collide
 internal/diff/diff.go         Patience line differ + unified-diff rendering (pure Go)
 internal/app/compare.go       Compare panel: buffer ↔ file / saved copy / pasted text
 internal/editor/find.go       Match model + the one scanner (options: case, whole word)
@@ -354,6 +355,45 @@ asked twice: can we faithfully round-trip this file, and did we?
   table sees it — the binding tests green and does nothing in a real
   terminal. Same trap for `P`, `N`, `\`, `^`, `_`, `#`. Tab switching is
   `Esc ,` / `Esc .` (`<` and `>` live on those keys) and `Esc b`.
+
+### Tab labels and the status bar's path (app/tablabel.go, app/statusbar.go)
+Which main.go is this? Every tab used to be drawn as its basename, so a
+Go project with three `main.go` / `handler.go` / `syntax.go` files open
+showed identical tabs and the only way to tell them apart was to click
+one. Two halves, one question. House rules:
+
+- **A label is the basename until another OPEN tab claims it**, and then
+  it grows by whole directory segments until the tie breaks
+  (`cmd/main.go` beside `web/main.go`). The strip is the editor's
+  scarcest horizontal space — it scrolls, and a tab that doesn't fit is
+  not laid out at all — so directory columns spent on files nobody could
+  confuse would cost visible tabs for nothing.
+- **Growth is per COLLIDING GROUP, re-derived each round.** Widening the
+  two `main.go`s must not widen the `tabbar.go` sitting beside them, and
+  a tab drops out of the growth the moment its label is unique. A round
+  in which nothing can grow ends the loop — which is also the
+  termination proof for two untitled buffers, which have no directories
+  to take.
+- **The cache is keyed by the LIST OF OPEN PATHS, not a dirty flag.**
+  Tabs are born, closed, renamed, reordered and restored from half a
+  dozen files; a flag one of them forgot to set would draw a stale label
+  with nothing on screen to explain it, while comparing the paths cannot
+  be wrong. The list is tiny, and the comparison is what a cache hit
+  costs.
+- **`tabWidth` measures the LABEL.** A width taken from the basename
+  clips exactly the directory that carries the information. The icon
+  still keys off the real file name — a glyph is chosen by extension,
+  not by how much path the strip had to show.
+- **The status bar answers the same question for the file in FRONT of
+  you**: the directory (project-relative inside the root, absolute
+  outside it — a `../../..` chain says nothing), truncated from the
+  FRONT per the find-all label rule, budgeted to a share of the window
+  so it can never push Ln/Col off a narrow terminal, and empty for a
+  file at the root, whose name already is its path. The trailing `⧉` is
+  the mouse twin of ≡ File → "Copy absolute path" and copies the full
+  filespec; it trails the path rather than sitting between the name and
+  it, so the two read as one thing. It is drawn even when the directory
+  came to nothing — a root-level file still has a path worth copying.
 
 ### Scroll clamping with overscroll
 `tab.clampScroll(viewH)` allows the last line to scroll roughly to the

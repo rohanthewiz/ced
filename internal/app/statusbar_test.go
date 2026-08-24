@@ -194,6 +194,83 @@ func TestStatusBarNarrowWindowDropsRightSegments(t *testing.T) {
 	}
 }
 
+// TestStatusBarCopyPathButton pins the ⧉ affordance: it is stamped as a
+// clickable segment for any saved file, and clicking it reports back —
+// the OS clipboard is invisible from inside a TUI, so a silent copy is
+// indistinguishable from a dead button.
+func TestStatusBarCopyPathButton(t *testing.T) {
+	root := t.TempDir()
+	p := writeStatusTestFile(t, root, "main.go", "package main\n")
+	a := newTestApp(t, root)
+	a.openFile(p)
+	expireFlash(a)
+	a.drawStatusBar()
+
+	seg := drawnStatusSeg(a, statusCopyGlyph)
+	if seg == nil {
+		t.Fatalf("no ⧉ segment stamped; segs: %+v", a.statusSegs)
+	}
+	seg.onClick(a)
+	if a.statusMsg == "" {
+		t.Fatal("⧉ click produced no feedback")
+	}
+	// Either outcome is fine — CI may have no usable /dev/tty — but it
+	// must name the path or the failure (the copyPathToSystemClipboard
+	// contract).
+	if !strings.Contains(a.statusMsg, "main.go") &&
+		!strings.Contains(a.statusMsg, "Copy failed") {
+		t.Fatalf("flash mentioned neither the path nor an error: %q", a.statusMsg)
+	}
+}
+
+// TestStatusPathDir_RelativeAndRootLevel covers the two shapes of the
+// directory readout: a nested file shows its project-relative directory,
+// and a file AT the root shows nothing — its name is already its path,
+// and a lone "." would be a column spent on nothing.
+func TestStatusPathDir_RelativeAndRootLevel(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	nested := filepath.Join(root, "internal", "app", "x.go")
+	if got := a.statusPathDir(nested, 40); got != filepath.Join("internal", "app") {
+		t.Errorf("nested dir = %q, want internal/app", got)
+	}
+	if got := a.statusPathDir(filepath.Join(root, "main.go"), 40); got != "" {
+		t.Errorf("root-level dir = %q, want empty", got)
+	}
+}
+
+// TestStatusPathDir_TruncatesFromTheFront pins the truncation direction:
+// the distinguishing part of a path is its tail, so a budget too small
+// for the whole thing must keep the END of it.
+func TestStatusPathDir_TruncatesFromTheFront(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	deep := filepath.Join(root, "aaaa", "bbbb", "cccc", "dddd", "x.go")
+	got := a.statusPathDir(deep, 12)
+	if runeLen(got) != 12 {
+		t.Fatalf("dir = %q (%d runes), want 12", got, runeLen(got))
+	}
+	if !strings.HasPrefix(got, "…") || !strings.HasSuffix(got, "dddd") {
+		t.Errorf("dir = %q, want a leading … and the tail kept", got)
+	}
+}
+
+// TestStatusPathDir_OutsideRootGoesAbsolute: a file opened from outside
+// the project has no short true form, and "../../.." says nothing about
+// where it is — so the readout switches to the real location.
+func TestStatusPathDir_OutsideRootGoesAbsolute(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	a := newTestApp(t, root)
+	got := a.statusPathDir(filepath.Join(other, "far.go"), 200)
+	if strings.HasPrefix(got, "..") || got == "" {
+		t.Fatalf("outside-root dir = %q, want an absolute path", got)
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("outside-root dir = %q, want absolute", got)
+	}
+}
+
 func TestOpenMenuAtSection(t *testing.T) {
 	root := t.TempDir()
 	a := newTestApp(t, root)

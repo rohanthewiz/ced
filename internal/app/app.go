@@ -971,6 +971,14 @@ type App struct {
 	// with something long (see cats_glue.go's state reporter).
 	projectSearchActive int
 
+	// tabLabels is what each tab is DRAWN as — the basename, or a
+	// directory-prefixed form when another open tab shares it — and
+	// tabLabelPaths is the list of open paths those labels were computed
+	// from, which is the cache's whole invalidation story. See
+	// tablabel.go.
+	tabLabels     []string
+	tabLabelPaths []string
+
 	// tabScroll is the index of the leftmost tab DRAWN in the tab strip.
 	// Derived state, never a preference: layoutTabs re-derives it from
 	// the active tab and the available width on every frame. See

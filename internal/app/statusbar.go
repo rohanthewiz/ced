@@ -66,11 +66,12 @@ func (a *App) statusLeftSegments() []statusSegment {
 	}
 	if tab.IsImage() && tab.Image != nil {
 		b := tab.Image.Bounds()
-		return []statusSegment{
+		segs := []statusSegment{
 			{text: " " + filepath.Base(tab.Path), onClick: (*App).menuSwitchTab},
-			{text: fmt.Sprintf(" · %s · %d×%d",
-				strings.ToUpper(tab.ImageFmt), b.Dx(), b.Dy())},
 		}
+		segs = append(segs, a.statusPathSegments(tab.Path)...)
+		return append(segs, statusSegment{text: fmt.Sprintf(" · %s · %d×%d",
+			strings.ToUpper(tab.ImageFmt), b.Dx(), b.Dy())})
 	}
 
 	segs := []statusSegment{
@@ -85,6 +86,9 @@ func (a *App) statusLeftSegments() []statusSegment {
 		// save button — the state and the verb that clears it, one cell.
 		segs = append(segs, statusSegment{text: " ●", onClick: (*App).menuSave})
 	}
+	// Where the file actually LIVES, and the one-click way to take that
+	// answer with you. See statusPathSegments.
+	segs = append(segs, a.statusPathSegments(tab.Path)...)
 	segs = append(segs,
 		// The language label doubles as the door to the ≡ Code section —
 		// the LSP-backed verbs — since "what does the editor know about
@@ -112,6 +116,90 @@ func (a *App) statusLeftSegments() []statusSegment {
 		segs = append(segs, statusSegment{text: s})
 	}
 	return segs
+}
+
+// statusCopyGlyph is the ⧉ button: one click puts the active file's FULL
+// path on the system clipboard. Single-width by the marker rule (runeLen
+// counts runes, and a double-width glyph would slide every segment right
+// of it out from under its own stamped rect), and deliberately the same
+// glyph the chat transcript and the git log already use for copy — the
+// editor should only have one symbol for "take this with you".
+const statusCopyGlyph = "⧉"
+
+// statusPathMaxShare caps the directory readout at a fraction of the
+// window. The left run is clipped against the right one, and it is laid
+// out in order — so an unbudgeted path on a deep tree would push Ln/Col
+// and the line count off the bar entirely on a narrow terminal, trading a
+// fact you consult constantly for one you consult occasionally.
+const statusPathMaxShare = 3
+
+// statusPathSegments renders where the active file lives, plus the ⧉
+// button that copies its full path.
+//
+// It exists because the tab strip answers "which file?" with a NAME, and
+// a name is not an answer when three of them are open — tablabel.go
+// widens colliding tabs just far enough to tell them apart, and this is
+// the other half: the whole location, for whichever file is in front of
+// you, without opening a menu or a picker.
+//
+// Three decisions:
+//
+//   - **The directory only, not the file's whole path.** The name is
+//     already the segment to the left of it; repeating it would spend the
+//     bar's scarcest columns saying the same thing twice.
+//   - **Project-relative when the file is inside the root**, absolute
+//     otherwise. Relative is the shortest TRUE answer and the form the
+//     user would paste into a shell already sitting in the project; a
+//     file outside the root has no short true form, and "../../.." chains
+//     are noise (the tabPickerDir rule).
+//   - **Truncated from the FRONT**, like the find-all panel's path
+//     labels: the distinguishing part of a path is its tail. A file AT
+//     the root renders nothing at all — its name is its path, and a lone
+//     "." is a cell spent on nothing.
+//
+// The ⧉ button is drawn whatever the directory came to, because a file at
+// the project root still has a full path worth copying — and it is the
+// mouse twin of the ≡ File → "Copy absolute path" row, so a terminal that
+// eats clicks loses nothing (the macOS-Terminal rule).
+func (a *App) statusPathSegments(path string) []statusSegment {
+	if path == "" {
+		return nil
+	}
+	var segs []statusSegment
+	_, _, sw, _ := a.statusRect()
+	if dir := a.statusPathDir(path, sw/statusPathMaxShare); dir != "" {
+		segs = append(segs, statusSegment{text: " " + dir})
+	}
+	// The button TRAILS the path it copies, so the two read as one thing
+	// — a location and the way to take it with you — rather than as a
+	// glyph wedged between the file name and its directory.
+	return append(segs, statusSegment{text: " " + statusCopyGlyph,
+		onClick: (*App).menuCopyAbsolutePath})
+}
+
+// statusPathDir is the directory half of the readout: project-relative,
+// falling back to absolute for a file outside the root, front-truncated
+// to budget, and empty for a file sitting at the root itself. Split out
+// from statusPathSegments so the text rule can be tested without a
+// screen.
+func (a *App) statusPathDir(path string, budget int) string {
+	if path == "" || budget <= 1 {
+		return ""
+	}
+	dir := filepath.Dir(a.relativePathFor(path))
+	if dir == "." || dir == string(filepath.Separator) {
+		return ""
+	}
+	if strings.HasPrefix(dir, "..") {
+		// Outside the project: the relative form is a chain of parents
+		// that reads as nothing at all, so say where it really is.
+		dir = filepath.Dir(absolutePathFor(path))
+	}
+	if runeLen(dir) > budget {
+		r := []rune(dir)
+		dir = "…" + string(r[len(r)-(budget-1):])
+	}
+	return dir
 }
 
 // statusRightSegments builds the right-hand run: ambient session state

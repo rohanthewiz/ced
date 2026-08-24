@@ -85,10 +85,16 @@ func (a *App) tabOverflowReserve() int {
 
 // tabWidth is the rendered width of one tab:
 //
-//	" <dirty><icon? ><name> × " — a single space pad, two-cell dirty slot
+//	" <dirty><icon? ><label> × " — a single space pad, two-cell dirty slot
 //	(dot+space, or two spaces), an optional Nerd Font glyph + 1-space
-//	separator (only when icons are enabled), the file name, a separator
+//	separator (only when icons are enabled), the tab's LABEL, a separator
 //	space, the close ×, and a trailing space.
+//
+// The label is a.tabLabel, not the bare basename: two open files with the
+// same name are drawn with as much of their directory as it takes to tell
+// them apart (tablabel.go), and a width measured against the basename
+// would leave the difference clipped off the end — the one part of the
+// label that carries the information.
 func (a *App) tabWidth(i int) int {
 	if i < 0 || i >= len(a.tabs) {
 		return 0
@@ -97,7 +103,7 @@ func (a *App) tabWidth(i int) int {
 	if a.iconsOn() {
 		iconW = 2 // glyph + space
 	}
-	nameLen := len([]rune(a.tabs[i].DisplayName()))
+	nameLen := len([]rune(a.tabLabel(i)))
 	return 1 + 2 + iconW + nameLen + 1 + 1 + 1
 }
 
@@ -157,7 +163,7 @@ func (a *App) layoutTabs() []tabRect {
 				break
 			}
 		}
-		nameLen := len([]rune(a.tabs[i].DisplayName()))
+		nameLen := len([]rune(a.tabLabel(i)))
 		out = append(out, tabRect{
 			Index:   i,
 			X:       cursor,
@@ -259,7 +265,11 @@ func (a *App) drawTabBar() {
 			}
 			col++ // separator space after glyph
 		}
-		for _, ru := range tab.DisplayName() {
+		// The LABEL, which is the basename until another open tab claims
+		// it — see tablabel.go. The icon above still keys off the real
+		// file name: a glyph is chosen by extension, not by how much
+		// path the strip had to show.
+		for _, ru := range a.tabLabel(r.Index) {
 			if col >= tx+tw {
 				break
 			}

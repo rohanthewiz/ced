@@ -1222,6 +1222,12 @@ type App struct {
 	// half is modal. Armed at Tier 1 only; see that file's header.
 	hoverDwell hoverDwellState
 
+	// commitReceipt is the transient panel naming the hash and message
+	// of the commit that just landed (gitcommitreceipt.go). Passive
+	// chrome like the dwell tooltip — it never takes the modal slot,
+	// and any keystroke dismisses it without being consumed.
+	commitReceipt commitReceiptState
+
 	// copilot holds the GitHub Copilot sidecar state: the
 	// copilot-language-server connection and the sign-in machinery.
 	// Mutated only on the main loop; background work posts
@@ -1729,6 +1735,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleGitLogFilterResult(e)
 	case *gitCommitDiffEvent:
 		a.handleGitCommitDiff(e)
+	case *gitCommitReceiptEvent:
+		a.handleGitCommitReceipt(e)
+	case *commitReceiptExpireEvent:
+		a.handleCommitReceiptExpire(e)
 	case *gitPushRefsEvent:
 		a.handleGitPushRefs(e)
 	case *termOutputEvent:
@@ -2317,6 +2327,11 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// identifier is the exact behaviour that makes people turn hover off.
 	// Non-consuming — the key then does what it always did.
 	a.closeHoverDwell()
+	// The commit receipt goes the same way and for the same reason: it
+	// is chrome nobody asked for, so the first thing the user does next
+	// takes it down — and, like the ghost text, it must never cost them
+	// the keystroke that did it.
+	a.closeCommitReceipt()
 	// The active modal owns the keyboard while it's up. Each handler
 	// understands Esc (cancel), Enter (submit / activate), and the keys
 	// relevant to its layout (text editing for the prompt, arrow keys for
@@ -2769,6 +2784,19 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// See hoverdwell.go.
 	if a.notePointer(x, y, btn) {
 		return
+	}
+
+	// The commit receipt takes a press the same way: it closes on any
+	// button, and a press that landed INSIDE the panel is swallowed
+	// rather than moving the caret in code the user could not see. Pure
+	// motion and the wheel pass through, so reading a receipt is not
+	// interrupted by a nudge of the mouse.
+	if btn&(tcell.Button1|tcell.Button2|tcell.Button3) != 0 && a.commitReceiptOpen() {
+		hit := a.commitReceiptContains(x, y)
+		a.closeCommitReceipt()
+		if hit {
+			return
+		}
 	}
 
 	// The which-key overlay's rows are clickable. A left press on a row
@@ -4359,6 +4387,13 @@ func (a *App) draw() {
 	// It is always given the chance to draw, because that call is also
 	// what clears the stamped rect when it is NOT visible.
 	a.drawHoverDwell()
+
+	// The commit receipt shares that passive layer: above the panels
+	// (it is a report about what just happened, so nothing may cover
+	// it) and below the menu and modals, which suppress it outright —
+	// handleGitCommitReceipt declines to open under either, since a
+	// receipt nobody can see would expire unread.
+	a.drawCommitReceipt()
 
 	// Overlay layer. The menu and the active modal are mutually
 	// exclusive (closeAllModals enforces it), so at most one of these

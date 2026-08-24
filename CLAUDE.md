@@ -135,6 +135,7 @@ internal/cats/events.go       events.subscribe stream — reconnects forever, su
 internal/cats/hooks.go        Hook reporter: idle/working/blocked → cats badge/toast/push
 internal/app/cats_glue.go     Tier detection, the state reporter, sibling-agent notifications
 internal/app/gitcommitmsg.go  Commit the panel's selection + agent-drafted messages
+internal/app/gitcommitreceipt.go The transient panel naming the commit that just landed
 internal/app/gitlog.go        Git log panel: commit list + `git show` detail (Esc-L)
 internal/app/gitlogactions.go Git log verbs: cherry-pick, revert, reset, branch/tag, copies
 internal/app/gitstatusreport.go git's own `git status` report, on demand, in the info modal
@@ -1901,6 +1902,56 @@ rules:
   message they had already typed. `canSuggestCommitMsg` is therefore
   down to the one question that makes the ACTION meaningless rather than
   merely unavailable: is this a repository.
+
+### The commit receipt (app/gitcommitreceipt.go)
+For a few seconds after a commit lands, a panel naming the hash git just
+minted and the whole message that went with it. House rules:
+
+- **IT IS PASSIVE, AND THAT IS THE WHOLE DESIGN.** It never takes the
+  modal slot: nobody asked a question, so nothing here may own the
+  keyboard — the hoverdwell argument, and the same reason an arriving
+  `git status` report DECLINES an occupied slot. A modal would spend the
+  user's next keystroke making them dismiss a receipt for something they
+  already know happened. It paints on the passive layer beside the dwell
+  tooltip (above the panels, below the menu and modals), so it opens only
+  when neither of those owns the screen — a receipt drawn underneath one
+  would be invisible for its whole window and then expire unread.
+- **Dismissed by anything, and the keystroke is NOT consumed.** The
+  expiry is a one-shot `time.AfterFunc` posting a seq-stamped event (the
+  events-only rule; the seq is what stops a second commit inside the
+  window being closed early by the first one's timer), and any key or any
+  press closes it sooner. A press INSIDE the box is swallowed — it covers
+  code the user cannot see, the completion popup's contract — but a
+  keystroke never is: this is chrome nobody asked for, so it must not
+  cost a character. Same rule as clearing the ghost text.
+- **The facts are REPORTED, never re-derived.** The panel reads `git log
+  -1`, not the message string ced sent: hooks rewrite messages, cleanup
+  rules trim them, and the hash cannot be known any other way. It is also
+  why this hangs off a SUCCESS hook rather than off the prompt — both
+  facts exist only after git exits.
+- **`gitCmdDoneEvent.onOK` is that hook, and it is onFail's twin** —
+  built on the main loop, carried by the goroutine, called only on the
+  loop, riding the EVENT so two commands in flight can't claim each
+  other's follow-up. `runGitCmdOK` / `runGitCmdSeqOK` are the wrappers;
+  the sequence flavour is safe by construction, since one done-event for
+  the whole set already means a stage that failed never reached the
+  commit. `gitCommitFiles` is the single place that arms it — every
+  commit in the editor comes through there, so a new commit surface gets
+  the receipt for free.
+- **A failed or unreadable `git log` costs the receipt, not the commit**,
+  which already succeeded and already flashed (silent degradation, the
+  LSP/formatter contract). The hash is validated as hex before anything
+  is shown, and NOT pinned to 40 characters — a receipt has no reason to
+  have an opinion about SHA-1 vs SHA-256.
+- **Wrapping runs per SOURCE line and blank lines survive.** A commit
+  message's line structure is authored (the subject stands alone,
+  paragraphs and bullets are separated on purpose), so flowing it as one
+  blob would run the subject into the body and report a message the
+  repository does not hold. The body is capped and the cut is MARKED
+  (`capLines`) — a silently short message reads as one that was silently
+  truncated on the way in, the one wrong thing a receipt could say.
+- No ≡ row and no leader key: it is not a verb, it is what a verb says
+  back.
 
 ### Git log panel (app/gitlog.go + gitlogactions.go)
 A JetBrains-style history browser (Esc-L) in the SAME bottom strip as

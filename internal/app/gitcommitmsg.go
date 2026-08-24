@@ -256,14 +256,21 @@ func (a *App) menuToggleCommitTrailer() {
 // the row would silently commit a stale version. Pathspec-limited
 // commit leaves anything else already staged alone, which is what makes
 // the row safe to use on a half-staged tree.
+//
+// Both spellings arm the commit receipt (gitcommitreceipt.go) as their
+// success hook, and this is the single place that does — every commit
+// in the editor comes through here, so a new commit surface gets the
+// receipt for free rather than having to remember it. The hook is a
+// method expression: the git plumbing carries a plain func(*App) and
+// knows nothing about what a receipt is.
 func (a *App) gitCommitFiles(files []gitPanelFile, msg string) {
 	if len(files) == 0 {
-		a.runGitCmd("Commit", "commit", "-m", msg)
+		a.runGitCmdOK("Commit", (*App).requestCommitReceipt, "commit", "-m", msg)
 		return
 	}
 	what := gitPanelTargetLabel(files)
 	paths := gitPanelPaths(files)
-	a.runGitCmdSeq("Commit "+what, [][]string{
+	a.runGitCmdSeqOK("Commit "+what, (*App).requestCommitReceipt, [][]string{
 		append([]string{"add", "--"}, paths...),
 		append([]string{"commit", "-m", msg, "--"}, paths...),
 	})

@@ -49,6 +49,19 @@ type gitCmdDoneEvent struct {
 	err    error
 	output []byte
 	onFail func(*App, *gitCmdDoneEvent) bool
+
+	// onOK is the mirror image, run on the main loop after a SUCCESSFUL
+	// command and after the usual flash + refresh — a hook for a verb
+	// that owes the user more than "done". It rides on the event for the
+	// same reason onFail does (two commands in flight must not claim
+	// each other's follow-up), and it is likewise BUILT on the main loop
+	// and only ever CALLED there; the goroutine merely carries it.
+	//
+	// The one caller today is the commit receipt (gitcommitreceipt.go):
+	// a commit is the one write here whose result the user wants to
+	// READ back, and the hash it produced exists only after the command
+	// has actually exited.
+	onOK func(*App)
 }
 
 // When satisfies the tcell.Event interface.
@@ -82,6 +95,21 @@ func (a *App) runGitCmdHook(label string, onFail func(*App, *gitCmdDoneEvent) bo
 // caller but the conflict resolver wants — see gitNoEditorEnv for the
 // one that doesn't.
 func (a *App) runGitCmdEnv(label string, env []string, onFail func(*App, *gitCmdDoneEvent) bool, args ...string) {
+	a.runGitCmdFull(label, env, onFail, nil, args...)
+}
+
+// runGitCmdOK is runGitCmd for a caller that wants to act on SUCCESS —
+// the onFail hook's twin, and the only one of the two that ever needs to
+// see the command's aftermath rather than its output.
+func (a *App) runGitCmdOK(label string, onOK func(*App), args ...string) {
+	a.runGitCmdFull(label, nil, nil, onOK, args...)
+}
+
+// runGitCmdFull is the single launcher every variant above funnels
+// through: an optional child environment plus both outcome hooks. The
+// wrappers exist so a call site names only what it actually uses — the
+// escalating-variant idiom this file already follows.
+func (a *App) runGitCmdFull(label string, env []string, onFail func(*App, *gitCmdDoneEvent) bool, onOK func(*App), args ...string) {
 	if a.screen == nil || a.rootDir == "" {
 		return
 	}
@@ -92,7 +120,8 @@ func (a *App) runGitCmdEnv(label string, env []string, onFail func(*App, *gitCmd
 		cmd.Env = env
 		out, err := cmd.CombinedOutput()
 		_ = scr.PostEvent(&gitCmdDoneEvent{
-			when: time.Now(), label: label, err: err, output: out, onFail: onFail,
+			when: time.Now(), label: label, err: err, output: out,
+			onFail: onFail, onOK: onOK,
 		})
 	}()
 }
@@ -163,11 +192,27 @@ func (a *App) runGitCmdSeq(label string, cmds [][]string) {
 	a.runGitCmdSeqEnv(label, nil, cmds)
 }
 
+// runGitCmdSeqOK is runGitCmdSeq with a success hook, on the same terms
+// as runGitCmdOK. The whole SET has to have succeeded before it runs,
+// which is exactly what "one done-event for the whole sequence" already
+// guarantees — a stage that failed never reaches the commit, and a hook
+// that reported one anyway would name a commit that does not exist.
+func (a *App) runGitCmdSeqOK(label string, onOK func(*App), cmds [][]string) {
+	a.runGitCmdSeqFull(label, nil, onOK, cmds)
+}
+
 // runGitCmdSeqEnv is runGitCmdSeq with a child environment, on the same
 // terms as runGitCmdEnv: nil inherits ced's own. The stage-then-continue
 // row in the conflict picker is the caller — its second command is a
 // --continue, and so needs the editor neutered.
 func (a *App) runGitCmdSeqEnv(label string, env []string, cmds [][]string) {
+	a.runGitCmdSeqFull(label, env, nil, cmds)
+}
+
+// runGitCmdSeqFull is the sequence launcher both wrappers funnel
+// through: a child environment and a success hook, either of which may
+// be nil.
+func (a *App) runGitCmdSeqFull(label string, env []string, onOK func(*App), cmds [][]string) {
 	if a.screen == nil || a.rootDir == "" || len(cmds) == 0 {
 		return
 	}
@@ -183,7 +228,7 @@ func (a *App) runGitCmdSeqEnv(label string, env []string, cmds [][]string) {
 				return
 			}
 		}
-		_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label})
+		_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, onOK: onOK})
 	}()
 }
 
@@ -207,6 +252,11 @@ func (a *App) handleGitCmdDone(e *gitCmdDoneEvent) {
 	}
 	a.flash(e.label + " — done")
 	a.refreshTreeNow()
+	// Last, so a hook that has more to say speaks over the generic
+	// flash rather than under it.
+	if e.onOK != nil {
+		e.onOK(a)
+	}
 }
 
 // -----------------------------------------------------------------------------

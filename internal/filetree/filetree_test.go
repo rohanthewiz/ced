@@ -1364,3 +1364,56 @@ func TestIsExecFile(t *testing.T) {
 		}
 	}
 }
+
+// TestRender_MoreMarker pins what the sidebar has instead of a scrollbar:
+// when the list runs on past the bottom row, the LAST list row carries a
+// '▾' in its final column — and when everything fits, that column is left
+// to the tree. A list that silently ends mid-content is the failure this
+// marker exists to prevent, and a marker that never leaves is a column
+// permanently taken off every name for nothing.
+func TestRender_MoreMarker(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 40; i++ {
+		name := filepath.Join(root, fmt.Sprintf("file-%02d.txt", i))
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	tr, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	const w, h = 30, 12
+	cells, cw := renderAndCollect(t, tr, w, h)
+	off, rows := tr.ListRows(h)
+	last := off + rows - 1
+	if got := cells[last*cw+w-1].Runes[0]; got != treeMoreRune {
+		t.Fatalf("last row's final cell = %q, want the more-marker %q", got, treeMoreRune)
+	}
+	// Only the last row wears it — the whole point of dropping the bar.
+	for row := off; row < last; row++ {
+		if got := cells[row*cw+w-1].Runes[0]; got == treeMoreRune {
+			t.Fatalf("row %d also carries the more-marker; it belongs on the last row alone", row)
+		}
+	}
+
+	// Scrolled to the end, there is nothing further down to announce.
+	tr.ScrollY = tr.MaxScroll(rows)
+	cells, cw = renderAndCollect(t, tr, w, h)
+	if got := cells[last*cw+w-1].Runes[0]; got == treeMoreRune {
+		t.Error("marker survived a scroll to the bottom of the list")
+	}
+
+	// And a tree that fits gets its column back outright.
+	small, err := New(mkTree(t))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	cells, cw = renderAndCollect(t, small, w, h)
+	for row := off; row < off+rows; row++ {
+		if got := cells[row*cw+w-1].Runes[0]; got == treeMoreRune {
+			t.Fatalf("a tree that fits drew the more-marker on row %d", row)
+		}
+	}
+}

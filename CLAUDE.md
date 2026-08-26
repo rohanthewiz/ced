@@ -158,7 +158,8 @@ internal/app/runexec.go       Run an executable: dir picker → staged line in t
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, locked by a drag
-internal/app/scrollbar.go     Scrollbars: editor (reserved column) + tree (shared column)
+internal/app/scrollbar.go     The editor's scrollbar: reserved column, rail + thumb, drag
+internal/app/scrollbarmarks.go The rail's overlay: caret tick + off-screen diagnostics / find hits
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
 internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, scrollbar, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
@@ -2718,15 +2719,11 @@ The sidebar sizes itself to the tree's longest row, so expanding
   pin sidebar geometry, and a splitter-drag test would persist the lock
   into the developer's real config.json.
 
-### Scrollbars (app/scrollbar.go)
+### The editor scrollbar (app/scrollbar.go)
 
-A thumb whose HEIGHT says how much of the content fits on screen and
-whose POSITION says where in it you are — and which drags. Two surfaces
-on ONE preference, and the interesting part is the single difference
-between them: the editor's bar RESERVES its column, the file tree's
-SHARES the tree's own last one. Everything below follows from that.
-
-House rules, editor bar first:
+A thumb whose HEIGHT says how much of the file fits on screen and whose
+POSITION says where in it you are — one reserved column down the right
+edge of the editor body, and it drags. House rules:
 
 - **It DISPLACES the editor, it does not float over it** (the Find-all
   dock's rule). `editorRect` subtracts `scrollbarCols()`, which is what
@@ -2742,7 +2739,23 @@ House rules, editor bar first:
   FULL-HEIGHT thumb instead, which is the honest way to say "this is all
   of it". The two cases that do give the column back are no tab open
   (there is no scroll position to report) and a band too narrow for
-  `scrollbarMinEditor` (at that size the code is the scarce thing).
+  `scrollbarMinEditor` (at that size the code is the scarce thing). The
+  FILE TREE answers the same question the opposite way and for the
+  opposite reason — see the overflow marker below.
+- **The rail and the thumb are ONE shape at two weights**, right-aligned
+  in the cell: `▕` (one-eighth block) under `▐` (half block), the same
+  Block-Elements family the git gutter's `▎` comes from. The first cut
+  drew a box-drawing `│` under a solid `█` — a hairline centred in the
+  cell with a slab bulging out of it, so the thumb read as a blot rather
+  than as the rail thickened, and the whole column read as a scaffold
+  bolted to the code. Right-aligned matters too: the ink sits against the
+  window's edge instead of crowding the text it stands beside. Both are
+  single-width per the marker rule.
+- **`scrollbarMinThumb` is 2 rows, not 1.** The thumb is a grab HANDLE
+  before it is a readout, and the arithmetic produces a one-cell thumb
+  exactly where dragging matters most (a file thousands of lines long).
+  The floor is applied before the ceiling and the ceiling wins, or on a
+  track shorter than the floor the thumb places off the end of its track.
 - **It sits at `ex+ew`, INSIDE a right-docked Find-all list.** The bar
   belongs to the editor, so it stays welded to the editor's edge wherever
   that edge moved to — which is why `findAllModal.rect` is the one call
@@ -2759,9 +2772,9 @@ House rules, editor bar first:
   in the height would shrink the thumb to claim there is more file than
   there is, while ignoring it in the position would leave the thumb a few
   rows short of the bottom at the end of travel. `scrollbarMetrics` is a
-  pure function for that reason — three degenerate cases (empty buffer,
-  file shorter than the window, thumb as tall as the track), each one a
-  place a division could panic.
+  pure function for that reason — four degenerate cases (empty buffer,
+  file shorter than the window, thumb as tall as the track, track shorter
+  than the thumb floor), each one a place a division could panic.
 - **Press on the thumb DRAGS, press on the track PAGES.** Paging is the
   reversible answer: a mis-aimed page is one press back, while jumping
   the thumb to the pointer has thrown away the position the user was
@@ -2777,54 +2790,114 @@ House rules, editor bar first:
   where `EnsureVisible` and `clampScroll` settle `ScrollY`, so a bar
   drawn ahead of it reports the previous frame's position on any tick
   that moved the cursor.
+- **The rail carries more than the thumb** — the caret's position and
+  every off-screen diagnostic and find hit, one colored cell each. That
+  half is `scrollbarmarks.go`; `drawScrollbar` is where the two meet, and
+  the thumb wins its own rows outright.
 - `"scrollbar"` is the persisted key (default on) with a ≡ **View** row
   and no leader key (the flat table is out of letters, and this is a
   once-a-session decision about how much code width to spend). The row
   sits with the two dock toggles rather than up with the tree rows,
   because the rows above it are pinned above the fold on a 24-row window
   (`TestMenuLayout_TerminalRowsAboveTheFold`) with no slack to push them
-  down by. `newTestApp` leaves the bar OFF, the treeAutoFit precedent:
-  on, it would shift `editorRect` by a column under every test that pins
-  editor geometry.
+  down by. **The tree's overflow marker is NOT gated on it** — that
+  marker costs no layout, so the one thing the key buys (give me the
+  width back) does not apply to it. `newTestApp` leaves the bar OFF, the
+  treeAutoFit precedent: on, it would shift `editorRect` by a column
+  under every test that pins editor geometry.
 
-And the file tree's:
+### The scrollbar's marks (app/scrollbarmarks.go)
 
-- **IT SHARES THE TREE'S LAST COLUMN**, painted over after `Tree.Render`
-  rather than subtracted from `sidebarRect`. The tree keeps its full
-  drawing width; the cost is that the longest row's final rune can end up
-  under the bar. That is the trade the next rule buys.
-- **So it appears only while the list overflows**, which the editor's bar
-  structurally cannot do. There, coming and going would move the editor's
-  right edge and re-flow the code on an edit that had nothing to do with
-  layout; here it costs no layout at all, so a tree with nothing to
-  scroll gets its column back instead of wearing a full-height thumb over
-  its names. Two bars, opposite answers, one reason.
-- **Auto-fit is the ONE thing that compensates** (`treeScrollbarCols`,
-  read only by `autoFitSidebar`): it asks for one column more while the
-  bar is up, because auto-fit exists precisely to stop the tree
-  truncating names and a bar sitting on the last rune of the row it just
-  widened to fit would undo that. It cannot oscillate — widening changes
-  no ROW count, and the bar's verdict is about rows. With auto-fit off
-  (a width the user dragged) nothing compensates and the bar simply
-  overlays; dragging one column wider is the out.
-- **It spans the LIST band only**, never the two header rows: those
-  scroll with nothing, and the project name is itself a click target.
-  `Tree.ListRows` is that split's one spelling — `Render` reads it too,
-  so the "2" lives in exactly one place.
-- **`Tree.MaxScroll` / `Tree.RowCount` mirror the editor's** for the same
-  one-formula reason, and there is deliberately NO overscroll pad here: a
-  tree has no "read the bottom comfortably" problem, and scrolling into
-  blank space would just lose rows.
-- **The hit-test runs before `sidebarClick`**, or a press would select
-  whatever node the user grabbed the thumb on — and after the splitter
-  cases, because the two columns are adjacent and the splitter is the one
-  the user aims at by feel.
-- Both bars share `scrollbarMetrics` and `scrollbarGrab`, so a thumb of a
-  given size can never mean two things, and both go through the same
-  `"scrollbar"` key: this is one feature at two surfaces (the
-  find-in-file / find-in-project rule), and the single argument for
-  turning a bar off — give me the width back — does not even apply to the
-  tree's.
+The rail is a scale model of the whole document, so three things the
+viewport cannot show get plotted on it: where the caret went when you
+scrolled away from it (a `━` tick in the accent color), and one colored
+cell for every OFF-SCREEN diagnostic and find hit. A minimap of
+positions, not of content — color only, no glyph vocabulary to learn.
+House rules:
+
+- **A mark is drawn only for a line the viewport does NOT show.** On
+  screen the gutter dot, the underline and the find tint are already
+  there against the code, saying it better and in place; repeating them
+  would make the bar loudest exactly when it has least to add. That rule
+  is also what keeps the rail silent on a file that fits (nothing is off
+  screen) and useful on a long one. Same argument for the caret tick:
+  while the cursor is visible the hardware cursor IS the answer, and a
+  tick would be a second cursor to explain.
+- **Nothing paints over the thumb.** It is the one thing on the column
+  that has to keep reading as a shape, and it covers the rows whose
+  marks are suppressed anyway.
+- **`railKind` is ordered by precedence and the caret wins outright.** A
+  rail row stands for many lines (a 5,000-line file through a 40-row
+  track is 125 lines per cell), so collisions are the normal case and
+  the cell has to answer with the loudest thing in its range. The caret
+  is the only mark that is UNIQUE — lose its cell and the feature has
+  silently failed — while a diagnostic is redundantly reported by the
+  status bar's counts, the Problems panel and its own gutter dot. Find
+  outranks the diagnostics for the reason `collectDecorations` puts
+  `findSource` last: a question the user asked outranks ambient
+  annotation.
+- **`railRow` is the ONE line→row mapping**, shared by the tick and every
+  mark, so two things on the same line can never be drawn on different
+  rows. It is proportional over the whole FILE — the measure that gives
+  the thumb its HEIGHT — and deliberately not the thumb's POSITION
+  formula, which is measured against `MaxScroll` because it maps scroll
+  offsets rather than lines. The two agree to within a row at the
+  extremes, and marks are suppressed under the thumb regardless.
+- **Sources are read from their CACHES, not through `DecorationSource`.**
+  Sources are asked per visible window by contract, and this feature's
+  whole subject is the rest of the file; asking each for the entire
+  buffer would turn a per-frame read into a whole-file walk for the word
+  highlighter and the git differ, neither of which has anything to say
+  here. So: `lsp.diags`, `plugins.decos` (gated on the kill switch at the
+  READ, like every other plugin surface), and `Tab.FindMatches`, which is
+  already whole-buffer.
+- **Git changes are deliberately NOT plotted.** They would be on the rail
+  of nearly every file you actually work in, which is precisely when the
+  bar most needs to read as a position — and a change bar is state you
+  already own, not somewhere you were about to jump. The rail is for
+  what you would go and look at.
+- **A mark is not a click target.** A press on the track still PAGES
+  toward the pointer, per the bar's own rule: paging is reversible, and a
+  cell that jumped somewhere would make the rail's two halves answer one
+  gesture differently depending on where in it you happened to land.
+- The colors are the theme's existing `Diag*` three plus `FindCurrent`
+  and `Accent` — a red cell here and a red dot in the gutter are
+  obviously the same fact at two distances. Find uses `FindCurrent`, not
+  `FindMatch`: the latter is a background TINT and is invisible as a
+  foreground. Nothing new is persisted; the whole overlay lives under the
+  bar's own `"scrollbar"` key.
+
+### The file tree's overflow marker (filetree's drawMoreMarker)
+
+The sidebar has no scrollbar. When the list runs on past the bottom row,
+the LAST list row carries a muted `▾` in its final column, and that is
+the whole feature. House rules:
+
+- **A LIST ASKS A DIFFERENT QUESTION THAN A BODY OF TEXT.** "How far into
+  this file am I?" needs a thumb's height and position; "have I seen
+  everything?" is a yes/no. The tree had a real bar for a while and it
+  answered the second question at the price of the first one's machinery
+  — plus a column shared with the names, which are the thing the panel
+  exists to show. One marker on one row answers what was actually being
+  asked and costs the last cell of exactly one name.
+- **It is drawn unconditionally**, unlike the editor's bar, for the same
+  reason the ≡ menu's clipped-content arrows are: content the user cannot
+  see and has not been told about is the one thing a list must never do.
+  No preference gates it, so there is nothing to plumb through the App —
+  it lives inside `Tree.Render`, which already has the flat row list, the
+  band split (`ListRows`) and `ScrollY` in hand.
+- **Bottom only.** Scrolled-down content announces itself (the user did
+  the scrolling); content below the fold does not.
+- **Position is what tells it apart from the chevrons**, which are the
+  same `▾` glyph: an expand chevron sits at the HEAD of a row against the
+  indent, this one at the row's last column. Single-width per the marker
+  rule — the cell is one column, and a double-width glyph would spill
+  into the splitter beside it.
+- **Auto-fit no longer compensates for a column.** `autoFitSidebar` asks
+  for `ContentWidth() + 1` (the splitter) and nothing more: an allowance
+  for a one-row marker would be a column of blank air on every other row
+  of the tree. That is the trade a shared-column scrollbar could not
+  make, and the reason the tree stopped having one.
 
 ## Build / run
 

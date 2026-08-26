@@ -2965,12 +2965,6 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
-	// File-tree scrollbar drag — same gesture, other panel.
-	if leftDown && a.dragMode == "treescroll" {
-		a.dragTreeScrollbarTo(y)
-		return
-	}
-
 	// Chat transcript drag-select: the panel captures the mouse, so the
 	// terminal's own selection never reaches it — this is the editor's
 	// replacement, same shape as the editor pane's drag.
@@ -3062,13 +3056,6 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			a.dragMode = "termsplit"
 		case a.chatSplitterX() >= 0 && x == a.chatSplitterX():
 			a.dragMode = "chatsplit"
-		// The tree's bar shares the tree's own last column, so it asks
-		// before sidebarClick — which would otherwise select whatever
-		// node the user grabbed the thumb on. It sits after the splitter
-		// cases above because the two columns are adjacent and the
-		// splitter's is the one the user aims at by feel.
-		case a.treeScrollbarContains(x, y):
-			a.dragMode = a.treeScrollbarPress(x, y)
 		case a.inSidebarBlock(x):
 			a.sidebarClick(x, y)
 		// The chat strip spans y==0 like a left-docked terminal, so its
@@ -4332,9 +4319,6 @@ func (a *App) draw() {
 		a.tree.Focused = a.treeFocus
 		sx, sy, sw, sh := a.sidebarRect()
 		a.tree.Render(a.screen, a.theme, sx, sy, sw, sh)
-		// Over the column the tree just drew — the bar SHARES it, so
-		// anything painted before Render would simply be overwritten.
-		a.drawTreeScrollbar()
 		a.drawSplitter()
 	}
 

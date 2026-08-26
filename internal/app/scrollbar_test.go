@@ -8,7 +8,6 @@
 package app
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,7 +107,10 @@ func TestScrollbarRect_SitsOnTheEditorsEdge(t *testing.T) {
 // TestScrollbarMetrics covers the arithmetic and each of its degenerate
 // cases: a file that fits (full-height thumb — the honest way to say
 // "this is all of it"), a file far longer than the window (a thumb no
-// smaller than one row), and the two ends of travel.
+// shorter than scrollbarMinThumb, because at that point it is a grab
+// handle before it is a readout), a track shorter than that floor (where
+// the ceiling has to win, or the thumb places off the end of its own
+// track), and the two ends of travel.
 func TestScrollbarMetrics(t *testing.T) {
 	cases := []struct {
 		name                              string
@@ -121,7 +123,8 @@ func TestScrollbarMetrics(t *testing.T) {
 		{"top of a long file", 200, 20, 20, 0, 190, 0, 2},
 		{"bottom of a long file", 200, 20, 20, 190, 190, 18, 2},
 		{"midway", 200, 20, 20, 95, 190, 9, 2},
-		{"huge file keeps a visible thumb", 100000, 20, 20, 0, 99990, 0, 1},
+		{"huge file keeps a grabbable thumb", 100000, 20, 20, 0, 99990, 0, scrollbarMinThumb},
+		{"track shorter than the thumb floor", 100000, 1, 1, 0, 99990, 0, 1},
 		{"no track", 200, 20, 0, 0, 190, 0, 0},
 	}
 	for _, c := range cases {
@@ -266,194 +269,20 @@ func TestScrollbarDraw(t *testing.T) {
 	}
 }
 
-// treeScrollbarApp builds an App whose tree has `files` entries at the
-// root — enough to overflow the sidebar's list band, which is the only
-// condition under which the tree's bar exists at all.
-func treeScrollbarApp(t *testing.T, files int) *App {
-	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	root := t.TempDir()
-	for i := 0; i < files; i++ {
-		// Deliberately long names: one test measures auto-fit's allowance
-		// for the shared column, which is invisible while the tree's
-		// content still fits inside defaultSidebarWidth.
-		name := filepath.Join(root, fmt.Sprintf("a-quite-long-file-name-%03d.txt", i))
-		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
-			t.Fatalf("seed: %v", err)
-		}
-	}
-	a := newTestApp(t, root)
-	a.tree.Refresh()
-	a.scrollbarShown = true
-	return a
-}
-
-// TestTreeScrollbar_OnlyWhenTheListOverflows is the sidebar bar's
-// defining rule, and the one place it deliberately differs from the
-// editor's: its column is SHARED, so a tree with nothing to scroll gets
-// the column back instead of wearing a full-height thumb over its names.
-func TestTreeScrollbar_OnlyWhenTheListOverflows(t *testing.T) {
-	a := treeScrollbarApp(t, 200)
-	if _, _, w, _ := a.treeScrollbarRect(); w != 1 {
-		t.Fatalf("no bar on an overflowing tree (w=%d)", w)
-	}
-
-	short := treeScrollbarApp(t, 2)
-	if _, _, w, _ := short.treeScrollbarRect(); w != 0 {
-		t.Errorf("a tree that fits drew a bar (w=%d)", w)
-	}
-}
-
-// TestTreeScrollbar_SharesTheTreesLastColumn pins the geometry: the bar
-// takes NO width from the sidebar (unlike the editor's, which reserves
-// its column) and spans the list band only — never the EXPLORER header
-// or the project-name row, which scroll with nothing.
-func TestTreeScrollbar_SharesTheTreesLastColumn(t *testing.T) {
-	a := treeScrollbarApp(t, 200)
-	sx, sy, sw, sh := a.sidebarRect()
-	withBar := sw
-
-	a.scrollbarShown = false
-	_, _, without, _ := a.sidebarRect()
-	if withBar != without {
-		t.Fatalf("tree width with bar = %d, without = %d; the column is meant to be shared", withBar, without)
-	}
-	a.scrollbarShown = true
-
-	bx, by, bw, bh := a.treeScrollbarRect()
-	off, rows := a.tree.ListRows(sh)
-	if bx != sx+sw-1 || bw != 1 {
-		t.Errorf("bar at x%d w%d, want the tree's last column (x%d w1)", bx, bw, sx+sw-1)
-	}
-	if by != sy+off || bh != rows {
-		t.Errorf("bar spans y%d h%d, want the list band (y%d h%d)", by, bh, sy+off, rows)
-	}
-	if a.treeScrollbarContains(bx, sy) || a.treeScrollbarContains(bx, sy+1) {
-		t.Error("bar claimed a header row")
-	}
-}
-
-// TestTreeScrollbarDrag_MovesTheTree pins the gesture end to end through
-// the real mouse router, including the clamp that makes a drag past the
-// bottom park at the last row rather than doing nothing.
-func TestTreeScrollbarDrag_MovesTheTree(t *testing.T) {
-	a := treeScrollbarApp(t, 200)
-	bx, by, _, bh := a.treeScrollbarRect()
-
-	a.handleMouse(tcell.NewEventMouse(bx, by, tcell.Button1, tcell.ModNone))
-	if a.dragMode != "treescroll" {
-		t.Fatalf("dragMode = %q after pressing the thumb, want treescroll", a.dragMode)
-	}
-	if a.tree.ScrollY != 0 {
-		t.Fatalf("the press itself scrolled to %d, want 0", a.tree.ScrollY)
-	}
-
-	maxScroll := a.tree.MaxScroll(bh)
-	a.handleMouse(tcell.NewEventMouse(bx, by+bh/2, tcell.Button1, tcell.ModNone))
-	if a.tree.ScrollY <= 0 || a.tree.ScrollY >= maxScroll {
-		t.Fatalf("mid-track drag put ScrollY at %d, want strictly inside (0, %d)", a.tree.ScrollY, maxScroll)
-	}
-
-	a.handleMouse(tcell.NewEventMouse(bx, a.height+50, tcell.Button1, tcell.ModNone))
-	if a.tree.ScrollY != maxScroll {
-		t.Errorf("drag past the bottom put ScrollY at %d, want %d", a.tree.ScrollY, maxScroll)
-	}
-
-	a.handleMouse(tcell.NewEventMouse(bx, by, tcell.ButtonNone, tcell.ModNone))
-	if a.dragMode != "" {
-		t.Errorf("dragMode = %q after release, want cleared", a.dragMode)
-	}
-}
-
-// TestTreeScrollbarPress_DoesNotSelectANode is why the hit-test runs
-// before sidebarClick: the bar sits on the tree's own column, so an
-// unasked press would open (or re-target) whatever row the user grabbed
-// the thumb on.
-func TestTreeScrollbarPress_DoesNotSelectANode(t *testing.T) {
-	a := treeScrollbarApp(t, 200)
-	before := a.activeFolder
-	bx, by, _, bh := a.treeScrollbarRect()
-
-	a.handleMouse(tcell.NewEventMouse(bx, by+bh-1, tcell.Button1, tcell.ModNone))
-	if a.dragMode != "" {
-		t.Errorf("a track press started drag mode %q, want none", a.dragMode)
-	}
-	if a.tree.ScrollY != bh {
-		t.Fatalf("ScrollY = %d after paging down, want one band (%d)", a.tree.ScrollY, bh)
-	}
-	if len(a.tabs) != 0 {
-		t.Errorf("a scrollbar press opened %d tab(s)", len(a.tabs))
-	}
-	if a.activeFolder != before {
-		t.Errorf("a scrollbar press retargeted the active folder to %q", a.activeFolder)
-	}
-}
-
-// TestTreeScrollbarDraw paints a frame and reads the shared column back:
-// a thumb over a track, and the tree's width untouched either side of it.
-func TestTreeScrollbarDraw(t *testing.T) {
-	a := treeScrollbarApp(t, 200)
-	a.draw()
-	a.screen.Show()
-
-	bx, by, _, bh := a.treeScrollbarRect()
-	cells, w, _ := a.screen.(tcell.SimulationScreen).GetContents()
-	var thumb, track int
-	for row := 0; row < bh; row++ {
-		switch cells[(by+row)*w+bx].Runes[0] {
-		case scrollbarThumbRune:
-			thumb++
-		case scrollbarTrackRune:
-			track++
-		}
-	}
-	if thumb == 0 || track == 0 {
-		t.Fatalf("tree scrollbar drew %d thumb / %d track rows in %d, want both", thumb, track, bh)
-	}
-	if thumb+track != bh {
-		t.Errorf("tree scrollbar drew %d recognised rows, want all %d", thumb+track, bh)
-	}
-}
-
-// TestTreeScrollbar_AutoFitLeavesRoomForIt pins the one place the shared
-// column is compensated for: auto-fit exists to stop the tree truncating
-// names, so it asks for one column more while the bar is on screen —
-// otherwise the row it just widened to fit would have its last rune under
-// the thumb. With auto-fit off nothing compensates, which is the honest
-// price of sharing.
-func TestTreeScrollbar_AutoFitLeavesRoomForIt(t *testing.T) {
-	a := treeScrollbarApp(t, 200)
-	a.treeAutoFit = true
-	if a.treeScrollbarCols() != 1 {
-		t.Fatal("fixture tree does not overflow, so there is no bar to make room for")
-	}
-
-	a.autoFitSidebar()
-	withBar := a.sidebarWidth
-
-	a.scrollbarShown = false
-	a.autoFitSidebar()
-	if withBar-a.sidebarWidth != 1 {
-		t.Fatalf("sidebar width with bar = %d, without = %d; want exactly one column of allowance",
-			withBar, a.sidebarWidth)
-	}
-}
-
 // TestScrollbarToggle_PersistsAndRelabels pins the ≡ row: it names the
-// action it will perform (not the state it's in), covers BOTH bars from
-// one key, and writes the choice to config.json, since the preference
-// outlives the session.
+// action it will perform (not the state it's in) and writes the choice to
+// config.json, since the preference outlives the session.
 func TestScrollbarToggle_PersistsAndRelabels(t *testing.T) {
 	a, _ := scrollbarApp(t, 200)
 
-	if got := a.scrollbarToggleLabel(); got != "Hide scrollbars" {
+	if got := a.scrollbarToggleLabel(); got != "Hide scrollbar" {
 		t.Errorf("label with the bar on = %q", got)
 	}
 	a.menuToggleScrollbar()
 	if a.scrollbarShown {
 		t.Fatal("toggle left the bar on")
 	}
-	if got := a.scrollbarToggleLabel(); got != "Show scrollbars" {
+	if got := a.scrollbarToggleLabel(); got != "Show scrollbar" {
 		t.Errorf("label with the bar off = %q", got)
 	}
 

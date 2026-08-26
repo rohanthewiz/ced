@@ -81,14 +81,13 @@ func (a *App) autoFitSidebar() {
 	}
 
 	// +1 for the splitter: sidebarWidth covers the block, and sidebarRect
-	// hands the tree one column less than that. Plus one more while the
-	// tree's scrollbar is on screen — it SHARES the tree's last column
-	// (scrollbar.go), so without the allowance the longest name would end
-	// up with its final rune under the bar, which is exactly the
-	// truncation this feature exists to remove. Widening cannot flip the
-	// bar's own verdict (it is about ROW count), so there is no
-	// oscillation between the two.
-	want := a.tree.ContentWidth() + 1 + a.treeScrollbarCols()
+	// hands the tree one column less than that. Nothing else is added:
+	// the sidebar's only overlay is the overflow marker, which sits on ONE
+	// row (filetree's drawMoreMarker) rather than down every one of them,
+	// so a column of allowance for it would be a column of blank air on
+	// every other row of the tree. That is the trade a shared-column
+	// scrollbar could not make, and the reason the tree no longer has one.
+	want := a.tree.ContentWidth() + 1
 	if want < defaultSidebarWidth {
 		want = defaultSidebarWidth
 	}

@@ -299,7 +299,7 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	}
 
 	// Through ListRows so the header's row count has exactly one
-	// spelling — the sidebar's scrollbar reads the same split.
+	// spelling — the overflow marker below reads the same split.
 	off, listH := t.ListRows(h)
 	listTop := y + off
 	t.clampScroll(len(flat), listH)
@@ -320,6 +320,43 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		visible = append(visible, item.Node)
 	}
 	t.visible = visible
+
+	drawMoreMarker(scr, th, x, listTop, w, listH, len(flat)-(t.ScrollY+listH))
+}
+
+// treeMoreRune marks a list that runs on past the bottom row. It is drawn
+// in the row's LAST column, where the tree's own expand chevrons (also
+// '▾') never appear — those sit at the head of a row, against the
+// indent — so position alone tells the two apart.
+//
+// Single-width per the marker rule: the cell is one column, and a
+// double-width glyph would spill into whatever the sidebar's splitter
+// draws beside it.
+const treeMoreRune = '▾'
+
+// drawMoreMarker paints the "there is more below" indicator over the last
+// list row when `hidden` rows sit past the bottom of the band.
+//
+// This is what the sidebar has INSTEAD of a scrollbar. A tree is a list
+// of names, not a body of text: the question it raises is "have I seen
+// everything?", which is a yes/no, and not "how far into it am I?", which
+// is what a thumb's height and position are for. A full bar answered the
+// second question at the cost of a column of every name — the tree's bar
+// shared the tree's own last column — and the names are the thing the
+// panel exists to show. One marker on one row answers the question that
+// was actually being asked, and costs a column of exactly one name.
+//
+// It is drawn unconditionally (no preference gates it) for the same
+// reason the menu's clipped-content arrows are: content the user cannot
+// see and has not been told about is the one thing a list must never do.
+func drawMoreMarker(scr tcell.Screen, th theme.Theme, x, listTop, w, listH, hidden int) {
+	if hidden <= 0 || listH <= 0 || w <= 0 {
+		return
+	}
+	// Muted rather than Subtle: this has something to say, and it is
+	// competing with a filename in the cells beside it.
+	st := tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Muted).Bold(true)
+	scr.SetContent(x+w-1, listTop+listH-1, treeMoreRune, nil, st)
 }
 
 // isDirty reports whether a node should render in the Modified color —

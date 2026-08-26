@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-ced ("Cats Editor") is a Go terminal editor module at `github.com/rohanthewiz/ced`; the CLI entry point is `main.go` and the binary is `ced`. Core packages live under `internal/`: `app` owns the event loop and rendering, `editor` owns buffers/tabs/editing behavior, `filetree` manages the sidebar tree, and supporting packages cover clipboard, formatting, icons, config, theme, finder, versioning, and the JSON-RPC clients (`lsp` for gopls/ACP, `mcp` for Model Context Protocol servers), and `skills` (the `SKILL.md` inventory read from `~/.claude/skills`, `<project>/.claude/skills`, and `~/.config/ced/skills`). Tests sit beside source files as `*_test.go`. Release packaging includes `Formula/ced.rb`, `install.sh`, and samples under `samples/`. `website/` holds the inherited SpiceEdit Hugo site — dormant since the ced rebrand and no longer built or deployed; leave it alone.
+ced ("Cats Editor") is a Go terminal editor module at `github.com/rohanthewiz/ced`; the CLI entry point is `main.go` and the binary is `ced`. Core packages live under `internal/`: `app` owns the event loop and rendering, `editor` owns buffers/tabs/editing behavior, `filetree` manages the sidebar tree, and supporting packages cover clipboard, formatting, icons, config, theme, finder, versioning, and the JSON-RPC clients (`lsp` for gopls/ACP, `mcp` for Model Context Protocol servers), and `skills` (the `SKILL.md` inventory read from `~/.claude/skills`, `<project>/.claude/skills`, and `~/.config/ced/skills`). Tests sit beside source files as `*_test.go`. Release packaging includes `Formula/ced.rb`, `install.sh`, and samples under `samples/`.
 
 ## Build, Test, and Development Commands
 

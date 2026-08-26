@@ -2890,11 +2890,15 @@ run already tagged before failing, delete the remote tag
 (`git push origin :refs/tags/vX.Y.Z`) before re-dispatching, or GoReleaser
 releases the old tagged tree instead of your fix.
 
-There is no site deploy step. The inherited SpiceEdit marketing site
-(`website/`, spice-edit.com) went dormant with the ced rebrand — its
-`pages.yml` workflow, the `CNAME` domain binding, and the Makefile
-`site-*` targets are all gone. Recover them from git history if a ced
-site ever gets built.
+There is no site deploy step and no site. The inherited SpiceEdit
+marketing site (`website/`) was deleted on 2026-08-25; its `pages.yml`
+workflow, the spice-edit.com `CNAME` binding, and the Makefile `site-*`
+targets had gone with the rebrand before it, which left 5MB of Hugo
+templates and SpiceEdit screenshots that nothing built and nobody could
+trust. **Don't restore it to document a ced feature** — a page that is
+wrong about the editor is worse than no page, which is what the tree had
+already become. README.md is the documentation; a ced site, if one is
+ever wanted, starts fresh. Git history has the old tree.
 
 `main` is left untouched by a release run — merge `release` back into
 main yourself to bring its `version.go` current.

@@ -80,8 +80,8 @@ tidy:
 clean:
 	rm -rf bin coverage.out coverage.html
 
-# There are no website targets. The inherited SpiceEdit marketing site
-# (./website, spice-edit.com) is dormant as of the ced rebrand — its
-# Pages workflow is disabled and its domain binding is gone. Restore
-# these targets alongside .github/workflows/pages.yml if a ced site
-# ever gets built.
+# There are no website targets, and no website. The inherited SpiceEdit
+# marketing site (./website, spice-edit.com) went dormant at the ced
+# rebrand and was deleted on 2026-08-25 — its Pages workflow and domain
+# binding had already gone. A ced site starts fresh; the old Hugo tree is
+# in git history if any of it is worth lifting.

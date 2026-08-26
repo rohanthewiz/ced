@@ -2,7 +2,8 @@
 
 *The editor and the multiplexer as one IDE.*
 
-Successor to [mini-ide-plan.md](mini-ide-plan.md) (fully executed 2026-07).
+Successor to `mini-ide-plan.md` (fully executed 2026-07, then deleted — it
+is in git history).
 North star: **intuitiveness** — click on things for actions more than remember
 key chords; chords remain as accelerators. Written 2026-08-12.
 

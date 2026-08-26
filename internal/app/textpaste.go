@@ -150,12 +150,11 @@ func (a *App) termPasteTarget() bool {
 // runes — which such a field can't render and no consumer wants — are
 // dropped.
 //
-// The two callers use it at different granularity, which is the whole
-// difference between the panels. The chat composer flattens a paste
-// WHOLE: a prompt is prose, so a snippet arriving as one long line keeps
-// every word, and the alternative silently drops everything after the
-// first line. The terminal calls it per LINE and then runs the lines in
-// order (termInsertPaste), because there a break means Enter.
+// The terminal panel is its remaining caller, per LINE: termInsertPaste
+// splits a paste and runs the flattened lines in order, because there a
+// break means Enter. The chat composer used to flatten a paste WHOLE,
+// but it is multi-line now and keeps its breaks (chatcomposer.go's
+// composerSanitize carries the control-noise half of this contract).
 func flattenPaste(text string) string {
 	var b strings.Builder
 	b.Grow(len(text))

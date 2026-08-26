@@ -174,15 +174,16 @@ func TestPaste_NotGatedWhenModalOpen(t *testing.T) {
 
 // TestPaste_IntoFocusedChatPrompt is the regression pin for "can't paste
 // into the chat prompt": with the panel focused a terminal paste must
-// land in the composer, flattened to one line, and must NOT touch the
-// file sitting behind the panel.
+// land in the composer — line breaks kept, tabs folded to one space
+// (composerSanitize) — and must NOT touch the file sitting behind the
+// panel.
 func TestPaste_IntoFocusedChatPrompt(t *testing.T) {
 	a := openBlankTab(t)
 	a.chat.open, a.chat.focused = true, true
 
 	feedPaste(a, "func main() {\n\tfmt.Println(\"hi\")\n}")
 
-	want := "func main() {  fmt.Println(\"hi\") }"
+	want := "func main() {\n fmt.Println(\"hi\")\n}"
 	if got := a.chat.input.String(); got != want {
 		t.Errorf("chat prompt = %q, want %q", got, want)
 	}
@@ -197,7 +198,7 @@ func TestPaste_IntoFocusedChatPrompt(t *testing.T) {
 func TestPaste_ChatPromptInsertsAtCaret(t *testing.T) {
 	a := openBlankTab(t)
 	a.chat.open, a.chat.focused = true, true
-	a.chat.input = newTextField("explain:  <- here")
+	a.chat.input = newChatComposer("explain:  <- here")
 	a.chat.input.cursor = len("explain: ")
 
 	feedPaste(a, "the bug")

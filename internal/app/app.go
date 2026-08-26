@@ -2460,6 +2460,21 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		a.armWhichKey()
 		return
 	}
+	// Alt+Enter never reaches tcell as itself on a legacy terminal (tmux
+	// included): the emulator writes ESC CR, and tcell's fold for
+	// ESC + control-char reports it as the RUNE 'm' carrying
+	// ModAlt|ModCtrl ('j' for the rare emulator that sends LF). Rewrite
+	// that spelling into the KeyEnter+ModAlt event a CSI-u terminal
+	// would have delivered, BEFORE the leader branches below — 'm' is a
+	// bound leader rune, so without this the chord fired multicaret on
+	// the buffer behind whatever surface the user was actually typing
+	// into. Downstream, every consumer (the chat composer's newline
+	// chord first among them) then sees one spelling of the gesture.
+	if ev.Key() == tcell.KeyRune &&
+		ev.Modifiers()&tcell.ModAlt != 0 && ev.Modifiers()&tcell.ModCtrl != 0 &&
+		(ev.Rune() == 'm' || ev.Rune() == 'j') {
+		ev = tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModAlt)
+	}
 	// Esc-leader hotkey: if Esc was pressed within doubleEscMs and this
 	// key is bound in the leader table, fire the action and consume the
 	// keystroke. Unbound keys fall through to normal handling so a stray

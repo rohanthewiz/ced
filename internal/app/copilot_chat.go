@@ -92,6 +92,14 @@ const (
 	// it the oldest messages fall off — the termScrollbackMax rule
 	// applied to chat.
 	chatTranscriptMax = 500
+
+	// chatComposerMaxRows caps how tall the composer band may grow as
+	// the prompt gains lines; past it the composer scrolls internally.
+	// The band displaces the transcript row for row (the Find-all rule:
+	// nothing floats over what it serves), so an uncapped composer
+	// would let a long paste evict the very conversation the prompt is
+	// part of.
+	chatComposerMaxRows = 6
 )
 
 // chatMsgRole styles a transcript message: who (or what) produced it.
@@ -274,9 +282,9 @@ type chatState struct {
 	selAnchor chatPos
 	selHead   chatPos
 
-	input     textField
+	input     chatComposer
 	history   []string
-	histIdx   int    // == len(history) while editing a fresh line
+	histIdx   int    // == len(history) while editing a fresh draft
 	histDraft string // in-progress input stashed while browsing history
 }
 
@@ -700,7 +708,7 @@ func (a *App) chatSend() {
 		a.flash(a.chatAgent().name + " is answering — ⏹ to stop it first")
 		return
 	}
-	a.chat.input = newTextField("")
+	a.chat.input = newChatComposer("")
 	a.chat.history = append(a.chat.history, text)
 	a.chat.histIdx = len(a.chat.history)
 	a.chat.histDraft = ""
@@ -1241,11 +1249,12 @@ func (a *App) menuChatCopyAll() {
 // -----------------------------------------------------------------------------
 
 // chatVisibleRows is how many transcript rows the panel shows — the
-// strip minus the header rule, the input row, and any attachment chips
-// (chatAttachRowsView already clamps itself to leave a row here).
+// strip minus the header rule, the composer band (one row empty, more
+// as the prompt grows), and any attachment chips (chatAttachRowsView
+// already clamps itself to leave a row here).
 func (a *App) chatVisibleRows() int {
 	_, _, _, ph := a.chatPanelRect()
-	if v := ph - 2 - a.chatAttachRows(); v > 0 {
+	if v := ph - 1 - a.chatComposerRowsView() - a.chatAttachRows(); v > 0 {
 		return v
 	}
 	return 1
@@ -1305,10 +1314,10 @@ func (a *App) chatHistoryMove(delta int) {
 	}
 	c.histIdx = idx
 	if idx == len(c.history) {
-		c.input = newTextField(c.histDraft)
+		c.input = newChatComposer(c.histDraft)
 		return
 	}
-	c.input = newTextField(c.history[idx])
+	c.input = newChatComposer(c.history[idx])
 }
 
 // -----------------------------------------------------------------------------
@@ -1597,18 +1606,65 @@ func (a *App) chatStopRect() btnRect {
 	return btnRect{x: c.x - 4, y: c.y, w: 3}
 }
 
-// chatInputSpan returns the input row's y and the field's [start, end)
-// columns after the prompt — the one geometry source for drawing,
-// caret placement, and click-to-position.
+// chatInputSpan returns the composer band's FIRST row y and the text
+// area's [start, end) columns after the prompt gutter — the one
+// geometry source for drawing, caret placement, and click-to-position.
+// Continuation rows share the same span; the gutter column is only ever
+// painted on the first row.
 func (a *App) chatInputSpan() (y, start, end int) {
-	px, py, pw, ph := a.chatPanelRect()
-	y = py + ph - 1
+	start, end = a.chatInputCols()
+	return a.chatComposerTop(), start, end
+}
+
+// chatInputCols is the text area's [start, end) columns alone — split
+// out because chatComposerWidth is needed BY the row-count math that
+// places the band's y, and the columns never depend on the height.
+func (a *App) chatInputCols() (start, end int) {
+	px, _, pw, _ := a.chatPanelRect()
 	start = px + 1 + runeLen(a.chatPrompt())
 	end = px + pw - 1
 	if start > end {
 		start = end
 	}
-	return
+	return start, end
+}
+
+// chatComposerWidth is the composer text area's column count — what
+// every rows()/caret computation must agree with the drawn span on.
+func (a *App) chatComposerWidth() int {
+	start, end := a.chatInputCols()
+	if w := end - start; w > 0 {
+		return w
+	}
+	return 1
+}
+
+// chatComposerRowsView is how many rows the composer band occupies
+// right now: the wrapped input's height, floored at one row, capped by
+// chatComposerMaxRows and by the panel itself (the header plus at least
+// one transcript row survive any prompt). The attachment chips clamp
+// against what this leaves — never the other way around, which is what
+// keeps the two clamps from being circular.
+func (a *App) chatComposerRowsView() int {
+	_, _, _, ph := a.chatPanelRect()
+	n := a.chat.input.rowCount(a.chatComposerWidth())
+	if n > chatComposerMaxRows {
+		n = chatComposerMaxRows
+	}
+	if room := ph - 2; n > room {
+		n = room
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// chatComposerTop is the composer band's first row — everything above
+// it belongs to the transcript and the chips.
+func (a *App) chatComposerTop() int {
+	_, py, _, ph := a.chatPanelRect()
+	return py + ph - a.chatComposerRowsView()
 }
 
 // chatPrompt is the input row's gutter text: a run indicator while a
@@ -1627,20 +1683,52 @@ func (a *App) chatPrompt() string {
 // handleChatKey processes a keystroke while the panel has focus. Esc
 // never reaches here (the global handler consumes it first), so
 // leaders and the double-Esc menu keep working from inside the chat.
+//
+// Enter sends; Alt+Enter (or Shift+Enter, on terminals that can tell)
+// breaks the line — the chords are safe for the find bar's reason: the
+// panel owns the keyboard, so handleKey's Alt-leader branch never sees
+// them (and the legacy ESC-CR spelling of Alt+Enter is rewritten into
+// KeyEnter+ModAlt before the leader branches — see handleKey). Up/Down
+// move the caret while it has somewhere to go and fall back to prompt
+// history at the composer's edges, which is exactly what they did when
+// the composer was one row tall.
 func (a *App) handleChatKey(ev *tcell.EventKey) {
 	switch ev.Key() {
 	case tcell.KeyEnter:
+		if ev.Modifiers()&(tcell.ModAlt|tcell.ModShift) != 0 {
+			a.chatComposerEdit(func() { a.chat.input.insertNewline() })
+			return
+		}
 		a.chatSend()
 	case tcell.KeyUp:
-		a.chatHistoryMove(-1)
+		if !a.chat.input.moveVertical(-1, a.chatComposerWidth()) {
+			a.chatHistoryMove(-1)
+		}
 	case tcell.KeyDown:
-		a.chatHistoryMove(1)
+		if !a.chat.input.moveVertical(1, a.chatComposerWidth()) {
+			a.chatHistoryMove(1)
+		}
 	case tcell.KeyPgUp:
 		a.chatPanelScroll(-a.chatVisibleRows())
 	case tcell.KeyPgDn:
 		a.chatPanelScroll(a.chatVisibleRows())
 	default:
-		a.chat.input.handleKey(ev)
+		a.chatComposerEdit(func() { a.chat.input.handleKey(ev) })
+	}
+}
+
+// chatComposerEdit runs one composer mutation while keeping the
+// transcript pinned: an edit that grows or shrinks the band moves the
+// transcript's bottom edge, so a view that was following the newest row
+// must keep following it (the chatAppendMsg atBottom rule, triggered by
+// layout instead of content). Scroll is re-clamped either way — a
+// shrinking band can strand the offset past the new maximum.
+func (a *App) chatComposerEdit(edit func()) {
+	atBottom := a.chatAtBottom()
+	edit()
+	a.chatPanelScroll(0)
+	if atBottom {
+		a.chat.scroll = a.chatMaxScroll()
 	}
 }
 
@@ -1661,9 +1749,11 @@ func (a *App) chatPanelPress(x, y int) string {
 	}
 	a.chat.focused = true
 	a.term.focused = false
-	iy, start, end := a.chatInputSpan()
-	if y == iy {
-		a.chat.input.clickAt(start, end, x)
+	// The composer band owns its rows outright — clicks position the
+	// caret, wherever in the band they land (the y clamps, so the
+	// gutter column parks the caret at that row's start).
+	if iy, start, _ := a.chatInputSpan(); y >= iy {
+		a.chat.input.clickAt(start, iy, a.chatComposerWidth(), x, y)
 		return ""
 	}
 	// The chip block owns its rows outright — a drag started on a chip
@@ -1735,20 +1825,15 @@ func (a *App) chatPasteClip() {
 // terminal paste, which handlePaste routes here once chatPasteTarget
 // claims it (see textpaste.go).
 //
-// The text is flattened to one line first (flattenPaste, shared with the
-// terminal panel): the composer is a single-line field (a multi-line
-// composer is a known follow-up), and pasting a snippet, a stack trace,
-// or a log excerpt into a prompt is common enough that flattening beats
-// keeping only the first line. The whole paste lands in one step, so a
-// long snippet doesn't cost one field edit per character.
-//
-// The terminal panel deliberately does the opposite with the same input
-// (termInsertPaste runs each pasted line, because there a break means
-// Enter). A break in a PROMPT means nothing of the kind — there is no
-// "submit" to imply — so flattening loses nothing and keeps the text
-// editable before it's sent.
+// Line breaks are KEPT — the composer is multi-line, so a pasted
+// snippet, stack trace, or log excerpt arrives shaped as it was copied
+// and stays editable before it's sent (the composer's own sanitize
+// still folds CRLF and strips control noise). The terminal panel
+// deliberately does the opposite with the same input (termInsertPaste
+// runs each pasted line, because there a break means Enter); in a
+// prompt a break implies no submit, so nothing here may run anything.
 func (a *App) chatInsertPaste(text string) {
-	a.chat.input.insertString(flattenPaste(text))
+	a.chatComposerEdit(func() { a.chat.input.insertString(text) })
 }
 
 // -----------------------------------------------------------------------------
@@ -1809,10 +1894,14 @@ func (a *App) drawChatPanel() {
 	// Attachment chips, between the transcript and the composer.
 	a.drawChatAttachments()
 
-	// Input row: prompt gutter + editable field.
-	iy, start, end := a.chatInputSpan()
-	for cx := px; cx < px+pw; cx++ {
-		a.screen.SetContent(cx, iy, ' ', nil, bodyBG)
+	// Composer band: prompt gutter on the first row, then the wrapped
+	// input rows (the widget scrolls itself past chatComposerMaxRows).
+	iy, start, _ := a.chatInputSpan()
+	rowsC := a.chatComposerRowsView()
+	for ry := iy; ry < iy+rowsC; ry++ {
+		for cx := px; cx < px+pw; cx++ {
+			a.screen.SetContent(cx, ry, ' ', nil, bodyBG)
+		}
 	}
 	promptSt := tcell.StyleDefault.Background(th.BG).Foreground(th.Accent).Bold(true)
 	if a.chat.turnActive {
@@ -1820,7 +1909,7 @@ func (a *App) drawChatPanel() {
 	}
 	drawAt(a.screen, px+1, iy, a.chatPrompt(), promptSt)
 	inputSt := tcell.StyleDefault.Background(th.BG).Foreground(th.Text)
-	a.chat.input.draw(a.screen, iy, start, end, inputSt, a.chat.focused)
+	a.chat.input.draw(a.screen, start, iy, a.chatComposerWidth(), rowsC, inputSt, a.chat.focused)
 }
 
 // chatHeaderTitle names the panel: "<agent> - <model>" once a session

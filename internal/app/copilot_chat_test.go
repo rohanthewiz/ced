@@ -1307,7 +1307,8 @@ func TestChatInitialize_WriteCapability(t *testing.T) {
 
 // TestChatPasteClip_CmdV drives the Cmd+V gesture through the real key
 // path: with the panel focused the editor's text clipboard lands in the
-// composer at the caret, flattened to one line.
+// composer at the caret, line breaks KEPT — the multi-line composer's
+// paste contract.
 func TestChatPasteClip_CmdV(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.chat.open, a.chat.focused = true, true
@@ -1316,17 +1317,17 @@ func TestChatPasteClip_CmdV(t *testing.T) {
 
 	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModMeta))
 
-	if got, want := a.chat.input.String(), "fix: line one line two"; got != want {
+	if got, want := a.chat.input.String(), "fix: line one\nline two"; got != want {
 		t.Errorf("chat prompt = %q, want %q", got, want)
 	}
 }
 
 // TestChatInsertPaste_EmptyIsNoop pins that an empty clipboard (or a
-// paste that flattens to nothing) leaves the composer alone rather than
-// disturbing the caret.
+// paste that sanitizes to nothing) leaves the composer alone rather
+// than disturbing the caret.
 func TestChatInsertPaste_EmptyIsNoop(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	a.chat.input = newTextField("kept")
+	a.chat.input = newChatComposer("kept")
 	a.chat.input.cursor = 2
 
 	a.chatInsertPaste("")
@@ -1337,5 +1338,99 @@ func TestChatInsertPaste_EmptyIsNoop(t *testing.T) {
 	}
 	if a.chat.input.cursor != 2 {
 		t.Errorf("caret moved to %d, want 2", a.chat.input.cursor)
+	}
+}
+
+// TestChatComposer_AltEnterInsertsNewline pins the newline chords on
+// the real key path: Alt+Enter (and Shift+Enter where the terminal can
+// tell) breaks the line instead of sending, and plain Enter then sends
+// the whole multi-line prompt as ONE message.
+func TestChatComposer_AltEnterInsertsNewline(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	fake := wireChat(a)
+	a.chat.open, a.chat.focused = true, true
+	typeChatText(a, "first")
+	a.handleChatKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModAlt))
+	typeChatText(a, "second")
+	a.handleChatKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModShift))
+	typeChatText(a, "third")
+	if got := a.chat.input.String(); got != "first\nsecond\nthird" {
+		t.Fatalf("draft = %q", got)
+	}
+
+	a.handleChatKey(enterKey())
+	waitForCopilot(t, "session/prompt call", func() bool { return fake.called("session/prompt") })
+	if len(a.chat.msgs) == 0 || a.chat.msgs[0].text != "first\nsecond\nthird" {
+		t.Errorf("sent transcript echo = %+v", a.chat.msgs)
+	}
+	if a.chat.input.String() != "" {
+		t.Errorf("input not cleared: %q", a.chat.input.String())
+	}
+}
+
+// TestChatComposer_LegacyAltEnterFold pins the tmux path end to end:
+// ESC CR reaches tcell as rune 'm' with ModAlt|ModCtrl, and handleKey
+// must rewrite it into Alt+Enter — a line break in the focused composer,
+// NEVER the multicaret leader that a bare Alt+m fires.
+func TestChatComposer_LegacyAltEnterFold(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.chat.open, a.chat.focused = true, true
+	typeChatText(a, "hi")
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'm', tcell.ModAlt|tcell.ModCtrl))
+
+	if got := a.chat.input.String(); got != "hi\n" {
+		t.Errorf("composer = %q, want a line break from the folded Alt+Enter", got)
+	}
+}
+
+// TestChatComposer_BandGrowsAndCaps pins the geometry contract: the
+// composer band displaces transcript rows one for one as the prompt
+// gains lines, stops at chatComposerMaxRows, and the chip block stays
+// stacked directly above it.
+func TestChatComposer_BandGrowsAndCaps(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.chat.open = true
+	bare := a.chatVisibleRows()
+	if got := a.chatComposerRowsView(); got != 1 {
+		t.Fatalf("empty composer band = %d rows, want 1", got)
+	}
+
+	a.chat.input = newChatComposer("a\nb\nc")
+	if got := a.chatComposerRowsView(); got != 3 {
+		t.Fatalf("3-line composer band = %d rows", got)
+	}
+	if got := a.chatVisibleRows(); got != bare-2 {
+		t.Errorf("visible rows = %d, want %d (two rows displaced)", got, bare-2)
+	}
+	_, py, _, ph := a.chatPanelRect()
+	if got, want := a.chatComposerTop(), py+ph-3; got != want {
+		t.Errorf("composer top = %d, want %d", got, want)
+	}
+
+	a.chat.input = newChatComposer(strings.Repeat("x\n", 20))
+	if got := a.chatComposerRowsView(); got != chatComposerMaxRows {
+		t.Errorf("oversize composer band = %d rows, want the %d cap", got, chatComposerMaxRows)
+	}
+}
+
+// TestChatComposer_UpMovesCaretBeforeHistory pins the arrow contract on
+// the app layer: in a multi-row draft Up moves the caret, and only the
+// top row hands the key to prompt history — so recalling a prompt still
+// works exactly as before from a one-line draft.
+func TestChatComposer_UpMovesCaretBeforeHistory(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.chat.open, a.chat.focused = true, true
+	a.chat.history = []string{"older"}
+	a.chat.histIdx = 1
+	a.chat.input = newChatComposer("one\ntwo")
+
+	a.handleChatKey(tcell.NewEventKey(tcell.KeyUp, 0, 0))
+	if got := a.chat.input.String(); got != "one\ntwo" {
+		t.Fatalf("first Up must move the caret, not recall history (got %q)", got)
+	}
+	a.handleChatKey(tcell.NewEventKey(tcell.KeyUp, 0, 0))
+	if got := a.chat.input.String(); got != "older" {
+		t.Errorf("Up from the top row = %q, want the history entry", got)
 	}
 }

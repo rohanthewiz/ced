@@ -113,6 +113,7 @@ internal/app/termdiag.go      Terminal output → clickable path:line:col jumps
 internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
 internal/app/copilot_ghost.go Copilot phase 2: doc sync + inline completions (ghost text)
 internal/app/copilot_chat.go  Copilot phase 3: ACP chat panel (left strip, streaming turns)
+internal/app/chatcomposer.go  The chat prompt's multi-line input widget (hard-wrap, caret math)
 internal/app/chatagent.go     Chat backend registry + ≡ picker (Copilot / Claude Code / Gemini)
 internal/app/copilot_chat_context.go  Chat context: file / selection attachments
 internal/app/summarize.go     AI summarize: selection-or-file, one visible chat turn
@@ -1310,22 +1311,41 @@ House rules:
 - **Transcript is the model, rows are derived**: `chatRows(width)`
   re-wraps `[]chatMsg` on demand (word wrap for prose, hard wrap for
   fenced code, ❯ gutter on user prompts), so resizes re-flow for
-  free. Scroll follows the termAtBottom rule. The composer is a
-  single-line `textField` (Enter sends, Up/Down history, and both paste
-  gestures — Cmd+V from the internal clipboard and a real terminal
-  paste — land there with newlines flattened); a multi-line composer is
-  a known follow-up, not an accident.
+  free. Scroll follows the termAtBottom rule. The composer is the
+  MULTI-line `chatComposer` (chatcomposer.go) — textField grown a second
+  dimension, for the chat prompt ONLY; every other single-line input
+  stays on `textField`, because a widget that can hold a newline must
+  not be reachable from surfaces that would send it somewhere expecting
+  one line. Enter sends; **Alt+Enter (Shift+Enter where the terminal
+  can tell) breaks the line**; Up/Down move the caret while it has
+  somewhere to go and fall back to prompt HISTORY at the composer's
+  edges — exactly what they meant when the composer was one row tall.
+  The band grows a row per wrapped line and displaces the transcript
+  (the Find-all rule: nothing floats over what it serves), capped at
+  `chatComposerMaxRows`, past which the widget scrolls internally;
+  `chatComposerEdit` keeps a bottom-pinned transcript pinned while the
+  band resizes under it. Composer rows HARD-wrap (the find-bar /
+  signature-label argument: only rune==column lets a caret index become
+  a (row, col) by arithmetic) — the word-wrapped transcript is prose
+  being READ, the composer is text being EDITED. **The legacy Alt+Enter
+  fold is rewritten in handleKey**: a terminal without CSI-u (tmux
+  included) sends ESC CR, which tcell reports as rune 'm' carrying
+  ModAlt|ModCtrl — rewritten to KeyEnter+ModAlt BEFORE the leader
+  branches, because 'm' is a bound leader rune and the chord otherwise
+  fired multicaret on the buffer behind the panel.
 - **A focused chat panel owns the paste.** `chatPasteTarget`
   (textpaste.go) claims bracketed pastes for the composer, and
   `editorPasteTarget` returns nil while the panel has focus — the two
   predicates are mutually exclusive on purpose. Without that gate a
   paste aimed at the prompt resolved through the active tab and landed
   in the FILE behind the panel. Both gestures funnel through
-  `chatInsertPaste` → `flattenPaste`, so Cmd+V and a terminal paste can
-  never drift apart. The composer flattens a paste WHOLE, unlike the
-  terminal, which runs it line by line — deliberate, not an
-  inconsistency: a break in a prompt implies no "submit", so flattening
-  loses nothing and keeps the text editable before it's sent.
+  `chatInsertPaste` → the composer's own sanitize, so Cmd+V and a
+  terminal paste can never drift apart. The composer keeps a paste's
+  line breaks (it is multi-line; `composerSanitize` still folds CRLF,
+  renders tabs as one space, and drops control noise), unlike the
+  terminal, which runs the paste line by line — deliberate, not an
+  inconsistency: a break in a prompt implies no "submit", so nothing
+  here may run anything, and the text stays editable before it's sent.
 - **Selection + copy live in the panel, not the terminal.** The app
   captures the mouse, so the terminal's own drag-to-select can never
   reach the transcript — the editor provides it. Selection is a

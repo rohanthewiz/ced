@@ -594,10 +594,12 @@ func (a *App) chatAttachRowsView() []chatAttachRow {
 	if n > chatAttachRowsMax {
 		n = chatAttachRowsMax
 	}
-	// The transcript keeps at least one row: header + 1 row + input is
-	// the floor below which the panel stops being a chat panel.
+	// The transcript keeps at least one row: header + 1 row + the
+	// composer band is the floor below which the panel stops being a
+	// chat panel. Chips clamp against what the composer left — never
+	// the other way around — so the two clamps can't chase each other.
 	_, _, _, ph := a.chatPanelRect()
-	if room := ph - 3; n > room {
+	if room := ph - 2 - a.chatComposerRowsView(); n > room {
 		n = room
 	}
 	if n <= 0 {
@@ -623,11 +625,10 @@ func (a *App) chatAttachRowsView() []chatAttachRow {
 func (a *App) chatAttachRows() int { return len(a.chatAttachRowsView()) }
 
 // chatAttachTop is the first chip row's y: the block sits directly above
-// the composer, where an attachment reads as part of the message you are
-// about to send rather than part of the history.
+// the composer band, where an attachment reads as part of the message
+// you are about to send rather than part of the history.
 func (a *App) chatAttachTop() int {
-	_, py, _, ph := a.chatPanelRect()
-	return py + ph - 1 - a.chatAttachRows()
+	return a.chatComposerTop() - a.chatAttachRows()
 }
 
 // chatAttachRemoveRect is a chip's ✕ button, flush right on its row —

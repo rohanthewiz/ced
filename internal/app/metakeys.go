@@ -168,6 +168,10 @@ func metaAccels() []metaAccel {
 		//     sensitive (the compare panel, the chat composer and the
 		//     terminal each claim their own paste), which is exactly the
 		//     shape a flat table cannot express.
+		//   ⌘← / ⌘→ — line start / line end. Not runes, so they cannot
+		//     be table rows at all; they are arrow keys carrying
+		//     ModMeta and they dispatch from the editing switch in
+		//     handleKey, beside Alt+Up/Down. See metaLineMotion.
 		//   everything in metaReserved, below.
 	}
 }
@@ -279,4 +283,36 @@ func (a *App) metaAccelFire(ev *tcell.EventKey) bool {
 		}
 	}
 	return false
+}
+
+// metaLineMotion reports whether ev is a Command-modified arrow — the
+// macOS ⌘←/⌘→ line-motion chord — rather than a plain arrow keystroke.
+//
+// It is NOT an entry in metaAccels, and it can't be: that table is keyed
+// by RUNE and dispatches a global verb, while this is an arrow key whose
+// meaning is a cursor motion inside the buffer. The precedent is
+// Alt+Up/Down (move line), which lives in the editing switch for exactly
+// the same reason — a motion belongs where the tab is already in hand,
+// not in a table that has to run before the panels claim the keyboard.
+//
+// What it DOES share with the table is metaAccelArmed, and that is the
+// whole reason this is a function rather than an inline modifier test.
+// A terminal that folds Option into Meta would otherwise turn every
+// Option+Left — a reflex for anyone with readline in their fingers —
+// into a jump to column 0, and Alt+Left is already spoken for here (nav
+// back). The gate is the one place ced decides it can trust a host to
+// report Command distinctly; a motion is a cheaper mistake than a
+// phantom save, but it is still a mistake, and there is no reason to
+// make it in the one configuration we can identify.
+//
+// Where the chord ARRIVES is the host's business, as with every row in
+// the table above: kitty-protocol emulators encode ⌘← as `CSI 1;9D`,
+// which tcell's ss3 branch decodes to (KeyLeft, ModMeta). A host that
+// keeps the chord for itself leaves this dark, which costs nothing —
+// End/Home are the guaranteed path and always were.
+func (a *App) metaLineMotion(ev *tcell.EventKey) bool {
+	if ev.Modifiers()&tcell.ModMeta == 0 {
+		return false
+	}
+	return a.metaAccelArmed()
 }

@@ -2698,8 +2698,24 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// binds, and shell EOF semantics don't apply in raw mode.
 		tab.DuplicateLines()
 	case tcell.KeyLeft:
+		// ⌘← is Home's twin — the macOS spelling of "start of line",
+		// and the one every other editor on the platform answers to.
+		// Cmd is safe where Ctrl is not: it collides with no tmux
+		// prefix and no terminal flow control, which is what the
+		// no-Ctrl rule actually protects. Shift rides along for free
+		// (extend is already ModShift), so ⌘⇧← selects to the start.
+		// See metaLineMotion for why the arming gate is consulted and
+		// why this isn't a row in the ⌘ accelerator table.
+		if a.metaLineMotion(ev) {
+			tab.MoveLineHome(extend)
+			return
+		}
 		tab.MoveCursor(0, -1, extend)
 	case tcell.KeyRight:
+		if a.metaLineMotion(ev) {
+			tab.MoveLineEnd(extend)
+			return
+		}
 		tab.MoveCursor(0, 1, extend)
 	case tcell.KeyHome:
 		tab.MoveLineHome(extend)

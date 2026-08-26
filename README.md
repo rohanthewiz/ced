@@ -290,6 +290,17 @@ half-typed chord.
 Everything reachable by hotkey is also reachable from the `≡` menu —
 the hotkeys are just a faster path for the actions you reach for most.
 
+**Command-key accelerators.** If your terminal forwards the `Cmd` key —
+kitty, Ghostty, WezTerm, or a cats pane — ced also answers the chords
+your hands already know from every other editor: `⌘S` save, `⌘P` find
+file, `⌘⇧P` command palette, `⌘F` find, `⌘⇧F` find in project, `⌘D`
+duplicate line, `⌘/` toggle comment, `⌘G` go to line, `⌘E` recent files,
+plus `⌘←` / `⌘→` for the start and end of the line (hold `Shift` to
+select there). Every one of them is a second door onto something the
+`Esc` table or the `≡` menu already does, so nothing is lost in a
+terminal that keeps `Cmd` for itself — and in that case the chord simply
+does nothing rather than something surprising.
+
 ### Multi-line editing
 
 Several carets, one keystroke. Build a column with `Esc m` (add a caret

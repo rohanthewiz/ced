@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // armMetaHost makes the ⌘ layer live for one test by claiming to be
@@ -362,5 +363,98 @@ func TestMetaAccelArmedByTier1(t *testing.T) {
 
 	if !a.metaAccelArmed() {
 		t.Fatal("Tier 1 should arm the ⌘ layer")
+	}
+}
+
+// metaArrowEv builds the event a kitty-protocol host sends for ⌘←/⌘→.
+// Arrows keep their legacy CSI spelling under the protocol (`CSI 1;9D`),
+// which tcell's ss3 branch decodes to an arrow Key carrying ModMeta —
+// so unlike metaKeyEv there is no rune, and no both-encodings question.
+func metaArrowEv(k tcell.Key, shift bool) *tcell.EventKey {
+	mods := tcell.ModMeta
+	if shift {
+		mods |= tcell.ModShift
+	}
+	return tcell.NewEventKey(k, 0, mods)
+}
+
+// metaLineTab opens a one-line file and parks the caret in the middle of
+// it, which is the only starting position from which both halves of the
+// chord can be seen to have moved.
+func metaLineTab(t *testing.T) *App {
+	t.Helper()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte("hello world"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	a.activeTabPtr().MoveCursorTo(editor.Position{Line: 0, Col: 5}, false)
+	return a
+}
+
+// ⌘→ is end of line and ⌘← is start — the macOS spelling of End/Home,
+// which is the pair a hand trained on any other editor reaches for.
+func TestMetaLineMotionArrows(t *testing.T) {
+	armMetaHost(t)
+	a := metaLineTab(t)
+
+	a.handleKey(metaArrowEv(tcell.KeyRight, false))
+	if got := a.activeTabPtr().Cursor.Col; got != 11 {
+		t.Fatalf("Cmd+Right left the caret at col %d, want 11 (end of line)", got)
+	}
+
+	a.handleKey(metaArrowEv(tcell.KeyLeft, false))
+	if got := a.activeTabPtr().Cursor.Col; got != 0 {
+		t.Fatalf("Cmd+Left left the caret at col %d, want 0 (start of line)", got)
+	}
+}
+
+// Shift rides along for free — extend is already read off ModShift — so
+// ⌘⇧→ selects to the end of the line rather than merely landing there.
+// Worth pinning because the chord reaches MoveLineEnd through a branch
+// that could just as easily have dropped the flag.
+func TestMetaLineMotionExtendsSelection(t *testing.T) {
+	armMetaHost(t)
+	a := metaLineTab(t)
+
+	a.handleKey(metaArrowEv(tcell.KeyRight, true))
+
+	tab := a.activeTabPtr()
+	if tab.Anchor.Col != 5 || tab.Cursor.Col != 11 {
+		t.Fatalf("Cmd+Shift+Right selected %d..%d, want 5..11",
+			tab.Anchor.Col, tab.Cursor.Col)
+	}
+}
+
+// Outside a host known to report Command distinctly the chord is not
+// ours, and the arrow does what a bare arrow does. That is the whole
+// point of the gate: a terminal folding Option into Meta must not turn
+// a reflex Option+Left into a jump to column 0.
+func TestMetaLineMotionSilentOnUnknownHost(t *testing.T) {
+	disarmMetaHost(t)
+	a := metaLineTab(t)
+
+	a.handleKey(metaArrowEv(tcell.KeyRight, false))
+
+	if got := a.activeTabPtr().Cursor.Col; got != 6 {
+		t.Fatalf("Cmd+Right moved to col %d on an untrusted host, want 6 "+
+			"(a plain one-column step)", got)
+	}
+}
+
+// Alt+Left is nav history and must stay that way: the two chords sit one
+// modifier bit apart, and a metaLineMotion that tested for "any
+// modifier" would silently eat the older binding.
+func TestMetaLineMotionDoesNotShadowNavHistory(t *testing.T) {
+	armMetaHost(t)
+	a := metaLineTab(t)
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyLeft, 0, tcell.ModAlt))
+
+	if got := a.activeTabPtr().Cursor.Col; got != 5 {
+		t.Fatalf("Alt+Left moved the caret to col %d — it is nav history, "+
+			"not a line motion", got)
 	}
 }

@@ -908,6 +908,21 @@ SHA**. This phase closes the specific named gaps:
    adjacent fix rode along: an unclaimed ⌘ chord is now SWALLOWED instead
    of falling through to the editing switch, where it typed its letter
    into the buffer — "⌘S didn't work" must never mean "⌘S typed an s".
+   ***⌘← / ⌘→ (line start / end) added 2026-08-25*** — the pair the plan
+   never asked for and the first addition that could not be a table row.
+   The table is keyed by RUNE and returns early on anything else, while
+   these are arrow keys carrying ModMeta, so they dispatch from the
+   editing switch beside Alt+Up/Down — where the tab is already in hand
+   and a motion belongs. They share the table's gate (`metaLineMotion`
+   → `metaAccelArmed`) for the reason the gate exists: Alt+Left is nav
+   history here, so an Option-as-Meta terminal would otherwise turn a
+   readline reflex into a jump to column 0. `extend` is already read off
+   ModShift, so ⌘⇧← / ⌘⇧→ select to the line edge for free, and because
+   both motions route through `applyAtCarets` the chord fans out in
+   multi-caret mode. Their Tier-0 twins are the End / Home keys, which
+   is what makes this legal under the nothing-may-be-⌘-only rule.
+   Whether cats' `CMD_TO_PANE` allowlist forwards them is the host's
+   call, exactly as ⌘E's was — armed here regardless.
    See the corrections under §2's ⌘ layer for what was dropped (⌘E,
    ⌘click) and why the Tier-1 half is armed but dark.
 3. ✅ **done 2026-08-12** — **Hook reporter — the editor can page you.**

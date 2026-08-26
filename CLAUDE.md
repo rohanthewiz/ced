@@ -28,6 +28,18 @@ nothing (not flow control, not the tmux/zellij prefixes), and the owner
 approved it explicitly. `Alt+Up/Down` (move line) is fine — Alt never
 fights tmux.
 
+**`Cmd+` is the one modifier that is genuinely free**, and it is a BONUS
+LAYER — every chord is a second door onto a verb the Esc table or the ≡
+menu already reaches, pinned by test, so a terminal that keeps `Cmd` for
+itself costs the user nothing. It arrives only through the kitty
+keyboard protocol (as `ModMeta`) and only fires behind `metaAccelArmed`,
+which trusts a cats Tier-1 pane or a self-identified kitty/Ghostty/
+WezTerm — the gate exists so a terminal folding Option into Meta can't
+misfire a verb. `⌘←` / `⌘→` (line start / end, `Shift` to select) are
+the one pair that is NOT in that rune table and cannot be: they're arrow
+keys, so they dispatch from the editing switch beside `Alt+Up/Down`. See
+metakeys.go — the whole rationale lives in its header comment.
+
 **tmux folds Esc sequences into Alt events.** tmux buffers a lone ESC
 for its escape-time (500ms default), so a fast double-Esc reaches tcell
 as one `\x1b\x1b` write → a single `KeyEsc + ModAlt` event, and "Esc,
@@ -123,6 +135,8 @@ internal/editor/ghost.go      GhostText display form + the render-row splice ove
 internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → autoSaveEvent)
 internal/app/zipops.go        Zip file/folder — stdlib archive/zip, async zipDoneEvent
 internal/app/format.go        Format-on-save bridge: project config, builtin Go, prompts
+internal/app/metakeys.go      The ⌘ accelerator layer: the rune table, its host gate,
+                              and ⌘←/⌘→ (line start/end) beside it
 internal/app/nav.go           Back/forward file-navigation history (Esc-o/O, Alt+←/→)
 internal/session/session.go   state.json: recent folders + per-folder tab sessions
 internal/app/folder.go        Open folder (restart), recent list, session record/restore

@@ -238,7 +238,7 @@ func (a *App) hoverDwellEligible() bool {
 // end" — and exactly wrong for a pointer, which is over whitespace and
 // means nothing. Same for the gutter, where HitTest reports column 0 and
 // would have the editor explain the first token of every line the
-// pointer crosses on its way to the scrollbar.
+// pointer crosses on its way to the window's edge.
 //
 // The "actually on it" test round-trips through the editor's own
 // PosScreenCell rather than re-deriving the gutter offset and tab-stop

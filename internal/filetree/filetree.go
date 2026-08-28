@@ -321,42 +321,12 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	}
 	t.visible = visible
 
-	drawMoreMarker(scr, th, x, listTop, w, listH, len(flat)-(t.ScrollY+listH))
-}
-
-// treeMoreRune marks a list that runs on past the bottom row. It is drawn
-// in the row's LAST column, where the tree's own expand chevrons (also
-// '▾') never appear — those sit at the head of a row, against the
-// indent — so position alone tells the two apart.
-//
-// Single-width per the marker rule: the cell is one column, and a
-// double-width glyph would spill into whatever the sidebar's splitter
-// draws beside it.
-const treeMoreRune = '▾'
-
-// drawMoreMarker paints the "there is more below" indicator over the last
-// list row when `hidden` rows sit past the bottom of the band.
-//
-// This is what the sidebar has INSTEAD of a scrollbar. A tree is a list
-// of names, not a body of text: the question it raises is "have I seen
-// everything?", which is a yes/no, and not "how far into it am I?", which
-// is what a thumb's height and position are for. A full bar answered the
-// second question at the cost of a column of every name — the tree's bar
-// shared the tree's own last column — and the names are the thing the
-// panel exists to show. One marker on one row answers the question that
-// was actually being asked, and costs a column of exactly one name.
-//
-// It is drawn unconditionally (no preference gates it) for the same
-// reason the menu's clipped-content arrows are: content the user cannot
-// see and has not been told about is the one thing a list must never do.
-func drawMoreMarker(scr tcell.Screen, th theme.Theme, x, listTop, w, listH, hidden int) {
-	if hidden <= 0 || listH <= 0 || w <= 0 {
-		return
-	}
-	// Muted rather than Subtle: this has something to say, and it is
-	// competing with a filename in the cells beside it.
-	st := tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Muted).Bold(true)
-	scr.SetContent(x+w-1, listTop+listH-1, treeMoreRune, nil, st)
+	// The "there is more" markers used to be painted here. They now live
+	// in app/overflow.go, which draws the same pair of glyphs on the
+	// editor and the git panel's diff pane as well — one mechanism, so a
+	// marker means the same thing wherever it appears, and one place for
+	// the hover popup to read its counts from. Everything it needs is
+	// already exported: RowCount, ScrollY and ListRows.
 }
 
 // isDirty reports whether a node should render in the Modified color —
@@ -585,16 +555,18 @@ func maxTreeScroll(total, viewH int) int {
 // MaxScroll reports the largest ScrollY the tree will hold for a list
 // band of viewH rows — the same number clampScroll enforces.
 //
-// Exported for the sidebar's scrollbar (app/scrollbar.go), which has to
-// place its thumb against exactly the range the wheel can reach. Two
-// copies of the arithmetic would drift, and the symptom is a thumb that
-// can't be dragged to the bottom of a tree the wheel scrolls to happily.
+// Exported so nothing above this layer re-derives the ceiling the wheel
+// can reach — two copies of the arithmetic would drift. Unlike the
+// editor's there is no overscroll pad: a tree has no "read the bottom
+// comfortably" problem, and scrolling into blank space would just lose
+// rows.
 func (t *Tree) MaxScroll(viewH int) int {
 	return maxTreeScroll(t.RowCount(), viewH)
 }
 
 // RowCount is how many rows the list has in total, at the current
-// expansion — what the scrollbar measures its thumb against. It walks
+// expansion — what the overflow markers count the hidden rows against
+// (app/overflow.go), together with ScrollY and ListRows. It walks
 // the tree, like ContentWidth does, which is bounded in practice because
 // the tree is lazy: rows exist only under folders somebody opened.
 func (t *Tree) RowCount() int {
@@ -614,8 +586,8 @@ func (t *Tree) RowCount() int {
 // the project name).
 //
 // It exists so nothing outside this package has to hard-code that "2".
-// The scrollbar spans the LIST, not the header — those two rows scroll
-// with nothing, and the project name is itself a click target.
+// The overflow markers span the LIST, not the header — those two rows
+// scroll with nothing, and the project name is itself a click target.
 func (t *Tree) ListRows(h int) (offset, rows int) {
 	rows = h - treeHeaderRows
 	if rows < 0 {

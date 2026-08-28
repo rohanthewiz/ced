@@ -159,10 +159,10 @@ internal/app/runexec.go       Run an executable: dir picker → staged line in t
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, locked by a drag
-internal/app/scrollbar.go     The editor's scrollbar: reserved column, rail + thumb, drag
-internal/app/scrollbarmarks.go The rail's overlay: caret tick + off-screen diagnostics / find hits
+internal/app/overflow.go      The ▴/▾ overflow markers (editor, git diff pane, tree),
+                              what is off-screen each way, and the hover popup
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, scrollbar, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
+internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
 internal/theme/theme.go       Theme struct (tcell colors) + Default() fallback
 internal/theme/palette.go     Canonical color keys + the 8-core derivation table
@@ -2739,130 +2739,52 @@ The sidebar sizes itself to the tree's longest row, so expanding
   pin sidebar geometry, and a splitter-drag test would persist the lock
   into the developer's real config.json.
 
-### The editor scrollbar (app/scrollbar.go)
+### The overflow markers (app/overflow.go)
 
-A thumb whose HEIGHT says how much of the file fits on screen and whose
-POSITION says where in it you are — one reserved column down the right
-edge of the editor body, and it drags. House rules:
-
-- **It DISPLACES the editor, it does not float over it** (the Find-all
-  dock's rule). `editorRect` subtracts `scrollbarCols()`, which is what
-  keeps every existing call site — hit-testing, the hover tooltip, drag
-  auto-scroll, Alt+click, the context menu — ignorant that the bar
-  exists. A thumb painted on top of the last column would cover a
-  character on every row it crossed, and that column is the one
-  `Tab.Render` already uses for the horizontal-overflow arrow.
-- **The column is NOT conditioned on the file overflowing.** A bar that
-  came and went as the buffer grew past the bottom row would move the
-  editor's right edge — re-flowing everything the user was reading — on
-  an edit that had nothing to do with layout. A short file gets a
-  FULL-HEIGHT thumb instead, which is the honest way to say "this is all
-  of it". The two cases that do give the column back are no tab open
-  (there is no scroll position to report) and a band too narrow for
-  `scrollbarMinEditor` (at that size the code is the scarce thing). The
-  FILE TREE answers the same question the opposite way and for the
-  opposite reason — see the overflow marker below.
-- **The rail and the thumb are ONE shape at two weights**, right-aligned
-  in the cell: `▕` (one-eighth block) under `▐` (half block), the same
-  Block-Elements family the git gutter's `▎` comes from. The first cut
-  drew a box-drawing `│` under a solid `█` — a hairline centred in the
-  cell with a slab bulging out of it, so the thumb read as a blot rather
-  than as the rail thickened, and the whole column read as a scaffold
-  bolted to the code. Right-aligned matters too: the ink sits against the
-  window's edge instead of crowding the text it stands beside. Both are
-  single-width per the marker rule.
-- **`scrollbarMinThumb` is 2 rows, not 1.** The thumb is a grab HANDLE
-  before it is a readout, and the arithmetic produces a one-cell thumb
-  exactly where dragging matters most (a file thousands of lines long).
-  The floor is applied before the ceiling and the ceiling wins, or on a
-  track shorter than the floor the thumb places off the end of its track.
-- **It sits at `ex+ew`, INSIDE a right-docked Find-all list.** The bar
-  belongs to the editor, so it stays welded to the editor's edge wherever
-  that edge moved to — which is why `findAllModal.rect` is the one call
-  site that had to learn about it (`ex + ew + scrollbarCols()`). A second
-  surface that positions itself against the band's right edge has to do
-  the same.
-- **`Tab.MaxScroll` is exported so there is ONE ceiling.** The thumb is
-  placed against exactly the range the wheel can reach, including
-  `clampScroll`'s overscroll pad; a second copy of that arithmetic would
-  drift, and the symptom is a thumb that cannot be dragged to the end of
-  a file the wheel scrolls to happily. `clampScroll` now calls it.
-- **Thumb HEIGHT is measured against the file, thumb POSITION against
-  `MaxScroll`.** The pad is blank space below the last line: counting it
-  in the height would shrink the thumb to claim there is more file than
-  there is, while ignoring it in the position would leave the thumb a few
-  rows short of the bottom at the end of travel. `scrollbarMetrics` is a
-  pure function for that reason — four degenerate cases (empty buffer,
-  file shorter than the window, thumb as tall as the track, track shorter
-  than the thumb floor), each one a place a division could panic.
-- **Press on the thumb DRAGS, press on the track PAGES.** Paging is the
-  reversible answer: a mis-aimed page is one press back, while jumping
-  the thumb to the pointer has thrown away the position the user was
-  reading from with nothing to restore it. The grab offset
-  (`scrollbarGrab`) is taken at press time so the thumb slides with the
-  pointer instead of snapping its top edge under it.
-- **The hit-test runs BEFORE the editor catch-all** in `handleMouse`, the
-  same reason every panel's does: the column is inside the editor's
-  y-band, so an unasked press would move the caret to whatever line the
-  user grabbed the thumb on. The wheel needs no such case — `scrollAt`'s
-  catch-all already scrolls the active tab for that y range.
-- **`drawScrollbar` runs AFTER `Tab.Render`**, never before: Render is
-  where `EnsureVisible` and `clampScroll` settle `ScrollY`, so a bar
-  drawn ahead of it reports the previous frame's position on any tick
-  that moved the cursor.
-- **The rail carries more than the thumb** — the caret's position and
-  every off-screen diagnostic and find hit, one colored cell each. That
-  half is `scrollbarmarks.go`; `drawScrollbar` is where the two meet, and
-  the thumb wins its own rows outright.
-- `"scrollbar"` is the persisted key (default on) with a ≡ **View** row
-  and no leader key (the flat table is out of letters, and this is a
-  once-a-session decision about how much code width to spend). The row
-  sits with the two dock toggles rather than up with the tree rows,
-  because the rows above it are pinned above the fold on a 24-row window
-  (`TestMenuLayout_TerminalRowsAboveTheFold`) with no slack to push them
-  down by. **The tree's overflow marker is NOT gated on it** — that
-  marker costs no layout, so the one thing the key buys (give me the
-  width back) does not apply to it. `newTestApp` leaves the bar OFF, the
-  treeAutoFit precedent: on, it would shift `editorRect` by a column
-  under every test that pins editor geometry.
-
-### The scrollbar's marks (app/scrollbarmarks.go)
-
-The rail is a scale model of the whole document, so three things the
-viewport cannot show get plotted on it: where the caret went when you
-scrolled away from it (a `━` tick in the accent color), and one colored
-cell for every OFF-SCREEN diagnostic and find hit. A minimap of
-positions, not of content — color only, no glyph vocabulary to learn.
+A `▴` or `▾` in the LAST column of a viewport's first and last row, on
+every surface that scrolls — the editor body, the git panel's diff pane,
+and the file tree — plus a hover popup saying how many lines lie that
+way. It replaced a real scrollbar (a reserved column, a rail and a
+draggable thumb) on the owner's verdict that the rail was not pleasing
+to look at, and the tree's own marker is where the shape came from.
 House rules:
 
-- **A mark is drawn only for a line the viewport does NOT show.** On
-  screen the gutter dot, the underline and the find tint are already
-  there against the code, saying it better and in place; repeating them
-  would make the bar loudest exactly when it has least to add. That rule
-  is also what keeps the rail silent on a file that fits (nothing is off
-  screen) and useful on a long one. Same argument for the caret tick:
-  while the cursor is visible the hardware cursor IS the answer, and a
-  tick would be a second cursor to explain.
-- **Nothing paints over the thumb.** It is the one thing on the column
-  that has to keep reading as a shape, and it covers the rows whose
-  marks are suppressed anyway.
-- **`railKind` is ordered by precedence and the caret wins outright.** A
-  rail row stands for many lines (a 5,000-line file through a 40-row
-  track is 125 lines per cell), so collisions are the normal case and
-  the cell has to answer with the loudest thing in its range. The caret
-  is the only mark that is UNIQUE — lose its cell and the feature has
-  silently failed — while a diagnostic is redundantly reported by the
-  status bar's counts, the Problems panel and its own gutter dot. Find
-  outranks the diagnostics for the reason `collectDecorations` puts
-  `findSource` last: a question the user asked outranks ambient
-  annotation.
-- **`railRow` is the ONE line→row mapping**, shared by the tick and every
-  mark, so two things on the same line can never be drawn on different
-  rows. It is proportional over the whole FILE — the measure that gives
-  the thumb its HEIGHT — and deliberately not the thumb's POSITION
-  formula, which is measured against `MaxScroll` because it maps scroll
-  offsets rather than lines. The two agree to within a row at the
-  extremes, and marks are suppressed under the thumb regardless.
+- **THE MARKER SHARES THE LAST COLUMN; IT RESERVES NOTHING.** That is
+  what lets it come and go with the content, which the bar structurally
+  could not do: a marker that cost layout would move the editor's right
+  edge — re-flowing everything the user was reading — on an edit that had
+  nothing to do with layout, which is exactly why the bar had to keep its
+  column even in a file that fit on screen. `editorRect` therefore
+  subtracts nothing, and `findAllModal.rect`'s right dock is back to a
+  plain `ex + ew`. In the editor the glyph covers one cell of code on two
+  rows; in the git panel's diff pane it lands in the blank right margin
+  (`drawGitPanelDiffRow` and the hunk chips both stop a column short) and
+  covers nothing at all.
+- **IT IS DRAWN UNCONDITIONALLY.** No preference gates it, for the reason
+  the ≡ menu's clipped-content arrows aren't gated either: content the
+  user cannot see and has not been told about is the one thing a viewport
+  must never do. The `"scrollbar"` config key and its ≡ View row are
+  GONE — that key bought exactly one thing, "give me the column back",
+  and there is no column to give back. A stale `"scrollbar"` entry in a
+  user's config.json is ignored rather than rejected
+  (`TestLoadRetiredScrollbarKey`).
+- **THE COLOR IS WHAT IS OUT THERE.** The retired rail plotted every
+  off-screen diagnostic and find hit as its own cell, a minimap of
+  positions. With no rail to plot on, that information folds into the
+  marker: it takes the color of the loudest thing that way, and the popup
+  names the counts. `offscreenKind` is that ranking and its order is the
+  design — **caret > find > error > warn > info**. A marker stands for
+  the whole rest of the document in its direction, so collisions are the
+  normal case; the caret wins outright because it is the only UNIQUE mark
+  (lose it and the feature has silently failed), while a diagnostic is
+  redundantly carried by the status bar's counts, the Problems panel and
+  its own gutter dot. Find outranks the diagnostics for the reason
+  `collectDecorations` puts `findSource` last.
+- **Only what is OFF SCREEN counts.** On screen the gutter dot, the
+  underline and the find tint are already there against the code, saying
+  it better and in place; repeating them would make the marker loudest
+  exactly when it has least to add. Same argument for the caret — while
+  the cursor is visible the hardware cursor IS the answer.
 - **Sources are read from their CACHES, not through `DecorationSource`.**
   Sources are asked per visible window by contract, and this feature's
   whole subject is the rest of the file; asking each for the entire
@@ -2871,53 +2793,58 @@ House rules:
   here. So: `lsp.diags`, `plugins.decos` (gated on the kill switch at the
   READ, like every other plugin surface), and `Tab.FindMatches`, which is
   already whole-buffer.
-- **Git changes are deliberately NOT plotted.** They would be on the rail
-  of nearly every file you actually work in, which is precisely when the
-  bar most needs to read as a position — and a change bar is state you
-  already own, not somewhere you were about to jump. The rail is for
-  what you would go and look at.
-- **A mark is not a click target.** A press on the track still PAGES
-  toward the pointer, per the bar's own rule: paging is reversible, and a
-  cell that jumped somewhere would make the rail's two halves answer one
-  gesture differently depending on where in it you happened to land.
-- The colors are the theme's existing `Diag*` three plus `FindCurrent`
-  and `Accent` — a red cell here and a red dot in the gutter are
-  obviously the same fact at two distances. Find uses `FindCurrent`, not
-  `FindMatch`: the latter is a background TINT and is invisible as a
-  foreground. Nothing new is persisted; the whole overlay lives under the
-  bar's own `"scrollbar"` key.
-
-### The file tree's overflow marker (filetree's drawMoreMarker)
-
-The sidebar has no scrollbar. When the list runs on past the bottom row,
-the LAST list row carries a muted `▾` in its final column, and that is
-the whole feature. House rules:
-
-- **A LIST ASKS A DIFFERENT QUESTION THAN A BODY OF TEXT.** "How far into
-  this file am I?" needs a thumb's height and position; "have I seen
-  everything?" is a yes/no. The tree had a real bar for a while and it
-  answered the second question at the price of the first one's machinery
-  — plus a column shared with the names, which are the thing the panel
-  exists to show. One marker on one row answers what was actually being
-  asked and costs the last cell of exactly one name.
-- **It is drawn unconditionally**, unlike the editor's bar, for the same
-  reason the ≡ menu's clipped-content arrows are: content the user cannot
-  see and has not been told about is the one thing a list must never do.
-  No preference gates it, so there is nothing to plumb through the App —
-  it lives inside `Tree.Render`, which already has the flat row list, the
-  band split (`ListRows`) and `ScrollY` in hand.
-- **Bottom only.** Scrolled-down content announces itself (the user did
-  the scrolling); content below the fold does not.
-- **Position is what tells it apart from the chevrons**, which are the
-  same `▾` glyph: an expand chevron sits at the HEAD of a row against the
-  indent, this one at the row's last column. Single-width per the marker
-  rule — the cell is one column, and a double-width glyph would spill
-  into the splitter beside it.
-- **Auto-fit no longer compensates for a column.** `autoFitSidebar` asks
-  for `ContentWidth() + 1` (the splitter) and nothing more: an allowance
-  for a one-row marker would be a column of blank air on every other row
-  of the tree. That is the trade a shared-column scrollbar could not
-  make, and the reason the tree stopped having one.
+- **`overflowMarkers()` is the ONE enumerator** draw, hit-testing and the
+  popup all read (the btnRect rule), which is also why the tree no longer
+  paints its own: `filetree.drawMoreMarker` is gone, and the app derives
+  the sidebar's pair from `RowCount` / `ScrollY` / `ListRows`, all already
+  exported. One mechanism, so a marker means the same thing wherever it
+  appears, and one place for the popup to read its counts from.
+- **The marker keeps its cell's BACKGROUND** (`GetContent` +
+  `Decompose`). It is an annotation on a row somebody else drew, so only
+  the foreground is its own — setting a background would punch a hole in
+  the editor's current-line highlight, the tree's selection bar or the
+  panel's fill.
+- **Drawn after every surface has rendered.** `Tab.Render` is where
+  `EnsureVisible` and `clampScroll` settle `ScrollY`, so a marker placed
+  before it would report the previous frame's viewport — the same reason
+  `drawScrollbar` ran last.
+- **Line counts floor at zero.** `clampScroll`'s overscroll pad lets the
+  last line come up to the middle of the viewport, so `total - (last+1)`
+  goes negative there; a marker for lines that do not exist is worse than
+  none.
+- **THE POPUP IS PASSIVE AND ITS OWN LAYER.** It never takes the modal
+  slot (nobody asked a question — the hoverdwell/commit-receipt rule),
+  draws beside the dwell tooltip and the receipt, and reuses
+  `tooltipSize` / `tooltipPlace` / `drawTooltipBox` so there is one
+  tooltip look in the editor rather than three. A press inside the drawn
+  box is swallowed (it covers content the user cannot see, the completion
+  popup's contract); a press anywhere else is not.
+- **`overflowTipState` is deliberately NOT folded into
+  `hoverDwellState`.** That layer is armed only inside cats
+  (`hoverDwellArmed` → Tier 1) because its answer costs a round trip to a
+  language server over a link ced cannot vouch for. This answer is a
+  count the draw already had in hand, so it is free and runs on every
+  host. `armOverflowTip` also arms NOTHING unless the cell really carries
+  a marker — unlike the dwell layer, which has to ask before it knows.
+  The 250ms delay exists only to stop a pointer sweeping along the
+  window's edge flashing a box on its way past.
+- **The units follow the surface**: "lines" for a body of text, "rows"
+  for the tree, because a tree is a list of names.
+- **Position is what tells `▾` apart from the tree's expand chevrons**,
+  which are the same glyph: a chevron sits at the HEAD of a row against
+  the indent, this at the row's tail. Same distinction in the editor,
+  where the only other thing in that column is the horizontal-overflow
+  `›` — and on the one row where both would land, this wins, because "the
+  file runs on" outranks "this line runs on" (the line's own arrow is
+  repeated on every other long row; the marker has exactly one place to
+  be). Single-width per the marker rule.
+- **Auto-fit does not compensate for it.** `autoFitSidebar` asks for
+  `ContentWidth() + 1` (the splitter) and nothing more: an allowance for
+  a two-row marker would be a column of blank air on every other row of
+  the tree. That is the trade a shared-column scrollbar could not make,
+  and the reason the tree stopped having one.
+- No leader key and no ≡ row: it is not a verb, and there is nothing to
+  toggle.
 
 ## Build / run
 

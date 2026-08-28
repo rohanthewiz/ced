@@ -329,25 +329,34 @@ collapses back to a single caret, so you can never be left typing into
 lines you aren't looking at. The status bar says how many carets are
 live whenever there's more than one.
 
-### Scrollbars
+### Overflow markers
 
-The editor body's rightmost column is a vertical scrollbar, and the file
-tree has one down its own right edge. The thumb is sized to the share of
-the content that fits on screen, so a glance answers "how much is
-below?" — a long file gets a stub, a file that fits gets a full-height
-thumb.
+Anything that scrolls — the editor, the file tree, the git panel's diff
+pane — puts a small **▴** or **▾** in the last column of its first and
+last row when there is more content that way. That is the whole
+indicator: no rail, no thumb, no column permanently spent on chrome.
 
-- **Drag the thumb** to move; dragging past either end parks there.
-- **Click the track** above or below the thumb to page toward it.
-- The wheel works over either bar exactly as it does over the content.
+**Hover one** and a popup says how much:
 
-The two differ in one way. The editor's bar costs it a column, so it is
-always there. The tree's *shares* its last column instead, so it appears
-only when there are more rows than fit — and auto-fit widens the sidebar
-by one to keep the longest name out from under it.
+```
+  }                                                    ▾
+                                    ┌───────────────────┐
+                                    │ 1842 lines below  │
+                                    │ 5 hits · 2 errors │
+                                    └───────────────────┘
+```
 
-Turn both off from `≡` → **Hide scrollbars**; it persists as
-`"scrollbar": "off"` in `~/.config/ced/config.json`.
+The second line appears when there is something out there worth naming,
+and the marker takes that thing's **color**: red for an error below,
+amber for find hits, the accent color for a cursor you have scrolled
+away from. Precedence runs cursor → find hits → errors → warnings →
+notes, so one cell always reports the loudest thing in the direction it
+points. Only what is OFF SCREEN counts — on screen the gutter dot and
+the find tint are already saying it, against the code itself.
+
+Nothing gates the markers: they cost no layout, and a viewport that
+silently runs on past its last row is the one thing an editor must never
+do.
 
 ### Matching word highlight
 

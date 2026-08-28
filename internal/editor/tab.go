@@ -1137,6 +1137,12 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		// scrollbar to clue them in. visualCol now equals the total
 		// visual width of the line; scrollVisual is the visual cell
 		// corresponding to ScrollX.
+		//
+		// The app paints its VERTICAL overflow marker in this same column
+		// on the viewport's first and last row (app/overflow.go), and
+		// wins there: "the file runs on" outranks "this line runs on",
+		// because the line's own arrow is repeated on every other long
+		// row while that marker has exactly one place to be.
 		overflowStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
 		if t.ScrollX > 0 {
 			scr.SetContent(contentX, cy, '‹', nil, overflowStyle)
@@ -1263,10 +1269,12 @@ func (t *Tab) ScrollH(deltaCols int) {
 // middle of the viewport — which feels much better than abruptly stopping
 // when the last line hits the bottom row.
 //
-// Exported because the scrollbar has to place its thumb against exactly
-// the range the wheel can reach (app/scrollbar.go). Two copies of this
-// arithmetic would drift, and the symptom would be a thumb that can't be
-// dragged to the end of a file the wheel scrolls to happily.
+// Exported so nothing above this layer re-derives the ceiling the wheel
+// can reach: two copies of the arithmetic would drift, and the pad is the
+// part an outside caller always forgets. The overflow marker's line
+// counts (app/overflow.go) floor at zero for exactly that reason — a
+// viewport parked inside the pad has nothing below it, not a negative
+// number of lines.
 func (t *Tab) MaxScroll(viewH int) int {
 	overscroll := viewH / 2
 	if overscroll < 3 {

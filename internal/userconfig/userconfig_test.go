@@ -1373,74 +1373,23 @@ func TestRemote_LoadAndSave(t *testing.T) {
 	}
 }
 
-// TestDefaultsScrollbarOn pins the documented default: the editor shows
-// its scrollbar unless the user asks for the column back.
-func TestDefaultsScrollbarOn(t *testing.T) {
-	if !Defaults().Scrollbar {
-		t.Fatal("Defaults().Scrollbar = false, want true")
-	}
-}
-
-// TestLoadScrollbarValues exercises the recognised scrollbar values and
-// the absent-field default, mirroring the treeautofit table.
-func TestLoadScrollbarValues(t *testing.T) {
-	cases := map[string]bool{
-		`{"scrollbar":"on"}`:    true,
-		`{"scrollbar":"off"}`:   false,
-		`{"scrollbar":" OFF "}`: false, // case/whitespace tolerant
-		`{}`:                    true,  // omitted field keeps the default
-	}
-	for body, want := range cases {
-		p := filepath.Join(t.TempDir(), "config.json")
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			t.Fatalf("seed: %v", err)
-		}
-		cfg, err := Load(p)
-		if err != nil {
-			t.Fatalf("Load(%s): %v", body, err)
-		}
-		if cfg.Scrollbar != want {
-			t.Errorf("Load(%s).Scrollbar = %v, want %v", body, cfg.Scrollbar, want)
-		}
-	}
-}
-
-// TestLoadScrollbarInvalid mirrors the treeautofit rule: a typo'd value is
-// an error the caller can flash, not a silent fallback.
-func TestLoadScrollbarInvalid(t *testing.T) {
+// TestLoadRetiredScrollbarKey pins that a config.json left over from the
+// scrollbar era still loads. The bar was replaced by the ▴/▾ overflow
+// markers, which cost no layout and so have nothing to toggle; the key is
+// no longer read, and the one thing that must not happen is a stale
+// "scrollbar" entry turning into a startup error over a preference that
+// has no meaning any more.
+func TestLoadRetiredScrollbarKey(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(p, []byte(`{"scrollbar":"sometimes"}`), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(`{"scrollbar":"off","icons":"on"}`), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if _, err := Load(p); err == nil {
-		t.Fatal("invalid scrollbar value should error")
-	}
-}
-
-// TestSaveScrollbar_RoundTripsAndPreserves makes the same unknown-key
-// guarantee for the new key that every other Save* helper makes.
-func TestSaveScrollbar_RoundTripsAndPreserves(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	seed := "{\n  \"icons\": \"on\",\n  \"future-key\": 42\n}\n"
-	if err := os.WriteFile(path, []byte(seed), 0644); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if err := SaveScrollbar(path, false); err != nil {
-		t.Fatalf("SaveScrollbar: %v", err)
-	}
-	cfg, err := Load(path)
+	cfg, err := Load(p)
 	if err != nil {
-		t.Fatalf("Load after save: %v", err)
+		t.Fatalf("Load with a retired key: %v", err)
 	}
-	if cfg.Scrollbar || cfg.Icons != IconsOn {
-		t.Fatalf("round trip lost values: scrollbar=%v icons=%q", cfg.Scrollbar, cfg.Icons)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read back: %v", err)
-	}
-	if !strings.Contains(string(raw), "future-key") {
-		t.Fatalf("unknown key dropped: %s", raw)
+	if cfg.Icons != IconsOn {
+		t.Errorf("Icons = %q, want %q — the rest of the file must still parse", cfg.Icons, IconsOn)
 	}
 }
 

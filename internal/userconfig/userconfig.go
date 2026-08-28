@@ -40,11 +40,6 @@
 //	{"treeautofit": "off"}  // the sidebar keeps whatever width it has —
 //	                        // set by dragging the splitter. Dragging the
 //	                        // splitter also writes this key off.
-//	{"scrollbar": "on"}     // default; draggable vertical scrollbars on
-//	                        // the editor and the file tree, thumb sized
-//	                        // to the share of the content on screen
-//	{"scrollbar": "off"}    // no bars — the editor keeps that column of
-//	                        // code width
 //	{"copilot": "on"}       // default; run copilot-language-server when
 //	                        // it's installed (silent no-op when absent)
 //	{"copilot": "off"}      // never spawn the Copilot sidecar
@@ -228,17 +223,6 @@ type Config struct {
 	// itself persists this key off: the two cannot both own the number.
 	TreeAutoFit bool
 
-	// Scrollbar controls whether the editor body reserves its rightmost
-	// column for a draggable scrollbar, and whether the file tree paints
-	// one over its own last column. Defaults to on: "how much of this am
-	// I looking at" has no other answer in a terminal editor, and the
-	// status bar's line count can't show it at a glance. Off is here
-	// because the editor's bar costs a column of code width, which a user
-	// on an 80-column terminal may well want back. One key for both
-	// surfaces — see app/scrollbar.go. Persisted by the ≡ view toggle,
-	// same as ExecMarks.
-	Scrollbar bool
-
 	// WordHL controls whether the editor tints the other visible
 	// instances of the word under the cursor. Defaults to on — reading
 	// code is the editor's primary job and "where else is this used"
@@ -358,7 +342,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, TreeAutoFit: true, Scrollbar: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
+	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, TreeAutoFit: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -379,7 +363,6 @@ type fileFormat struct {
 	FindAllDock   string `json:"findalldock,omitempty"`
 	ExecMarks     string `json:"execmarks,omitempty"`
 	TreeAutoFit   string `json:"treeautofit,omitempty"`
-	Scrollbar     string `json:"scrollbar,omitempty"`
 	WordHL        string `json:"wordhl,omitempty"`
 	Copilot       string `json:"copilot,omitempty"`
 	Suggestions   string `json:"suggestions,omitempty"`
@@ -621,20 +604,6 @@ func Load(path string) (Config, error) {
 		)
 	}
 
-	switch strings.ToLower(strings.TrimSpace(ff.Scrollbar)) {
-	case "":
-		// field omitted — keep default
-	case "on":
-		cfg.Scrollbar = true
-	case "off":
-		cfg.Scrollbar = false
-	default:
-		return Defaults(), fmt.Errorf(
-			"%s: scrollbar must be \"on\" or \"off\" (got %q)",
-			path, ff.Scrollbar,
-		)
-	}
-
 	switch strings.ToLower(strings.TrimSpace(ff.WordHL)) {
 	case "":
 		// field omitted — keep default
@@ -827,16 +796,6 @@ func SaveTreeAutoFit(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "treeautofit", val)
-}
-
-// SaveScrollbar persists the editor scrollbar preference into the config
-// file at path. See saveKey for the round-trip guarantees.
-func SaveScrollbar(path string, on bool) error {
-	val := "on"
-	if !on {
-		val = "off"
-	}
-	return saveKey(path, "scrollbar", val)
 }
 
 // SaveWordHL persists the matching-word-highlight preference into the

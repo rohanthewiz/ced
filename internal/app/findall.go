@@ -785,14 +785,11 @@ func (m *findAllModal) visibleRows(a *App) int {
 //
 // RIGHT: a full-height column at the far end of the editor's band,
 // editor narrowed to its left. `ex + ew` IS that edge, because
-// editorRect has already subtracted the column's width — plus the
-// scrollbar's column, which editorRect subtracted too and which sits
-// BETWEEN the two (the bar belongs to the editor, so it stays welded to
-// the editor's edge rather than to the band's).
+// editorRect has already subtracted the column's width.
 func (m *findAllModal) rect(a *App) (x, y, w, h int) {
 	ex, _, ew, _ := a.editorRect()
 	if a.findAllDockRight {
-		return ex + ew + a.scrollbarCols(), 1, m.width(a), m.height(a)
+		return ex + ew, 1, m.width(a), m.height(a)
 	}
 	return ex, 1, ew, m.height(a)
 }

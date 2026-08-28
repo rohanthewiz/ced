@@ -252,16 +252,6 @@ func builtinMenuGroups() []menuGroup {
 			// setting while the list itself is open (a modal owns the
 			// keyboard, so the menu is unreachable from inside it).
 			{action: (*App).menuToggleFindAllDock, enabled: alwaysTrue, labelFor: (*App).findAllDockToggleLabel},
-			// The editor scrollbar (scrollbar.go). It sits with the two
-			// dock rows rather than up with the tree/word-highlight
-			// toggles because it is the same KIND of setting — a column
-			// of the editor's band spent on chrome — and because the
-			// rows above it are pinned above the fold on a 24-row
-			// window (TestMenuLayout_TerminalRowsAboveTheFold) with no
-			// slack left to push them down by. A View toggle rather than
-			// a leader key: the flat table is out of mnemonic letters,
-			// and this is a once-a-session decision.
-			{action: (*App).menuToggleScrollbar, enabled: alwaysTrue, labelFor: (*App).scrollbarToggleLabel},
 			// Color themes (theme.go). They live in View rather than in a
 			// group of their own for the same above-the-fold reason the
 			// terminal rows do: the menu scrolls on short windows, and a
@@ -897,13 +887,13 @@ type App struct {
 	// See treeautofit.go.
 	treeAutoFit bool
 
-	// scrollbarShown reserves the editor body's rightmost column for the
-	// draggable scrollbar. Persisted as "scrollbar" (default on), toggled
-	// from the ≡ View group. scrollbarGrab is the offset within the thumb
-	// at which the current drag grabbed it, so the thumb slides with the
-	// pointer instead of snapping under it. See scrollbar.go.
-	scrollbarShown bool
-	scrollbarGrab  int
+	// overflowTip is the popup behind the ▴/▾ overflow markers: how many
+	// lines (or rows) lie beyond that edge, and what is in them. Passive
+	// chrome on a dwell timer, armed on every host rather than only
+	// inside cats — the answer is a count the draw already had, so
+	// unlike the LSP dwell tooltip it costs no round trip. See
+	// overflow.go.
+	overflowTip overflowTipState
 
 	clipBuf string
 	// fileClipPath is the absolute path armed by a Copy file/folder
@@ -1507,7 +1497,6 @@ func (a *App) loadUserConfig() {
 		a.tree.ExecMarks = cfg.ExecMarks
 	}
 	a.treeAutoFit = cfg.TreeAutoFit
-	a.scrollbarShown = cfg.Scrollbar
 	a.autoSaveEnabled = cfg.AutoSave
 	a.autoSaveDelay = cfg.AutoSaveDelay
 	a.wordHLEnabled = cfg.WordHL
@@ -1705,6 +1694,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleWhichKeyTick(e)
 	case *hoverDwellEvent:
 		a.handleHoverDwellTick(e)
+	case *overflowTipEvent:
+		a.handleOverflowTipTick(e)
 	case *gitDiffEvent:
 		a.handleGitDiff(e)
 	case *gitBlameEvent:
@@ -2172,10 +2163,7 @@ func (a *App) editorRect() (x, y, w, h int) {
 	lw := a.leftBlockW()
 	top := a.findAllPanelHeight()
 	h = a.editorBandRows() - top
-	// The scrollbar takes its column from the same edge, INSIDE the
-	// Find-all dock's: the bar belongs to the editor, so it stays welded
-	// to whichever edge the editor ended up with. See scrollbar.go.
-	w = a.editorBandCols() - a.findAllPanelWidth() - a.scrollbarCols()
+	w = a.editorBandCols() - a.findAllPanelWidth()
 	return lw, 1 + top, w, h
 }
 
@@ -2823,6 +2811,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
+	// The overflow popup keeps its own pointer bookkeeping beside the
+	// dwell layer's, and claims an event on the same single condition: a
+	// press inside the drawn box, which covers content the user cannot
+	// see. See overflow.go for why it is not folded into hoverdwell.
+	if a.noteOverflowPointer(x, y, btn) {
+		return
+	}
+
 	// The commit receipt takes a press the same way: it closes on any
 	// button, and a press that landed INSIDE the panel is swallowed
 	// rather than moving the caret in code the user could not see. Pure
@@ -2977,15 +2973,6 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
-	// Editor scrollbar drag: the thumb follows the mouse row, carrying
-	// the viewport with it. Deliberately handled wherever the pointer has
-	// wandered to — dragging off either end parks at that end, which is
-	// what every scrollbar does.
-	if leftDown && a.dragMode == "scrollbar" {
-		a.dragScrollbarTo(y)
-		return
-	}
-
 	// Chat transcript drag-select: the panel captures the mouse, so the
 	// terminal's own selection never reaches it — this is the editor's
 	// replacement, same shape as the editor pane's drag.
@@ -3113,13 +3100,6 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// any focused field it holds (click-where-you-want-to-type).
 		case a.findAllPinContains(x, y):
 			a.findAllPin.handleMouse(a, x, y, btn)
-		// The scrollbar's column sits inside the editor's y-band, so it
-		// asks before the catch-all for the same reason every panel does
-		// — an unasked press would move the caret to whatever line the
-		// user happened to grab the thumb on. A press on the track pages
-		// instead of dragging, hence the empty mode. See scrollbar.go.
-		case a.scrollbarContains(x, y):
-			a.dragMode = a.scrollbarPress(x, y)
 		// The find bar sits inside the editor's former y-range too, so
 		// its hit-test runs before the catch-all — otherwise a click on
 		// the Aa toggle would land in the file behind it and move the
@@ -4348,10 +4328,6 @@ func (a *App) draw() {
 	if tab := a.activeTabPtr(); tab != nil {
 		ex, ey, ew, eh := a.editorRect()
 		tab.Render(a.screen, a.theme, ex, ey, ew, eh)
-		// After Render, never before: Render is where EnsureVisible and
-		// clampScroll settle ScrollY, and a bar drawn ahead of them would
-		// report the previous frame's position.
-		a.drawScrollbar()
 	} else {
 		a.drawEmptyEditor()
 	}
@@ -4385,6 +4361,13 @@ func (a *App) draw() {
 	if a.findAllPin != nil {
 		a.findAllPin.draw(a)
 	}
+
+	// The overflow markers go on last of the body layer: each one shares
+	// the final column of a row somebody else has already drawn (code, a
+	// filename, a diff line), and it keeps that cell's background — so it
+	// has to run after the surface it annotates. See overflow.go.
+	a.drawOverflowMarkers()
+
 	a.drawStatusBar()
 
 	// The which-key overlay sits above the panels but below the menu
@@ -4408,6 +4391,13 @@ func (a *App) draw() {
 	// It is always given the chance to draw, because that call is also
 	// what clears the stamped rect when it is NOT visible.
 	a.drawHoverDwell()
+
+	// The overflow popup shares that passive layer for the same reasons:
+	// nobody asked for it, so it may not own the keyboard or the modal
+	// slot, and it is anchored into a body somebody is reading. Always
+	// given the chance to draw, because that call is also what clears the
+	// stamped rect when it is NOT visible.
+	a.drawOverflowTip()
 
 	// The commit receipt shares that passive layer: above the panels
 	// (it is a report about what just happened, so nothing may cover

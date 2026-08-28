@@ -116,6 +116,8 @@ internal/app/copilot_chat.go  Copilot phase 3: ACP chat panel (left strip, strea
 internal/app/chatcomposer.go  The chat prompt's multi-line input widget (hard-wrap, caret math)
 internal/app/chatagent.go     Chat backend registry + ≡ picker (Copilot / Claude Code / Gemini)
 internal/app/copilot_chat_context.go  Chat context: file / selection attachments
+internal/chatstore/chatstore.go One JSON file per saved conversation + the cap
+internal/app/chatarchive.go   New chat, the archive, and the Recent chats picker
 internal/app/summarize.go     AI summarize: selection-or-file, one visible chat turn
 internal/gonotes/gonotes.go   GoNotes v1 REST client: env credentials, shared token cache
 internal/app/gonotes.go       Capture selection/file as a GoNotes note (+ AI-drafted title)
@@ -1455,6 +1457,101 @@ context" to "you could go look"; don't add one. House rules:
 - The ≡ Copilot group carries the keyboard/menu twins (toggle, attach
   current-or-selection, attach-file picker, clear). Attaching opens the
   panel — context you can't see is context you can't trust.
+
+### Chat archive — New chat + Recent chats
+### (internal/chatstore + app/chatarchive.go)
+Putting a conversation down and picking an old one back up. The panel had
+been a single unbounded transcript that only ever grew — with the model's
+context growing beside it — and no way to end one without losing it.
+House rules:
+
+- **CLEARING RESETS THE AGENT, NOT JUST THE SCREEN.** A clear that emptied
+  the panel while the ACP session kept every prior turn would be a lie in
+  the direction that costs money: the next question is still answered
+  against a conversation the user can no longer see, and still billed for
+  it. So `chatNewChat` archives, empties, and tears the connection down so
+  the next turn opens a fresh `session/new`. That is deliberately the
+  agent switch's own teardown-and-restart — one honest path, already
+  tested — rather than a second "reset" verb reaching into the handshake
+  to re-issue session/new by itself. `chatRestartSession` is a no-op while
+  detached and never clears the `dead` verdict: reconnecting is a side
+  effect here, not the user asking to retry a crashed agent, and quietly
+  borrowing that gesture would turn "new chat" into a spawn attempt on a
+  machine with no binary.
+- **NOTHING IS DESTROYED, WHICH IS WHY NEITHER VERB CONFIRMS.** Clearing
+  archives first, and opening a saved conversation archives the live one
+  on its way past, so every gesture is reversible from the picker. A
+  confirmation in front of a reversible action trains people to dismiss
+  dialogs. Both verbs DO refuse mid-turn — the agent is mid-sentence and
+  the user is watching it arrive.
+- **The live conversation is saved after EVERY TURN**, not only at
+  teardown (`handleChatTurnDone`, on the error path too; `chatShutdown`
+  catches what was appended after the last one). The transcript is the one
+  thing in the panel that cannot be reconstructed, and the write is one
+  small file where the turn already cost seconds of model time. Same split
+  session.go makes by recording a folder VISIT at startup: a run that dies
+  must cost as little as possible of what actually happened. The save is
+  SILENT on failure — it is bookkeeping nobody asked for, and the failure
+  surfaces where it means something, in a picker that lists nothing.
+- **ONE CONVERSATION IS ONE FILE.** `archiveID` is minted on the first
+  save and reused for every later one, so a hundred-turn chat is one row
+  rather than a hundred. A restored conversation CONTINUES its own entry
+  for the same reason — two rows differing only by where the user stopped
+  reading is exactly the list nobody can navigate. Ids carry the full
+  nanosecond field: a clear mints the next id microseconds after saving
+  the previous one, and a coarser tail collides there, which means one
+  conversation silently overwriting the other's file.
+- **A RESTORED CONVERSATION IS A READING SURFACE, NOT A RESUMED ONE, AND
+  THE PANEL SAYS SO.** ced archives the transcript it drew; the agent's
+  memory lived in a session that died with its process. ACP's
+  `session/load` could in principle resume one, but it is optional,
+  agent-side, and replays the whole history back as `session/update`
+  notifications — which would double every message against the transcript
+  ced just restored. So restoring loads text, starts a fresh session, and
+  writes an info line naming the gap. Silence there is the worst outcome:
+  the gap is invisible until a follow-up gets a confidently unrelated
+  answer three messages later.
+- **Reading needs no agent** — `chatOpenArchived` reveals the panel
+  through `chatRevealPanel`, not `chatOpenPanel`. That one means "I want
+  to talk to the agent" and refuses when there is nobody to talk to, which
+  would hide the archive on exactly the machine where it is all that
+  survives of the conversation. The start is still attempted, silently, so
+  a follow-up has somewhere to go.
+- **A clear keeps the prompt history and the pending attachments.**
+  Up-arrow recall is a typing convenience that spans conversations the way
+  a shell's history spans directories, and an attachment describes the
+  message the user has not sent yet — `chatDisconnect`'s own argument. The
+  selection goes, because its row numbers are about to mean nothing.
+- **A promptless panel is not a conversation** (`chatArchiveWorth`): one
+  that opened, printed "starting Copilot chat", and closed would otherwise
+  fill the Recent list with rows nobody can tell apart or remember making.
+- **The archive is USER-scoped, and a row names the project only when it
+  isn't this one.** A conversation is reached for by what was ASKED
+  ("what did I work out about the caret blink?"), which does not always
+  live in the folder you are standing in — and a marker repeating the
+  current project on every row spends width the TITLE needs while
+  distinguishing nothing (the status bar's empty-directory rule).
+- **A directory of documents, not a key in state.json** — the inverse of
+  why state.json is separate from config.json. A transcript is far bigger
+  than anything else ced persists, so folding it in would make every
+  folder switch's rewrite proportional to how much the user has chatted,
+  and one bad write would cost the tab list too. One file per conversation
+  also makes the retention cap a trim of old FILES, and `rm` a working
+  delete. Per-file degradation as everywhere else: one unparseable
+  transcript costs itself, never the picker.
+- The picker is `openPicker` (house rule) and EXCLUDES the live
+  conversation — picking it would reload the panel from a copy of itself
+  (the recent-folders rule). `chatArchiveDirFn` / `chatArchiveNow` are
+  package vars; newTestApp pins the directory at a temp dir, so no test
+  run can write fixture transcripts into the developer's real archive or
+  prune their oldest conversations to make room.
+- Leaders: **Esc-a-x** new (x for cleared, and the namespace's 'c' is the
+  panel itself), **Esc-a-r** recent. Both collide with a top-level
+  binding on purpose — the prefix already said which world you're in. The
+  ≡ rows sit under "Copy chat transcript": all three are about the
+  transcript as a THING rather than about the agent answering into it.
+  "New chat" dims on an empty panel; "Recent chats" stays clickable with
+  an empty archive and says so in a flash (the MCP/Skills rule).
 
 ### Summarize with AI (app/summarize.go)
 The AI namespace's one READING verb: what does the selected text — or
@@ -2954,8 +3051,10 @@ loops forever.
   ced never runs one. A SKILL.md is markdown handed to the chat agent,
   so the skills directories — including the `~/.claude/skills` and
   `<project>/.claude/skills` ced reads but doesn't own — extend the
-  AGENT, not the editor. `state.json` is the odd one out and earns its
-  place differently again: it holds no preferences at all, only what the
+  AGENT, not the editor. The `chats/` archive is not a
+  preference either — it is the conversations themselves, the one thing in
+  the chat panel ced cannot reconstruct. `state.json` is the odd one out
+  and earns its place differently again: it holds no preferences at all, only what the
   editor did — which folders you opened and where your cursor was — so
   deleting it costs convenience and changes no behavior.)
 - **A HOST plugin system** — anything ced loads and runs *as code*: Go

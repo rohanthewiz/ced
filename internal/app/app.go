@@ -485,6 +485,17 @@ func builtinMenuGroups() []menuGroup {
 			// the same reason the git panel has one: the panel is
 			// mouse-driven, but macOS Terminal can swallow clicks.
 			{label: "Copy chat transcript", action: (*App).menuChatCopyAll, enabled: (*App).hasChatTranscript},
+			// Conversation lifecycle (chatarchive.go). The two rows sit
+			// directly under Copy because all three are about the
+			// transcript as a THING rather than about the agent
+			// answering into it: take a copy of it, put it down, pick an
+			// old one back up. "New chat" dims on an empty panel — there
+			// is nothing to clear and nothing to save — while "Recent
+			// chats" stays clickable with an empty archive, the MCP and
+			// Skills rule: the empty case is worth a sentence, and a
+			// dimmed row cannot say one.
+			{action: (*App).menuChatNew, shortcut: "esc a x", enabled: (*App).hasChatTranscript, labelFor: (*App).chatClearLabel},
+			{action: (*App).menuChatRecent, shortcut: "esc a r", enabled: alwaysTrue, labelFor: (*App).chatRecentLabel},
 			{action: (*App).menuToggleSuggestions, enabled: alwaysTrue, labelFor: (*App).suggestionsToggleLabel},
 			{action: (*App).menuToggleCopilot, enabled: alwaysTrue, labelFor: (*App).copilotToggleLabel},
 		}},

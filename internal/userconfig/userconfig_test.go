@@ -559,6 +559,19 @@ func TestLoadPluginsInvalid(t *testing.T) {
 	}
 }
 
+// TestChatsDir_SharesTheConfigDirectory pins that the chat archive
+// resolves beside every other ced config file — the whole point of
+// routing it through configFilePath.
+func TestChatsDir_SharesTheConfigDirectory(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got, want := ChatsDir(), filepath.Join("/xdg", "ced", "chats"); got != want {
+		t.Errorf("ChatsDir() = %q, want %q", got, want)
+	}
+	if filepath.Dir(ChatsDir()) != filepath.Dir(DefaultPath()) {
+		t.Error("chats dir drifted out of the config directory")
+	}
+}
+
 // TestPluginsDir_SharesTheConfigDirectory pins that the plugins
 // directory resolves beside every other ced config file — the whole
 // point of routing it through configFilePath.

@@ -471,6 +471,21 @@ func ThemesDir() string { return configFilePath("themes") }
 // the directory is, so the config locations can never drift apart.
 func SkillsDir() string { return configFilePath("skills") }
 
+// ChatsDir returns the canonical chat-archive directory:
+// $XDG_CONFIG_HOME/ced/chats, falling back to ~/.config/ced/chats
+// (or "" when no config location resolves).
+//
+// A directory of documents, and it earns its own place for state.json's
+// reason rather than mcp.json's: nobody hand-writes a transcript, but
+// ced rewrites the live one after every chat turn, and a conversation is
+// far bigger than anything else the editor persists. One file per
+// conversation keeps "keep only the last few" a trim of old files rather
+// than a rewrite of a growing blob, and lets a user delete one
+// conversation with rm. The schema and the retention cap live in
+// internal/chatstore; this package only knows where the directory is, so
+// the two config locations can never drift apart.
+func ChatsDir() string { return configFilePath("chats") }
+
 // PluginsDir returns the canonical plugins directory:
 // $XDG_CONFIG_HOME/ced/plugins, falling back to ~/.config/ced/plugins
 // (or "" when no config location resolves).

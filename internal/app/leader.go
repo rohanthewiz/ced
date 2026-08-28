@@ -185,7 +185,7 @@ func leaderBindings() []leaderBinding {
 		// touches lives one rune deeper: the panel itself, context, the
 		// model and backend pickers, skills, and MCP tools.
 		{key: 'a', sub: aiLeaderBindings(), name: "AI", label: "AI…",
-			hint: "AI  c chat · z summarize · n note · s skills · a attach · f file · m model · b backend · t tools"},
+			hint: "AI  c chat · x new · r recent · z summarize · n note · s skills · a attach · f file · m model · b backend · t tools"},
 		// 'x' for eXtensions — the plugin namespace, and the codebase's
 		// only DYNAMIC prefix: its sub-table is whatever leader keys the
 		// user's installed plugins asked for (plugins.go).
@@ -380,6 +380,15 @@ func aiLeaderBindings() []leaderBinding {
 		// 't' for tools — what MCP servers actually are from the chat
 		// panel's side, and the word the README leads with.
 		{key: 't', action: (*App).menuMCPServers, label: "MCP tools"},
+		// The conversation lifecycle (chatarchive.go). 'x' for cleared —
+		// the letter the gesture is spelled with everywhere else, and
+		// free here because the namespace's 'c' is the panel itself. It
+		// collides with the top-level plugin prefix on purpose: the
+		// prefix already said which world you're in.
+		{key: 'x', action: (*App).chatNewChat, label: "New chat"},
+		// 'r' for recent — the archive picker. Top-level 'r' is redo,
+		// which the prefix disambiguates the same way.
+		{key: 'r', action: (*App).menuChatRecent, label: "Recent chats"},
 	}
 }
 

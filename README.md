@@ -268,6 +268,8 @@ seconds to pick one.
 | Combo       | Action                          |
 | ----------- | ------------------------------- |
 | `Esc a c`   | Chat panel (focus, or toggle)   |
+| `Esc a x`   | New chat (saves the current one)|
+| `Esc a r`   | Recent chats…                   |
 | `Esc a z`   | Summarize selection / file      |
 | `Esc a n`   | Send to GoNotes as a note       |
 | `Esc a s`   | Use skill in chat               |
@@ -950,6 +952,22 @@ the file tree slides over to the right while it's open.
   the agent offers, with premium multipliers where it reports them.
   Your pick persists as `"chatmodel"` and is re-applied on every
   reconnect.
+- **Start a fresh conversation**: **≡ → Copilot → New chat** (`Esc a x`)
+  clears the panel *and* the agent's memory of it — a clear that only
+  wiped the screen would leave the model still answering against
+  everything above, and still charging for it. Nothing is lost: the
+  conversation is saved on its way out, so the row asks for no
+  confirmation.
+- **Go back to an old one**: **≡ → Copilot → Recent chats…** (`Esc a r`)
+  lists what you have been asking, newest first, with the project named
+  when it isn't this one. ced saves the live conversation after every
+  turn — so a crash costs you at most the question you were typing — and
+  keeps the last 30 under `~/.config/ced/chats/`, one JSON file each.
+
+  A reopened chat is the **transcript**, not a resumed session: the text
+  is back, but the agent's memory of it died with its process, and the
+  panel says so at the top. Quote what matters or re-attach the files
+  before asking a follow-up.
 - **Copy anything**: click **⧉ copy** under a response to lift that
   answer, **⧉ copy conversation** at the end for the whole transcript
   (also at **≡ → Copilot → Copy chat transcript**), or drag across the

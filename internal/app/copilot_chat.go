@@ -273,6 +273,21 @@ type chatState struct {
 	msgs   []chatMsg
 	scroll int // first visible wrapped row
 
+	// The live conversation's archive identity (chatarchive.go).
+	// archiveID is the file it is saved as — minted on the first save
+	// and REUSED for every later one, so a conversation is one row in
+	// the Recent list however many turns it runs to. archiveStart is
+	// what the entry records as its beginning. restored marks a
+	// transcript that came off disk: the text is back, the agent's
+	// memory of it is not, and the panel says so on the way in.
+	//
+	// All three belong to the conversation, not the connection, so
+	// chatDisconnect leaves them alone — an agent switch mid-chat is
+	// still the same chat.
+	archiveID    string
+	archiveStart time.Time
+	restored     bool
+
 	// Transcript selection, in derived-row coordinates. selActive is set
 	// by a press in the transcript body and stays set (so the highlight
 	// persists after the mouse comes up) until the next press, Esc, or a
@@ -652,6 +667,12 @@ func (a *App) handleChatExit(e *chatExitEvent) {
 // the Copilot disable toggle and editor exit, where a later re-enable
 // should get a fresh start attempt.
 func (a *App) chatShutdown() {
+	// The last word on the conversation before the editor (or the
+	// Copilot toggle) puts it down. Turn-done already saved everything
+	// the agent said; what this catches is a prompt or an editor-side
+	// note appended since — and the exit path, where there is no later
+	// turn to save it.
+	a.chatArchiveSave()
 	a.chatDisconnect()
 }
 
@@ -831,6 +852,10 @@ func (a *App) handleChatTurnDone(e *chatTurnDoneEvent) {
 		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: a.chatAgent().name + " chat: " + e.err.Error()})
 		a.chatCommitSuggestDone(e)
 		a.chatNoteTitleDone(e)
+		// Saved on the failure path too: whatever streamed in before the
+		// turn broke is still the conversation, and a turn that died is
+		// exactly when a user is most likely to lose the session next.
+		a.chatArchiveSave()
 		return
 	}
 	if e.stopReason == "cancelled" {
@@ -846,6 +871,11 @@ func (a *App) handleChatTurnDone(e *chatTurnDoneEvent) {
 	// consulted unconditionally so neither can strand a request that
 	// somehow outlived its own turn.
 	a.chatNoteTitleDone(e)
+	// A completed turn is the natural save point: the transcript just
+	// gained everything this turn produced, and the next thing to change
+	// it is minutes of typing away. See chatarchive.go for why the
+	// archive is kept current rather than written only at teardown.
+	a.chatArchiveSave()
 }
 
 // chatInterrupt is the ⏹ button / the mouse-first stand-in for Ctrl+C:
@@ -1379,6 +1409,20 @@ func (a *App) chatOpenPanel() {
 		a.flash(why)
 		return
 	}
+	a.chatRevealPanel()
+}
+
+// chatRevealPanel puts the strip on screen and gives it the keyboard,
+// with no opinion about whether an agent is attached.
+//
+// Split out of chatOpenPanel because the two callers ask different
+// questions. That one is "I want to talk to the agent", so it refuses
+// when there is nobody to talk to. Restoring an archived conversation
+// (chatarchive.go) is READING — the transcript is ced's own file and
+// renders identically with the agent dead, missing, or disabled — so a
+// refusal there would hide the saved text on exactly the machine where
+// it is the only thing left of the conversation.
+func (a *App) chatRevealPanel() {
 	a.chat.open = true
 	a.chat.focused = true
 	a.term.focused = false

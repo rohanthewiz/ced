@@ -331,8 +331,8 @@ live whenever there's more than one.
 
 ### Overflow markers
 
-Anything that scrolls — the editor, the file tree, the git panel's diff
-pane — puts a small **▴** or **▾** in the last column of its first and
+Anything that scrolls — the editor, the file tree, both panes of the git
+panel — puts a small **▴** or **▾** in the last column of its first and
 last row when there is more content that way. That is the whole
 indicator: no rail, no thumb, no column permanently spent on chrome.
 
@@ -345,6 +345,9 @@ indicator: no rail, no thumb, no column permanently spent on chrome.
                                     │ 5 hits · 2 errors │
                                     └───────────────────┘
 ```
+
+It counts in the unit the surface is made of: lines in the editor and a
+diff, rows in the tree, **files** in the git panel's change list.
 
 The second line appears when there is something out there worth naming,
 and the marker takes that thing's **color**: red for an error below,

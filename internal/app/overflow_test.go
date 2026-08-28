@@ -298,10 +298,10 @@ func TestOverflowTip_DwellLifecycle(t *testing.T) {
 	}
 }
 
-// TestOverflowMarkers_GitDiffPane pins the second surface. Its markers
-// land in the pane's blank right margin — drawGitPanelDiffRow and the
-// hunk chips both stop a column short of the panel's edge — so unlike
-// the editor's they cover nothing at all.
+// TestOverflowMarkers_GitDiffPane pins the diff pane. Its markers land
+// in the pane's blank right margin — drawGitPanelDiffRow and the hunk
+// chips both stop a column short of the panel's edge — so unlike the
+// editor's they cover nothing at all.
 func TestOverflowMarkers_GitDiffPane(t *testing.T) {
 	a, _ := overflowApp(t, 20)
 	a.gitPanel.open = true
@@ -378,6 +378,67 @@ func TestOverflowMarkers_Tree(t *testing.T) {
 	for _, m := range a.overflowMarkers() {
 		if m.unit == "row" {
 			t.Error("a hidden sidebar still enumerated its marker")
+		}
+	}
+}
+
+// TestOverflowMarkers_GitFileList pins the panel's other pane. It scrolls
+// independently of the diff beside it, so it carries its own pair — in
+// its own column, and counted in FILES, which is the unit somebody about
+// to commit is asking in.
+func TestOverflowMarkers_GitFileList(t *testing.T) {
+	a, _ := overflowApp(t, 20)
+	a.gitPanel.open = true
+	px, py, pw, ph := a.gitPanelRect()
+	visible := ph - 1
+	if visible <= 2 {
+		t.Skipf("panel too short in this fixture (%d rows)", ph)
+	}
+	listW := a.gitPanelListW(pw)
+	col := px + listW - 1
+	if col >= px+pw-1 {
+		t.Fatalf("list column %d collides with the diff pane's at %d", col, px+pw-1)
+	}
+
+	files := make([]gitPanelFile, visible+9)
+	for i := range files {
+		files[i] = gitPanelFile{Path: "/x/f" + itoa(i) + ".go", Code: " M"}
+	}
+	a.gitPanel.files = files
+
+	if _, ok := a.overflowMarkerAt(col, py+1); ok {
+		t.Error("unscrolled list drew an up-marker")
+	}
+	down := markerAt(t, a, col, py+ph-1)
+	if down.off.lines != 9 {
+		t.Errorf("down marker = %d, want 9", down.off.lines)
+	}
+	if down.unit != "file" {
+		t.Errorf("unit = %q, want \"file\"", down.unit)
+	}
+	if got := overflowTipLines(down)[0]; got != "9 files below" {
+		t.Errorf("popup says %q", got)
+	}
+
+	// The two panes are independent: scrolling the list must not move the
+	// diff's markers, and vice versa.
+	a.gitPanel.listScroll = 9
+	if _, ok := a.overflowMarkerAt(col, py+ph-1); ok {
+		t.Error("marker survived a scroll to the end of the list")
+	}
+	if got := markerAt(t, a, col, py+1); got.off.lines != 9 {
+		t.Errorf("up marker = %d, want 9", got.off.lines)
+	}
+	if _, ok := a.overflowMarkerAt(px+pw-1, py+ph-1); ok {
+		t.Error("scrolling the list drew a marker for an empty diff pane")
+	}
+
+	// An empty change list has nothing to announce, "(clean)" and all.
+	a.gitPanel.files = nil
+	a.gitPanel.listScroll = 0
+	for _, m := range a.overflowMarkers() {
+		if m.unit == "file" {
+			t.Error("a clean panel still enumerated a list marker")
 		}
 	}
 }

@@ -159,7 +159,7 @@ internal/app/runexec.go       Run an executable: dir picker → staged line in t
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
 internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, locked by a drag
-internal/app/overflow.go      The ▴/▾ overflow markers (editor, git diff pane, tree),
+internal/app/overflow.go      The ▴/▾ overflow markers (editor, both git panes, tree),
                               what is off-screen each way, and the hover popup
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
 internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
@@ -2742,9 +2742,9 @@ The sidebar sizes itself to the tree's longest row, so expanding
 ### The overflow markers (app/overflow.go)
 
 A `▴` or `▾` in the LAST column of a viewport's first and last row, on
-every surface that scrolls — the editor body, the git panel's diff pane,
-and the file tree — plus a hover popup saying how many lines lie that
-way. It replaced a real scrollbar (a reserved column, a rail and a
+every surface that scrolls — the editor body, both panes of the git
+panel, and the file tree — plus a hover popup saying how many lines lie
+that way. It replaced a real scrollbar (a reserved column, a rail and a
 draggable thumb) on the owner's verdict that the rail was not pleasing
 to look at, and the tree's own marker is where the shape came from.
 House rules:
@@ -2759,7 +2759,9 @@ House rules:
   plain `ex + ew`. In the editor the glyph covers one cell of code on two
   rows; in the git panel's diff pane it lands in the blank right margin
   (`drawGitPanelDiffRow` and the hunk chips both stop a column short) and
-  covers nothing at all.
+  covers nothing at all; in that panel's FILE LIST, which has no such
+  margin, it takes the last cell of a filename — the tree's trade, and
+  why those paths were already ellipsised rather than run to the edge.
 - **IT IS DRAWN UNCONDITIONALLY.** No preference gates it, for the reason
   the ≡ menu's clipped-content arrows aren't gated either: content the
   user cannot see and has not been told about is the one thing a viewport
@@ -2829,7 +2831,10 @@ House rules:
   The 250ms delay exists only to stop a pointer sweeping along the
   window's edge flashing a box on its way past.
 - **The units follow the surface**: "lines" for a body of text, "rows"
-  for the tree, because a tree is a list of names.
+  for the tree (a list of names and folders), "files" for the git panel's
+  change list, which is the unit somebody about to commit is asking in.
+  The panel's two panes scroll independently, so each carries its own
+  pair.
 - **Position is what tells `▾` apart from the tree's expand chevrons**,
   which are the same glyph: a chevron sits at the HEAD of a row against
   the indent, this at the row's tail. Same distinction in the editor,

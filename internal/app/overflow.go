@@ -381,18 +381,34 @@ func (a *App) overflowMarkers() []overflowMarker {
 		}
 	}
 
-	// The git panel's diff pane. Its markers land in the pane's blank
-	// right margin (drawGitPanelDiffRow stops one column short of the
-	// panel's edge, and so do the hunk chips), so here they cover
-	// nothing at all.
+	// The git panel's two panes, which scroll independently and so each
+	// carry their own pair. Both bands are the same rows (the panel's
+	// body under its header rule); only the column differs.
+	//
+	// The DIFF pane's markers land in its blank right margin —
+	// drawGitPanelDiffRow stops one column short of the panel's edge, and
+	// so do the hunk chips — so there they cover nothing at all. The FILE
+	// LIST has no such margin, so its pair shares the last cell of a
+	// filename: the tree's trade, and the reason paths in that column are
+	// already truncated with an ellipsis rather than run to the edge.
 	if a.gitPanel.open {
 		px, py, pw, ph := a.gitPanelRect()
 		visible := ph - 1 // the header rule
 		if pw > 0 && visible > 0 {
-			total := len(a.gitPanel.diffLines)
-			top := a.gitPanel.diffScroll
-			add(px+pw-1, py+1, false, "line", offscreen{lines: top})
-			add(px+pw-1, py+ph-1, true, "line", offscreen{lines: total - (top + visible)})
+			diffTop := a.gitPanel.diffScroll
+			add(px+pw-1, py+1, false, "line", offscreen{lines: diffTop})
+			add(px+pw-1, py+ph-1, true, "line",
+				offscreen{lines: len(a.gitPanel.diffLines) - (diffTop + visible)})
+
+			// Counted in FILES, not rows: every row of this list is one,
+			// and "9 files below" is the answer somebody about to commit
+			// is actually asking for.
+			if listW := a.gitPanelListW(pw); listW > 0 {
+				listTop := a.gitPanel.listScroll
+				add(px+listW-1, py+1, false, "file", offscreen{lines: listTop})
+				add(px+listW-1, py+ph-1, true, "file",
+					offscreen{lines: len(a.gitPanel.files) - (listTop + visible)})
+			}
 		}
 	}
 

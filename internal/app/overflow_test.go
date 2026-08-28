@@ -442,3 +442,75 @@ func TestOverflowMarkers_GitFileList(t *testing.T) {
 		}
 	}
 }
+
+// TestOverflowMarkers_GitLogPanes pins the fifth and sixth surfaces. The
+// log panel is the changes panel's twin — two columns, independent
+// scrolls — with one difference that matters: its body starts below the
+// search bar when that is open, so the markers must ride gitLogBodyTop /
+// gitLogBodyRows rather than the panel rect.
+func TestOverflowMarkers_GitLogPanes(t *testing.T) {
+	a, _ := overflowApp(t, 20)
+	a.gitLog.open = true
+	px, _, pw, _ := a.gitLogRect()
+	top, visible := a.gitLogBodyTop(), a.gitLogBodyRows()
+	if visible <= 2 {
+		t.Skipf("panel too short in this fixture (%d rows)", visible)
+	}
+	listW := a.gitLogListW(pw)
+	listCol, detailCol := px+listW-1, px+pw-1
+
+	commits := make([]gitLogCommit, visible+7)
+	for i := range commits {
+		commits[i] = gitLogCommit{Short: itoa(i), Subject: "subject " + itoa(i)}
+	}
+	a.gitLog.commits = commits
+	detail := make([]string, visible+40)
+	for i := range detail {
+		detail[i] = "+ line"
+	}
+	a.gitLog.detailLines = detail
+
+	// Both panes report their own remainder, in their own unit.
+	list := markerAt(t, a, listCol, top+visible-1)
+	if list.off.lines != 7 || list.unit != "commit" {
+		t.Errorf("list marker = %+v, want 7 commits", list)
+	}
+	if got := overflowTipLines(list)[0]; got != "7 commits below" {
+		t.Errorf("list popup says %q", got)
+	}
+	if got := markerAt(t, a, detailCol, top+visible-1); got.off.lines != 40 || got.unit != "line" {
+		t.Errorf("detail marker = %+v, want 40 lines", got)
+	}
+	for _, col := range []int{listCol, detailCol} {
+		if _, ok := a.overflowMarkerAt(col, top); ok {
+			t.Errorf("unscrolled pane at column %d drew an up-marker", col)
+		}
+	}
+
+	// The search bar takes a row off the TOP of the body, so the up-marker
+	// moves down with it and one more commit falls below the fold. Reading
+	// the panel rect instead of gitLogBodyTop is what this catches.
+	a.gitLog.listScroll = 3
+	a.gitLog.filter.open = true
+	newTop, newVisible := a.gitLogBodyTop(), a.gitLogBodyRows()
+	if newTop != top+1 || newVisible != visible-1 {
+		t.Fatalf("filter bar changed the body to top=%d rows=%d, want %d/%d", newTop, newVisible, top+1, visible-1)
+	}
+	if _, ok := a.overflowMarkerAt(listCol, top); ok {
+		t.Error("the up-marker stayed on the row the search bar now occupies")
+	}
+	if got := markerAt(t, a, listCol, newTop); got.off.lines != 3 {
+		t.Errorf("up marker with the bar open = %d commits, want 3", got.off.lines)
+	}
+	if got := markerAt(t, a, listCol, newTop+newVisible-1); got.off.lines != 7-3+1 {
+		t.Errorf("down marker with the bar open = %d commits, want %d", got.off.lines, 7-3+1)
+	}
+
+	// A closed panel contributes nothing, even with commits still cached.
+	a.gitLog.open = false
+	for _, m := range a.overflowMarkers() {
+		if m.unit == "commit" {
+			t.Error("a closed git log still enumerated a marker")
+		}
+	}
+}

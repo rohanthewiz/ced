@@ -369,6 +369,16 @@ func (a *App) overflowMarkers() []overflowMarker {
 		out = append(out, overflowMarker{x: x, y: y, down: down, unit: unit, off: o})
 	}
 
+	// pane adds the pair for one scrolling COLUMN of a panel: `visible`
+	// rows starting at screen row `top`, showing `total` items from
+	// `scroll`. Every panel below is two of these side by side, scrolling
+	// independently, and spelling the arithmetic out four times is how
+	// one of them ends up off by a row.
+	pane := func(x, top, visible, scroll, total int, unit string) {
+		add(x, top, false, unit, offscreen{lines: scroll})
+		add(x, top+visible-1, true, unit, offscreen{lines: total - (scroll + visible)})
+	}
+
 	// The editor body. The marker shares the last CONTENT column, which
 	// is the column Tab.Render paints code into — nothing is reserved,
 	// so the glyph simply covers one cell of two rows.
@@ -395,19 +405,36 @@ func (a *App) overflowMarkers() []overflowMarker {
 		px, py, pw, ph := a.gitPanelRect()
 		visible := ph - 1 // the header rule
 		if pw > 0 && visible > 0 {
-			diffTop := a.gitPanel.diffScroll
-			add(px+pw-1, py+1, false, "line", offscreen{lines: diffTop})
-			add(px+pw-1, py+ph-1, true, "line",
-				offscreen{lines: len(a.gitPanel.diffLines) - (diffTop + visible)})
-
+			pane(px+pw-1, py+1, visible, a.gitPanel.diffScroll, len(a.gitPanel.diffLines), "line")
 			// Counted in FILES, not rows: every row of this list is one,
 			// and "9 files below" is the answer somebody about to commit
 			// is actually asking for.
 			if listW := a.gitPanelListW(pw); listW > 0 {
-				listTop := a.gitPanel.listScroll
-				add(px+listW-1, py+1, false, "file", offscreen{lines: listTop})
-				add(px+listW-1, py+ph-1, true, "file",
-					offscreen{lines: len(a.gitPanel.files) - (listTop + visible)})
+				pane(px+listW-1, py+1, visible, a.gitPanel.listScroll, len(a.gitPanel.files), "file")
+			}
+		}
+	}
+
+	// The git log panel, the changes panel's twin in every way that
+	// matters here — same two columns, same blank margin on the right,
+	// same independent scrolls — and never open at the same time (the
+	// bottom strip is single-occupancy), so the two can't claim one cell.
+	//
+	// Its own body top and row count come from gitLogBodyTop /
+	// gitLogBodyRows rather than the rect, because the search bar takes a
+	// row off the list when it is open and those two are the single
+	// spelling of that.
+	//
+	// The commit count is the LOADED list (capped at 400, filtered by any
+	// search), which is what the panel is a viewport onto — the title
+	// carries the "+" that says the repository holds more.
+	if a.gitLog.open {
+		px, _, pw, _ := a.gitLogRect()
+		top, visible := a.gitLogBodyTop(), a.gitLogBodyRows()
+		if pw > 0 && visible > 0 {
+			pane(px+pw-1, top, visible, a.gitLog.detailScroll, len(a.gitLog.detailLines), "line")
+			if listW := a.gitLogListW(pw); listW > 0 {
+				pane(px+listW-1, top, visible, a.gitLog.listScroll, len(a.gitLog.commits), "commit")
 			}
 		}
 	}

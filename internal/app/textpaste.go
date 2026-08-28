@@ -51,6 +51,7 @@ func (a *App) handlePaste(ev *tcell.EventPaste) {
 		a.pasting = a.comparePasteTarget() || a.chatPasteTarget() ||
 			a.termPasteTarget() || a.editorPasteTarget() != nil
 		a.pasteBuf = a.pasteBuf[:0]
+		a.pasteCR = false
 		return
 	}
 	if !a.pasting {
@@ -90,11 +91,31 @@ func (a *App) handlePaste(ev *tcell.EventPaste) {
 // destroy (IndentUnit substitution, leader routing). Non-text keys inside
 // a paste (arrows, control chars, a stray Esc from the parser) carry no
 // insertable content and are dropped.
+//
+// BOTH line endings have to be caught here, and that is the whole
+// subtlety. tcell's parser special-cases a CR into KeyEnter but sends a
+// bare LF down the generic control-key path as KeyCtrlJ (KeyCtrlSpace+10,
+// ModCtrl) — so matching KeyEnter alone silently DROPS every newline of a
+// paste from a terminal that forwards the clipboard's bytes unchanged.
+// Terminals disagree about this: xterm and its descendants translate LF
+// to CR on the way in, while others do not, so a multi-line paste landed
+// as one joined line in some hosts and correctly in others. A CRLF pair
+// is two events that each mean "line break", hence the pasteCR fold — the
+// same one-break-per-pair rule flattenPaste applies for single-line
+// fields.
 func (a *App) accumulatePaste(ev *tcell.EventKey) {
+	wasCR := a.pasteCR
+	a.pasteCR = false
 	switch ev.Key() {
 	case tcell.KeyRune:
 		a.pasteBuf = append(a.pasteBuf, ev.Rune())
-	case tcell.KeyEnter:
+	case tcell.KeyEnter: // CR (0x0D)
+		a.pasteBuf = append(a.pasteBuf, '\n')
+		a.pasteCR = true
+	case tcell.KeyCtrlJ: // LF (0x0A), which tcell reports as a control key
+		if wasCR {
+			return // second half of a CRLF pair; the CR already broke the line
+		}
 		a.pasteBuf = append(a.pasteBuf, '\n')
 	case tcell.KeyTab:
 		a.pasteBuf = append(a.pasteBuf, '\t')

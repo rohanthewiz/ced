@@ -76,7 +76,15 @@ the repo.
 Steps are `;`-separated; each is `[delayMs]@[payload]` (default 500ms),
 where the delay is how long to wait **before** sending. Payload is
 literal text plus `{esc} {enter} {tab} {up} {down} {left} {right} {home}
-{end} {pgup} {pgdn} {bs} {space}`, with `{down x12}` to repeat.
+{end} {pgup} {pgdn} {bs} {space} {lf}`, with `{down x12}` to repeat.
+
+`{lf}` is a bare line feed where `{enter}` is a carriage return — two
+different bytes, and terminals disagree about which one a pasted newline
+becomes. That's what lets a script drive a real bracketed paste:
+
+```sh
+-script '1800@;300@{esc}p;500@notes;700@{enter};700@{esc}[200~one{lf}two{esc}[201~;900@SNAP;400@{esc}q'
+```
 
 The default script opens `main.go` through the fuzzy finder and scrolls
 into it — tree, tab bar, line numbers, syntax colors, and status bar all

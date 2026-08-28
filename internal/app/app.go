@@ -921,6 +921,12 @@ type App struct {
 	// textpaste.go. Both are zero when no paste is in flight.
 	pasting  bool
 	pasteBuf []rune
+	// pasteCR records that the previous accumulated event was a CR, so a
+	// CRLF pair folds into ONE newline. Both halves arrive as separate
+	// key events (KeyEnter then KeyCtrlJ), and each is a line break on
+	// its own, so without this a Windows-flavored paste would double
+	// every line. Reset with the buffer at each start marker.
+	pasteCR bool
 
 	statusMsg    string
 	statusUntil  time.Time

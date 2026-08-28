@@ -155,12 +155,18 @@ An empty payload is a pure wait. A payload is literal text to type,
 except for these tokens:
 
     SNAP            capture the screen at this point (see below)
-    {esc} {enter} {tab} {bs} {space}
+    {esc} {enter} {tab} {bs} {space} {lf}
     {up} {down} {left} {right} {home} {end} {pgup} {pgdn}
     {esc}x          ced's leader form — e.g. {esc}p is "find file",
                     {esc}q quit, {esc}t sidebar, {esc}` + "`" + ` terminal,
                     {esc}g git panel, {esc}L git log, {esc}a palette
     {down x12}      repeat a key N times
+
+{lf} is a BARE line feed, as opposed to {enter}'s carriage return. The
+two are different bytes on the wire and terminals disagree about which
+one a pasted newline becomes, so a bracketed paste is scripted as
+  {esc}[200~line one{lf}line two{esc}[201~
+and swapping {lf} for {enter} photographs the other host's flavor.
 
 SNAP is the one you cannot skip. Quitting restores and clears the
 terminal, so a capture taken after {esc}q is a blank screen. Put SNAP on
@@ -231,7 +237,7 @@ func parseScript(s string) ([]step, error) {
 
 // namedKeys maps the {token} names to the bytes a terminal sends.
 var namedKeys = map[string]string{
-	"esc": "\x1b", "enter": "\r", "tab": "\t", "bs": "\x7f", "space": " ",
+	"esc": "\x1b", "enter": "\r", "tab": "\t", "bs": "\x7f", "space": " ", "lf": "\n",
 	"up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
 	"home": "\x1b[H", "end": "\x1b[F", "pgup": "\x1b[5~", "pgdn": "\x1b[6~",
 }

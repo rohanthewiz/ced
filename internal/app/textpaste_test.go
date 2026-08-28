@@ -38,6 +38,45 @@ func feedPaste(a *App, text string) {
 	a.handlePaste(tcell.NewEventPaste(false))
 }
 
+// feedPasteLF is feedPaste for a terminal that forwards the clipboard's
+// bytes unchanged: a newline arrives as a bare LF, which tcell reports as
+// KeyCtrlJ (KeyCtrlSpace+10, ModCtrl) rather than KeyEnter. Splitting the
+// two helpers is deliberate — a single one covering both endings would
+// hide exactly the case that broke, since the CR path always worked.
+func feedPasteLF(a *App, text string) {
+	a.handlePaste(tcell.NewEventPaste(true))
+	for _, r := range text {
+		switch r {
+		case '\n':
+			a.handleKey(tcell.NewEventKey(tcell.KeyCtrlJ, 0, tcell.ModCtrl))
+		case '\t':
+			a.handleKey(tcell.NewEventKey(tcell.KeyTab, '\t', tcell.ModNone))
+		default:
+			a.handleKey(tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone))
+		}
+	}
+	a.handlePaste(tcell.NewEventPaste(false))
+}
+
+// feedPasteCRLF sends each newline as the CR/LF PAIR a Windows-flavored
+// clipboard carries — two events that each mean "line break", which is
+// what the CRLF fold in accumulatePaste exists to collapse.
+func feedPasteCRLF(a *App, text string) {
+	a.handlePaste(tcell.NewEventPaste(true))
+	for _, r := range text {
+		switch r {
+		case '\n':
+			a.handleKey(tcell.NewEventKey(tcell.KeyEnter, '\r', tcell.ModNone))
+			a.handleKey(tcell.NewEventKey(tcell.KeyCtrlJ, 0, tcell.ModCtrl))
+		case '\t':
+			a.handleKey(tcell.NewEventKey(tcell.KeyTab, '\t', tcell.ModNone))
+		default:
+			a.handleKey(tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone))
+		}
+	}
+	a.handlePaste(tcell.NewEventPaste(false))
+}
+
 // openBlankTab seeds and opens an empty text file, returning the app with
 // that tab active — the common fixture for the paste tests.
 func openBlankTab(t *testing.T) *App {
@@ -585,5 +624,50 @@ func TestPaste_TerminalStopWithNothingRunning(t *testing.T) {
 	}
 	if strings.Contains(a.statusMsg, "interrupt sent") {
 		t.Errorf("statusMsg = %q, want no claim of an interrupt", a.statusMsg)
+	}
+}
+
+// TestPaste_BareLFPreservesNewlines is the regression pin for the report
+// that a multi-line paste arrived as one joined line. tcell special-cases
+// a CR into KeyEnter but routes a bare LF through the generic control-key
+// path as KeyCtrlJ, so accumulatePaste's KeyEnter-only match dropped every
+// newline from a terminal that forwards the clipboard verbatim.
+func TestPaste_BareLFPreservesNewlines(t *testing.T) {
+	a := openBlankTab(t)
+	src := "# Prod tasks\n- Custom app\n- Repo for DAGs"
+
+	feedPasteLF(a, src)
+
+	if got := a.activeTabPtr().Buffer.String(); got != src {
+		t.Fatalf("bare-LF paste lost its newlines:\n got %q\nwant %q", got, src)
+	}
+}
+
+// TestPaste_BareLFKeepsBlankLines guards the CRLF fold from over-reaching:
+// two LFs in a row are a blank line the user pasted, not a pair to
+// collapse. Only an LF immediately after a CR is the second half of one
+// break.
+func TestPaste_BareLFKeepsBlankLines(t *testing.T) {
+	a := openBlankTab(t)
+	src := "one\n\ntwo"
+
+	feedPasteLF(a, src)
+
+	if got := a.activeTabPtr().Buffer.String(); got != src {
+		t.Fatalf("blank line lost:\n got %q\nwant %q", got, src)
+	}
+}
+
+// TestPaste_CRLFIsOneNewline pins the other side of accepting LF: a
+// Windows-flavored paste sends CR and LF as separate events, and counting
+// both would double every line break in the buffer.
+func TestPaste_CRLFIsOneNewline(t *testing.T) {
+	a := openBlankTab(t)
+
+	feedPasteCRLF(a, "alpha\nbeta\ngamma")
+
+	want := "alpha\nbeta\ngamma"
+	if got := a.activeTabPtr().Buffer.String(); got != want {
+		t.Fatalf("CRLF paste doubled its breaks:\n got %q\nwant %q", got, want)
 	}
 }

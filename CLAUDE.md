@@ -2840,8 +2840,8 @@ The sidebar sizes itself to the tree's longest row, so expanding
 
 A `▴` or `▾` in the LAST column of a viewport's first and last row, on
 every surface that scrolls — the editor body, both panes of each git
-panel, and the file tree — plus a hover popup saying how many lines lie
-that way. It replaced a real scrollbar (a reserved column, a rail and a
+panel, the file tree, and the Find-all list — plus a hover popup saying
+how many lines lie that way. It replaced a real scrollbar (a reserved column, a rail and a
 draggable thumb) on the owner's verdict that the rail was not pleasing
 to look at, and the tree's own marker is where the shape came from.
 House rules:
@@ -2859,7 +2859,13 @@ House rules:
   hunk chips all stop a column short) and covers nothing at all; in the
   left-hand LIST of either panel, which has no such margin, it takes the
   last cell of a row — the tree's trade, and why those labels were
-  already ellipsised rather than run to the edge.
+  already ellipsised rather than run to the edge. The Find-all list is
+  the diff pane's case again: `mx+mw-3` is the blank cell `drawRow`
+  already leaves between the text and the row's `✕`, so the marker
+  covers nothing — but that cell is inside the three-cell DISMISS zone,
+  so `handleMouse` carves a drawn marker out of it. A marker is a
+  report, not a verb, and least of all THAT verb; the `✕` keeps its own
+  cell, so those two rows are still dismissable.
 - **IT IS DRAWN UNCONDITIONALLY.** No preference gates it, for the reason
   the ≡ menu's clipped-content arrows aren't gated either: content the
   user cannot see and has not been told about is the one thing a viewport
@@ -2908,6 +2914,20 @@ House rules:
   `EnsureVisible` and `clampScroll` settle `ScrollY`, so a marker placed
   before it would report the previous frame's viewport — the same reason
   `drawScrollbar` ran last.
+- **The Find-all list is the one surface with TWO homes, so the paint
+  has two halves.** Pinned it is furniture and draws with the panels, so
+  the body pass (`drawOverflowMarkers`) annotates it like everything
+  else. Unpinned it owns the modal slot and is drawn on the OVERLAY
+  layer — after that pass — so a marker stamped there would be covered
+  by the very panel it describes; `findAllModal.draw` ends by calling
+  `drawOverflowMarkersOverlay`, which paints exactly the markers the
+  enumerator flagged `overlay`. Two call sites, but still ONE enumerator
+  and one `paintOverflowMarker`, so a marker can never appear where
+  `overflowMarkerAt` would not find it. The POPUP does not follow it up
+  there: it is passive, so it paints below the modals, and an unpinned
+  list's markers therefore say "there is more" without being able to say
+  how much. That is the honest half to keep — the yes/no is what a
+  viewport owes its reader — and pinning (◇) restores the rest.
 - **Line counts floor at zero.** `clampScroll`'s overscroll pad lets the
   last line come up to the middle of the viewport, so `total - (last+1)`
   goes negative there; a marker for lines that do not exist is worse than
@@ -2930,8 +2950,13 @@ House rules:
   window's edge flashing a box on its way past.
 - **The units follow the surface**: "lines" for a body of text, "rows"
   for the tree (a list of names and folders), "files" for the changes
-  panel's list (the unit somebody about to commit is asking in), and
-  "commits" for the log's. Each panel's two panes scroll independently,
+  panel's list (the unit somebody about to commit is asking in),
+  "commits" for the log's, and "results" for the Find-all list — whose
+  total is `len(view)`, the DISPLAYED rows, so the filter and the
+  dismissals narrow it the way the log's search narrows its own count.
+  That list's marker is also a PLAIN count on purpose: every row in it
+  is a find hit, so coloring it `offFind` would repeat the title in a
+  place that is supposed to mean "something unusual is out there". Each panel's two panes scroll independently,
   so each carries its own pair — built by the `pane` helper rather than
   spelled out four times, which is how one of them ends up off by a row.
   The log's pair rides `gitLogBodyTop` / `gitLogBodyRows` rather than the

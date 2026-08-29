@@ -7,8 +7,9 @@
 
 // "There is more that way", said once per direction: a single '▴' or
 // '▾' in the LAST column of a viewport's first and last row, on every
-// surface that scrolls — the editor body, the git panel's diff pane,
-// and the file tree — plus a popup on hover saying how much more.
+// surface that scrolls — the editor body, both git panels, the file
+// tree, and the Find-all list — plus a popup on hover saying how much
+// more.
 //
 //	func handleKey(...) {                    ▴   ← 412 lines above
 //	    switch {
@@ -350,6 +351,13 @@ type overflowMarker struct {
 	down bool
 	unit string // "line" for a body of text, "row" for a list
 	off  offscreen
+
+	// overlay marks a marker whose surface is painted ABOVE the body
+	// layer, so drawOverflowMarkers must NOT paint it there — the
+	// surface would come along afterwards and cover it. Exactly one
+	// thing sets it today: the Find-all list while it sits in the modal
+	// slot. See drawOverflowMarkersOverlay.
+	overlay bool
 }
 
 // overflowMarkers enumerates every marker that should be on screen right
@@ -439,6 +447,43 @@ func (a *App) overflowMarkers() []overflowMarker {
 		}
 	}
 
+	// The Find-all list — results, references, a workspace edit's
+	// receipt — which is a viewport like any other and the only one with
+	// TWO homes: the modal slot when it is a peek, the pinned-panel slot
+	// when it is furniture. findAllVisible is the single spelling of
+	// "whichever one is on screen", so both get the markers from one
+	// block.
+	//
+	// The column is mx+mw-3: the blank cell drawRow already leaves
+	// between the text and the row's ✕, so here — as in the git panels'
+	// right-hand pane — the marker covers nothing at all. It is a plain
+	// count, deliberately: every row in this list is a find hit, so
+	// coloring the marker offFind would say nothing the title does not
+	// already say, in a place that is supposed to mean "something
+	// unusual is out there".
+	//
+	// The total is len(view), the DISPLAYED list — narrowed by the
+	// filter, shortened by dismissals — because that is what the panel
+	// is a viewport onto (the git log's rule about its capped list).
+	if fa := a.findAllVisible(); fa != nil {
+		fx, fy, fw, fh := fa.rect(a)
+		vis := fa.visibleRows(a)
+		if fw >= findAllMinDrawWidth && fh >= findAllMinHeight && vis > 0 {
+			first := len(out)
+			pane(fx+fw-3, fy+4, vis, fa.scroll, len(fa.view), "result")
+			// Unpinned, the list is drawn on the OVERLAY layer with the
+			// rest of the modals — after drawOverflowMarkers has run —
+			// so its markers have to be painted by its own draw or the
+			// panel would cover them. Pinned, it draws with the panels
+			// and the body-layer pass gets it right.
+			if a.modal == fa {
+				for i := first; i < len(out); i++ {
+					out[i].overlay = true
+				}
+			}
+		}
+	}
+
 	// The file tree. Counted in rows, not lines: a tree is a list of
 	// names, and "12 more rows" is the honest unit for it.
 	if a.sidebarShown {
@@ -467,16 +512,42 @@ func (a *App) overflowMarkers() []overflowMarker {
 // viewport.
 func (a *App) drawOverflowMarkers() {
 	for _, m := range a.overflowMarkers() {
-		r := overflowUpRune
-		if m.down {
-			r = overflowDownRune
+		if m.overlay {
+			continue // painted with its own surface, one layer up
 		}
-		_, _, st, _ := a.screen.GetContent(m.x, m.y)
-		_, bg, _ := st.Decompose()
-		a.screen.SetContent(m.x, m.y, r, nil,
-			tcell.StyleDefault.Background(bg).
-				Foreground(offscreenColor(a.theme, m.off.kind())).Bold(true))
+		a.paintOverflowMarker(m)
 	}
+}
+
+// drawOverflowMarkersOverlay is the other half of that pass, for the
+// surfaces the body layer cannot annotate: anything drawn ABOVE it would
+// simply cover a marker put down here. It is called from the surface's
+// own draw (findAllModal.draw today), which is the only moment at which
+// the cells are settled AND nothing is going to be painted over them.
+//
+// Two call sites, but one enumerator and one painter — so a marker still
+// cannot be drawn anywhere overflowMarkerAt would not find it, which is
+// what the popup and the hit-tests depend on.
+func (a *App) drawOverflowMarkersOverlay() {
+	for _, m := range a.overflowMarkers() {
+		if !m.overlay {
+			continue
+		}
+		a.paintOverflowMarker(m)
+	}
+}
+
+// paintOverflowMarker stamps one marker, keeping its cell's background.
+func (a *App) paintOverflowMarker(m overflowMarker) {
+	r := overflowUpRune
+	if m.down {
+		r = overflowDownRune
+	}
+	_, _, st, _ := a.screen.GetContent(m.x, m.y)
+	_, bg, _ := st.Decompose()
+	a.screen.SetContent(m.x, m.y, r, nil,
+		tcell.StyleDefault.Background(bg).
+			Foreground(offscreenColor(a.theme, m.off.kind())).Bold(true))
 }
 
 // -----------------------------------------------------------------------------
@@ -575,6 +646,15 @@ func (a *App) closeOverflowTip() {
 // rather than remembered: the editor may have scrolled under a stationary
 // pointer (a wheel event is a rest, not a move), and the count is the
 // whole content of the box.
+//
+// The modal guard is also where this feature's one gap lives: an
+// UNPINNED Find-all list owns the modal slot, so its markers appear but
+// never explain themselves. That is not an oversight to route around —
+// the popup is passive, so it paints BELOW the overlay layer, and a box
+// drawn there would be covered by the very panel it describes. Pin the
+// list (◇) and it behaves like every other surface. What the reader is
+// owed either way — "there is more that way" — is the marker itself,
+// and that is drawn in both homes.
 func (a *App) handleOverflowTipTick(e *overflowTipEvent) {
 	if e.seq != a.overflowTip.seq || a.modal != nil || a.menuOpen {
 		return

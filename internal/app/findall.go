@@ -97,6 +97,13 @@ const (
 	// findAllDockBtnW is the dock button's cell width: glyph plus a
 	// pad either side, so it's a comfortable click target.
 	findAllDockBtnW = 3
+	// findAllMinDrawWidth is the narrowest column draw will paint into
+	// at all — below it the frame, the title and the row's own furniture
+	// have nowhere to go. Named rather than inlined because the overflow
+	// markers ask the same question from another file, and a second copy
+	// of the number is how a marker ends up painted into a panel that
+	// never drew (overflow.go, the one-enumerator rule).
+	findAllMinDrawWidth = 12
 )
 
 // findAllRow is one result: where the hit is in the buffer, plus the
@@ -1166,8 +1173,14 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	}
 	m.focus = findAllFocusList
 	// The ✕ zone at the row's right edge dismisses instead of selecting
-	// — the worklist gesture.
-	if x >= mx+mw-3 {
+	// — the worklist gesture. The one cell carved out of it is a drawn
+	// overflow marker, which shares the blank column left of the ✕ on
+	// the first and last visible rows: a marker is a report, not a verb,
+	// and least of all this verb — striking a row off because the user
+	// pointed at "12 results below" is the one way this annotation could
+	// cost them something. The ✕ itself is untouched, so those two rows
+	// are still dismissable; the press falls through to plain selection.
+	if _, onMarker := a.overflowMarkerAt(x, y); x >= mx+mw-3 && !onMarker {
 		m.dismissRow(a, idx)
 		return
 	}
@@ -1200,7 +1213,7 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 //	N+1      bottom border, carrying the key hint
 func (m *findAllModal) draw(a *App) {
 	mx, my, mw, mh := m.rect(a)
-	if mw < 12 || mh < findAllMinHeight {
+	if mw < findAllMinDrawWidth || mh < findAllMinHeight {
 		return
 	}
 	c := a.chrome()
@@ -1273,6 +1286,16 @@ func (m *findAllModal) draw(a *App) {
 			break
 		}
 	}
+
+	// The overflow markers, last: they share a cell of the first and
+	// last result rows, keeping whatever background those rows painted.
+	//
+	// Unpinned, this list draws on the overlay layer — AFTER the body
+	// pass that annotates every other scrolling surface — so its pair
+	// has to be stamped here or the panel would cover it. Pinned, this
+	// call finds nothing to do and the body pass has already done it.
+	// See overflow.go.
+	a.drawOverflowMarkersOverlay()
 }
 
 // drawFields paints the filter/replace row over the divider drawFrame

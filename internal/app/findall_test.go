@@ -1096,3 +1096,40 @@ func TestFindAll_FreshSearchDropsPinnedPanel(t *testing.T) {
 		t.Fatal("the fresh search should own the modal slot")
 	}
 }
+
+// TestFindAllRowClick_MarkerIsNotADismiss pins the one cell where this
+// panel's worklist gesture and the overflow marker overlap. The marker
+// shares the blank column left of the ✕, which is inside the three-cell
+// dismiss zone — and a marker is a report, not a verb: striking a row off
+// because the user pointed at "20 results below" is the one way an
+// annotation nobody asked for could cost them something. The ✕ itself is
+// untouched, so those rows are still dismissable.
+func TestFindAllRowClick_MarkerIsNotADismiss(t *testing.T) {
+	a, _ := seedFindAllLongApp(t)
+	m := openFindAllT(t, a, "count")
+	mx, my, mw, _ := m.rect(a)
+	vis := m.visibleRows(a)
+	if vis <= 2 || vis >= len(m.view) {
+		t.Skipf("fixture shows %d of %d rows — no marker is drawn", vis, len(m.view))
+	}
+	bot := my + 4 + vis - 1
+	idx := vis - 1
+	if _, ok := a.overflowMarkerAt(mx+mw-3, bot); !ok {
+		t.Fatalf("fixture drew no marker at (%d, %d)", mx+mw-3, bot)
+	}
+
+	before := len(m.view)
+	m.handleMouse(a, mx+mw-3, bot, tcell.Button1)
+	if len(m.view) != before {
+		t.Fatalf("a press on the marker dismissed a row (%d → %d)", before, len(m.view))
+	}
+	if m.selected != idx {
+		t.Errorf("marker press selected row %d, want the row under it (%d)", m.selected, idx)
+	}
+
+	// The ✕ beside it still means what it always did.
+	m.handleMouse(a, mx+mw-2, bot, tcell.Button1)
+	if len(m.view) != before-1 {
+		t.Errorf("the ✕ stopped dismissing: %d rows, want %d", len(m.view), before-1)
+	}
+}

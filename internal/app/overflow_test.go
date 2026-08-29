@@ -514,3 +514,126 @@ func TestOverflowMarkers_GitLogPanes(t *testing.T) {
 		}
 	}
 }
+
+// TestOverflowMarkers_FindAllList pins the seventh surface. The list is a
+// viewport like any other, with two things none of the others have: its
+// marker lands in the blank cell drawRow leaves between the text and the
+// row's ✕ (so it covers nothing, and — the point of the next test — it
+// must not sit ON the ✕), and it counts the DISPLAYED rows, which
+// dismissals and the filter narrow.
+func TestOverflowMarkers_FindAllList(t *testing.T) {
+	a, _ := seedFindAllLongApp(t)
+	m := openFindAllT(t, a, "count")
+	mx, my, mw, _ := m.rect(a)
+	vis := m.visibleRows(a)
+	if vis <= 2 || vis >= len(m.view) {
+		t.Skipf("fixture shows %d of %d rows — nothing is off-screen", vis, len(m.view))
+	}
+	col, top, bot := mx+mw-3, my+4, my+4+vis-1
+	total := len(m.view)
+
+	if _, ok := a.overflowMarkerAt(col, top); ok {
+		t.Error("an unscrolled list drew an up-marker")
+	}
+	down := markerAt(t, a, col, bot)
+	if down.off.lines != total-vis || down.unit != "result" {
+		t.Errorf("down marker = %+v, want %d results", down, total-vis)
+	}
+	if got := overflowTipLines(down)[0]; got != itoa(total-vis)+" results below" {
+		t.Errorf("popup says %q", got)
+	}
+	// The ✕ is the row's own control and keeps its cell — a marker there
+	// would hide it on exactly the two rows the eye lands on first.
+	if _, ok := a.overflowMarkerAt(mx+mw-2, bot); ok {
+		t.Error("the marker took the row's ✕ cell")
+	}
+
+	// Scrolling moves what is off-screen from one end to the other.
+	m.scrollList(a, total)
+	if _, ok := a.overflowMarkerAt(col, bot); ok {
+		t.Error("marker survived a scroll to the end of the list")
+	}
+	if got := markerAt(t, a, col, top); got.off.lines != total-vis {
+		t.Errorf("up marker = %d, want %d", got.off.lines, total-vis)
+	}
+
+	// The total is the DISPLAYED list: a dismissed row is one fewer
+	// result below, because the panel is a viewport onto view, not rows.
+	m.scrollList(a, -total)
+	m.dismissRow(a, 0)
+	if got := markerAt(t, a, col, bot); got.off.lines != total-vis-1 {
+		t.Errorf("after a dismissal the marker says %d, want %d", got.off.lines, total-vis-1)
+	}
+
+	// A closed list contributes nothing, in either home.
+	m.abort(a)
+	for _, mk := range a.overflowMarkers() {
+		if mk.unit == "result" {
+			t.Error("a closed find-all list still enumerated a marker")
+		}
+	}
+}
+
+// TestOverflowMarkers_FindAllLayers pins the one thing about this surface
+// that is not like the other six: it lives in two homes, and only one of
+// them is drawn on the body layer. Unpinned it is a modal, painted AFTER
+// the body pass — so a marker stamped there would be covered by the very
+// panel it describes, and its own draw has to do it instead.
+func TestOverflowMarkers_FindAllLayers(t *testing.T) {
+	a, _ := seedFindAllLongApp(t)
+	m := openFindAllT(t, a, "count")
+	mx, my, mw, _ := m.rect(a)
+	vis := m.visibleRows(a)
+	if vis <= 2 || vis >= len(m.view) {
+		t.Skipf("fixture shows %d of %d rows — nothing is off-screen", vis, len(m.view))
+	}
+	col, bot := mx+mw-3, my+4+vis-1
+
+	if !markerAt(t, a, col, bot).overlay {
+		t.Fatal("an unpinned list's marker is not flagged for the overlay layer")
+	}
+	// The body pass must decline it: on its own it paints nothing here.
+	a.screen.Clear()
+	a.drawOverflowMarkers()
+	a.screen.Show()
+	if got := screenRuneAt(t, a, col, bot); got == overflowDownRune {
+		t.Error("the body pass painted a marker the modal is about to cover")
+	}
+	// The full frame does paint it, because the panel's own draw does.
+	a.draw()
+	a.screen.Show()
+	if got := screenRuneAt(t, a, col, bot); got != overflowDownRune {
+		t.Errorf("unpinned list's marker = %q, want %q", got, overflowDownRune)
+	}
+
+	// Pinned, the list draws with the panels and the body pass owns it.
+	m.togglePin(a)
+	if markerAt(t, a, col, bot).overlay {
+		t.Fatal("a pinned panel's marker still claims the overlay layer")
+	}
+	a.screen.Clear()
+	a.drawOverflowMarkers()
+	a.screen.Show()
+	if got := screenRuneAt(t, a, col, bot); got != overflowDownRune {
+		t.Errorf("pinned panel's marker = %q, want the body pass to paint it", got)
+	}
+
+	// And only pinned can the popup explain itself: the modal slot is
+	// free, so the passive layer is allowed to open under it.
+	a.noteOverflowPointer(col, bot, tcell.ButtonNone)
+	a.handleOverflowTipTick(&overflowTipEvent{seq: a.overflowTip.seq})
+	if !a.overflowTip.open || !strings.HasSuffix(a.overflowTip.lines[0], "results below") {
+		t.Errorf("pinned panel's marker opened no popup: %+v", a.overflowTip)
+	}
+}
+
+// screenRuneAt reads one cell of the simulation screen.
+func screenRuneAt(t *testing.T, a *App, x, y int) rune {
+	t.Helper()
+	cells, w, _ := a.screen.(tcell.SimulationScreen).GetContents()
+	cell := cells[y*w+x]
+	if len(cell.Runes) == 0 {
+		return ' '
+	}
+	return cell.Runes[0]
+}

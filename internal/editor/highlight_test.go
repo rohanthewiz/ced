@@ -5,17 +5,22 @@
 // Copyright: 2026 Cloudmanic, LLC. All rights reserved.
 // =============================================================================
 
-// Tests for the syntax-highlight grid generator. We don't pin specific
-// chroma token assignments (those are an upstream concern), only the shape
-// invariants the renderer relies on: one row per source line, each row long
-// enough to cover its line's runes, and a graceful fallback for unknown or
-// missing lexers.
+// Tests for the syntax-highlight grid generator. Mostly shape invariants
+// the renderer relies on — one row per source line, each row long enough
+// to cover its line's runes, a graceful fallback for unknown or missing
+// lexers — since chroma's own token assignments are an upstream concern.
+//
+// The one place colors ARE pinned is the Literal family, where ced has to
+// take a position chroma's category numbering won't give it for free.
+// See TestStyleForToken_LiteralFamilySplitsStringsFromNumbers.
 
 package editor
 
 import (
 	"strings"
 	"testing"
+
+	"github.com/alecthomas/chroma/v2"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -157,6 +162,68 @@ func (f *Foo) Bar() string {
 	for i, ln := range lines {
 		if len(got[i]) != len([]rune(ln)) {
 			t.Errorf("row %d len = %d, want %d", i, len(got[i]), len([]rune(ln)))
+		}
+	}
+}
+
+// TestStyleForToken_LiteralFamilySplitsStringsFromNumbers is the
+// regression for a category bug that shipped for a long time: Chroma
+// numbers its token types so LiteralString (3100) and LiteralNumber
+// (3200) both divide down to Literal (3000), which meant the
+// `case chroma.LiteralString` / `case chroma.LiteralNumber` arms beside
+// the other Category() cases were unreachable and every string and
+// number in the editor was painted with the CONSTANT color instead.
+//
+// It is pinned here rather than left to the eye because the wrong colors
+// were perfectly plausible-looking, and because the bracket matcher now
+// reads these two off the grid to decide which brackets are real code
+// (bracket.go) — a regression would quietly take that with it.
+func TestStyleForToken_LiteralFamilySplitsStringsFromNumbers(t *testing.T) {
+	th := theme.Default()
+	// Distinct sentinels: the shipped palette gives numbers and constants
+	// the same orange, so the real theme could not tell this test whether
+	// the fix worked.
+	th.SynString = tcell.NewRGBColor(0x11, 0x11, 0x11)
+	th.SynNumber = tcell.NewRGBColor(0x22, 0x22, 0x22)
+	th.SynConstant = tcell.NewRGBColor(0x33, 0x33, 0x33)
+	base := tcell.StyleDefault.Background(th.BG).Foreground(th.Text)
+
+	cases := []struct {
+		tt   chroma.TokenType
+		want tcell.Color
+		name string
+	}{
+		{chroma.LiteralString, th.SynString, "LiteralString"},
+		{chroma.LiteralStringDouble, th.SynString, "LiteralStringDouble"},
+		{chroma.LiteralStringChar, th.SynString, "LiteralStringChar"},
+		{chroma.LiteralNumber, th.SynNumber, "LiteralNumber"},
+		{chroma.LiteralNumberInteger, th.SynNumber, "LiteralNumberInteger"},
+		{chroma.LiteralNumberFloat, th.SynNumber, "LiteralNumberFloat"},
+		// A bare Literal (and its non-string, non-number siblings) still
+		// lands on the constant color, which is what that arm is for.
+		{chroma.Literal, th.SynConstant, "Literal"},
+		{chroma.LiteralDate, th.SynConstant, "LiteralDate"},
+	}
+	for _, c := range cases {
+		fg, _, _ := styleForToken(c.tt, th, base).Decompose()
+		if fg != c.want {
+			t.Errorf("%s → %v, want %v", c.name, fg, c.want)
+		}
+	}
+}
+
+// TestHighlight_StringContentIsStringColored proves the fix above
+// reaches the grid the renderer actually paints from — the level the
+// bracket matcher's classifier reads.
+func TestHighlight_StringContentIsStringColored(t *testing.T) {
+	th := theme.Default()
+	th.SynString = tcell.NewRGBColor(0x11, 0x11, 0x11)
+	const src = "x := \"ab\"\n"
+	got := Highlight("f.go", src, th)
+	for _, col := range []int{5, 6, 7, 8} { // the quotes and their contents
+		fg, _, _ := got[0][col].Decompose()
+		if fg != th.SynString {
+			t.Errorf("col %d (%q) fg = %v, want SynString", col, []rune(src)[col], fg)
 		}
 	}
 }

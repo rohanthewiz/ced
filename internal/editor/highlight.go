@@ -75,24 +75,36 @@ func Highlight(filename, src string, t theme.Theme) [][]tcell.Style {
 }
 
 // styleForToken maps a Chroma token type to a tcell.Style using the active
-// theme. We match by category first (Keyword, LiteralString, etc.) so the
-// mapping stays tight across the dozens of language-specific subtypes.
+// theme. We match by CATEGORY first (Keyword, Name, Comment, …) so the
+// mapping stays tight across the dozens of language-specific subtypes —
+// with one documented exception, the Literal family, where the category
+// is too coarse to tell a string from a number. See the arm below.
 func styleForToken(tt chroma.TokenType, t theme.Theme, base tcell.Style) tcell.Style {
 	switch tt.Category() {
 	case chroma.Keyword:
 		return base.Foreground(t.SynKeyword)
-	case chroma.LiteralString:
-		return base.Foreground(t.SynString)
-	case chroma.LiteralNumber:
-		return base.Foreground(t.SynNumber)
+	case chroma.Literal:
+		// Chroma numbers its token types so that Category() is the
+		// THOUSAND block and SubCategory() the hundred: strings are
+		// 3100 and numbers 3200, both of which divide down to Literal
+		// (3000). So a `case chroma.LiteralString` beside the other
+		// category arms can never be reached — which is exactly what
+		// used to happen here, and it painted every string and every
+		// number in the editor with the constant color. The Literal
+		// family is the one place the sub-category has to be asked.
+		switch tt.SubCategory() {
+		case chroma.LiteralString:
+			return base.Foreground(t.SynString)
+		case chroma.LiteralNumber:
+			return base.Foreground(t.SynNumber)
+		}
+		return base.Foreground(t.SynConstant)
 	case chroma.Comment:
 		return base.Foreground(t.SynComment).Italic(true)
 	case chroma.Operator:
 		return base.Foreground(t.SynOperator)
 	case chroma.Punctuation:
 		return base.Foreground(t.SynPunct)
-	case chroma.Literal:
-		return base.Foreground(t.SynConstant)
 	case chroma.Name:
 		switch tt {
 		case chroma.NameFunction, chroma.NameFunctionMagic:

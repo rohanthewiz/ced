@@ -148,6 +148,13 @@ func leaderBindings() []leaderBinding {
 		// away from every word with an L in it, which is the same
 		// argument that put the git Log on a shifted 'L'.
 		{key: 'j', action: (*App).menuGoToLine, label: "Go to line"},
+		// '%' jumps to the matching bracket — vim's own key for it,
+		// unshifted-in-spirit and still free in this table, which is
+		// the same muscle-memory argument that put the palette on 'k'
+		// and next-occurrence on '*'. Repeatable because the gesture
+		// round-trips: the caret lands ON the partner, so pressing it
+		// again walks straight back (bracket.go).
+		{key: '%', action: (*App).menuGoToMatchingBracket, repeat: true, label: "Matching bracket"},
 		{key: 'p', action: (*App).openFinder, label: "Find file"},
 		// 'P' searches the project's CONTENTS rather than its filenames —
 		// the shifted variant of the same verb, following the f/F and o/O

@@ -407,6 +407,15 @@ func builtinMenuGroups() []menuGroup {
 			// what's under the cursor, 'D' lists every definition in the
 			// file — the f/F and p/P convention again.
 			{label: "Go to symbol in file…", shortcut: "esc D", action: (*App).menuGoToSymbol, enabled: (*App).hasLSPActions},
+			// Brace matching (bracket.go) — the second row in this group
+			// that needs no language server, sitting beside the other
+			// one for that reason. It is gated only on there being a
+			// text buffer, deliberately: the honest predicate is the
+			// scan itself, menuLayout runs predicates every frame the
+			// menu is open, and "put the cursor on a bracket first" is
+			// a better answer than a dimmed row that can't say it —
+			// the same trade the terminal-locations row makes below.
+			{label: "Go to matching bracket", shortcut: "esc %", action: (*App).menuGoToMatchingBracket, enabled: (*App).hasGoToLine},
 			// Clickable terminal output (termdiag.go). It sits with the
 			// code-intelligence rows rather than the terminal's View
 			// toggles because it answers their question — "take me to the

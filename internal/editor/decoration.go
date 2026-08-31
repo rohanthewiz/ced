@@ -171,16 +171,21 @@ type DecorationSource interface {
 // collectDecorations gathers spans and marks from every source for the
 // visible window. External sources (Tab.DecoSources) run first, the
 // interaction built-ins last, so precedence is: syntax < external
-// annotations < selection < find. See the file comment for why.
+// annotations < word highlight < bracket pair < selection < find. See
+// the file comment for why.
 func (t *Tab) collectDecorations(th theme.Theme, firstLine, lastLine int) ([]Span, []GutterMark) {
 	var spans []Span
 	var marks []GutterMark
-	sources := make([]DecorationSource, 0, len(t.DecoSources)+3)
+	sources := make([]DecorationSource, 0, len(t.DecoSources)+4)
 	sources = append(sources, t.DecoSources...)
-	// The word highlight is ambient — it answers a question the user
-	// didn't ask — so it runs ahead of both interaction built-ins and
-	// loses every overlap to them.
-	sources = append(sources, wordHighlightSource{}, selectionSource{}, findSource{})
+	// The word highlight and the bracket pair are ambient — they answer
+	// questions the user didn't ask — so they run ahead of both
+	// interaction built-ins and lose every overlap to them. Between the
+	// two, the bracket pair wins: it marks two specific cells the caret
+	// points at, where the wash marks everything that merely shares a
+	// name. (They cannot actually collide — a bracket is not a word
+	// rune — but the order should say what we would want if they could.)
+	sources = append(sources, wordHighlightSource{}, bracketSource{}, selectionSource{}, findSource{})
 	for _, src := range sources {
 		s, m := src.Decorations(t, th, firstLine, lastLine)
 		spans = append(spans, s...)

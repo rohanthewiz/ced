@@ -95,8 +95,10 @@ internal/app/projectsearch.go Find in project: search → the find-all panel
 internal/editor/decoration.go Span/GutterMark overlay system merged in Tab.Render
 internal/editor/multicaret.go Secondary carets + the bottom-up edit fan-out
 internal/editor/wordhl.go     Word scanner, occurrence matcher, word-highlight source
+internal/editor/bracket.go    Brace matcher: budgeted scan, string/comment skip, pair source
 internal/app/multicaret.go    Multi-caret UI: ≡ rows, Esc-m/M/*, Alt+click, status
 internal/app/wordhl.go        Word-highlight ≡ toggle + per-tab flag plumbing
+internal/app/bracket.go       Go to matching bracket (Esc-%) + its three refusals
 internal/app/findall.go       Find-all peek list: compacted rows, preview, Esc-restore
 internal/lsp/client.go        Minimal JSON-RPC-over-stdio LSP client (stdlib only)
 internal/lsp/workspaceedit.go WorkspaceEdit's two wire shapes → one normal form
@@ -533,6 +535,81 @@ House rules:
   one scanner, two consumers. `Tab.WordHighlight` gates it per tab
   because sources are asked per-tab; `App.wordHLEnabled` is the
   authoritative copy and `applyWordHighlight` the single write path.
+  Brace matching (below) is the other caret-driven ambient source, and
+  runs immediately after this one — see it for why its box is the louder
+  of the two.
+
+### Brace matching (editor/bracket.go + app/bracket.go)
+The bracket under the caret and its partner, boxed; `Esc %` jumps
+between them. House rules:
+
+- **IT IS ALWAYS ON.** No config key, no ≡ toggle — the overflow
+  markers' rule, for the overflow markers' reason: the answer is
+  information about code the user is already looking at, and there is
+  nothing here a preference could usefully say no to. The word
+  highlight has a toggle because it is a *search* the caret keeps
+  re-running; this is a fact about the two characters under it.
+- **THE MATCHER READS THE SYNTAX GRID, which is what makes it correct.**
+  A naive counter pairs the braces inside `fmt.Printf("{%d}", n)` and
+  then reports every brace after it one level off — not a cosmetic
+  error, a confident wrong answer. `Tab.Styles` already holds a
+  per-rune foreground Chroma assigned, so a bracket painted syn-string
+  or syn-comment is skipped for one color compare. The grid is the
+  render's, not a fresh lex: forcing an O(file) Chroma pass out of a
+  keystroke handler is exactly what syntax.go's settle policy exists to
+  stop, and the frame the user is looking at is where their own sense
+  of "that's inside a string" came from. `inStringOrComment` degrades
+  to "code" three ways — no grid (SyntaxOff), a row the grid doesn't
+  cover, and a theme whose `syn-string` IS its `fg` (where the
+  classifier can no longer tell content from code and must not skip
+  every real bracket in the file).
+- **This is the feature that found the `styleForToken` bug.** Chroma
+  numbers its token types so `Category()` is the thousand block:
+  `LiteralString` (3100) and `LiteralNumber` (3200) both divide down to
+  `Literal` (3000), so those two `case` arms sitting beside the other
+  category cases were unreachable and every string and number in the
+  editor was painted with the CONSTANT color. The Literal family is the
+  one place `SubCategory()` has to be asked, and
+  `TestStyleForToken_LiteralFamilySplitsStringsFromNumbers` pins it —
+  a regression there would silently take brace matching with it.
+- **The scan is BUDGETED, and running out is NOT the same as finding
+  nothing.** It cannot be window-scoped the way the word highlighter is
+  (a function's closing brace is usually off screen, and the jump verb
+  has to reach it), so `bracketScanLines` bounds it instead. Hitting
+  that bound is reported as `Conclusive=false` and paints NOTHING —
+  reporting it as unmatched would tint a perfectly balanced brace red
+  purely for living in a big file. `Matched` and `Conclusive` are two
+  facts on purpose, and the app flashes three different messages from
+  them.
+- **Loudness is the INVERSE of cell count.** `word-highlight` is a 26%
+  neutral wash because it can cover dozens of cells; `bracket-match` is
+  the same neutral idea at 42% plus bold because it covers exactly two,
+  and finding the second one from across the screen is the whole
+  feature. Neutral for the word highlight's reason — the blue fill
+  stays the selection's alone. An unmatched bracket takes `err` as a
+  FOREGROUND rather than a fill: one cell of solid red would shout, and
+  making the two states differ in KIND rather than only in hue is what
+  stops "matched" and "broken" reading alike at a glance.
+- **Only `()[]{}`.** Angle brackets are excluded deliberately — `<` and
+  `>` are comparisons far more often than pairs, so matching them would
+  light up two unrelated inequalities on most lines of code. Quotes too:
+  the grid already colors a string end to end, which says it better than
+  two boxed cells would.
+- **The caret is ON the bracket, or immediately after it** — WordRange's
+  courtesy, and for its reason (the caret lands past a character you
+  just typed, so without the fallback the pair stays dark at the one
+  moment it is most wanted). ON wins the tie, which is what lets the
+  jump ROUND-TRIP: the verb lands the caret on the partner, so pressing
+  `%` again comes straight back. That is why the binding is `repeat`.
+- **Quiet in multi-caret mode**, the word highlight's rule: every
+  position that matters is already marked by a caret the user placed.
+- Leader is **`Esc %`** — vim's own key for this, still free, the same
+  muscle-memory argument that put the palette on `k` and next-occurrence
+  on `*`. The ≡ **Code** row is its twin and is gated only on there
+  being a text buffer: the honest predicate is the scan itself,
+  menuLayout runs predicates every frame the menu is open, and "put the
+  cursor on a bracket first" is a better answer than a dimmed row that
+  cannot say it — the terminal-locations trade.
 
 ### Find verbs — options, replace, go to line (editor/find.go,
 ### editor/replace.go, app/find.go, app/goto.go)
@@ -2673,7 +2750,7 @@ right-click-swallowed rule), no leader key. House rules:
 Ten shipped palettes plus `~/.config/ced/themes/*.json`, switchable live
 from ≡ → Theme. House rules:
 
-- **Eight core keys, twenty-seven derived.** A theme states `bg fg muted
+- **Eight core keys, twenty-nine derived.** A theme states `bg fg muted
   line accent ok warn err`; `Normalize` fills the rest from the ordered
   derivation table in palette.go (`selection ← 32% accent over bg`,
   `syn-string ← ok`, `git-deleted ← err`, …). That's what keeps a

@@ -286,7 +286,7 @@ func TestEncode_SparseStaysSparse(t *testing.T) {
 // TestEncode_CanonicalKeyOrder pins that generated files read core-first
 // rather than in Go's map order, which is what makes a written theme
 // file navigable by a human: the eight keys they'll actually edit are at
-// the top, above the twenty-seven they mostly won't.
+// the top, above the twenty-nine they mostly won't.
 func TestEncode_CanonicalKeyOrder(t *testing.T) {
 	spec, _ := Find(Builtins(), DefaultName)
 	out, err := Encode(spec, true)

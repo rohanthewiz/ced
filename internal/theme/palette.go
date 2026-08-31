@@ -12,7 +12,7 @@
 // The whole design turns on one idea: **only eight keys are required**.
 // A theme author states `bg fg muted line accent ok warn err` — the
 // background, the text, the two quieter greys, the accent, and the three
-// semantic signal colors — and Normalize fills the other twenty-seven in
+// semantic signal colors — and Normalize fills the other twenty-nine in
 // a fixed dependency order (`selection` is a 32% accent wash over `bg`,
 // `syn-string` is `ok`, `git-deleted` is `err`, …). That keeps a
 // hand-written user theme eight lines long instead of thirty-five, and
@@ -106,6 +106,23 @@ func derivations() []derivation {
 		// selected. Going neutral buys visibility without that collision
 		// — the selection stays the only blue fill in the editor body.
 		{"word-highlight", func(p Palette) string { return mix(p["bg"], p["fg"], 0.26) }},
+
+		// The bracket pair under the caret. Neutral for word-highlight's
+		// reason — the blue fill stays the selection's alone — but a
+		// long step louder, because the loudness a highlight can afford
+		// is the inverse of how many cells it paints. The word wash can
+		// cover dozens and has to stay quiet; a pair is exactly two
+		// cells, and the whole point is finding the second one from
+		// across the screen. The gap between 26% and 42% is also what
+		// keeps the two readable when both are on the same row.
+		//
+		// An unmatched bracket is the err color, and it is applied as a
+		// FOREGROUND rather than a fill — one cell of solid red would
+		// shout, and making the two states differ in KIND rather than
+		// only in hue is what stops "matched" and "broken" reading alike
+		// at a glance.
+		{"bracket-match", func(p Palette) string { return mix(p["bg"], p["fg"], 0.42) }},
+		{"bracket-unmatched", func(p Palette) string { return p["err"] }},
 
 		// Git gutter — the near-universal green / blue / red convention,
 		// expressed in the theme's own three signal colors.
@@ -238,6 +255,9 @@ func ToTheme(p Palette) Theme {
 		FindCurrent: c("find-current"),
 
 		WordHL: c("word-highlight"),
+
+		BracketMatch:     c("bracket-match"),
+		BracketUnmatched: c("bracket-unmatched"),
 
 		GitAdded:    c("git-added"),
 		GitModified: c("git-modified"),

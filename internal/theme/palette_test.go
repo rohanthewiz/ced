@@ -20,7 +20,7 @@ import (
 )
 
 // minimal is the smallest legal theme: exactly the eight core keys. Used
-// throughout to prove the derivation table can carry the other 27.
+// throughout to prove the derivation table can carry the other 29.
 func minimal() Palette {
 	return Palette{
 		"bg": "#101018", "fg": "#e0e0f0", "muted": "#707088", "line": "#303040",

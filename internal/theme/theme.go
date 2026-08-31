@@ -13,7 +13,7 @@
 //     Default(), the Tokyo Night palette ced has always shipped with.
 //   - palette.go — the color model: a flat map of canonical keys, of
 //     which only eight are required, and a derivation table that fills
-//     the other twenty-seven.
+//     the other twenty-nine.
 //   - builtin.go / load.go — ten named themes, and the registry that
 //     merges them with the user's own ~/.config/ced/themes/*.json.
 //
@@ -66,6 +66,14 @@ type Theme struct {
 	// every overlap to Selection — that's decoration precedence, not
 	// color weight.
 	WordHL tcell.Color
+
+	// BracketMatch fills the two cells of the bracket pair the caret is
+	// on; BracketUnmatched tints the one bracket that has no partner.
+	// Both are set by bracket.go's decoration source. They are a fill
+	// and a foreground respectively so the two answers differ in kind,
+	// not just in color — see palette.go's derivation for why.
+	BracketMatch     tcell.Color
+	BracketUnmatched tcell.Color
 
 	// Git gutter marks (the mark column between line numbers and code).
 	// Follows the near-universal editor convention: green = added,
@@ -137,6 +145,12 @@ func Default() Theme {
 		// an accent wash. That's what keeps it visible without looking
 		// like the (blue) selection. See palette.go's derivation.
 		WordHL: tcell.NewRGBColor(0x45, 0x49, 0x5c),
+
+		// Bracket pair — the same neutral idea one step louder (42%
+		// text over background), because it only ever paints two cells.
+		// The unmatched tint is the theme's plain error red.
+		BracketMatch:     tcell.NewRGBColor(0x60, 0x65, 0x7d),
+		BracketUnmatched: tcell.NewRGBColor(0xf7, 0x76, 0x8e),
 
 		// Git gutter — the standard Tokyo Night green / blue / red.
 		GitAdded:    tcell.NewRGBColor(0x9e, 0xce, 0x6a),

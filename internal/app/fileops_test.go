@@ -789,3 +789,110 @@ func TestMenuNewFolder_FallsBackToRoot(t *testing.T) {
 		t.Fatalf("folder not created at the root: err=%v", err)
 	}
 }
+
+// TestCtxRename_FolderRoutesToFolderRename is the reason ctxRename
+// dispatches on node kind: renaming a directory has to carry the tabs
+// living INSIDE it and the active folder along with it, which is what
+// doRenameFolder does and doRenameFile does not. Renaming through the
+// file path left those tabs backed by a path that no longer exists.
+func TestCtxRename_FolderRoutesToFolderRename(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "old")
+	if err := os.Mkdir(sub, 0755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	inner := filepath.Join(sub, "kept.txt")
+	if err := os.WriteFile(inner, []byte("payload"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, root)
+	a.openFile(inner)
+	a.setActiveFolder(sub)
+
+	var node *filetree.Node
+	for _, c := range a.tree.Root.Children {
+		if c.Name == "old" {
+			node = c
+		}
+	}
+	if node == nil {
+		t.Fatal("folder node missing from the tree")
+	}
+
+	ctxRename(a, node)
+	pm, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("expected a prompt modal, got %T", a.modal)
+	}
+	if pm.title != "Rename folder" {
+		t.Errorf("prompt title = %q, want Rename folder", pm.title)
+	}
+	pm.field = newTextField("new")
+	pm.submit(a)
+
+	moved := filepath.Join(root, "new")
+	if _, err := os.Stat(moved); err != nil {
+		t.Fatalf("folder not renamed: %v", err)
+	}
+	// The descendant tab follows the folder — the half doRenameFile misses.
+	wantTab := filepath.Join(moved, "kept.txt")
+	found := false
+	for _, tb := range a.tabs {
+		if tb.Path == wantTab {
+			found = true
+		}
+		if tb.Path == inner {
+			t.Error("a tab is still backed by the pre-rename path")
+		}
+	}
+	if !found {
+		t.Errorf("no tab at %q after the rename", wantTab)
+	}
+	if a.activeFolder != moved {
+		t.Errorf("activeFolder = %q, want %q", a.activeFolder, moved)
+	}
+}
+
+// TestCtxRename_FileStillRenamesTheFile pins the other half of the
+// routing: a file node keeps the file path, title and all.
+func TestCtxRename_FileStillRenamesTheFile(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "before.txt")
+	if err := os.WriteFile(target, []byte("payload"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, root)
+	a.openFile(target)
+
+	var node *filetree.Node
+	for _, c := range a.tree.Root.Children {
+		if c.Name == "before.txt" {
+			node = c
+		}
+	}
+	if node == nil {
+		t.Fatal("file node missing from the tree")
+	}
+
+	ctxRename(a, node)
+	pm, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("expected a prompt modal, got %T", a.modal)
+	}
+	if pm.title != "Rename file" {
+		t.Errorf("prompt title = %q, want Rename file", pm.title)
+	}
+	pm.field = newTextField("after.txt")
+	pm.submit(a)
+
+	moved := filepath.Join(root, "after.txt")
+	got, err := os.ReadFile(moved)
+	if err != nil || string(got) != "payload" {
+		t.Fatalf("file not renamed: %q err=%v", got, err)
+	}
+	for _, tb := range a.tabs {
+		if tb.Path == target {
+			t.Error("the tab still points at the old file path")
+		}
+	}
+}

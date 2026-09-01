@@ -630,18 +630,34 @@ func ctxNewFolder(a *App, n *filetree.Node) {
 }
 
 // ctxRename opens a prompt pre-filled with n's basename and renames the
-// file or folder on submit.
+// file or folder on submit. ONE row, routed by node kind — a tree node is
+// either a file or a directory, so a second row would be meaningless on
+// whichever node the user actually clicked.
+//
+// The routing is not cosmetic. doRenameFile updates a tab pointing AT the
+// renamed path; a directory needs doRenameFolder, which also rewrites
+// every tab living INSIDE it and moves activeFolder along with it.
+// Renaming a folder through the file path left those tabs backed by a
+// path that no longer exists, and the next New file aimed into the old
+// directory. The title names the noun so the prompt says which of the two
+// is about to happen without costing a row.
 func ctxRename(a *App, n *filetree.Node) {
 	if n == a.tree.Root {
 		return
 	}
 	old := n.Path
+	title := "Rename file"
+	rename := (*App).doRenameFile
+	if n.IsDir {
+		title = "Rename folder"
+		rename = (*App).doRenameFolder
+	}
 	a.openPrompt(
-		"Rename",
+		title,
 		"in "+filepath.Dir(old),
 		n.Name,
 		func(app *App, value string) {
-			app.doRenameFile(old, value)
+			rename(app, old, value)
 		},
 	)
 }

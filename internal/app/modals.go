@@ -887,6 +887,10 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	items := []contextItem{}
 	if n.IsDir {
 		items = append(items, contextItem{label: "New File", action: ctxNewFile})
+		// New Folder sits directly under it: same noun (a child of this
+		// directory), same prompt shape, and the pair reads as one
+		// vocabulary rather than two half-features.
+		items = append(items, contextItem{label: "New Folder", action: ctxNewFolder})
 	}
 	if n != a.tree.Root {
 		items = append(items, contextItem{label: "Rename", action: ctxRename})

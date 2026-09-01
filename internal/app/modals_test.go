@@ -372,7 +372,7 @@ func TestOpenTreeContext_Folder(t *testing.T) {
 	if contextOf(a) == nil {
 		t.Fatal("context should open")
 	}
-	wantLabels := []string{"New File", "Rename", "Delete", "Copy", "Zip", "Copy rel path", "Copy abs path"}
+	wantLabels := []string{"New File", "New Folder", "Rename", "Delete", "Copy", "Zip", "Copy rel path", "Copy abs path"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("folder context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))
 	}
@@ -384,7 +384,7 @@ func TestOpenTreeContext_Folder(t *testing.T) {
 }
 
 // TestOpenTreeContext_File offers Rename + Delete plus the two clipboard
-// rows. New File is folder-only.
+// rows. New File / New Folder are folder-only.
 func TestOpenTreeContext_File(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "f.txt")
@@ -414,12 +414,12 @@ func TestOpenTreeContext_File(t *testing.T) {
 	}
 }
 
-// TestOpenTreeContext_Root offers New File and the two clipboard rows —
-// Rename / Delete on the project root would be a footgun.
+// TestOpenTreeContext_Root offers the two create rows and the clipboard
+// rows — Rename / Delete on the project root would be a footgun.
 func TestOpenTreeContext_Root(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.openTreeContext(a.tree.Root, 5, 5)
-	wantLabels := []string{"New File", "Zip", "Copy rel path", "Copy abs path"}
+	wantLabels := []string{"New File", "New Folder", "Zip", "Copy rel path", "Copy abs path"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("root context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))
 	}

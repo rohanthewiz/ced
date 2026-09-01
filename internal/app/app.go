@@ -574,6 +574,10 @@ func builtinMenuGroups() []menuGroup {
 			// "unavailable" is how a user learns the socket never bound.
 			{action: (*App).menuToggleRemote, enabled: alwaysTrue, labelFor: (*App).remoteToggleLabel},
 			{shortcut: "esc n", action: (*App).menuNewFile, enabled: alwaysTrue, labelFor: (*App).newFileLabel},
+			// New folder has no shortcut: the shifted twin of esc-n is
+			// SS2, which the terminal eats before the leader table sees
+			// it (see fileops.go's menuNewFolder).
+			{action: (*App).menuNewFolder, enabled: alwaysTrue, labelFor: (*App).newFolderLabel},
 			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
 			{label: "Delete file", action: (*App).menuDelete, enabled: (*App).hasFileTab},
 			{action: (*App).menuRenameFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).renameFolderLabel},

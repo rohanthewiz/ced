@@ -5,19 +5,23 @@
 // Copyright: 2026 Cloudmanic, LLC. All rights reserved.
 // =============================================================================
 
-// fileops.go implements the editor's three file-management actions:
-// create-empty-file, rename-file, and delete-file. Each one is exposed two
-// ways:
+// fileops.go implements the editor's file-management actions:
+// create-empty-file, create-folder, rename, and delete. Each one is
+// exposed two ways:
 //
-//   • From the main ≡ action menu, targeting the currently active tab
-//     (Rename / Delete only — there's no obvious "where" for a new file
-//     in that context, so New File lives only on the tree right-click).
+//   • From the main ≡ action menu. Rename / Delete target the currently
+//     active tab; the two create rows target the ACTIVE FOLDER, which
+//     the tree keeps current as the user clicks around and which each
+//     row names in its own dynamic label — that is the "where" a menu
+//     row otherwise couldn't answer.
 //
 //   • From the right-click context menu over a file-tree row. For folders
-//     the menu offers New File (creates a child) plus Rename / Delete; for
-//     files it offers Rename / Delete on the file itself.
+//     the menu offers New File and New Folder (both create a child) plus
+//     Rename / Delete; for files it offers Rename / Delete on the file
+//     itself. The tree's keyboard layer (treenav.go) is the third door:
+//     n / N / r / d.
 //
-// All three operations refresh the file tree afterwards so the sidebar
+// Every operation refreshes the file tree afterwards so the sidebar
 // reflects the change immediately, without waiting for the 10-second
 // background poller.
 
@@ -47,6 +51,23 @@ func createEmptyFile(path string) error {
 		return err
 	}
 	return f.Close()
+}
+
+// createFolder creates the directory at path, including any missing
+// parents. The existence check in front of MkdirAll is what keeps the
+// two halves of the contract honest: MkdirAll succeeds silently on a
+// directory that is already there, which would report "Created foo"
+// for an action that did nothing, and O_EXCL has no mkdir equivalent
+// to lean on. Intermediates ARE created here, unlike doCreateFile's
+// deliberate refusal to mkdir on the user's behalf — the difference is
+// that every segment of "a/b/c" typed into a New Folder prompt is a
+// folder the user named, whereas "subdir/foo.go" names one file and
+// only implies the directory around it.
+func createFolder(path string) error {
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("%q already exists", filepath.Base(path))
+	}
+	return os.MkdirAll(path, 0755)
 }
 
 // renameFile moves oldPath to newPath. It refuses to clobber an existing
@@ -124,6 +145,30 @@ func (a *App) doCreateFile(parent, name string) {
 	a.workspaceChanged()
 	a.openFile(target)
 	a.flash(fmt.Sprintf("Created %s", name))
+}
+
+// doCreateFolder creates a directory called name inside parent,
+// refreshes the tree, and makes the new folder the active one. name may
+// contain path separators ("a/b") — see createFolder for why the whole
+// chain is created rather than refused.
+//
+// Adopting the new directory as activeFolder is the deliberate part: a
+// folder is almost never the end of the gesture, it is the place the
+// next file is going, and the ≡ menu's New File row carries the target
+// in its own label, so the move is visible rather than surprising.
+func (a *App) doCreateFolder(parent, name string) {
+	name = trimSpace(name)
+	if name == "" {
+		return
+	}
+	target := filepath.Join(parent, name)
+	if err := createFolder(target); err != nil {
+		a.flash(fmt.Sprintf("Create failed: %v", err))
+		return
+	}
+	a.workspaceChanged()
+	a.setActiveFolder(target)
+	a.flash(fmt.Sprintf("Created %s%c", name, filepath.Separator))
 }
 
 // doRenameFile renames oldPath to a sibling whose basename is newName,
@@ -244,6 +289,64 @@ func (a *App) newFileLabel() string {
 		suffix = " (in " + rel + ")"
 	}
 	return "New file" + suffix
+}
+
+// menuNewFolder prompts for a directory name and creates it inside the
+// editor's active folder — the ≡ twin of the tree's right-click "New
+// Folder", and the path that survives a terminal which eats right-click
+// (the CLAUDE.md rule that every file action is reachable from the main
+// menu first). Same active-folder fallback as menuNewFile: a folder
+// deleted underneath us drops back to the project root rather than
+// handing the user a prompt rooted at a path that no longer exists.
+//
+// No leader key. The obvious one would be a shifted twin of New File's
+// Esc-n, and `\x1bN` is SS2 — a pair the terminal eats before the leader
+// table ever sees it (see the tab-bar section of CLAUDE.md), so the
+// binding would test green and do nothing in a real terminal.
+func (a *App) menuNewFolder() {
+	a.closeMenu()
+	folder := a.activeFolder
+	if folder == "" {
+		folder = a.rootDir
+	}
+	if info, err := os.Stat(folder); err != nil || !info.IsDir() {
+		folder = a.rootDir
+		a.setActiveFolder(folder)
+	}
+	hint := "in " + a.relativeFolderLabel(folder)
+	a.openPrompt(
+		"New folder",
+		hint,
+		"",
+		func(app *App, value string) {
+			app.doCreateFolder(folder, value)
+		},
+	)
+}
+
+// newFolderLabel is the dynamic label hook for the New Folder menu row,
+// mirroring newFileLabel exactly: the target folder is the one fact the
+// row can't leave the user guessing about, since it decides where the
+// directory lands.
+func (a *App) newFolderLabel() string {
+	folder := a.activeFolder
+	if folder == "" || folder == a.rootDir {
+		return "New folder"
+	}
+	rel := a.relativeFolderLabel(folder)
+	const maxLen = maxLabelSuffix
+	suffix := " (in " + rel + ")"
+	if runeLen(suffix) > maxLen {
+		keep := maxLen - len(" (in …)")
+		if keep < 4 {
+			keep = 4
+		}
+		if keep < len(rel) {
+			rel = "…" + rel[len(rel)-keep:]
+		}
+		suffix = " (in " + rel + ")"
+	}
+	return "New folder" + suffix
 }
 
 // relativeFolderLabel returns folder rendered relative to the project root,
@@ -500,6 +603,28 @@ func ctxNewFile(a *App, n *filetree.Node) {
 		"",
 		func(app *App, value string) {
 			app.doCreateFile(parent, value)
+		},
+	)
+}
+
+// ctxNewFolder opens a prompt to name a new directory inside n. n is
+// always a directory — openTreeContext only adds this row for folder
+// nodes. The parent is auto-expanded, like ctxNewFile, so the new child
+// is visible the moment the post-create tree refresh lands.
+func ctxNewFolder(a *App, n *filetree.Node) {
+	if !n.IsDir {
+		return
+	}
+	parent := n.Path
+	if !n.Expanded {
+		a.tree.Toggle(n)
+	}
+	a.openPrompt(
+		"New folder",
+		"in "+parent,
+		"",
+		func(app *App, value string) {
+			app.doCreateFolder(parent, value)
 		},
 	)
 }

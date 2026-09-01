@@ -10,9 +10,9 @@
 // symmetric with the rest of the editor: mouse-first, keys as
 // accelerators. Esc-T (or the ≡ View row) moves focus into the tree;
 // then arrows walk the rows, →/← expand and collapse, Enter opens,
-// plain letters typeahead-jump, and n/d/r run the same New/Delete/
-// Rename verbs the right-click menu offers — one vocabulary, third
-// door (context menu, ≡ menu, now keys).
+// plain letters typeahead-jump, and n/N/d/r run the same New file/
+// New folder/Delete/Rename verbs the right-click menu offers — one
+// vocabulary, third door (context menu, ≡ menu, now keys).
 //
 // Focus discipline mirrors the terminal and chat panels: the branch in
 // handleKey sits AFTER the Esc/leader/menu blocks, so every global
@@ -23,10 +23,11 @@
 // opening a file) hands focus back to the editor, the same
 // click-where-you-want-to-type model the other panels follow.
 //
-// The n/d/r verbs shadow typeahead for those three letters — the
+// The n/N/d/r verbs shadow typeahead for those letters — the
 // deliberate cost of having verbs at all. Every shadowed name is still
 // reachable: one arrow key, or the finder, which is better at names
-// anyway.
+// anyway. ('N' costs nothing extra: typeahead lowercases, so the names
+// it would have reached were already claimed by 'n'.)
 
 package app
 
@@ -183,6 +184,22 @@ func (a *App) treeNavRune(r rune, sel *filetree.Node) {
 		}
 		a.setActiveFolder(target.Path)
 		ctxNewFile(a, target)
+	case 'N':
+		// New folder — the shifted twin of 'n', resolving its target the
+		// same way. Safe here where esc-N is not: this is a bare rune the
+		// focused tree claims, not an ESC pair the terminal can swallow.
+		// It costs typeahead nothing that 'n' hadn't already cost.
+		target := a.tree.Root
+		switch {
+		case sel != nil && sel.IsDir:
+			target = sel
+		case sel != nil:
+			if p := a.tree.ParentOf(sel); p != nil {
+				target = p
+			}
+		}
+		a.setActiveFolder(target.Path)
+		ctxNewFolder(a, target)
 	case 'd':
 		if sel != nil {
 			ctxDelete(a, sel)

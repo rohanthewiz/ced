@@ -7,8 +7,8 @@
 
 // Tests for the small file-system helpers in fileops.go. The App-level glue
 // (modals, menu wiring) is exercised manually via the TUI; here we just
-// pin down the behavior of the three primitives so future refactors don't
-// silently regress them.
+// pin down the behavior of the primitives (create file, create folder,
+// rename, delete) so future refactors don't silently regress them.
 
 package app
 
@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
 // TestCreateEmptyFile_New writes a brand-new empty file and verifies it
@@ -491,6 +493,7 @@ func TestDynamicLabels_FitInModal(t *testing.T) {
 		label string
 	}{
 		{"newFileLabel", a.newFileLabel()},
+		{"newFolderLabel", a.newFolderLabel()},
 		{"renameFolderLabel", a.renameFolderLabel()},
 		{"deleteFolderLabel", a.deleteFolderLabel()},
 	} {
@@ -596,5 +599,193 @@ func TestCopyPathToSystemClipboard_FlashMessage(t *testing.T) {
 	if !strings.Contains(a.statusMsg, "/tmp/sample.go") &&
 		!strings.Contains(a.statusMsg, "Copy failed") {
 		t.Fatalf("status flash didn't mention the path or an error: %q", a.statusMsg)
+	}
+}
+
+// TestCreateFolder_New creates a directory and confirms it landed as a
+// directory rather than a file.
+func TestCreateFolder_New(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "pkg")
+
+	if err := createFolder(target); err != nil {
+		t.Fatalf("createFolder: %v", err)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat after create: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("expected a directory")
+	}
+}
+
+// TestCreateFolder_MakesIntermediates pins the deliberate difference
+// from doCreateFile: every segment the user typed is a folder they
+// named, so the whole chain is created rather than refused.
+func TestCreateFolder_MakesIntermediates(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "a", "b", "c")
+
+	if err := createFolder(target); err != nil {
+		t.Fatalf("createFolder: %v", err)
+	}
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		t.Fatalf("nested dir missing: err=%v", err)
+	}
+}
+
+// TestCreateFolder_RefusesExisting is the reason for the Lstat in front
+// of MkdirAll: MkdirAll succeeds on a directory that is already there,
+// which would report "Created foo" for an action that did nothing. An
+// existing FILE must be refused too, and left untouched.
+func TestCreateFolder_RefusesExisting(t *testing.T) {
+	dir := t.TempDir()
+	existingDir := filepath.Join(dir, "there")
+	if err := os.Mkdir(existingDir, 0755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := createFolder(existingDir); err == nil {
+		t.Fatal("expected error for an existing directory, got nil")
+	}
+
+	existingFile := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(existingFile, []byte("keep me"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := createFolder(existingFile); err == nil {
+		t.Fatal("expected error for an existing file, got nil")
+	}
+	got, err := os.ReadFile(existingFile)
+	if err != nil || string(got) != "keep me" {
+		t.Fatalf("file was clobbered: %q err=%v", got, err)
+	}
+}
+
+// TestDoCreateFolder_AdoptsNewFolder pins the app-level side effect: the
+// created directory becomes the active folder, so the next New file
+// lands inside the folder the user just made rather than beside it.
+func TestDoCreateFolder_AdoptsNewFolder(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+
+	a.doCreateFolder(root, "pkg")
+
+	target := filepath.Join(root, "pkg")
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		t.Fatalf("folder not created: err=%v", err)
+	}
+	if a.activeFolder != target {
+		t.Errorf("activeFolder = %q, want %q", a.activeFolder, target)
+	}
+	// And nothing was opened — a directory is not a buffer.
+	for _, tb := range a.tabs {
+		if tb.Path == target {
+			t.Fatal("a tab was opened for the new directory")
+		}
+	}
+}
+
+// TestDoCreateFolder_EmptyNameIsNoOp: a submitted-but-blank prompt must
+// not create anything, and must not move the active folder either.
+func TestDoCreateFolder_EmptyNameIsNoOp(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	before := a.activeFolder
+
+	a.doCreateFolder(root, "   ")
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected an empty root, got %d entries", len(entries))
+	}
+	if a.activeFolder != before {
+		t.Errorf("activeFolder moved to %q", a.activeFolder)
+	}
+}
+
+// TestCtxNewFolder_ExpandsParent: the prompt targets the clicked folder
+// and expands it, so the new child is visible the moment the post-create
+// tree refresh lands. A file node is refused outright — openTreeContext
+// only offers the row on directories, and the guard keeps that true even
+// if a future caller forgets.
+func TestCtxNewFolder_ExpandsParent(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "child")
+	if err := os.Mkdir(sub, 0755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	file := filepath.Join(root, "f.txt")
+	if err := os.WriteFile(file, []byte("x"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, root)
+
+	var dirNode, fileNode *filetree.Node
+	for _, c := range a.tree.Root.Children {
+		switch c.Name {
+		case "child":
+			dirNode = c
+		case "f.txt":
+			fileNode = c
+		}
+	}
+	if dirNode == nil || fileNode == nil {
+		t.Fatal("seeded nodes missing from the tree")
+	}
+
+	ctxNewFolder(a, fileNode)
+	if a.modal != nil {
+		t.Fatal("a file node should not open the New folder prompt")
+	}
+
+	ctxNewFolder(a, dirNode)
+	if !dirNode.Expanded {
+		t.Error("parent folder should be expanded")
+	}
+	pm, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("expected a prompt modal, got %T", a.modal)
+	}
+	pm.field = newTextField("inner")
+	pm.submit(a)
+
+	if info, err := os.Stat(filepath.Join(sub, "inner")); err != nil || !info.IsDir() {
+		t.Fatalf("nested folder not created: err=%v", err)
+	}
+}
+
+// TestMenuNewFolder_FallsBackToRoot mirrors menuNewFile: an active
+// folder deleted underneath us must not leave the user with a prompt
+// rooted at a path that no longer exists.
+func TestMenuNewFolder_FallsBackToRoot(t *testing.T) {
+	root := t.TempDir()
+	gone := filepath.Join(root, "gone")
+	if err := os.Mkdir(gone, 0755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, root)
+	a.setActiveFolder(gone)
+	if err := os.Remove(gone); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	a.menuNewFolder()
+
+	if a.activeFolder != root {
+		t.Errorf("activeFolder = %q, want the project root %q", a.activeFolder, root)
+	}
+	pm, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("expected a prompt modal, got %T", a.modal)
+	}
+	pm.field = newTextField("made")
+	pm.submit(a)
+
+	if info, err := os.Stat(filepath.Join(root, "made")); err != nil || !info.IsDir() {
+		t.Fatalf("folder not created at the root: err=%v", err)
 	}
 }

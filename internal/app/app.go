@@ -1014,6 +1014,13 @@ type App struct {
 	// modifierStickyWindow. See handleMouse.
 	lastShiftAt time.Time
 
+	// mouseHeld is true while a mouse button is physically down, as of
+	// the last mouse event seen. Close reads it to size the input drain
+	// that keeps a stray release report out of the shell — see
+	// ttydrain.go — and it is deliberately a plain latch rather than
+	// part of dragMode, which only tracks gestures a surface claimed.
+	mouseHeld bool
+
 	menuOpen       bool
 	hoveredMenuRow int       // index into menuItems of the row under the mouse, or -1.
 	lastEscape     time.Time // timestamp of the previous Esc press, for double-tap detection.
@@ -1655,6 +1662,11 @@ func (a *App) Close() {
 	// Give the terminal its previous title back (the pop matching
 	// hostIdentInit's push) while the tty is still ours.
 	a.hostIdentClose()
+	// Stop the reporting modes and swallow what the terminal already
+	// said, BEFORE Fini: tcell writes the mouse-off sequences last and
+	// returns, so a release or motion report still in flight would land
+	// in the shell that gets the pane back. See ttydrain.go.
+	a.drainPendingInput()
 	if a.screen != nil {
 		a.screen.Fini()
 	}
@@ -2791,6 +2803,13 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 func (a *App) handleMouse(ev *tcell.EventMouse) {
 	x, y := ev.Position()
 	btn := ev.Buttons()
+
+	// Remember whether a button is physically down, before any of the
+	// routing below can return early. Close reads it to decide how long
+	// to wait for the matching release: a menu row fires on the PRESS,
+	// so the click that quits the editor leaves its release to be
+	// written after ced has stopped reading. See ttydrain.go.
+	a.mouseHeld = mouseButtonHeld(btn)
 
 	// Remember when we last saw Shift held down on ANY mouse event.
 	// Zellij + macOS Terminal split shift+wheel into two events: a

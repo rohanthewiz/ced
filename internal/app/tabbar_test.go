@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // tabBarApp opens n files named tab0.go … tab<n-1>.go in a throwaway root
@@ -309,5 +311,50 @@ func TestSwitchTabPicker_MarksDirtyTabs(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("a dirty tab should carry the dirty marker in the switcher")
+	}
+}
+
+// TestDrawTabBar_ActiveCloseIsBrighterThanInactive pins the loudness
+// order of the × glyphs. The active tab's close used to be painted in
+// theme.Subtle — the separator tone — which made the one button the
+// user was about to click the faintest thing on the strip.
+func TestDrawTabBar_ActiveCloseIsBrighterThanInactive(t *testing.T) {
+	a := tabBarApp(t, 2)
+	a.activeTab = 1
+	a.drawTabBar()
+
+	// Find the × of each laid-out tab and record its foreground.
+	_, ty, _, _ := a.tabBarRect()
+	fgOf := func(r tabRect) tcell.Color {
+		for cx := r.X + r.Width - 1; cx >= r.X; cx-- {
+			ru, _, st, _ := a.screen.GetContent(cx, ty)
+			if ru == '×' {
+				fg, _, _ := st.Decompose()
+				return fg
+			}
+		}
+		t.Fatalf("no × drawn in tab rect %+v", r)
+		return 0
+	}
+	rects := a.lastTabRects
+	if len(rects) < 2 {
+		t.Fatalf("expected 2 laid-out tabs, got %d", len(rects))
+	}
+	var active, inactive tcell.Color
+	for _, r := range rects {
+		if r.Index == a.activeTab {
+			active = fgOf(r)
+		} else {
+			inactive = fgOf(r)
+		}
+	}
+	if active != a.theme.Text {
+		t.Errorf("active tab × fg = %v, want theme.Text %v", active, a.theme.Text)
+	}
+	if inactive != a.theme.Muted {
+		t.Errorf("inactive tab × fg = %v, want theme.Muted %v", inactive, a.theme.Muted)
+	}
+	if active == inactive {
+		t.Errorf("active and inactive × share a color (%v); the active one must stand out", active)
 	}
 }

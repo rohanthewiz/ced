@@ -278,9 +278,18 @@ func (a *App) drawTabBar() {
 		}
 		col++ // separator space before ×
 		if col < tx+tw {
+			// Loudness follows REACHABILITY: the × on the front tab is
+			// the one the user is about to click, so it takes the tab's
+			// own text color (bold, via st) and reads as a button. The
+			// inactive ones stay Muted — a strip of eight equally bright
+			// ×s reads as a row of buttons rather than as tabs. This was
+			// inverted: the active tab drew its × in Subtle, which is
+			// the LINE color (see palette.go's derivation table), i.e.
+			// the separator tone, so the one close button that mattered
+			// was the faintest thing on the strip.
 			closeStyle := st.Foreground(a.theme.Muted)
 			if active {
-				closeStyle = st.Foreground(a.theme.Subtle)
+				closeStyle = st.Foreground(a.theme.Text)
 			}
 			a.screen.SetContent(col, ty, '×', nil, closeStyle)
 		}

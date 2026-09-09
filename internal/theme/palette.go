@@ -74,6 +74,14 @@ func derivations() []derivation {
 		// steps the other way, toward the text.
 		{"sidebar-bg", func(p Palette) string { return shadePanel(p["bg"]) }},
 		{"line-hl", func(p Palette) string { return mix(p["bg"], p["fg"], 0.06) }},
+		// The markdown viewer's code slab. It is deliberately NOT
+		// line-hl, which is the active-line wash and by design only a
+		// few units off the background — a whole code block painted in
+		// it is invisible, which is the exact failure mode a "make it
+		// quiet, it's ambient" choice produces. It steps toward `line`,
+		// the separator color, so the slab reads as a distinct surface
+		// in every theme without becoming a second selection.
+		{"md-code-bg", func(p Palette) string { return mix(p["bg"], p["line"], 0.55) }},
 		// The status bar is the one loud surface: it wears the accent
 		// with the background as its text (see ToTheme's consumers).
 		{"status-bg", func(p Palette) string { return p["accent"] }},
@@ -241,6 +249,7 @@ func ToTheme(p Palette) Theme {
 		SidebarBG: c("sidebar-bg"),
 		StatusBG:  c("status-bg"),
 		LineHL:    c("line-hl"),
+		MDCodeBG:  c("md-code-bg"),
 
 		Text:       c("fg"),
 		Muted:      c("muted"),

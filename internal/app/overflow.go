@@ -393,9 +393,20 @@ func (a *App) overflowMarkers() []overflowMarker {
 	if t := a.activeTabPtr(); t != nil {
 		ex, ey, ew, eh := a.editorRect()
 		if ew > 0 && eh > 0 {
-			above, below := a.editorOffscreen(t, t.ScrollY, t.ScrollY+eh-1)
-			add(ex+ew-1, ey, false, "line", above)
-			add(ex+ew-1, ey+eh-1, true, "line", below)
+			if t.IsMarkdownView() {
+				// A preview's viewport is measured in DISPLAY ROWS, and
+				// none of the sources editorOffscreen reads have
+				// anything to say about it: a diagnostic's line number
+				// does not name a row, and there is no caret. So the
+				// count is the whole answer, and the unit says what is
+				// being counted (the Find-all list's rule).
+				total := len(a.markdownRows(t))
+				pane(ex+ew-1, ey, eh, t.MDScroll, total, "row")
+			} else {
+				above, below := a.editorOffscreen(t, t.ScrollY, t.ScrollY+eh-1)
+				add(ex+ew-1, ey, false, "line", above)
+				add(ex+ew-1, ey+eh-1, true, "line", below)
+			}
 		}
 	}
 

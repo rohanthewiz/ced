@@ -125,6 +125,10 @@ func (a *App) restyleTabs() {
 		// carries the OLD palette's colors, so painting from it while a
 		// settle window runs would show the previous theme for a beat.
 		t.InvalidateStyles()
+		// The markdown rows carry resolved tcell.Styles, so they are a
+		// second cache of theme-derived color and have to join the
+		// restyle — the Tab.Styles rule, one floor up.
+		t.InvalidateMarkdown()
 	}
 }
 

@@ -121,6 +121,29 @@ type Tab struct {
 	Image    image.Image // populated when Mode == imageMode
 	ImageFmt string      // "png" / "jpeg" / "gif" — for the status bar
 
+	// Markdown preview state (markdown.go). mdView is a VIEW flag, not a
+	// Mode: the buffer, the undo history and the dirty flag stay live
+	// underneath, so toggling it off must leave an ordinary editable tab
+	// behind. Nothing in the preview path may write to the buffer.
+	//
+	// MDScroll is the preview's own viewport, deliberately NOT ScrollY —
+	// a display row is not a buffer line, so sharing the field would let
+	// scrolling the preview silently rewrite the position the edit view
+	// gets restored to.
+	//
+	// mdRows is the cache, keyed by (mdRev, mdWidth) against EditRev and
+	// the content width: a resize re-flows, an edit re-renders, and
+	// anything else is a hit. mdPendingSync is the toggle asking the
+	// next draw to open on the passage the cursor was in — it can only
+	// be resolved once a width is known, which is the draw's to know.
+	mdView        bool
+	MDScroll      int
+	mdRows        []MDRow
+	mdRev         int
+	mdWidth       int
+	mdValid       bool
+	mdPendingSync bool
+
 	// Find state — populated when the user opens the find bar and
 	// types a query. The UI layer (App) owns the bar geometry and
 	// keystroke routing; the tab owns the query, the resolved match
@@ -942,6 +965,17 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	if t.IsImage() {
 		t.renderImage(scr, th, x, y, w, h)
 		return
+	}
+	// The markdown preview is a second way to draw the SAME buffer, so
+	// it branches here rather than replacing the tab. A window too narrow
+	// to lay a document out falls through to the source instead of
+	// painting an empty pane — the view degrades, the file is still
+	// readable, and nothing about the tab has changed underneath.
+	if t.mdView {
+		if rows := t.MarkdownRows(th, MDContentWidth(w)); rows != nil {
+			t.renderMarkdown(scr, th, x, y, w, h, rows)
+			return
+		}
 	}
 	// Re-lex only when it's actually due — syntax.go's settle policy keeps
 	// a typing burst from paying the O(file) Chroma cost per keystroke,

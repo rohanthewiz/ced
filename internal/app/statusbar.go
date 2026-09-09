@@ -115,6 +115,14 @@ func (a *App) statusLeftSegments() []statusSegment {
 	if s := a.syntaxStatusSuffix(); s != "" {
 		segs = append(segs, statusSegment{text: s})
 	}
+	// A preview changes what the pane MEANS — the Ln/Col above it is the
+	// caret in a file you cannot currently see — so the bar has to say
+	// so. Clicking it goes back to the source, which is what a reader
+	// who just noticed the label wants next.
+	if tab.IsMarkdownView() {
+		segs = append(segs, statusSegment{text: " · preview",
+			onClick: (*App).toggleMarkdownView})
+	}
 	return segs
 }
 

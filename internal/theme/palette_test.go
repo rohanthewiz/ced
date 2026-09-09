@@ -338,3 +338,45 @@ func TestKeys_CoreFirstNoDuplicates(t *testing.T) {
 		seen[k] = true
 	}
 }
+
+// TestDerive_MDCodeBGIsVisiblyOffTheBackground pins the reason this key
+// exists at all rather than reusing line-hl: the markdown viewer paints
+// whole code blocks on it, and line-hl is a few units off bg by design
+// (it is a one-row cursor wash), so a block wearing it would be
+// invisible. Every shipped theme has to clear a real, if modest, step.
+func TestDerive_MDCodeBGIsVisiblyOffTheBackground(t *testing.T) {
+	for _, spec := range Builtins() {
+		p, _ := Normalize(spec.Colors)
+		bg, code := p["bg"], p["md-code-bg"]
+		if code == "" {
+			t.Fatalf("%s: md-code-bg was not derived", spec.Name)
+		}
+		if d := channelDistance(bg, code); d < 8 {
+			t.Errorf("%s: md-code-bg %s is only %d off bg %s — a code slab in it would be invisible",
+				spec.Name, code, d, bg)
+		}
+		// And it must not have gone so far that it reads as a selection.
+		if d := channelDistance(bg, code); d > 60 {
+			t.Errorf("%s: md-code-bg %s is %d off bg %s — that is a selection, not a slab",
+				spec.Name, code, d, bg)
+		}
+	}
+}
+
+// channelDistance is the largest per-channel difference between two hex
+// colors — a crude but honest stand-in for "can you see the edge".
+func channelDistance(a, b string) int {
+	ar, ag, ab := rgb(a)
+	br, bg, bb := rgb(b)
+	d := 0
+	for _, p := range [][2]int{{ar, br}, {ag, bg}, {ab, bb}} {
+		v := p[0] - p[1]
+		if v < 0 {
+			v = -v
+		}
+		if v > d {
+			d = v
+		}
+	}
+	return d
+}

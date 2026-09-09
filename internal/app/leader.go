@@ -148,6 +148,12 @@ func leaderBindings() []leaderBinding {
 		// away from every word with an L in it, which is the same
 		// argument that put the git Log on a shifted 'L'.
 		{key: 'j', action: (*App).menuGoToLine, label: "Go to line"},
+		// 'v' for View / preView — the markdown reader (markdown.go).
+		// The letter was one of the last obvious ones free in the flat
+		// table, and it belongs there rather than in a namespace: it is
+		// a one-key toggle on the file in front of you, reached for
+		// mid-read, which is exactly what the flat table is for.
+		{key: 'v', action: (*App).menuToggleMarkdownView, label: "Markdown preview"},
 		// '%' jumps to the matching bracket — vim's own key for it,
 		// unshifted-in-spirit and still free in this table, which is
 		// the same muscle-memory argument that put the palette on 'k'

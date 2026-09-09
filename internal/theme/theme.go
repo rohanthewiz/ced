@@ -40,6 +40,12 @@ type Theme struct {
 	SidebarBG tcell.Color // File tree / inactive tab background, slightly darker than BG.
 	StatusBG  tcell.Color // Status bar background.
 	LineHL    tcell.Color // Active line highlight.
+	// MDCodeBG is the slab the markdown viewer paints code blocks and
+	// inline code spans on (editor/markdown.go). A surface of its own
+	// rather than a reuse of LineHL: that one is a few units off BG by
+	// design, which is right for a one-row cursor wash and invisible
+	// across a twenty-row block.
+	MDCodeBG tcell.Color
 
 	// --- Foregrounds & accents ---
 	Text       tcell.Color // Primary editor text.
@@ -123,6 +129,7 @@ func Default() Theme {
 		SidebarBG: tcell.NewRGBColor(0x16, 0x16, 0x1e),
 		StatusBG:  tcell.NewRGBColor(0x7a, 0xa2, 0xf7),
 		LineHL:    tcell.NewRGBColor(0x1f, 0x20, 0x2e),
+		MDCodeBG:  tcell.NewRGBColor(0x27, 0x29, 0x3a),
 
 		// Foregrounds & accents.
 		Text:       tcell.NewRGBColor(0xc0, 0xca, 0xf5),

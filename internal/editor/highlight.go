@@ -33,10 +33,42 @@ func Highlight(filename, src string, t theme.Theme) [][]tcell.Style {
 	if lexer == nil {
 		lexer = lexers.Fallback
 	}
+	return highlightWith(lexer, src, t, tcell.StyleDefault.Background(t.BG).Foreground(t.Text))
+}
+
+// HighlightLang is Highlight for source that has no filename to match on —
+// the body of a fenced code block, whose language arrives as the fence's
+// info string ("go", "bash", "json") rather than as an extension. It
+// resolves the lexer by NAME first (Chroma's registry is alias-aware, so
+// "golang", "sh" and "js" all land) and falls back to content analysis and
+// then plain text, exactly as Highlight does for an unknown extension.
+//
+// base is the style unstyled runes keep. The markdown viewer paints code
+// blocks on their own background, so it passes a style whose background is
+// the block's — a base of tcell.StyleDefault would punch the editor's
+// background through every space between two tokens.
+func HighlightLang(lang, src string, t theme.Theme, base tcell.Style) [][]tcell.Style {
+	var lexer chroma.Lexer
+	if lang != "" {
+		lexer = lexers.Get(lang)
+	}
+	if lexer == nil {
+		lexer = lexers.Analyse(src)
+	}
+	if lexer == nil {
+		lexer = lexers.Fallback
+	}
+	return highlightWith(lexer, src, t, base)
+}
+
+// highlightWith is the shared tokenise-and-fill pass behind Highlight and
+// HighlightLang. Split out so the two entry points can differ ONLY in how
+// they choose a lexer and what an unstyled rune falls back to — two copies
+// of the token walk would drift, and the grid it produces is what brace
+// matching reads to decide whether a bracket is inside a string.
+func highlightWith(lexer chroma.Lexer, src string, t theme.Theme, base tcell.Style) [][]tcell.Style {
 	// Coalesce merges adjacent same-type tokens; cheaper to scan in render.
 	lexer = chroma.Coalesce(lexer)
-
-	base := tcell.StyleDefault.Background(t.BG).Foreground(t.Text)
 
 	// Pre-allocate a styles grid sized to the source. We seed every cell
 	// with the base style so untokenised runes still render readably.

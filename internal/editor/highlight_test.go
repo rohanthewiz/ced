@@ -227,3 +227,52 @@ func TestHighlight_StringContentIsStringColored(t *testing.T) {
 		}
 	}
 }
+
+// TestHighlightLang_ResolvesByNameAndAliases pins the fenced-code entry
+// point: a markdown fence names its language as an info string, not as a
+// filename, and Chroma's registry is alias-aware — "golang" and "sh"
+// have to land on the same lexers "go" and "bash" do, or half the code
+// blocks in a real README render flat.
+func TestHighlightLang_ResolvesByNameAndAliases(t *testing.T) {
+	th := theme.Default()
+	base := tcell.StyleDefault.Background(th.MDCodeBG).Foreground(th.Text)
+	const src = "package main\n\nfunc main() {}\n"
+
+	want := HighlightLang("go", src, th, base)
+	for _, alias := range []string{"golang", "Go", "GO"} {
+		got := HighlightLang(alias, src, th, base)
+		if len(got) != len(want) {
+			t.Fatalf("%q produced %d lines, want %d", alias, len(got), len(want))
+		}
+		for i := range want {
+			for j := range want[i] {
+				if got[i][j] != want[i][j] {
+					t.Fatalf("%q disagreed with \"go\" at %d:%d", alias, i, j)
+				}
+			}
+		}
+	}
+	// "package" must not be painted in the base style, or the fence was
+	// never tokenised at all.
+	if want[0][0] == base {
+		t.Error("nothing was highlighted — the lexer did not resolve")
+	}
+}
+
+// TestHighlightLang_UnknownLanguageKeepsTheBaseBackground pins the
+// degradation that matters visually: a code block paints its own
+// background, so unstyled runes must inherit THAT rather than the
+// editor's, or every gap between two tokens punches a hole in the block.
+func TestHighlightLang_UnknownLanguageKeepsTheBaseBackground(t *testing.T) {
+	th := theme.Default()
+	base := tcell.StyleDefault.Background(th.MDCodeBG).Foreground(th.Text)
+	grid := HighlightLang("no-such-language-xyz", "one two three\n", th, base)
+	if len(grid) == 0 || len(grid[0]) == 0 {
+		t.Fatal("no styles produced")
+	}
+	for _, st := range grid[0] {
+		if _, bg, _ := st.Decompose(); bg != th.MDCodeBG {
+			t.Fatalf("a rune fell back to the wrong background: %v", bg)
+		}
+	}
+}

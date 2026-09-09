@@ -78,7 +78,11 @@ internal/editor/buffer.go     Position + Buffer ([]string lines), edit primitive
 internal/editor/tab.go        Tab: path, buffer, cursor, anchor, scroll, dirty state
 internal/editor/undo.go       Snapshot stack: coalescing, the byte budget, revert
 internal/editor/fileio.go     Open guards, line-ending/BOM round-trip, atomic save
-internal/editor/highlight.go  Chroma → []tcell.Style per line
+internal/editor/highlight.go  Chroma → []tcell.Style per line (+ HighlightLang, by name)
+internal/editor/markdown.go   Markdown VIEW: the per-tab flag, the row cache, the paint
+internal/editor/markdownblocks.go  Blocks → display rows: headings, code, lists, quotes, tables
+internal/editor/markdowninline.go  One line of markdown → styled spans
+internal/app/markdown.go      Preview toggle, its surfaces, and the pane's four differences
 internal/editor/syntax.go     Re-lex settle policy + the style-grid patch
 internal/app/syntax.go        The settle timer that wakes the loop for the re-lex
 internal/app/tabbar.go        Tab strip: scroll, overflow button, switching
@@ -610,6 +614,90 @@ between them. House rules:
   menuLayout runs predicates every frame the menu is open, and "put the
   cursor on a bracket first" is a better answer than a dimmed row that
   cannot say it — the terminal-locations trade.
+
+### Markdown viewer (editor/markdown*.go + app/markdown.go)
+The same .md buffer drawn as a formatted document instead of as source.
+Esc-v, the ≡ **View** row, the status bar's `preview` segment. House
+rules:
+
+- **IT IS A VIEW, NOT A MODE.** `Tab.mdView` is a flag beside the
+  buffer, deliberately not a second `Mode` like the image viewer's: an
+  image tab has no text to go back to, so imageMode short-circuits every
+  mutating method and Save refuses, while a previewed tab is an ordinary
+  editable file that is being LOOKED at differently for a moment. The
+  buffer, the undo history, the dirty flag, the caret, the find state,
+  auto-save, the LSP sync and the git gutter all keep running underneath,
+  and `TestSetMarkdownView_LeavesTheBufferAlone` is what pins that — a
+  rendering change that quietly edited would be the worst bug this
+  feature could have, and the only surface it would show on is a diff
+  somebody reads later.
+- **MDScroll is its own counter.** A display row is not a buffer line —
+  a paragraph becomes several, a heading gains a rule, a fence loses its
+  markers — so borrowing `ScrollY` would let scrolling the preview
+  silently rewrite the position the source view is restored to. Restoring
+  the view the user left is the whole point of a toggle.
+- **The rows are DERIVED and memoized on (EditRev, width)**, the chat
+  transcript's `chatRows` shape: the model is the text, the rows are a
+  function of it, so a resize re-flows for free and an edit invalidates
+  by itself. A theme switch has to invalidate EXPLICITLY (`restyleTabs`
+  calls `InvalidateMarkdown`) because the rows carry resolved
+  `tcell.Style`s — they are the second cache of theme-derived color in
+  the editor, and `Tab.Styles`' rule applies to them.
+- **`MarkdownRows` is exported because DRAW AND HIT-TESTING SHARE IT**
+  (the btnRect rule). Scrolling, the double-click's row→line mapping and
+  the overflow markers' counts all ask through it at
+  `MDContentWidth(paneW)`, so none of the four can disagree with what is
+  on screen.
+- **EVERY ROW NAMES ITS SOURCE LINE**, which is what turns the preview
+  from a picture into a place. A synthesized row (a heading's rule, a
+  table border, a paragraph's continuation) carries -1 and means the
+  nearest real row above it, so a double-click anywhere lands somewhere
+  honest. That property is also why the walk is FLAT — a document tree
+  would buy nesting only the block quote needs, and it recurses into a
+  fresh renderer instead.
+- **Keys are swallowed with navigation carved out.** Dropping every key
+  (the image tab's rule) would make the preview unscrollable from a
+  keyboard, which on a terminal that eats clicks means unreadable;
+  passing them through would type into a buffer with no visible caret.
+  Leaders are dispatched far above this branch, so Esc-v gets the source
+  back and the whole ≡ menu stays reachable from inside a preview.
+- **Prose WORD-wraps, code HARD-wraps** — the chat transcript's split,
+  and here it is load-bearing twice: a code line's columns are
+  meaningful, and tabs are EXPANDED at row-build time because the
+  preview has no tab-stop pass under it the way `Tab.Render` does.
+- **A fence is highlighted through `HighlightLang`**, one Chroma pass
+  for the whole block (the lexer is stateful — a string literal spans
+  lines, and per-line calls would mis-color every multi-line construct).
+  That is the reason this renderer lives in package editor at all rather
+  than in an `internal/markdown` beside internal/diff: the highlighter
+  is right here, and a flat code block is the single biggest thing a
+  markdown reader for PROGRAMMERS could get wrong.
+- **`md-code-bg` is a derived theme key, not a reuse of `line-hl`.**
+  That one is a few units off the background by design — right for a
+  one-row cursor wash, invisible across a twenty-row slab, which is
+  exactly the failure a "this is ambient, keep it quiet" choice
+  produces. The derivation steps toward `line` (the separator color) and
+  `TestDerive_MDCodeBGIsVisiblyOffTheBackground` holds every shipped
+  theme to a real step without letting it become a second selection.
+- **No config key and no "preview .md by default".** The toggle answers
+  "how do I want to look at THIS file right now", and the same file is a
+  document one minute and something you are editing the next. A
+  persisted default would also have to decide what happens when you type
+  into a preview, and "you cannot" is a bad thing to discover by
+  surprise on a file you opened to fix a typo in.
+- The ≡ row sits BELOW the terminal rows in **View**, not above them:
+  `TestMenuLayout_TerminalRowsAboveTheFold` pins those two on a short
+  window, and every row inserted before them spends that budget. It dims
+  on a non-markdown file rather than flashing a reason — there is
+  nothing to say beyond "this isn't one", which the filename already
+  says. Leader is **Esc-v** (View / preView), in the flat table rather
+  than a namespace because it is a one-key toggle on the file in front
+  of you, reached for mid-read.
+- It is a READER: nothing round-trips, reference-style links are left
+  literal (resolving one needs a definition table this does not build),
+  and raw HTML passes through muted. A link renders its TEXT, since a
+  terminal has nothing to click and repeating every href would double a
+  link-dense document to say what the source says one keystroke away.
 
 ### Find verbs — options, replace, go to line (editor/find.go,
 ### editor/replace.go, app/find.go, app/goto.go)

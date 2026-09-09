@@ -246,6 +246,18 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuToggleWordHighlight, enabled: alwaysTrue, labelFor: (*App).wordHighlightToggleLabel},
 			{shortcut: "esc `", action: (*App).menuToggleTerminal, enabled: alwaysTrue, labelFor: (*App).termToggleLabel},
 			{action: (*App).menuToggleTermDock, enabled: alwaysTrue, labelFor: (*App).termDockToggleLabel},
+			// The markdown preview is a VIEW of the active file, so it
+			// sits with the other rows that change how something is
+			// drawn rather than in Tab (which is about which file) or
+			// Code (which is about what a language server knows). It
+			// goes BELOW the terminal rows, not above them: those two
+			// are pinned above the fold on a short window by
+			// TestMenuLayout_TerminalRowsAboveTheFold, and every row
+			// inserted before them spends that budget. It dims on a
+			// non-markdown file — there is nothing to say beyond "this
+			// isn't one", which the filename already says.
+			{shortcut: "esc v", action: (*App).menuToggleMarkdownView,
+				enabled: (*App).hasMarkdownPreview, labelFor: (*App).markdownToggleLabel},
 			// The Find-all list's edge. Here rather than in Search
 			// because it's a layout preference like the terminal dock
 			// above it — and because it's the only keyboard path to the
@@ -2718,6 +2730,16 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	if tab.IsImage() {
 		return
 	}
+	// A markdown preview is read-only for the same reason, with
+	// navigation carved out: it is a document to scroll, not a caret to
+	// drive. Anything handleMarkdownKey does not claim is dropped rather
+	// than passed through — there is no visible caret to type at. The
+	// leader table ran well above this, so Esc-v still gets the source
+	// back and the ≡ menu is still reachable. See markdown.go.
+	if tab.IsMarkdownView() {
+		a.handleMarkdownKey(tab, ev)
+		return
+	}
 	extend := ev.Modifiers()&tcell.ModShift != 0
 
 	switch ev.Key() {
@@ -3240,6 +3262,12 @@ func (a *App) scrollAt(x, y, delta int) {
 	}
 	if y > 0 && y < a.height-1 {
 		if t := a.activeTabPtr(); t != nil {
+			// A preview scrolls by DISPLAY ROWS, which are not buffer
+			// lines — hence its own counter and its own clamp.
+			if t.IsMarkdownView() {
+				a.markdownScroll(t, delta)
+				return
+			}
 			t.Scroll(delta)
 		}
 	}
@@ -3337,6 +3365,12 @@ func (a *App) editorPress(x, y int) {
 	if tab == nil || tab.IsImage() {
 		return
 	}
+	// A preview has no caret to place; a double-click there means "edit
+	// this line" instead. See markdownPress.
+	if tab.IsMarkdownView() {
+		a.markdownPress(tab, x, y)
+		return
+	}
 	ex, ey, ew, eh := a.editorRect()
 	pos, ok := tab.HitTest(x-ex, y-ey, ew, eh)
 	if !ok {
@@ -3361,7 +3395,7 @@ func (a *App) editorPress(x, y int) {
 // drop the drag entirely.
 func (a *App) editorDrag(x, y int) {
 	tab := a.activeTabPtr()
-	if tab == nil || tab.IsImage() {
+	if tab == nil || tab.IsImage() || tab.IsMarkdownView() {
 		return
 	}
 	ex, ey, ew, eh := a.editorRect()

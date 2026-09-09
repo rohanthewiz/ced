@@ -62,6 +62,13 @@ The goals, in order:
   you get a heads-up; if the file is deleted, the tab is flagged once.
 - **Toggleable, draggable sidebar** — show/hide the file tree from the
   menu, or drag the splitter to resize it.
+- **Multi-select in the file tree** — click the left edge of a row (or
+  press `Space` with the tree focused) to tick it, then act on the whole
+  set at once: open, copy the paths, copy for paste, zip into one
+  archive, delete, or stage/unstage in git. The verb list is
+  ≡ **File ▸ Selected items…**, `A` in the focused tree, or the tree's
+  right-click menu; `*` ticks or clears every visible row, and
+  shift-click extends a run where your terminal reports it.
 - **Clipboard over SSH** — OSC 52, including a `tmux` passthrough so
   copy works from inside a tmux session on a remote host.
 - **Format on save** — opt-in per-project via `.ced/format.json`

@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -1410,4 +1411,271 @@ func TestRender_OverflowInputs(t *testing.T) {
 	if tr.ScrollY <= 0 {
 		t.Errorf("hidden above at the bottom = %d, want > 0", tr.ScrollY)
 	}
+}
+
+// -----------------------------------------------------------------------------
+// Multi-selection (marks)
+// -----------------------------------------------------------------------------
+
+// markTree builds a tree with three files and one expanded folder
+// holding two more — enough shape for range, prune and order tests.
+func markTree(t *testing.T) (*Tree, map[string]*Node) {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, rel := range []string{"a.txt", "b.txt", "c.txt", "sub/x.txt", "sub/y.txt"} {
+		if err := os.WriteFile(filepath.Join(root, rel), []byte("x"), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", rel, err)
+		}
+	}
+	tr, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	byName := map[string]*Node{}
+	var walk func(n *Node)
+	walk = func(n *Node) {
+		for _, c := range n.Children {
+			byName[c.Name] = c
+			if c.IsDir {
+				walk(c)
+			}
+		}
+	}
+	if sub := byName["sub"]; sub == nil {
+		// The folder sorts first, so expand it before indexing so its
+		// children are visible rows.
+		for _, c := range tr.Root.Children {
+			if c.IsDir {
+				tr.Toggle(c)
+			}
+		}
+	}
+	for _, c := range tr.Root.Children {
+		if c.IsDir && !c.Expanded {
+			tr.Toggle(c)
+		}
+	}
+	walk(tr.Root)
+	return tr, byName
+}
+
+// TestMarks_ToggleAndCount pins the basic set behaviour: a nil map is a
+// valid empty set, toggling adds then removes, and the root is never
+// markable (every verb a mark feeds refuses it, so a tick there could
+// only be a tick that does nothing).
+func TestMarks_ToggleAndCount(t *testing.T) {
+	tr, byName := markTree(t)
+	if tr.MarkCount() != 0 || tr.IsMarked(byName["a.txt"]) {
+		t.Fatalf("fresh tree should have no marks")
+	}
+	tr.ToggleMark(byName["a.txt"])
+	if !tr.IsMarked(byName["a.txt"]) || tr.MarkCount() != 1 {
+		t.Fatalf("toggle should mark: count=%d", tr.MarkCount())
+	}
+	tr.ToggleMark(byName["a.txt"])
+	if tr.IsMarked(byName["a.txt"]) || tr.MarkCount() != 0 {
+		t.Fatalf("second toggle should unmark: count=%d", tr.MarkCount())
+	}
+	tr.ToggleMark(tr.Root)
+	if tr.MarkCount() != 0 {
+		t.Fatalf("the project root must not be markable, count=%d", tr.MarkCount())
+	}
+}
+
+// TestMarks_MarkedNodesIsTreeOrder pins the ordering contract every
+// confirm body, flash and archive depends on: marked rows come back in
+// the order Render would draw them, not in map order (which Go
+// randomises) nor in the order they were ticked.
+func TestMarks_MarkedNodesIsTreeOrder(t *testing.T) {
+	tr, byName := markTree(t)
+	// Ticked back-to-front on purpose.
+	tr.SetMark(byName["c.txt"], true)
+	tr.SetMark(byName["a.txt"], true)
+	tr.SetMark(byName["x.txt"], true)
+
+	got := []string{}
+	for _, n := range tr.MarkedNodes() {
+		got = append(got, n.Name)
+	}
+	want := []string{"x.txt", "a.txt", "c.txt"} // sub/ sorts first, then files
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("MarkedNodes = %v, want %v", got, want)
+	}
+}
+
+// TestMarks_MarkedNodesSurvivesCollapse pins that folding a branch does
+// NOT drop the marks inside it: the rows are hidden, but the user placed
+// those ticks deliberately and the set is what the next verb acts on.
+func TestMarks_MarkedNodesSurvivesCollapse(t *testing.T) {
+	tr, byName := markTree(t)
+	tr.SetMark(byName["x.txt"], true)
+	sub := byName["sub"]
+	tr.Toggle(sub) // collapse
+	if sub.Expanded {
+		t.Fatal("sub should be collapsed")
+	}
+	if len(tr.MarkedNodes()) != 1 {
+		t.Fatalf("a folded mark must survive, got %d", len(tr.MarkedNodes()))
+	}
+}
+
+// TestMarks_RangeExtendsAndOnlyAdds pins MarkRange: it covers the whole
+// visible span between the anchor and the target, in either direction,
+// and never unmarks — a second extension must not destroy the set the
+// first one built.
+func TestMarks_RangeExtendsAndOnlyAdds(t *testing.T) {
+	tr, byName := markTree(t)
+	rows := tr.VisibleNodes()
+	if len(rows) < 5 {
+		t.Fatalf("expected at least 5 visible rows, got %d", len(rows))
+	}
+	tr.SetMark(rows[0], true) // anchor
+	tr.MarkRange(rows[3])
+	for i := 0; i <= 3; i++ {
+		if !tr.IsMarked(rows[i]) {
+			t.Fatalf("row %d (%s) should be in the range", i, rows[i].Name)
+		}
+	}
+	if tr.IsMarked(rows[4]) {
+		t.Fatalf("row 4 is past the range and must not be marked")
+	}
+	// Backwards from the same anchor, and additive.
+	before := tr.MarkCount()
+	tr.MarkRange(rows[1])
+	if tr.MarkCount() != before {
+		t.Fatalf("a backwards extension must not unmark: %d → %d", before, tr.MarkCount())
+	}
+	_ = byName
+}
+
+// TestMarks_RangeWithoutAnchorMarksOne pins the degradation: with no
+// usable anchor a range gesture behaves like a plain tick, which is the
+// right answer for a gesture that has no span to describe.
+func TestMarks_RangeWithoutAnchorMarksOne(t *testing.T) {
+	tr, byName := markTree(t)
+	tr.MarkRange(byName["b.txt"])
+	if tr.MarkCount() != 1 || !tr.IsMarked(byName["b.txt"]) {
+		t.Fatalf("anchorless range should mark exactly its target, count=%d", tr.MarkCount())
+	}
+}
+
+// TestMarks_VisibleAndChildren pins the two bulk helpers, both of which
+// are deliberately scoped to rows the user can SEE: MarkVisible covers
+// the current flattening, MarkChildren one folder's immediate entries.
+func TestMarks_VisibleAndChildren(t *testing.T) {
+	tr, byName := markTree(t)
+	tr.MarkVisible(true)
+	if got, want := tr.MarkCount(), len(tr.VisibleNodes()); got != want {
+		t.Fatalf("MarkVisible marked %d rows, want %d", got, want)
+	}
+	tr.MarkVisible(false)
+	if tr.MarkCount() != 0 {
+		t.Fatalf("MarkVisible(false) should clear, count=%d", tr.MarkCount())
+	}
+	tr.MarkChildren(byName["sub"], true)
+	if got := tr.MarkCount(); got != 2 {
+		t.Fatalf("MarkChildren marked %d, want 2 (sub's two files)", got)
+	}
+}
+
+// TestMarks_RefreshPrunesDeleted is the honesty test for the whole
+// feature: a file deleted on disk leaves the tree on the next refresh,
+// and its mark must leave with it — a stale tick would silently widen
+// the next bulk action (the git panel's pruning rule).
+func TestMarks_RefreshPrunesDeleted(t *testing.T) {
+	tr, byName := markTree(t)
+	tr.SetMark(byName["a.txt"], true)
+	tr.SetMark(byName["b.txt"], true)
+	if err := os.Remove(byName["a.txt"].Path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	tr.Refresh()
+	if tr.MarkCount() != 1 {
+		t.Fatalf("after refresh count = %d, want 1", tr.MarkCount())
+	}
+	if !tr.IsMarked(byName["b.txt"]) {
+		t.Fatal("the surviving file should stay marked")
+	}
+}
+
+// TestMarks_ClearDropsAnchor pins that clearing takes the anchor with
+// it: an anchor outliving its set would make the next range extend from
+// a row the user can no longer see.
+func TestMarks_ClearDropsAnchor(t *testing.T) {
+	tr, byName := markTree(t)
+	tr.SetMark(byName["a.txt"], true)
+	tr.ClearMarks()
+	if tr.markAnchor != nil || tr.Marked != nil {
+		t.Fatalf("ClearMarks should drop both the set and the anchor")
+	}
+	// With the anchor gone, a range is a plain tick again.
+	tr.MarkRange(byName["c.txt"])
+	if tr.MarkCount() != 1 {
+		t.Fatalf("post-clear range count = %d, want 1", tr.MarkCount())
+	}
+}
+
+// TestMarks_RenderPaintsTickAndHeaderCount pins the two visible halves:
+// the tick lands in the marked row's FIRST cell (the blank one every row
+// already opens with), and the count is annotated on the EXPLORER
+// header — the set's only always-visible surface.
+func TestMarks_RenderPaintsTickAndHeaderCount(t *testing.T) {
+	tr, byName := markTree(t)
+	tr.SetMark(byName["a.txt"], true)
+
+	const w, h = 30, 12
+	cells, cw := renderAndCollect(t, tr, w, h)
+
+	// Find the row a.txt was drawn on and check its first cell.
+	off, rows := tr.ListRows(h)
+	found := false
+	for row := off; row < off+rows; row++ {
+		text := rowText(cells, cw, row)
+		if !strings.Contains(text, "a.txt") {
+			continue
+		}
+		found = true
+		if got := cells[row*cw].Runes[0]; string(got) != markGlyph {
+			t.Fatalf("marked row's first cell = %q, want %q", got, markGlyph)
+		}
+	}
+	if !found {
+		t.Fatal("a.txt was not drawn")
+	}
+	if hdr := rowText(cells, cw, 0); !strings.Contains(hdr, "1 "+markGlyph) {
+		t.Fatalf("header = %q, want a %q count annotation", hdr, "1 "+markGlyph)
+	}
+}
+
+// TestMarks_TickCostsNoWidth pins the layout contract the feature turns
+// on: the tick borrows a cell it does not reserve, so marking a file can
+// never change ContentWidth — which is what the sidebar's auto-fit sizes
+// itself from. Were it otherwise, ticking a file would shift the
+// editor's columns.
+func TestMarks_TickCostsNoWidth(t *testing.T) {
+	tr, byName := markTree(t)
+	before := tr.ContentWidth()
+	tr.MarkVisible(true)
+	if after := tr.ContentWidth(); after != before {
+		t.Fatalf("ContentWidth changed with marks: %d → %d", before, after)
+	}
+	_ = byName
+}
+
+// TestMarks_NilSafe pins that every reader tolerates a nil Tree and a
+// nil mark map — the common case is an empty set, and the map is only
+// allocated on the first tick.
+func TestMarks_NilSafe(t *testing.T) {
+	var tr *Tree
+	if tr.MarkCount() != 0 || tr.IsMarked(nil) || tr.MarkedNodes() != nil {
+		t.Fatal("nil tree should read as an empty selection")
+	}
+	tr.ClearMarks()
+	tr.PruneMarks()
+	tr.MarkVisible(true)
+	tr.MarkRange(nil)
+	tr.SetMark(nil, true)
 }

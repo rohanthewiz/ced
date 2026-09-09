@@ -227,6 +227,48 @@ func (a *App) doDeletePath(path string) {
 	a.flash(fmt.Sprintf("Deleted %s", filepath.Base(path)))
 }
 
+// doDeletePaths removes a whole set (the tree's multi-selection),
+// closing every tab orphaned by any of them and refreshing the tree
+// once at the end.
+//
+// Deliberately NOT a loop over doDeletePath: that one flashes per file
+// and refreshes per file, so a ten-item delete would spend ten
+// workspace re-syncs and leave the user reading whichever flash landed
+// last. Here the failures are COLLECTED and reported together, because
+// which of the ten failed is the whole content of the answer.
+//
+// Deletion order is as given (tree order), and a failure does not stop
+// the rest: the paths are independent, and refusing to delete the
+// remaining nine because the first was read-only would be a worse
+// answer than doing what could be done and saying what could not.
+func (a *App) doDeletePaths(paths []string) {
+	var failed []string
+	done := 0
+	for _, p := range paths {
+		if err := deletePath(p); err != nil {
+			failed = append(failed, filepath.Base(p))
+			continue
+		}
+		done++
+		for i := len(a.tabs) - 1; i >= 0; i-- {
+			if tabPathRemoved(a.tabs[i].Path, p) {
+				a.closeTab(i)
+			}
+		}
+	}
+	a.workspaceChanged()
+	switch {
+	case len(failed) == 0 && done == 1:
+		a.flash(fmt.Sprintf("Deleted %s", filepath.Base(paths[0])))
+	case len(failed) == 0:
+		a.flash(fmt.Sprintf("Deleted %d items", done))
+	case done == 0:
+		a.flash("Delete failed: " + strings.Join(failed, ", "))
+	default:
+		a.flash(fmt.Sprintf("Deleted %d items; failed: %s", done, strings.Join(failed, ", ")))
+	}
+}
+
 // -----------------------------------------------------------------------------
 // Main menu actions: rename / delete the file backing the active tab.
 // -----------------------------------------------------------------------------

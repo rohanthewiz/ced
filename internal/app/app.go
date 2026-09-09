@@ -601,6 +601,19 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuZipFolder, enabled: alwaysTrue, labelFor: (*App).zipFolderLabel},
 			{label: "Copy relative path", action: (*App).menuCopyRelativePath, enabled: (*App).hasFileTab},
 			{label: "Copy absolute path", action: (*App).menuCopyAbsolutePath, enabled: (*App).hasFileTab},
+			// The file tree's multi-selection (treemarks.go). A File row
+			// because every verb behind it is a file verb, and the path
+			// that survives a terminal which swallows right-click — the
+			// project's rule that every file action lives in the main
+			// menu first. The label carries the count, so the menu is
+			// also where a user learns they still have six rows ticked
+			// from ten minutes ago; the tree's own header count is
+			// invisible while the sidebar is hidden. Always enabled: the
+			// picker falls back to the cursor's row, and its refusal
+			// names the gesture that builds a set, which a dimmed row
+			// could not.
+			{action: (*App).menuTreeMarkActions, enabled: alwaysTrue,
+				labelFor: (*App).treeMarkActionsLabel},
 			// Running the open file in the terminal panel (runexec.go).
 			// A File row rather than a View one — View holds the panel's
 			// toggles, this one is a verb about the FILE, and it belongs
@@ -932,10 +945,16 @@ type App struct {
 	overflowTip overflowTipState
 
 	clipBuf string
-	// fileClipPath is the absolute path armed by a Copy file/folder
-	// action; paste duplicates it under a collision-free name. Empty
+	// fileClipPaths are the absolute paths armed by a Copy file/folder
+	// action; paste duplicates each under a collision-free name. Empty
 	// means nothing has been copied this session. See copypaste.go.
-	fileClipPath string
+	//
+	// A SLICE rather than one path because the file tree's
+	// multi-selection can copy a whole set (treemarks.go) — and because
+	// a second, set-shaped clipboard beside a single-path one would give
+	// Cmd+V two things to mean. The one-file case is just a slice of
+	// one, so every existing surface reads unchanged.
+	fileClipPaths []string
 	// clipKind records which clipboard (text selection vs file) was
 	// written most recently so Cmd+V pastes the right one —
 	// last-write-wins, like a system clipboard.
@@ -3130,7 +3149,7 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		case a.chatSplitterX() >= 0 && x == a.chatSplitterX():
 			a.dragMode = "chatsplit"
 		case a.inSidebarBlock(x):
-			a.sidebarClick(x, y)
+			a.sidebarPress(x, y, ev.Modifiers()&tcell.ModShift != 0)
 		// The chat strip spans y==0 like a left-docked terminal, so its
 		// hit-test also runs before the tab-bar row case.
 		case a.chatPanelContains(x, y):
@@ -3313,6 +3332,28 @@ func (a *App) tryTreeContextClick(x, y int) bool {
 	}
 	a.openTreeContext(n, x, y)
 	return true
+}
+
+// sidebarPress is the sidebar's press entry point: the multi-selection
+// claims the gesture first (a click in a row's mark gutter, or a
+// shift-click extending a range — see treemarks.go), and everything it
+// does not claim falls through to the ordinary open/toggle click.
+//
+// It sits in front of sidebarClick rather than inside it so the marking
+// layer stays entirely in treemarks.go, and so the plain click path — the
+// one every existing test and every other caller uses — keeps its
+// two-argument shape.
+//
+// The shift flag comes from THIS event's modifiers only, deliberately not
+// through the modifierStickyWindow bridge the wheel handlers use: that
+// window exists because terminals strip the modifier off a wheel event,
+// and borrowing it here would make a plain click landing just after a
+// shift+wheel silently extend a range.
+func (a *App) sidebarPress(x, y int, shift bool) {
+	if a.treeMarkPress(x, y, shift) {
+		return
+	}
+	a.sidebarClick(x, y)
 }
 
 // sidebarClick toggles a directory or opens a file when the user clicks a

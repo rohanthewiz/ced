@@ -165,7 +165,9 @@ internal/app/gitstatusreport.go git's own `git status` report, on demand, in the
 internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PTY)
 internal/app/runexec.go       Run an executable: dir picker → staged line in the terminal
 internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
-internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render
+internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render,
+                              the mark set (paths, pruned by Refresh, one borrowed cell)
+internal/app/treemarks.go     Tree multi-selection: the gestures, the Actions picker, the verbs
 internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, locked by a drag
 internal/app/overflow.go      The ▴/▾ overflow markers (editor, both git panels, tree),
                               what is off-screen each way, and the hover popup
@@ -2952,6 +2954,109 @@ A drag is detected when a press lands at exactly `x == splitterX()`.
 Min widths: `minSidebarWidth = 18`, `minEditorAfterDrag = 40`. Don't
 let the editor shrink below that. A drag that MOVES the splitter also
 turns auto-fit off — see the next section for why.
+
+### Tree multi-selection (filetree's marks + app/treemarks.go)
+Tick several rows in the file tree, then run one verb over all of them.
+The tree could only ever act on ONE thing — the row you right-clicked or
+the row the cursor sat on — which made "delete these six generated
+files" six confirmations and "zip this handful" impossible. House rules:
+
+- **IT IS THE GIT PANEL'S CHECKBOX, ONE CELL WIDE.** That tick is a
+  multi-selection feeding an `Actions ▾` picker rather than a stage
+  toggle, and everything that follows from it applies here: targets fall
+  back to the row under the cursor when nothing is ticked
+  (`treeMarkTargets`, so the picker is useful on its first open), the
+  verbs live behind a picker rather than a bespoke dropdown, rows that
+  would no-op are omitted rather than dimmed, and the set is pruned on
+  every refresh — a mark for a file that left the tree would silently
+  widen the next bulk action.
+- **THE TICK BORROWS A CELL; IT RESERVES NOTHING.** Every row already
+  opens with a blank column (`nodeRowSegments` starts with a space), so
+  `paintMark` stamps the `✓` there AFTER the row's own text. That is the
+  overflow markers' shared-column argument, and here it is load-bearing
+  twice over: `nodeRowSegments` is also ContentWidth's measurer, so a
+  wider prefix would tie the sidebar's auto-fit width to the
+  multi-selection and shift the EDITOR's columns every time a file was
+  ticked. `TestMarks_TickCostsNoWidth` is what pins it. The glyph is the
+  git panel's review `✓` rather than its `[x]` checkbox because one cell
+  is all there is, and the tree has no competing "I have read this"
+  notion for it to collide with.
+- **The set is keyed by PATH, not by `*Node`.** The identity-preserving
+  refresh only preserves identity for SURVIVORS; a folder rewritten on
+  disk hands its rows fresh pointers, and a set keyed on the old ones
+  would empty itself silently. `Marked` is nil in the common case, so
+  every reader tolerates a nil map.
+- **`MarkedNodes` walks the LOADED tree, in tree order.** Order matters
+  because it is what confirm bodies, flashes and archive entries read in,
+  and a Go map's iteration order would give two runs of one delete two
+  different bodies. Walking the loaded tree rather than the visible rows
+  is what makes a mark survive FOLDING: the rows are hidden, but the user
+  placed those ticks deliberately.
+- **Bulk marking is scoped to what the user can SEE.** `MarkVisible`
+  covers the current flattening and `MarkChildren` one folder's immediate
+  entries; neither recurses, and the "select contents of…" row refuses an
+  unexpanded folder. A set nobody can see is a set nobody can check
+  before deleting it — which is also why the delete confirmation LISTS
+  the names instead of only counting them (the one place this differs
+  from the single-file dialog it grew out of), and why the count is
+  annotated on the EXPLORER header, the set's only always-visible
+  surface.
+- **The range gesture is a BONUS LAYER**, in metakeys.go's sense: several
+  terminals keep shift-click for their own text selection, so an
+  unreported shift degrades to a plain toggle and every set reachable
+  with it is reachable without it (`*`, the picker's select-all row,
+  one gutter click per row). `MarkRange` only ever ADDS — a second
+  extension that unmarked what it swept over would destroy the set the
+  first one built — and the anchor stays at the range's fixed end.
+- **Four surfaces, and each earns its place.** The gutter click is
+  primary (mouse-first); `Space` / `*` / `A` are its keyboard twins in
+  the focused tree; the right-click **Select** row is the DISCOVERY
+  surface, because a one-cell tick is close to invisible as an
+  affordance and without a named row a mouse user could never learn the
+  gutter is clickable; the ≡ **File** row is the path that survives a
+  terminal which swallows right-click, and its label carries the count
+  because the header's is invisible while the sidebar is hidden. No
+  leader key — the flat table is out of mnemonic letters, and `A` inside
+  the focused tree is the accelerator.
+- **The verbs REUSE the single-file paths, widened.** Nothing here owns
+  an implementation: `doDeletePaths` is deletePath plus one collected
+  report (a loop over `doDeletePath` would spend a workspace re-sync per
+  file and leave the user reading whichever flash landed last),
+  `createZipMulti` is `addZipSource` — the spine factored out of
+  `createZip` — over several sources, and Copy arms the SAME file
+  clipboard the ≡ Paste row and Cmd+V already read, which is why there
+  is no paste verb in the picker at all.
+- **A multi-source archive's entries are relative to the set's common
+  parent**, not to each source's basename: a set can hold
+  `app/main.go` beside `cmd/main.go`, and rooted at basenames both
+  would be stored as `main.go` and extraction would clobber one with
+  the other. `commonParentDir` works on path SEGMENTS, because a common
+  string prefix is not a common directory (`/a/foo` and `/a/foobar`).
+  The archive lands INSIDE that parent rather than beside it — zipDest's
+  sibling rule breaks down when the parent is the project root, whose
+  sibling is outside the tree.
+- **A set paste is PLANNED before it copies**, and the plan RESERVES
+  names (`uniquePastePathExcept`). "Is this name free?" is answered
+  against the filesystem and nothing is written until the plan is
+  complete, so two sources called `same.txt` would each find the
+  destination unoccupied and both claim it — the second copy then
+  failing on O_EXCL after the first had landed.
+- **Partial sets are reported, never silently narrowed.** A set ticked
+  minutes ago can legitimately have lost a file to a git checkout, so
+  Copy drops the missing and says how many, Delete says which names
+  failed, and Open counts what actually landed from the TAB LIST rather
+  than from the loop (openFile refuses a binary or oversized file with
+  its own flash). The one refusal that is all-or-nothing is the archive:
+  a zip quietly missing a file it was asked to hold is the single wrong
+  answer a backup can give.
+- **Discard is deliberately NOT a row.** Staging from the tree is two
+  lines through `runGitCmd` and genuinely useful; reverting a file's
+  contents is a loss the git panel shows you the diff of first, and
+  offering it from a surface that cannot render what would be lost is
+  the one git verb this picker should not carry.
+- **A delete clears the set explicitly** rather than leaving it to
+  Refresh's pruning: a path that FAILED to delete is still in the tree,
+  so it would stay ticked and ride along into the next action.
 
 ### File-tree auto-fit (app/treeautofit.go + filetree's ContentWidth)
 The sidebar sizes itself to the tree's longest row, so expanding

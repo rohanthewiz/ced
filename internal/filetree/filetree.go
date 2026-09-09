@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -24,6 +25,12 @@ import (
 	"github.com/rohanthewiz/ced/internal/icons"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
+
+// markGlyph is the tick a marked row wears, and the unit the header's
+// count is written in. Single-width per the project's marker rule — a
+// double-width emoji would overrun the one cell this feature is allowed
+// to borrow.
+const markGlyph = "\u2713"
 
 // Node is a single entry in the file tree. Directories also carry their
 // children (loaded lazily on first expansion); files carry only their path.
@@ -112,6 +119,29 @@ type Tree struct {
 	// time the Selected row renders with its highlight — a cursor you
 	// can't move shouldn't look like one.
 	Focused bool
+
+	// Marked is the multi-selection: absolute paths of rows the user
+	// has ticked so one verb can act on all of them (app/treemarks.go).
+	// Deliberately keyed by PATH rather than by *Node, because the
+	// identity-preserving refresh is only identity-preserving for
+	// survivors — a folder rewritten on disk hands its rows fresh Node
+	// pointers, and a set keyed on the old ones would empty itself
+	// silently. nil means "nothing marked", the common case, so every
+	// reader must tolerate a nil map.
+	//
+	// Distinct from Selected in the way the git panel's checkbox is
+	// distinct from its highlighted row: Selected is a CURSOR that
+	// wanders as the arrow keys move, Marked is a STATEMENT about which
+	// rows the next action covers.
+	Marked map[string]bool
+
+	// markAnchor is the last row a mark gesture landed on — the fixed
+	// end of a range extension (shift-click, MarkRange). Held as a
+	// *Node rather than a path because a range is a span of VISIBLE
+	// rows, which is a fact about the current flattening; an anchor
+	// whose row folded away has no span to define and is treated as
+	// absent.
+	markAnchor *Node
 }
 
 // New creates a tree rooted at root and pre-loads its top-level children so
@@ -209,8 +239,15 @@ func (n *Node) reload() error {
 // least once (i.e. anywhere the user has previously expanded). Surviving
 // entries keep their Node pointers so deeper Expanded state is preserved;
 // new files appear, deleted files vanish.
+//
+// Pruning the multi-selection is done HERE rather than at the app's call
+// sites, because this is the single funnel every tree reload comes
+// through and a forgotten prune is invisible: the mark for a file that
+// left the tree would silently widen the next bulk action (the git
+// panel's tick-pruning rule, and the same failure mode).
 func (t *Tree) Refresh() {
 	refreshNode(t.Root)
+	t.PruneMarks()
 }
 
 // refreshNode is Tree.Refresh's recursive worker. It reloads only Loaded
@@ -285,6 +322,20 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	// rows follow, so the highlight is honest.
 	headerStyle := tcell.StyleDefault.Background(bg).Foreground(th.Muted).Bold(true)
 	drawString(scr, x, y, w, " EXPLORER", headerStyle)
+	// The mark count rides the EXPLORER row, right-aligned. It is the
+	// multi-selection's only ALWAYS-visible surface: marks survive
+	// scrolling and folding, so without a count here a user could run a
+	// delete over rows that are nowhere on screen. Nothing is drawn when
+	// the set is empty, and auto-fit makes no allowance for it (the
+	// overflow markers' rule — an allowance would be blank air on every
+	// other row of the tree).
+	if n := t.MarkCount(); n > 0 {
+		label := strconv.Itoa(n) + " " + markGlyph
+		if col := w - runeLen(label) - 1; col > runeLen(" EXPLORER") {
+			drawString(scr, x+col, y, w-col,
+				label, tcell.StyleDefault.Background(bg).Foreground(th.Accent).Bold(true))
+		}
+	}
 	rootActive := t.ActiveFolder == "" || t.ActiveFolder == t.Root.Path
 	rootStyle := tcell.StyleDefault.Background(bg).Foreground(th.Text).Bold(true)
 	if rootActive {
@@ -316,7 +367,7 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		activeFile := !item.Node.IsDir && t.ActiveFile != "" && item.Node.Path == t.ActiveFile
 		dirty := t.isDirty(item.Node)
 		selected := t.Focused && t.Selected != nil && item.Node == t.Selected
-		drawNodeRow(scr, th, x, listTop+row, w, item, active, activeFile, dirty, t.IconsEnabled, t.ExecMarks, selected)
+		drawNodeRow(scr, th, x, listTop+row, w, item, active, activeFile, dirty, t.IconsEnabled, t.ExecMarks, selected, t.IsMarked(item.Node))
 		visible = append(visible, item.Node)
 	}
 	t.visible = visible
@@ -368,7 +419,7 @@ func (t *Tree) isDirty(n *Node) bool {
 // styling. That's the visual cue you find in nvim-tree and friends:
 // a quick eye-scan picks out Go from Ruby from Markdown without
 // reading any text.
-func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, active, activeFile, dirty, withIcons, execMarks, selected bool) {
+func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, active, activeFile, dirty, withIcons, execMarks, selected, marked bool) {
 	bg := th.SidebarBG
 	// The keyboard cursor paints the whole row on the Selection color —
 	// the same highlight every list in the editor uses — so the fg
@@ -414,8 +465,13 @@ func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, a
 
 	prefix, glyph, tail := nodeRowSegments(item, withIcons, execMarks)
 
+	// The multi-selection's tick (paintMark, below) is a `✓` — the git
+	// panel's review mark rather than its `[x]` checkbox, because one
+	// cell is all there is here and the tree has no competing "I have
+	// read this" notion for the glyph to collide with.
 	if glyph == "" {
 		drawString(scr, x, y, w, prefix+tail, rowStyle)
+		paintMark(scr, th, x, y, bg, marked)
 		return
 	}
 
@@ -433,6 +489,26 @@ func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, a
 	drawString(scr, x+px, y, w-px, glyph, glyphStyle)
 	gx := runeLen(glyph)
 	drawString(scr, x+px+gx, y, w-px-gx, tail, rowStyle)
+	paintMark(scr, th, x, y, bg, marked)
+}
+
+// paintMark stamps the multi-selection tick into the row's first cell,
+// keeping whatever background the row was painted on (the plain sidebar
+// fill, or the cursor's Selection wash) so the tick never punches a hole
+// in the highlight — the overflow markers' rule.
+//
+// It runs AFTER the row's own text for the reason the tick is not part of
+// nodeRowSegments at all: that function is also ContentWidth's measurer,
+// so a wider prefix would tie the sidebar's auto-fit width to the
+// multi-selection and shift the editor's columns every time a file was
+// ticked. Every row already opens with a blank cell, so the tick borrows
+// one it does not have to reserve.
+func paintMark(scr tcell.Screen, th theme.Theme, x, y int, bg tcell.Color, marked bool) {
+	if !marked {
+		return
+	}
+	scr.SetContent(x, y, []rune(markGlyph)[0], nil,
+		tcell.StyleDefault.Background(bg).Foreground(th.Accent).Bold(true))
 }
 
 // nodeRowSegments builds the three text chunks a row is painted from: the
@@ -751,4 +827,208 @@ func (t *Tree) EnsureSelectedVisible(viewH int) {
 // exported face of selectedIndex for the app's keyboard layer.
 func (t *Tree) SelectedIndex(rows []*Node) int {
 	return t.selectedIndex(rows)
+}
+
+// -----------------------------------------------------------------------------
+// Multi-selection (marks)
+// -----------------------------------------------------------------------------
+//
+// The tree could always act on ONE thing: the row you clicked, or the
+// row the cursor sat on. Marks are the set version of that — tick
+// several rows, then run one verb over all of them (app/treemarks.go
+// owns the verbs). The mechanics live here, the policy lives in the app:
+// this file only knows how to hold a set of paths, keep it honest across
+// a refresh, and paint the tick.
+//
+// Two properties are load-bearing:
+//
+//   - A mark costs the layout NOTHING. The tick is painted into the
+//     blank leading cell every row already has (see drawNodeRow), so
+//     marking a file cannot re-flow the sidebar's width or shift the
+//     editor's columns — the overflow markers' shared-column argument.
+//   - The set is a set of PATHS, so it survives the identity-preserving
+//     refresh whether or not a given Node pointer does.
+
+// IsMarked reports whether n is in the multi-selection.
+func (t *Tree) IsMarked(n *Node) bool {
+	if t == nil || n == nil || t.Marked == nil {
+		return false
+	}
+	return t.Marked[n.Path]
+}
+
+// MarkCount is how many rows are currently marked — what the header
+// annotation and every "N files" label are built from.
+func (t *Tree) MarkCount() int {
+	if t == nil {
+		return 0
+	}
+	return len(t.Marked)
+}
+
+// SetMark adds or removes n from the multi-selection and records it as
+// the anchor for a later range extension. The root is never markable:
+// every verb a mark feeds (delete, copy, zip a set) either refuses the
+// project root outright or means nothing applied to it, and a tick that
+// silently does nothing is worse than no tick.
+func (t *Tree) SetMark(n *Node, on bool) {
+	if t == nil || n == nil || n == t.Root {
+		return
+	}
+	if on {
+		if t.Marked == nil {
+			t.Marked = make(map[string]bool)
+		}
+		t.Marked[n.Path] = true
+	} else {
+		delete(t.Marked, n.Path)
+	}
+	t.markAnchor = n
+}
+
+// ToggleMark flips n's membership — the gesture behind a gutter click
+// and the Space key.
+func (t *Tree) ToggleMark(n *Node) {
+	t.SetMark(n, !t.IsMarked(n))
+}
+
+// MarkRange marks every visible row between the anchor and to,
+// inclusive. It only ever ADDS: a range gesture means "these as well",
+// and an extension that unmarked part of what it swept over would make
+// a second shift-click destroy the set the first one built.
+//
+// With no usable anchor (nothing marked yet, or the anchor's row folded
+// away since) it degrades to marking `to` alone — the same thing a
+// plain tick would have done, which is the right answer for a gesture
+// that has no span to describe.
+func (t *Tree) MarkRange(to *Node) {
+	if t == nil || to == nil {
+		return
+	}
+	rows := t.VisibleNodes()
+	from := t.markAnchor
+	ai, bi := -1, -1
+	for i, n := range rows {
+		if n == from {
+			ai = i
+		}
+		if n == to {
+			bi = i
+		}
+	}
+	if bi < 0 {
+		return
+	}
+	if ai < 0 {
+		t.SetMark(to, true)
+		return
+	}
+	if ai > bi {
+		ai, bi = bi, ai
+	}
+	for i := ai; i <= bi; i++ {
+		t.SetMark(rows[i], true)
+	}
+	// The anchor stays where the range STARTED, so a third click keeps
+	// extending from the same fixed end rather than walking it forward.
+	t.markAnchor = from
+}
+
+// MarkVisible marks (on) or unmarks (off) every currently visible row.
+// Scoped to what is VISIBLE, not to the whole tree: the tree is lazy and
+// mostly unexpanded, so "everything" would be a set the user cannot see
+// and therefore cannot check before running a delete over it.
+func (t *Tree) MarkVisible(on bool) {
+	if t == nil {
+		return
+	}
+	for _, n := range t.VisibleNodes() {
+		t.SetMark(n, on)
+	}
+}
+
+// MarkChildren marks or unmarks dir's immediate children — the "tick
+// this folder's contents" gesture. Shallow on purpose: a recursive
+// version would tick rows inside collapsed branches, which is the same
+// invisible-set problem MarkVisible avoids.
+func (t *Tree) MarkChildren(dir *Node, on bool) {
+	if t == nil || dir == nil || !dir.IsDir {
+		return
+	}
+	for _, c := range dir.Children {
+		t.SetMark(c, on)
+	}
+}
+
+// ClearMarks empties the multi-selection and drops the anchor with it —
+// an anchor outliving its set would make the next range extend from
+// somewhere the user can no longer see.
+func (t *Tree) ClearMarks() {
+	if t == nil {
+		return
+	}
+	t.Marked = nil
+	t.markAnchor = nil
+}
+
+// MarkedNodes returns the marked rows in tree order — the order Render
+// would draw them in if every branch were expanded — so a confirmation
+// body, a flash and an archive's entries all read top-down.
+//
+// It walks the LOADED tree rather than the visible rows: collapsing a
+// folder hides its rows but keeps its children, and a mark the user
+// placed before folding is still a target they meant to name.
+func (t *Tree) MarkedNodes() []*Node {
+	if t == nil || t.Root == nil || len(t.Marked) == 0 {
+		return nil
+	}
+	var out []*Node
+	var walk func(n *Node)
+	walk = func(n *Node) {
+		for _, c := range n.Children {
+			if t.Marked[c.Path] {
+				out = append(out, c)
+			}
+			if c.IsDir {
+				walk(c)
+			}
+		}
+	}
+	walk(t.Root)
+	return out
+}
+
+// PruneMarks drops marks whose paths are no longer anywhere in the
+// loaded tree — a file deleted on disk, or one whose folder was renamed
+// out from under it. Called by Refresh; see there for why it isn't left
+// to the caller.
+//
+// A mark under a directory the user has never expanded cannot exist
+// (marks are only placed on rows), so walking the loaded tree is a
+// complete existence test rather than an approximation.
+func (t *Tree) PruneMarks() {
+	if t == nil || len(t.Marked) == 0 {
+		return
+	}
+	alive := make(map[string]bool, len(t.Marked))
+	var walk func(n *Node)
+	walk = func(n *Node) {
+		for _, c := range n.Children {
+			if t.Marked[c.Path] {
+				alive[c.Path] = true
+			}
+			if c.IsDir {
+				walk(c)
+			}
+		}
+	}
+	walk(t.Root)
+	if len(alive) == len(t.Marked) {
+		return
+	}
+	if len(alive) == 0 {
+		t.ClearMarks()
+		return
+	}
+	t.Marked = alive
 }

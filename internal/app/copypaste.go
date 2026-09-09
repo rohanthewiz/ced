@@ -52,16 +52,19 @@ type clipboardKind int
 const (
 	clipNone clipboardKind = iota
 	clipText               // copySelection / cutSelection wrote clipBuf
-	clipFile               // copyToFileClip armed fileClipPath
+	clipFile               // copyToFileClip armed fileClipPaths
 )
 
 // pasteDoneEvent is posted by the paste goroutine when the copy is
 // finished (or failed). Carries the destination so the success flash
-// can name the file or folder that appeared.
+// can name the file or folder that appeared, plus how many items the
+// paste covered — a set's flash says "Pasted 4 items", and the first
+// destination alone would under-report it.
 type pasteDoneEvent struct {
-	when time.Time
-	dest string
-	err  error
+	when  time.Time
+	dest  string
+	count int
+	err   error
 }
 
 // When satisfies the tcell.Event interface.
@@ -142,8 +145,22 @@ func copyTree(src, dst string) error {
 // would leave an empty stem, and "my.dir copy" reads better than
 // "my copy.dir" for a folder.
 func uniquePastePath(dir, base string, isDir bool) string {
+	return uniquePastePathExcept(dir, base, isDir, nil)
+}
+
+// uniquePastePathExcept is uniquePastePath with a set of names already
+// RESERVED by this same paste — the multi-source case.
+//
+// It exists because "is this name free?" is answered against the
+// filesystem, and a set is planned before any of it is written: two
+// selected files both called same.txt would each find dest/same.txt
+// unoccupied and both claim it, and the second copy would then fail on
+// O_EXCL after the first had already landed. Planning is the only place
+// that can see the collision, so the reservation has to live here rather
+// than in the copy.
+func uniquePastePathExcept(dir, base string, isDir bool, taken map[string]bool) string {
 	cand := filepath.Join(dir, base)
-	if _, err := os.Lstat(cand); err != nil {
+	if _, err := os.Lstat(cand); err != nil && !taken[cand] {
 		return cand
 	}
 	ext := filepath.Ext(base)
@@ -157,7 +174,7 @@ func uniquePastePath(dir, base string, isDir bool) string {
 			name = fmt.Sprintf("%s copy %d%s", stem, n, ext)
 		}
 		cand = filepath.Join(dir, name)
-		if _, err := os.Lstat(cand); err != nil {
+		if _, err := os.Lstat(cand); err != nil && !taken[cand] {
 			return cand
 		}
 	}
@@ -185,20 +202,59 @@ func pasteIntoOwnSubtree(src, destDir string) bool {
 // yet — paste reads the source at paste time, so edits made between
 // Copy and Paste are included, matching how Finder's Cmd+C behaves.
 func (a *App) copyToFileClip(path string) {
-	if _, err := os.Lstat(path); err != nil {
-		a.flash(fmt.Sprintf("Copy failed: %s no longer exists", filepath.Base(path)))
+	a.copyPathsToFileClip([]string{path})
+}
+
+// copyPathsToFileClip is the single write path for the file clipboard,
+// arming it with a whole set (the tree's multi-selection) or with one
+// path via copyToFileClip above.
+//
+// Sources that no longer exist are dropped rather than refusing the
+// whole gesture: a set the user ticked minutes ago can legitimately have
+// lost a file to a git checkout or a shell command, and copying the four
+// that are still there beats copying nothing. A refusal is reserved for
+// the case where NOTHING survived, which is the only one the user has to
+// act on. Existence is re-checked at paste time regardless — this pass
+// is about what the flash can honestly claim.
+func (a *App) copyPathsToFileClip(paths []string) {
+	live := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if _, err := os.Lstat(p); err == nil {
+			live = append(live, p)
+		}
+	}
+	if len(live) == 0 {
+		switch len(paths) {
+		case 0:
+			a.flash("Nothing to copy")
+		case 1:
+			a.flash(fmt.Sprintf("Copy failed: %s no longer exists", filepath.Base(paths[0])))
+		default:
+			a.flash("Copy failed: none of the selected items still exist")
+		}
 		return
 	}
-	a.fileClipPath = path
+	a.fileClipPaths = live
 	a.clipKind = clipFile
-	a.flash(fmt.Sprintf("Copied %s — Paste to duplicate", filepath.Base(path)))
+	a.flash(fmt.Sprintf("Copied %s — Paste to duplicate", fileClipLabel(live)))
+}
+
+// fileClipLabel names a clipboard set for a flash or a menu row: the
+// basename for one item, a count otherwise. One helper so "Copied
+// main.go" and "Copied 4 items" cannot drift into two phrasings (the
+// git panel's gitPanelTargetLabel rule).
+func fileClipLabel(paths []string) string {
+	if len(paths) == 1 {
+		return filepath.Base(paths[0])
+	}
+	return itoa(len(paths)) + " items"
 }
 
 // hasFileClip is the menu predicate for the Paste row: true when a
 // file or folder has been copied this session. Staleness (source
 // deleted after Copy) is caught at paste time with a specific flash
 // rather than silently disabling the row.
-func (a *App) hasFileClip() bool { return a.fileClipPath != "" }
+func (a *App) hasFileClip() bool { return len(a.fileClipPaths) > 0 }
 
 // pasteTargetDir resolves where a menu / Cmd+V paste should land: the
 // active folder when it still exists, else the project root. Resolved
@@ -225,42 +281,79 @@ func (a *App) pasteTargetDir() string {
 // main loop so the user gets an immediate, specific flash instead of
 // an async failure.
 func (a *App) startPaste(destDir string) {
-	src := a.fileClipPath
-	if src == "" {
+	if len(a.fileClipPaths) == 0 {
 		a.flash("Nothing to paste — Copy a file or folder first")
-		return
-	}
-	info, err := os.Lstat(src)
-	if err != nil {
-		// The copied source vanished; disarm so the Paste row doesn't
-		// keep offering a paste that can never succeed.
-		a.fileClipPath = ""
-		if a.clipKind == clipFile {
-			a.clipKind = clipNone
-		}
-		a.flash(fmt.Sprintf("Paste failed: %s no longer exists", filepath.Base(src)))
 		return
 	}
 	if dinfo, derr := os.Stat(destDir); derr != nil || !dinfo.IsDir() {
 		a.flash("Paste failed: destination folder no longer exists")
 		return
 	}
-	if info.IsDir() && pasteIntoOwnSubtree(src, destDir) {
-		a.flash("Can't paste a folder into itself")
+
+	// Plan the whole set BEFORE copying anything, the way a workspace
+	// edit validates before it writes: every refusal below is a main-loop
+	// answer the user gets immediately, and a set that is half-pasted
+	// because the third item was a folder pasted into itself is the
+	// failure nobody notices. Names are reserved in order, so two items
+	// with the same basename can't both claim "name copy.ext".
+	type pastePlan struct{ src, dest string }
+	var plan []pastePlan
+	var missing []string
+	taken := map[string]bool{}
+	for _, src := range a.fileClipPaths {
+		info, err := os.Lstat(src)
+		if err != nil {
+			missing = append(missing, filepath.Base(src))
+			continue
+		}
+		if info.IsDir() && pasteIntoOwnSubtree(src, destDir) {
+			a.flash("Can't paste a folder into itself")
+			return
+		}
+		dest := uniquePastePathExcept(destDir, filepath.Base(src), info.IsDir(), taken)
+		taken[dest] = true
+		plan = append(plan, pastePlan{src: src, dest: dest})
+	}
+	if len(plan) == 0 {
+		// Every copied source vanished; disarm so the Paste row doesn't
+		// keep offering a paste that can never succeed.
+		a.fileClipPaths = nil
+		if a.clipKind == clipFile {
+			a.clipKind = clipNone
+		}
+		a.flash(fmt.Sprintf("Paste failed: %s no longer exists", strings.Join(missing, ", ")))
 		return
 	}
-	dest := uniquePastePath(destDir, filepath.Base(src), info.IsDir())
-	a.flash("Pasting " + filepath.Base(src) + "…")
+	if len(missing) > 0 {
+		// Partial sets are reported rather than silently narrowed — the
+		// count in the success flash would otherwise be the only clue.
+		a.flash(fmt.Sprintf("Pasting %d items (%d no longer exist)…", len(plan), len(missing)))
+	} else {
+		a.flash("Pasting " + fileClipLabel(a.fileClipPaths) + "…")
+	}
 	scr := a.screen
 	go func() {
-		err := copyTree(src, dest)
-		if err != nil {
-			// Remove the partial copy so a failed paste can't leave a
-			// half-populated folder wearing the destination's name.
-			// Safe: uniquePastePath guaranteed dest didn't exist before.
-			_ = os.RemoveAll(dest)
+		var err error
+		done := 0
+		last := ""
+		for _, p := range plan {
+			if cerr := copyTree(p.src, p.dest); cerr != nil {
+				// Remove the partial copy so a failed paste can't leave
+				// a half-populated folder wearing the destination's
+				// name. Safe: uniquePastePath guaranteed dest didn't
+				// exist before. Earlier items STAY — they are complete
+				// copies, and unwinding them would destroy files the
+				// user can see appearing in the tree.
+				_ = os.RemoveAll(p.dest)
+				err = cerr
+				break
+			}
+			done++
+			last = p.dest
 		}
-		_ = scr.PostEvent(&pasteDoneEvent{when: time.Now(), dest: dest, err: err})
+		_ = scr.PostEvent(&pasteDoneEvent{
+			when: time.Now(), dest: last, count: done, err: err,
+		})
 	}()
 }
 
@@ -272,10 +365,20 @@ func (a *App) handlePasteDone(e *pasteDoneEvent) {
 		return
 	}
 	if e.err != nil {
+		// A set that failed part-way still put files on disk, so the
+		// workspace is re-synced either way — the tree must not show a
+		// state the filesystem left behind.
+		if e.count > 0 {
+			a.workspaceChanged()
+		}
 		a.flash("Paste failed: " + e.err.Error())
 		return
 	}
 	a.workspaceChanged()
+	if e.count > 1 {
+		a.flash(fmt.Sprintf("Pasted %d items", e.count))
+		return
+	}
 	a.flash("Pasted " + filepath.Base(e.dest))
 }
 
@@ -343,10 +446,13 @@ func (a *App) menuPasteItem() {
 // back to the generic label while nothing is armed (the row is disabled
 // then anyway, but it still renders dimmed).
 func (a *App) pasteItemLabel() string {
-	if a.fileClipPath == "" {
+	if len(a.fileClipPaths) == 0 {
 		return "Paste file/folder"
 	}
-	base := filepath.Base(a.fileClipPath)
+	if len(a.fileClipPaths) > 1 {
+		return "Paste " + fileClipLabel(a.fileClipPaths)
+	}
+	base := filepath.Base(a.fileClipPaths[0])
 	const maxLen = maxLabelSuffix
 	if runeLen(base) > maxLen {
 		// Keep the tail — the name and extension are the informative part.

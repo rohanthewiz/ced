@@ -896,3 +896,90 @@ func TestCtxRename_FileStillRenamesTheFile(t *testing.T) {
 		}
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Deleting a set (the file tree's multi-selection)
+// -----------------------------------------------------------------------------
+
+// TestDoDeletePaths_RemovesEverythingAndClosesTabs pins the set delete:
+// every path goes, tabs orphaned by any of them close, and one flash
+// reports the count rather than one flash per file.
+func TestDoDeletePaths_RemovesEverythingAndClosesTabs(t *testing.T) {
+	dir := t.TempDir()
+	keep := filepath.Join(dir, "keep.txt")
+	doomed := filepath.Join(dir, "doomed.txt")
+	sub := filepath.Join(dir, "sub")
+	inside := filepath.Join(sub, "inner.txt")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{keep, doomed, inside} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := newTestApp(t, dir)
+	a.openFile(keep)
+	a.openFile(doomed)
+	a.openFile(inside)
+	if len(a.tabs) != 3 {
+		t.Fatalf("setup opened %d tabs, want 3", len(a.tabs))
+	}
+
+	a.doDeletePaths([]string{doomed, sub})
+
+	for _, p := range []string{doomed, sub, inside} {
+		if _, err := os.Lstat(p); err == nil {
+			t.Errorf("%s survived", p)
+		}
+	}
+	if _, err := os.Lstat(keep); err != nil {
+		t.Errorf("keep.txt should be untouched: %v", err)
+	}
+	// The tab inside the deleted folder must close too — otherwise the
+	// editor keeps a buffer backed by a file that is gone, and the next
+	// save silently re-creates it.
+	if len(a.tabs) != 1 || a.tabs[0].Path != keep {
+		t.Fatalf("tabs = %d, want only keep.txt", len(a.tabs))
+	}
+	if !strings.Contains(a.statusMsg, "2 items") {
+		t.Fatalf("flash = %q, want a count", a.statusMsg)
+	}
+}
+
+// TestDoDeletePaths_ReportsFailuresByName pins the partial answer: a
+// path that cannot be deleted does not stop the others, and which one
+// failed is the whole content of the message.
+func TestDoDeletePaths_ReportsFailuresByName(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.txt")
+	if err := os.WriteFile(good, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, dir)
+
+	a.doDeletePaths([]string{good, filepath.Join(dir, "never-existed.txt")})
+
+	if _, err := os.Lstat(good); err == nil {
+		t.Error("the deletable path should still have been deleted")
+	}
+	if !strings.Contains(a.statusMsg, "never-existed.txt") {
+		t.Fatalf("flash = %q, want the failing name", a.statusMsg)
+	}
+}
+
+// TestDoDeletePaths_SingleTargetNamesTheFile pins that a one-item set
+// still reads like the single-file delete it is, rather than "Deleted 1
+// items".
+func TestDoDeletePaths_SingleTargetNamesTheFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "solo.txt")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, dir)
+	a.doDeletePaths([]string{p})
+	if !strings.Contains(a.statusMsg, "solo.txt") {
+		t.Fatalf("flash = %q, want the file named", a.statusMsg)
+	}
+}

@@ -178,16 +178,16 @@ func TestCopyToFileClip_ArmsAndValidates(t *testing.T) {
 	a := newTestApp(t, dir)
 
 	a.copyToFileClip(target)
-	if a.fileClipPath != target || a.clipKind != clipFile {
-		t.Fatalf("clip not armed: path=%q kind=%v", a.fileClipPath, a.clipKind)
+	if fileClipOne(a) != target || a.clipKind != clipFile {
+		t.Fatalf("clip not armed: path=%q kind=%v", fileClipOne(a), a.clipKind)
 	}
 	if !strings.Contains(a.statusMsg, "Copied f.txt") {
 		t.Fatalf("flash = %q, want copied confirmation", a.statusMsg)
 	}
 
-	a.fileClipPath, a.clipKind = "", clipNone
+	a.fileClipPaths, a.clipKind = nil, clipNone
 	a.copyToFileClip(filepath.Join(dir, "gone.txt"))
-	if a.fileClipPath != "" {
+	if fileClipOne(a) != "" {
 		t.Fatal("missing source should not arm the clip")
 	}
 	if !strings.Contains(a.statusMsg, "Copy failed") {
@@ -292,7 +292,7 @@ func TestStartPaste_SourceGoneDisarms(t *testing.T) {
 	if !strings.Contains(a.statusMsg, "no longer exists") {
 		t.Fatalf("flash = %q, want source-gone message", a.statusMsg)
 	}
-	if a.fileClipPath != "" || a.clipKind != clipNone {
+	if fileClipOne(a) != "" || a.clipKind != clipNone {
 		t.Fatal("stale clip should be disarmed")
 	}
 }
@@ -315,14 +315,14 @@ func TestCmdCopy_SelectionBeatsFile(t *testing.T) {
 	if a.clipKind != clipText || a.clipBuf != "hello" {
 		t.Fatalf("selection copy: kind=%v buf=%q", a.clipKind, a.clipBuf)
 	}
-	if a.fileClipPath != "" {
+	if fileClipOne(a) != "" {
 		t.Fatal("selection copy must not arm the file clip")
 	}
 
 	tab.MoveLineHome(false) // collapse the selection
 	a.cmdCopy()
-	if a.clipKind != clipFile || a.fileClipPath != target {
-		t.Fatalf("file copy: kind=%v path=%q", a.clipKind, a.fileClipPath)
+	if a.clipKind != clipFile || fileClipOne(a) != target {
+		t.Fatalf("file copy: kind=%v path=%q", a.clipKind, fileClipOne(a))
 	}
 }
 
@@ -372,8 +372,8 @@ func TestHandleKey_CmdCVDispatch(t *testing.T) {
 	a.openFile(target)
 
 	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModMeta))
-	if a.fileClipPath != target {
-		t.Fatalf("Cmd+C should arm the file clip, got %q", a.fileClipPath)
+	if fileClipOne(a) != target {
+		t.Fatalf("Cmd+C should arm the file clip, got %q", fileClipOne(a))
 	}
 
 	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModMeta))
@@ -473,5 +473,152 @@ func TestCtxPaste_FileNodeTargetsParent(t *testing.T) {
 	}
 	if got := filepath.Dir(ev.dest); got != sub {
 		t.Fatalf("dest dir = %q, want %q", got, sub)
+	}
+}
+
+// fileClipOne is the tests' single-path view of the file clipboard,
+// which is a SET (App.fileClipPaths) since the file tree's
+// multi-selection can copy several items at once. Every assertion in
+// this file is about the one-item case, so collapsing the set here keeps
+// those tests reading as the single-file contract they pin down — and
+// makes a set arriving where one path was expected fail loudly rather
+// than pass on its first element.
+func fileClipOne(a *App) string {
+	if len(a.fileClipPaths) != 1 {
+		return ""
+	}
+	return a.fileClipPaths[0]
+}
+
+// -----------------------------------------------------------------------------
+// Set-shaped clipboard (the file tree's multi-selection)
+// -----------------------------------------------------------------------------
+
+// TestCopyPathsToFileClip_ArmsTheSet pins the set case of the one write
+// path: several live paths are armed together and the flash counts them
+// rather than naming one arbitrarily.
+func TestCopyPathsToFileClip_ArmsTheSet(t *testing.T) {
+	dir := t.TempDir()
+	var paths []string
+	for _, n := range []string{"a.txt", "b.txt"} {
+		p := filepath.Join(dir, n)
+		if err := writeFile(p, "x"); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	a := newTestApp(t, dir)
+	a.copyPathsToFileClip(paths)
+
+	if len(a.fileClipPaths) != 2 || a.clipKind != clipFile {
+		t.Fatalf("clip = %v kind=%v", a.fileClipPaths, a.clipKind)
+	}
+	if !strings.Contains(a.statusMsg, "2 items") {
+		t.Fatalf("flash = %q, want a count", a.statusMsg)
+	}
+}
+
+// TestCopyPathsToFileClip_DropsMissingKeepsRest pins the partial rule: a
+// set the user ticked minutes ago can legitimately have lost a file to a
+// git checkout, and copying the survivors beats copying nothing. A
+// refusal is reserved for the case where nothing survived — the only one
+// the user has to act on.
+func TestCopyPathsToFileClip_DropsMissingKeepsRest(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "live.txt")
+	if err := writeFile(live, "x"); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, dir)
+	a.copyPathsToFileClip([]string{live, filepath.Join(dir, "gone.txt")})
+	if len(a.fileClipPaths) != 1 || a.fileClipPaths[0] != live {
+		t.Fatalf("clip = %v, want just the live path", a.fileClipPaths)
+	}
+
+	a.copyPathsToFileClip([]string{filepath.Join(dir, "gone1"), filepath.Join(dir, "gone2")})
+	if !strings.Contains(a.statusMsg, "none of the selected") {
+		t.Fatalf("flash = %q, want an all-missing refusal", a.statusMsg)
+	}
+}
+
+// TestStartPaste_SetPastesEveryItem pins the set paste end to end: every
+// source lands in the destination, and the flash reports the count.
+func TestStartPaste_SetPastesEveryItem(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "dest")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	for _, n := range []string{"a.txt", "b.txt"} {
+		p := filepath.Join(dir, n)
+		if err := writeFile(p, n); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	a := newTestApp(t, dir)
+	a.copyPathsToFileClip(paths)
+	a.startPaste(dest)
+
+	ev := waitForPasteEvent(t, a)
+	if ev.err != nil {
+		t.Fatalf("paste err: %v", ev.err)
+	}
+	if ev.count != 2 {
+		t.Fatalf("count = %d, want 2", ev.count)
+	}
+	a.handlePasteDone(ev)
+	for _, n := range []string{"a.txt", "b.txt"} {
+		if _, err := os.Stat(filepath.Join(dest, n)); err != nil {
+			t.Fatalf("%s missing from the destination: %v", n, err)
+		}
+	}
+	if !strings.Contains(a.statusMsg, "2 items") {
+		t.Fatalf("flash = %q, want a count", a.statusMsg)
+	}
+}
+
+// TestStartPaste_SetReservesNamesInOrder pins that the destinations are
+// planned as a batch: two sources with the same basename must not both
+// claim the same collision-free name, which is exactly what a
+// paste-at-a-time loop would do.
+func TestStartPaste_SetReservesNamesInOrder(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "dest")
+	for _, sub := range []string{"one", "two", "dest"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var paths []string
+	for _, sub := range []string{"one", "two"} {
+		p := filepath.Join(dir, sub, "same.txt")
+		if err := writeFile(p, sub); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	a := newTestApp(t, dir)
+	a.copyPathsToFileClip(paths)
+	a.startPaste(dest)
+
+	ev := waitForPasteEvent(t, a)
+	if ev.err != nil {
+		t.Fatalf("paste err: %v", ev.err)
+	}
+	if ev.count != 2 {
+		t.Fatalf("count = %d, want 2 — both same-named sources should land", ev.count)
+	}
+	entries, err := os.ReadDir(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		names := []string{}
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("destination holds %v, want two distinct names", names)
 	}
 }

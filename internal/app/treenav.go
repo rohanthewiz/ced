@@ -14,6 +14,12 @@
 // New folder/Delete/Rename verbs the right-click menu offers — one
 // vocabulary, third door (context menu, ≡ menu, now keys).
 //
+// Space, * and A are the multi-selection's keyboard half
+// (treemarks.go): tick this row, tick or clear every visible row, and
+// open the verb list for whatever is ticked. They are the keyboard
+// twins of a click in a row's mark gutter and of the ≡ File row — the
+// same mouse-first-with-key-accelerators shape as the rest of this file.
+//
 // Focus discipline mirrors the terminal and chat panels: the branch in
 // handleKey sits AFTER the Esc/leader/menu blocks, so every global
 // gesture keeps working from inside the tree (Esc-s still saves,
@@ -208,6 +214,26 @@ func (a *App) treeNavRune(r rune, sel *filetree.Node) {
 		if sel != nil {
 			ctxRename(a, sel)
 		}
+	case ' ':
+		// Space ticks the cursor's row — the multi-selection's keyboard
+		// twin of a click in the mark gutter (treemarks.go). It is the
+		// gesture every file manager and mail client teaches, and it
+		// costs typeahead nothing: no filename starts with a space.
+		//
+		// It arrives as KeyRune ' ' rather than as a key of its own, so
+		// it belongs in this table rather than in the switch above.
+		a.treeToggleMarkSelected()
+	case '*':
+		// Mark every visible row, or clear the set when one exists —
+		// one key for both directions, because undoing an over-eager
+		// select has to be as cheap as making it.
+		a.treeMarkAllToggle()
+	case 'A':
+		// The verb surface for whatever is marked. Shifted, so it costs
+		// typeahead nothing (typeahead lowercases, so 'a' already
+		// claimed the names 'A' would have reached) — the same argument
+		// that put New folder on 'N'.
+		a.openTreeMarkActions()
 	default:
 		a.treeTypeahead(r)
 	}

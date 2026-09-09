@@ -312,3 +312,181 @@ func TestZipFolderLabel(t *testing.T) {
 		t.Errorf("subfolder label = %q, want Zip folder (pkg/)", got)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Multi-source archives (the file tree's multi-selection)
+// -----------------------------------------------------------------------------
+
+// TestCreateZipMulti_EntriesRelativeToBase pins the whole reason
+// createZipMulti exists rather than a loop over createZip: entry names
+// are relative to the set's common parent, so two selected files sharing
+// a basename in different folders stay distinct in the archive. Rooted
+// at their basenames both would be "main.go", and extraction would
+// silently clobber one with the other.
+func TestCreateZipMulti_EntriesRelativeToBase(t *testing.T) {
+	base := t.TempDir()
+	for _, rel := range []string{"app/main.go", "cmd/main.go"} {
+		if err := os.MkdirAll(filepath.Join(base, filepath.Dir(rel)), 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(base, rel), []byte(rel), 0644); err != nil {
+			t.Fatalf("seed %s: %v", rel, err)
+		}
+	}
+	dest := filepath.Join(base, "sel.zip")
+	srcs := []string{filepath.Join(base, "app/main.go"), filepath.Join(base, "cmd/main.go")}
+
+	if err := createZipMulti(srcs, base, dest); err != nil {
+		t.Fatalf("createZipMulti: %v", err)
+	}
+	entries := readZipEntries(t, dest)
+	if entries["app/main.go"] != "app/main.go" || entries["cmd/main.go"] != "cmd/main.go" {
+		t.Fatalf("entries = %v, want both paths distinct", entries)
+	}
+}
+
+// TestCreateZipMulti_FoldersKeepTheirTrees pins that a directory in the
+// set is archived whole, under its path relative to the base — the same
+// extraction contract createZip's folder case makes.
+func TestCreateZipMulti_FoldersKeepTheirTrees(t *testing.T) {
+	base := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(base, "pkg", "deep"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "pkg", "deep", "f.txt"), []byte("x"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "top.txt"), []byte("t"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	dest := filepath.Join(base, "sel.zip")
+
+	if err := createZipMulti([]string{
+		filepath.Join(base, "pkg"), filepath.Join(base, "top.txt"),
+	}, base, dest); err != nil {
+		t.Fatalf("createZipMulti: %v", err)
+	}
+	entries := readZipEntries(t, dest)
+	if _, ok := entries["pkg/deep/f.txt"]; !ok {
+		t.Fatalf("entries = %v, want the folder's tree", entries)
+	}
+	if entries["top.txt"] != "t" {
+		t.Fatalf("entries = %v, want top.txt", entries)
+	}
+}
+
+// TestCreateZipMulti_MissingSourceFailsWhole pins the refusal: an
+// archive quietly missing a file it was asked to hold is the one wrong
+// answer a backup can give, so a vanished source kills the archive and
+// the partial file is removed.
+func TestCreateZipMulti_MissingSourceFailsWhole(t *testing.T) {
+	base := t.TempDir()
+	good := filepath.Join(base, "a.txt")
+	if err := os.WriteFile(good, []byte("a"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	dest := filepath.Join(base, "sel.zip")
+
+	err := createZipMulti([]string{good, filepath.Join(base, "gone.txt")}, base, dest)
+	if err == nil {
+		t.Fatal("a missing source should fail the archive")
+	}
+	if _, statErr := os.Stat(dest); statErr == nil {
+		t.Fatal("the partial archive should have been removed")
+	}
+}
+
+// TestCreateZipMulti_RefusesClobber pins that the O_EXCL contract
+// survives the multi-source path — an existing archive is never
+// overwritten (createZip's rule).
+func TestCreateZipMulti_RefusesClobber(t *testing.T) {
+	base := t.TempDir()
+	src := filepath.Join(base, "a.txt")
+	if err := os.WriteFile(src, []byte("a"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	dest := filepath.Join(base, "sel.zip")
+	if err := os.WriteFile(dest, []byte("existing"), 0644); err != nil {
+		t.Fatalf("seed dest: %v", err)
+	}
+	if err := createZipMulti([]string{src}, base, dest); err == nil {
+		t.Fatal("an existing archive must not be clobbered")
+	}
+	if got, _ := os.ReadFile(dest); string(got) != "existing" {
+		t.Fatalf("dest was modified: %q", got)
+	}
+}
+
+// TestCommonParentDir works on path SEGMENTS, not on string prefixes:
+// /a/foo and /a/foobar share the text "/a/foo" and no directory below
+// /a, and getting that wrong would write an archive into a folder
+// neither selection came from.
+func TestCommonParentDir(t *testing.T) {
+	sep := string(filepath.Separator)
+	cases := []struct {
+		name  string
+		paths []string
+		want  string
+	}{
+		{"same folder", []string{"/a/b/x.txt", "/a/b/y.txt"}, "/a/b"},
+		{"one level up", []string{"/a/b/x.txt", "/a/c/y.txt"}, "/a"},
+		{"prefix is not a parent", []string{"/a/foo/x", "/a/foobar/y"}, "/a"},
+		{"single path", []string{"/a/b/x.txt"}, "/a/b"},
+		{"nothing in common", []string{"/a/x", "/b/y"}, sep},
+		{"empty", nil, ""},
+	}
+	for _, c := range cases {
+		if got := commonParentDir(c.paths); got != filepath.Clean(c.want) && got != c.want {
+			t.Errorf("%s: commonParentDir(%v) = %q, want %q", c.name, c.paths, got, c.want)
+		}
+	}
+}
+
+// TestStartZipSet_SingleItemUsesTheSiblingArchive pins the routing: a
+// one-item set is startZip, so ticking one file and zipping it produces
+// exactly the sibling <name>.zip the context menu's Zip row always has —
+// one gesture, one result, however the user got there.
+func TestStartZipSet_SingleItemUsesTheSiblingArchive(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "solo.txt")
+	if err := os.WriteFile(src, []byte("s"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.startZipSet([]string{src})
+	ev := waitForZipEvent(t, a)
+	if ev.err != nil {
+		t.Fatalf("zip err: %v", ev.err)
+	}
+	if ev.dest != src+".zip" {
+		t.Fatalf("dest = %q, want the sibling archive %q", ev.dest, src+".zip")
+	}
+}
+
+// TestStartZipSet_ArchiveLandsInTheCommonParent pins where a set's
+// archive is written: INSIDE the common parent rather than beside it,
+// because that parent may be the project root, whose sibling is outside
+// the tree where the user can neither see nor necessarily write.
+func TestStartZipSet_ArchiveLandsInTheCommonParent(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte(n), 0644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	a := newTestApp(t, dir)
+	a.startZipSet([]string{filepath.Join(dir, "a.txt"), filepath.Join(dir, "b.txt")})
+
+	ev := waitForZipEvent(t, a)
+	if ev.err != nil {
+		t.Fatalf("zip err: %v", ev.err)
+	}
+	dest := filepath.Join(dir, filepath.Base(dir)+"-selection.zip")
+	if ev.dest != dest {
+		t.Fatalf("dest = %q, want %q", ev.dest, dest)
+	}
+	entries := readZipEntries(t, dest)
+	if entries["a.txt"] != "a.txt" || entries["b.txt"] != "b.txt" {
+		t.Fatalf("entries = %v, want both files", entries)
+	}
+}

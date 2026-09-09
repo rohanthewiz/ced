@@ -35,6 +35,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -102,22 +103,97 @@ func createZip(src, dest string) (err error) {
 	}()
 
 	zw := zip.NewWriter(out)
-	base := filepath.Base(src)
-	if !info.IsDir() {
-		if err = writeZipEntry(zw, base, src, info); err != nil {
+	if err = addZipSource(zw, src, filepath.Base(src), dest, info); err != nil {
+		// Close the writer so the file handle is released before the
+		// deferred cleanup unlinks the partial archive.
+		_ = zw.Close()
+		return err
+	}
+	return zw.Close()
+}
+
+// createZipMulti archives every path in srcs into ONE archive at dest —
+// the multi-selection's zip verb (app/treemarks.go). It is the same
+// archive createZip writes, with one difference that matters:
+//
+// **Entry names are relative to base**, not each source's own basename.
+// A set can hold two files with the same name in different folders
+// (internal/app/main.go beside cmd/main.go); rooted at their basenames
+// both would be stored as "main.go", and extraction would silently
+// clobber one with the other. Rooted at the set's common parent they
+// become "app/main.go" and "cmd/main.go" — which is also what a desktop
+// archiver produces for a multi-file selection.
+//
+// The O_EXCL refusal, the partial-archive cleanup and the never-archive-
+// the-archive skip are all createZip's, reached through the same helper.
+func createZipMulti(srcs []string, base, dest string) (err error) {
+	if len(srcs) == 0 {
+		return os.ErrInvalid
+	}
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := out.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			_ = os.Remove(dest)
+		}
+	}()
+
+	zw := zip.NewWriter(out)
+	for _, src := range srcs {
+		info, statErr := os.Lstat(src)
+		if statErr != nil {
+			// One vanished source costs the whole archive rather than
+			// producing a quietly incomplete one: an archive that is
+			// missing a file it was asked to hold is the one wrong
+			// answer a backup can give (planWorkspaceEdit's rule).
+			_ = zw.Close()
+			return statErr
+		}
+		name := zipEntryName(src, base)
+		if err = addZipSource(zw, src, name, dest, info); err != nil {
+			_ = zw.Close()
 			return err
 		}
-		return zw.Close()
 	}
+	return zw.Close()
+}
 
+// zipEntryName is the archive-internal name for src: its path relative
+// to base, forward-slashed per the zip spec. Falls back to the basename
+// when src somehow sits outside base — a name is always better than an
+// error here, since the alternative is refusing to archive a file the
+// user pointed at.
+func zipEntryName(src, base string) string {
+	rel, err := filepath.Rel(base, src)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return filepath.Base(src)
+	}
+	return filepath.ToSlash(rel)
+}
+
+// addZipSource writes one source — a file or a whole directory tree —
+// into an open archive under the entry name `name`. It is the shared
+// spine of createZip and createZipMulti; a second copy of the walk would
+// drift, and the two flavours would then disagree about symlinks, empty
+// folders, or the dest-skip below.
+//
+// dest is passed only so the walk can refuse to archive the archive:
+// when it lives inside src (project-root zips) the walk would otherwise
+// find the half-written zip and recurse into reading it.
+func addZipSource(zw *zip.Writer, src, name, dest string, info os.FileInfo) error {
+	if !info.IsDir() {
+		return writeZipEntry(zw, name, src, info)
+	}
 	destClean := filepath.Clean(dest)
-	err = filepath.WalkDir(src, func(path string, d fs.DirEntry, walkErr error) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		// Never archive the archive: when dest lives inside src
-		// (project-root zips), the walk would otherwise find the
-		// half-written zip and recurse into reading it.
 		if filepath.Clean(path) == destClean {
 			return nil
 		}
@@ -125,25 +201,18 @@ func createZip(src, dest string) (err error) {
 		if relErr != nil {
 			return relErr
 		}
-		name := base
+		entry := name
 		if rel != "." {
 			// Zip entry names are always forward-slashed per spec,
 			// regardless of the host OS separator.
-			name = base + "/" + filepath.ToSlash(rel)
+			entry = name + "/" + filepath.ToSlash(rel)
 		}
 		fi, infoErr := d.Info()
 		if infoErr != nil {
 			return infoErr
 		}
-		return writeZipEntry(zw, name, path, fi)
+		return writeZipEntry(zw, entry, path, fi)
 	})
-	if err != nil {
-		// Close the writer so the file handle is released before the
-		// deferred cleanup unlinks the partial archive.
-		_ = zw.Close()
-		return err
-	}
-	return zw.Close()
 }
 
 // writeZipEntry appends one filesystem object to the archive under
@@ -219,6 +288,79 @@ func (a *App) startZip(src string) {
 		err := createZip(src, dest)
 		_ = scr.PostEvent(&zipDoneEvent{when: time.Now(), dest: dest, err: err})
 	}()
+}
+
+// startZipSet archives a whole multi-selection into one archive and is
+// the tree marks' zip verb. A single-item set is routed to startZip
+// instead, so ticking one file and zipping it produces exactly the
+// sibling `<name>.zip` the context menu's Zip row always has — one
+// gesture, one result, however the user got there.
+//
+// The archive lands INSIDE the set's common parent rather than beside it
+// (zipDest's sibling rule): the parent may be the project root, whose
+// sibling is outside the tree where the user can neither see nor
+// necessarily write. Naming it after that parent is what makes a second
+// run refuse loudly (O_EXCL) instead of silently producing
+// selection-2.zip nobody asked for.
+func (a *App) startZipSet(srcs []string) {
+	if len(srcs) == 0 {
+		a.flash("Nothing to zip")
+		return
+	}
+	if len(srcs) == 1 {
+		a.startZip(srcs[0])
+		return
+	}
+	base := commonParentDir(srcs)
+	if base == "" {
+		a.flash("Zip failed: no common folder for the selection")
+		return
+	}
+	dest := filepath.Join(base, filepath.Base(base)+"-selection.zip")
+	if _, err := os.Stat(dest); err == nil {
+		a.flash(fmt.Sprintf("Zip failed: %s already exists", filepath.Base(dest)))
+		return
+	}
+	a.flash(fmt.Sprintf("Zipping %d items…", len(srcs)))
+	scr := a.screen
+	paths := append([]string(nil), srcs...)
+	go func() {
+		err := createZipMulti(paths, base, dest)
+		_ = scr.PostEvent(&zipDoneEvent{when: time.Now(), dest: dest, err: err})
+	}()
+}
+
+// commonParentDir returns the deepest directory containing every path in
+// paths — the root a multi-source archive's entry names are measured
+// against, and the folder the archive itself is written into.
+//
+// It works on cleaned path SEGMENTS rather than on the strings, because a
+// common string prefix is not a common directory: /a/foo and /a/foobar
+// share the prefix "/a/foo" and nothing below /a.
+func commonParentDir(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	segs := strings.Split(filepath.Dir(filepath.Clean(paths[0])), string(filepath.Separator))
+	for _, p := range paths[1:] {
+		other := strings.Split(filepath.Dir(filepath.Clean(p)), string(filepath.Separator))
+		if len(other) < len(segs) {
+			segs = segs[:len(other)]
+		}
+		for i := range segs {
+			if segs[i] != other[i] {
+				segs = segs[:i]
+				break
+			}
+		}
+	}
+	out := strings.Join(segs, string(filepath.Separator))
+	if out == "" {
+		// Every path was at the filesystem root — an absolute join
+		// collapsed to nothing by the leading empty segment.
+		return string(filepath.Separator)
+	}
+	return out
 }
 
 // handleZipDone lands the goroutine's result on the main loop: flash

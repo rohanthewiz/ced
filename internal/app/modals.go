@@ -911,6 +911,34 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	items = append(items, contextItem{label: "Zip", action: ctxZip})
 	items = append(items, contextItem{label: "Copy rel path", action: ctxCopyRelativePath})
 	items = append(items, contextItem{label: "Copy abs path", action: ctxCopyAbsolutePath})
+	// The multi-selection (treemarks.go). Two rows, and both earn their
+	// place in a popup this small:
+	//
+	//   • Mark / Unmark is the DISCOVERY surface for the whole feature.
+	//     The tick lives in one borrowed cell at the row's left edge,
+	//     which is close to invisible as an affordance, so without a
+	//     right-click row a mouse user would have no way to learn the
+	//     gutter is clickable at all.
+	//   • "Selected items…" appears only once something is ticked — it
+	//     opens the same picker the ≡ File row does, at the point where
+	//     the user is already pointing at the set they built.
+	//
+	// The root is gated out of marking with Rename / Delete and for the
+	// same reason: every verb a mark feeds either refuses the project
+	// root or means nothing applied to it.
+	if n != a.tree.Root {
+		markLabel := "Select"
+		if a.tree.IsMarked(n) {
+			markLabel = "Unselect"
+		}
+		items = append(items, contextItem{label: markLabel, action: ctxToggleMark})
+	}
+	if a.tree.MarkCount() > 0 {
+		items = append(items, contextItem{
+			label:  "Selected (" + itoa(a.tree.MarkCount()) + ")…",
+			action: ctxMarkActions,
+		})
+	}
 	// Run sits LAST, and only on a file the tree has already marked
 	// executable (runexec.go). Appended rather than placed at the top for
 	// the same reason Paste is appended: it is a conditional row, not part

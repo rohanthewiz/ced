@@ -79,6 +79,17 @@ func (a *App) tryEditorContextClick(x, y int) bool {
 	if x < ex || x >= ex+ew || y < ey || y >= ey+eh {
 		return false
 	}
+	// A preview has no caret to place and no selection to act on, so it
+	// gets its own one-row popup instead of the code vocabulary aimed at
+	// a cursor the reader cannot see. It is the one surface where the
+	// menu MUST work: a preview swallows the keyboard except for
+	// navigation, so a user who arrived here from the tree's Preview row
+	// and never learned Esc-v would otherwise have only the ≡ menu.
+	if tab.IsMarkdownView() {
+		a.openPreviewContext(x, y)
+		return true
+	}
+
 	pos, ok := tab.HitTest(x-ex, y-ey, ew, eh)
 	if !ok {
 		return false
@@ -152,6 +163,19 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 		}
 		items = append(items, editorContextItem{
 			label: "Ask cats chat about selection", action: (*App).menuCatsAskChat, enabled: alwaysTrue,
+		})
+	}
+	// The markdown viewer (markdown.go). Appended conditionally like the
+	// cats rows rather than joining the dimmed fixed vocabulary above:
+	// that vocabulary is the things you do to a SPOT IN TEXT, all of
+	// which exist on every file, while this one exists on a handful of
+	// extensions and would otherwise be a permanently dead row in every
+	// source file the user right-clicks. The other half of the pair
+	// (Stop Preview) lives in openPreviewContext — inside a preview the
+	// code rows have nothing to aim at, so the two never share a popup.
+	if tab.MarkdownCapable() {
+		items = append(items, editorContextItem{
+			label: "Preview", action: (*App).toggleMarkdownView, enabled: alwaysTrue,
 		})
 	}
 	if word := a.contextSearchWord(tab); word != "" {
@@ -337,4 +361,21 @@ func (m *editorContextModal) draw(a *App) {
 	}
 
 	a.screen.HideCursor()
+}
+
+// openPreviewContext is the editor menu's shape while a markdown preview
+// owns the pane: one row, because a rendered document is a reading
+// surface and the only verb it owes is the way out. Built here rather
+// than as a branch inside editorContextItems so no caller can end up
+// asking a previewed tab for LSP rows.
+func (a *App) openPreviewContext(x, y int) {
+	items := []editorContextItem{
+		{label: "Stop Preview", action: (*App).toggleMarkdownView, enabled: alwaysTrue},
+	}
+	w := contextMenuWidth
+	if w > a.width {
+		w = a.width
+	}
+	cx, cy := a.placeContextSized(x, y, len(items), w)
+	a.openModal(&editorContextModal{x: cx, y: cy, w: w, items: items})
 }

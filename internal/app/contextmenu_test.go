@@ -318,3 +318,67 @@ func TestPlaceContextSizedFlips(t *testing.T) {
 		t.Fatalf("expected origin (0,0), got (%d,%d)", cx, cy)
 	}
 }
+
+// TestEditorContext_PreviewRowOnMarkdownOnly pins the conditional
+// append: a document offers Preview, a source file does not carry a
+// permanently dead row for a viewer that could never render it.
+func TestEditorContext_PreviewRowOnMarkdownOnly(t *testing.T) {
+	root := t.TempDir()
+	md := writeStatusTestFile(t, root, "doc.md", "# Title\n\nbody text\n")
+	code := writeStatusTestFile(t, root, "code.go", "package main\n")
+	a := newTestApp(t, root)
+
+	a.openFile(md)
+	m := openEditorContextAt(t, a, 1, 0)
+	if contextRowIndex(m, "Preview") < 0 {
+		t.Errorf("markdown file has no Preview row: %v", labelsOf(m))
+	}
+	a.closeModal()
+
+	a.openFile(code)
+	m = openEditorContextAt(t, a, 1, 0)
+	if contextRowIndex(m, "Preview") >= 0 {
+		t.Errorf("Preview offered on a .go file: %v", labelsOf(m))
+	}
+}
+
+// TestEditorContext_InsidePreviewOffersOnlyTheWayOut pins the one-row
+// popup: a rendered document has no caret for the code verbs to aim at,
+// and Stop Preview is the row a reader who arrived from the tree needs.
+func TestEditorContext_InsidePreviewOffersOnlyTheWayOut(t *testing.T) {
+	root := t.TempDir()
+	md := writeStatusTestFile(t, root, "doc.md", "# Title\n\nbody text\n")
+	a := newTestApp(t, root)
+	a.openFile(md)
+	a.toggleMarkdownView()
+
+	m := openEditorContextAt(t, a, 1, 0)
+	if got := labelsOf(m); len(got) != 1 || got[0] != "Stop Preview" {
+		t.Fatalf("preview popup should be exactly [Stop Preview], got %v", got)
+	}
+	m.activate(a)
+	if a.markdownTab() != nil {
+		t.Error("Stop Preview left the tab in preview")
+	}
+}
+
+// TestEditorContext_PreviewRowTogglesIn pins the other direction: the
+// row on a source view turns the preview on, so the pair is reachable
+// from the editor body alone.
+func TestEditorContext_PreviewRowTogglesIn(t *testing.T) {
+	root := t.TempDir()
+	md := writeStatusTestFile(t, root, "doc.md", "# Title\n\nbody text\n")
+	a := newTestApp(t, root)
+	a.openFile(md)
+
+	m := openEditorContextAt(t, a, 1, 0)
+	i := contextRowIndex(m, "Preview")
+	if i < 0 {
+		t.Fatalf("no Preview row: %v", labelsOf(m))
+	}
+	m.hover = i
+	m.activate(a)
+	if a.markdownTab() == nil {
+		t.Error("the Preview row did not turn the preview on")
+	}
+}

@@ -18,6 +18,7 @@ package app
 import (
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
@@ -911,6 +912,25 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	items = append(items, contextItem{label: "Zip", action: ctxZip})
 	items = append(items, contextItem{label: "Copy rel path", action: ctxCopyRelativePath})
 	items = append(items, contextItem{label: "Copy abs path", action: ctxCopyAbsolutePath})
+	// Preview / Stop Preview (markdown.go) — a conditional row like Paste
+	// and Run rather than part of the fixed vocabulary, because it means
+	// nothing on the overwhelming majority of nodes. On a .md file it is
+	// what the right-click is usually reaching for: the tree's ordinary
+	// click opens SOURCE, and without this the only way to read a
+	// document as a document was to open it and then press Esc-v.
+	//
+	// ONE row, labelled by the clicked file's own tab, not two rows one
+	// of which would always be a no-op. The label names the state the
+	// click produces (the ≡ toggle convention) and the action reads the
+	// same tab it does, so the popup can never offer "Preview" on a file
+	// it is already previewing.
+	if !n.IsDir && editor.IsMarkdownPath(n.Path) {
+		if a.previewingPath(n.Path) {
+			items = append(items, contextItem{label: a.ctxPreviewSourceLabel(n), action: ctxStopMarkdownPreview})
+		} else {
+			items = append(items, contextItem{label: a.ctxPreviewSourceLabel(n), action: ctxPreviewMarkdown})
+		}
+	}
 	// The multi-selection (treemarks.go). Two rows, and both earn their
 	// place in a popup this small:
 	//

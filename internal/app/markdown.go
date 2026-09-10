@@ -43,6 +43,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
 // mdKeyScrollRows is how far the arrow keys move the preview. Three
@@ -217,4 +218,76 @@ func (a *App) markdownPress(t *editor.Tab, x, y int) {
 		return
 	}
 	a.lastClick = clickRecord{x: x, y: y, when: now}
+}
+
+// previewingPath reports whether path is open in a tab that is CURRENTLY
+// being drawn as a document. It is what makes the tree's row name its own
+// outcome — the file the user right-clicked is usually not the file in
+// front of them, so markdownTab (which asks about the ACTIVE tab) is the
+// wrong question here.
+func (a *App) previewingPath(path string) bool {
+	t := a.tabForPath(absolutePathFor(path))
+	return t != nil && t.IsMarkdownView()
+}
+
+// ctxPreviewSourceLabel names what the click will DO — "Stop Preview"
+// rather than the ≡ row's "Show markdown source", because a context menu
+// row is read in one glance beside Rename and Delete, where the shortest
+// spelling of the verb wins. It reads the same tab the action writes, so
+// the label and the outcome can never disagree.
+func (a *App) ctxPreviewSourceLabel(n *filetree.Node) string {
+	if a.previewingPath(n.Path) {
+		return "Stop Preview"
+	}
+	return "Preview"
+}
+
+// ctxStopMarkdownPreview is Preview's other half: bring the clicked file
+// back to source. It is appended only when that file is ALREADY being
+// previewed (see openTreeContext), which is what keeps the pair honest —
+// exactly one of the two is ever on the popup, and its label says which.
+//
+// The tab is guaranteed to exist (the row's own predicate found it), so
+// the file is switched back and then focused; a preview left running
+// behind a tab switch is the case this row exists for.
+func ctxStopMarkdownPreview(a *App, n *filetree.Node) {
+	path := absolutePathFor(n.Path)
+	t := a.tabForPath(path)
+	if t == nil {
+		return
+	}
+	t.SetMarkdownView(false)
+	a.openFile(path)
+	a.flash("Markdown source")
+}
+
+// ctxPreviewMarkdown is the file tree's right-click door onto the
+// viewer: open the file the user clicked and draw it as a document
+// rather than as source. Appended to the popup only for markdown files
+// (see openTreeContext), so it never appears on a file it would refuse
+// — the tree menu's omit-rather-than-dim convention, since its rows
+// change by the KIND of node clicked.
+//
+// It FORCES the preview on rather than toggling it: the popup carries
+// exactly one of Preview / Show source, chosen by the clicked file's own
+// tab (ctxPreviewSourceLabel), so the row already names its outcome and
+// a toggling action could only disagree with the label above it. Esc-v
+// and the ≡ row toggle instead, because they act on the file in front of
+// you, where "the other way" is the only thing they could mean.
+//
+// The path is re-checked against the tab that ended up active because
+// openFile can refuse (too big, binary, unreadable) and flashes its own
+// reason — without the check a refusal would silently preview whatever
+// file was in front of the user instead.
+func ctxPreviewMarkdown(a *App, n *filetree.Node) {
+	path := absolutePathFor(n.Path)
+	a.openFile(path)
+	t := a.activeTabPtr()
+	if t == nil || t.Path != path || !t.MarkdownCapable() {
+		return
+	}
+	if !t.IsMarkdownView() {
+		t.SetMarkdownView(true)
+	}
+	a.flash("Markdown preview — esc v for source, double-click a line to edit it")
 }

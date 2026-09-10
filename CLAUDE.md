@@ -619,8 +619,26 @@ between them. House rules:
 
 ### Markdown viewer (editor/markdown*.go + app/markdown.go)
 The same .md buffer drawn as a formatted document instead of as source.
-Esc-v, the ≡ **View** row, the status bar's `preview` segment. House
-rules:
+Esc-v, the ≡ **View** row, a **Preview** / **Stop Preview** row in both
+right-click menus, the status bar's `preview` segment. House rules:
+
+- **Each menu carries ONE row of the pair, never both.** In the TREE it
+  is labelled by the CLICKED file's own tab (`previewingPath`, not
+  `markdownTab` — the file under the pointer is usually not the file in
+  front of you, which is the case Stop Preview exists for), and the
+  action reads the same tab the label does, so the popup can never
+  offer "Preview" on a document it is already previewing; Stop Preview
+  focuses the tab on its way. In the EDITOR menu the two live in
+  different popups entirely: Preview is a conditional append beside the
+  cats rows, and a previewed pane gets `openPreviewContext` — one row,
+  because the fixed vocabulary above it is things you do to a spot in
+  TEXT and a rendered document has no caret to aim them at. That popup
+  is also the reason the preview cannot be a trap: a preview swallows
+  every key but navigation, so a reader who arrived from the tree and
+  never learned Esc-v still has a way out under the pointer.
+- **"Stop Preview", not the ≡ row's "Show markdown source".** A context
+  row is read in one glance beside Rename and Delete, where the
+  shortest spelling of the verb wins.
 
 - **IT IS A VIEW, NOT A MODE.** `Tab.mdView` is a flag beside the
   buffer, deliberately not a second `Mode` like the image viewer's: an

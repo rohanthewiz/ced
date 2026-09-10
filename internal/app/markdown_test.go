@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
+	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
 // openMD writes a markdown file into the app's root and opens it.
@@ -220,5 +222,172 @@ func TestMarkdownView_SurvivesATabSwitch(t *testing.T) {
 	a.openFile(doc)
 	if a.markdownTab() == nil {
 		t.Error("the document lost its preview across a tab switch")
+	}
+}
+
+// treeNodeFor finds the tree row for a file directly under the root,
+// which is the noun openTreeContext acts on.
+func treeNodeFor(t *testing.T, a *App, name string) *filetree.Node {
+	t.Helper()
+	for _, c := range a.tree.Root.Children {
+		if filepath.Base(c.Path) == name {
+			return c
+		}
+	}
+	t.Fatalf("no tree row for %s", name)
+	return nil
+}
+
+// TestOpenTreeContext_PreviewOnlyOnMarkdown pins that the row is present
+// on a .md file and absent everywhere else — the tree menu omits rows by
+// node KIND rather than dimming them, so a Preview on a .go file would
+// be a dead end the user still has to read past.
+func TestOpenTreeContext_PreviewOnlyOnMarkdown(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	for _, name := range []string{"doc.md", "code.go"} {
+		if err := os.WriteFile(filepath.Join(a.rootDir, name), []byte("# hi\n"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	a.refreshTreeNow()
+
+	has := func(n *filetree.Node) bool {
+		a.openTreeContext(n, 5, 5)
+		m := contextOf(a)
+		if m == nil {
+			t.Fatal("context menu should open")
+		}
+		defer a.closeModal()
+		for _, it := range m.items {
+			if it.label == "Preview" {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(treeNodeFor(t, a, "doc.md")) {
+		t.Error("markdown file has no Preview row")
+	}
+	if has(treeNodeFor(t, a, "code.go")) {
+		t.Error("Preview offered on a file the viewer would refuse")
+	}
+	if has(a.tree.Root) {
+		t.Error("Preview offered on a directory")
+	}
+}
+
+// TestCtxPreviewMarkdown_OpensAsADocument pins the verb: the clicked
+// file becomes the active tab AND is drawn as a preview, so a user who
+// never learned Esc-v can still read a document as one.
+func TestCtxPreviewMarkdown_OpensAsADocument(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	path := filepath.Join(a.rootDir, "doc.md")
+	if err := os.WriteFile(path, []byte("# Title\n\nbody\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	a.refreshTreeNow()
+
+	ctxPreviewMarkdown(a, treeNodeFor(t, a, "doc.md"))
+
+	tab := a.activeTabPtr()
+	if tab == nil || tab.Path != path {
+		t.Fatalf("the clicked file did not become active: %+v", tab)
+	}
+	if a.markdownTab() == nil {
+		t.Error("the file opened as source, not as a preview")
+	}
+}
+
+// TestCtxPreviewMarkdown_ForcesPreviewOn pins that the row is not a
+// toggle: a tab already left in preview stays in preview rather than
+// flipping back to source, or the row's outcome would depend on state
+// the click cannot see.
+func TestCtxPreviewMarkdown_ForcesPreviewOn(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	path := filepath.Join(a.rootDir, "doc.md")
+	if err := os.WriteFile(path, []byte("# Title\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	a.refreshTreeNow()
+	n := treeNodeFor(t, a, "doc.md")
+
+	ctxPreviewMarkdown(a, n)
+	ctxPreviewMarkdown(a, n)
+	if a.markdownTab() == nil {
+		t.Error("a second Preview turned the preview off")
+	}
+}
+
+// ctxRowLabels opens the tree menu for n and returns its row labels.
+func ctxRowLabels(t *testing.T, a *App, n *filetree.Node) []string {
+	t.Helper()
+	a.openTreeContext(n, 5, 5)
+	m := contextOf(a)
+	if m == nil {
+		t.Fatal("context menu should open")
+	}
+	defer a.closeModal()
+	var out []string
+	for _, it := range m.items {
+		out = append(out, it.label)
+	}
+	return out
+}
+
+// TestOpenTreeContext_PreviewRowNamesItsOutcome pins the pair: exactly
+// one of Preview / Stop Preview is ever on the popup, chosen by the
+// CLICKED file's tab rather than the active one — right-clicking a
+// document while standing in another file is the normal case.
+func TestOpenTreeContext_PreviewRowNamesItsOutcome(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	path := filepath.Join(a.rootDir, "doc.md")
+	if err := os.WriteFile(path, []byte("# Title\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(a.rootDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	a.refreshTreeNow()
+	n := treeNodeFor(t, a, "doc.md")
+
+	joined := strings.Join(ctxRowLabels(t, a, n), " | ")
+	if !strings.Contains(joined, "Preview") || strings.Contains(joined, "Stop Preview") {
+		t.Errorf("a closed document should offer Preview only: %q", joined)
+	}
+
+	ctxPreviewMarkdown(a, n)
+	a.openFile(filepath.Join(a.rootDir, "main.go")) // stand somewhere else
+
+	joined = strings.Join(ctxRowLabels(t, a, n), " | ")
+	if !strings.Contains(joined, "Stop Preview") || strings.Contains(joined, "| Preview") {
+		t.Errorf("a previewed document should offer Stop Preview only: %q", joined)
+	}
+}
+
+// TestCtxStopMarkdownPreview_ReturnsToSourceAndFocuses pins the verb: the
+// preview drops and the file comes to the front, which is the whole
+// point of reaching for it from a tree row rather than from Esc-v.
+func TestCtxStopMarkdownPreview_ReturnsToSourceAndFocuses(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	path := filepath.Join(a.rootDir, "doc.md")
+	if err := os.WriteFile(path, []byte("# Title\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(a.rootDir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	a.refreshTreeNow()
+	n := treeNodeFor(t, a, "doc.md")
+
+	ctxPreviewMarkdown(a, n)
+	a.openFile(filepath.Join(a.rootDir, "main.go"))
+	ctxStopMarkdownPreview(a, n)
+
+	tab := a.activeTabPtr()
+	if tab == nil || tab.Path != path {
+		t.Fatalf("Stop Preview did not focus the document: %+v", tab)
+	}
+	if a.markdownTab() != nil {
+		t.Error("the tab is still being drawn as a preview")
 	}
 }

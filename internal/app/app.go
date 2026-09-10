@@ -611,6 +611,20 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuZipFolder, enabled: alwaysTrue, labelFor: (*App).zipFolderLabel},
 			{label: "Copy relative path", action: (*App).menuCopyRelativePath, enabled: (*App).hasFileTab},
 			{label: "Copy absolute path", action: (*App).menuCopyAbsolutePath, enabled: (*App).hasFileTab},
+			// Maintaining the favorites file (favmanage.go). A File row
+			// rather than a Navigation one: Navigation carries "Go to
+			// favorite…", which is about USING one, while this is about
+			// the file behind them — the same split as Open folder
+			// living here and Go back living there.
+			{label: "Manage favorites…", action: (*App).menuManageFavorites, enabled: alwaysTrue},
+			// Hand the active file (or the root) to $VISUAL / $EDITOR
+			// (openineditor.go). The keyboard twin of the tree's row, and
+			// the path that survives a terminal which swallows
+			// right-click. Unlike that row it DIMS rather than vanishing:
+			// the menu is where a user goes to find out what the editor
+			// can do, and a row that isn't there teaches nothing — the
+			// label then names the variable to set.
+			{action: (*App).menuOpenInEditor, enabled: (*App).hasOpenInEditor, labelFor: (*App).openInEditorLabel},
 			// The file tree's multi-selection (treemarks.go). A File row
 			// because every verb behind it is a file verb, and the path
 			// that survives a terminal which swallows right-click — the

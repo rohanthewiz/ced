@@ -465,25 +465,43 @@ func (s *Set) ResolveIn(root, name string) (Resolution, error) {
 	if !ok {
 		return Resolution{}, ErrNotFound
 	}
-	clean, err := Clean(rel)
+	abs, clean, err := ResolveRel(root, rel)
 	if err != nil {
-		// A hand-edited file can hold a path Add would have refused.
-		// Name the entry AND the rule it broke — the user is looking at
-		// the file, and "invalid" alone would not tell them which line.
+		// A hand-edited file can hold a path Add would have refused, and
+		// a project can simply not have the folder. Name the entry so
+		// the message points at a line rather than at a rule.
 		return Resolution{}, fmt.Errorf("favorite %q (%s): %w", name, scope, err)
 	}
-	abs := filepath.Join(root, clean)
+	return Resolution{Root: root, Abs: abs, Rel: clean, Scope: scope}, nil
+}
+
+// ResolveRel turns one stated relative path into an absolute one inside
+// root, applying the same validation, existence check and confinement
+// every other read does.
+//
+// Exported because the MANAGEMENT surface needs to ask about an entry's
+// OWN path rather than about the name it is filed under: a global entry
+// shadowed by a project override still has a path of its own, and a
+// picker offering "Go to" has to resolve the row the user is looking at,
+// not whichever entry would win a lookup. Keeping that one implementation
+// is what stops the two answers drifting.
+func ResolveRel(root, rel string) (abs, clean string, err error) {
+	clean, err = Clean(rel)
+	if err != nil {
+		return "", "", err
+	}
+	abs = filepath.Join(root, clean)
 	if _, err := os.Stat(abs); err != nil {
-		return Resolution{}, fmt.Errorf("favorite %q: %s does not exist", name, abs)
+		return "", "", fmt.Errorf("%s does not exist", abs)
 	}
 	// Confinement re-checked after the join resolves, because a lexical
 	// check alone is escapable through a symlink that lives inside the
 	// root (the workspace-edit rule). Best-effort: a path that won't
 	// resolve keeps its lexical verdict, which Clean already gave.
 	if !within(root, abs) {
-		return Resolution{}, fmt.Errorf("favorite %q resolves outside %s", name, root)
+		return "", "", fmt.Errorf("%s resolves outside %s", abs, root)
 	}
-	return Resolution{Root: root, Abs: abs, Rel: clean, Scope: scope}, nil
+	return abs, clean, nil
 }
 
 // Resolve finds the project root that owns name, starting at startDir

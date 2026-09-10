@@ -282,6 +282,42 @@ you named in advance. Unlike `ced fav list`, the picker offers only what
 actually exists in the open project: every row there is something you can
 press Enter on.
 
+**Right-click a folder in the tree → "Add to favorites…"** binds it
+without leaving the editor. The prompt defaults the name to the folder's
+own and carries a `[scope: global]` chip — `alt+s` flips it to this
+project only.
+
+`≡` → File → **Manage favorites…** is the maintenance surface: this
+project's overrides, under a drill-in row for the global set. Pick any
+entry to go to it, rename it, re-point it, override it here, or remove
+it. Unlike the Go-to picker this one lists entries whose folders are
+missing — those are the ones you came to fix.
+
+### Open in $EDITOR
+
+Right-click any file **or folder** in the tree (the project root
+included) and hand it to your own editor — `≡` → File has the same row.
+`$VISUAL` wins over `$EDITOR`, as the convention intends, and the row
+names what it will run rather than the variable:
+
+```
+┌──────────────────────┐
+│ Rename               │
+│ Delete               │
+│ …                    │
+│ Add to favorites…    │   ← folders
+│ Open in nvim         │   ← files and folders
+└──────────────────────┘
+```
+
+Inside [cats](https://github.com/rohanthewiz/cats) it opens a sibling
+pane beside you — a real pty, so `vim`, `emacs` and `helix` all work.
+Anywhere else the command is **staged** on ced's own terminal line for
+you to press Enter on: that panel is a REPL strip rather than a pty, so a
+full-screen editor needs a real terminal, but `code`, `subl` and
+`ced --remote` run there fine. With neither variable set the tree row
+simply isn't offered.
+
 Bare `ced` always opens the current directory — `cd myproj && ced` means
 what it says. What comes back with you is the **tabs**: each folder
 remembers which files were open and where the cursors were, and reopening

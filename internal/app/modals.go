@@ -970,6 +970,24 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	if !n.IsDir && n.IsExec {
 		items = append(items, contextItem{label: "Run in terminal…", action: ctxRunExecutable})
 	}
+	// Favorites (favmanage.go). Directories only: a favorite names a
+	// PLACE a project keeps things, and the whole feature — reveal the
+	// folder, expand it, put the cursor in it — is about arriving
+	// somewhere rather than at something. The root is included; "the
+	// project itself" is a name worth having when several checkouts of
+	// one repo are open in different panes.
+	if n.IsDir {
+		items = append(items, contextItem{label: "Add to favorites…", action: ctxAddFavorite})
+	}
+	// Open in $EDITOR (openineditor.go) sits last, and appears only when
+	// there IS one: the popup's fixed vocabulary is something users learn
+	// positions in, so a permanently dimmed row that could only ever say
+	// "$EDITOR isn't set" would be worse than its absence (the Paste
+	// row's argument). Offered on files AND directories, because `vim .`
+	// / `code .` mean something and the root is the most useful of them.
+	if editorCommand() != "" {
+		items = append(items, contextItem{label: a.openInEditorLabel(), action: ctxOpenInEditor})
+	}
 
 	cx, cy := a.placeContext(x, y, len(items))
 	a.openModal(&contextModal{x: cx, y: cy, node: n, items: items})

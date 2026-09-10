@@ -75,6 +75,8 @@ test passes against code that never sees a right-click.
 main.go                       Entry — the urfave/cli surface + `ced fav`
 internal/favorites/favorites.go favorites.json: two scopes, the walk-up resolver
 internal/app/favorites.go     RevealPath — expand the tree to a path, keep the root
+internal/app/favmanage.go     ≡ Manage favorites: the two lists, the verbs, the scope chip
+internal/app/openineditor.go  Hand a file or folder to $VISUAL / $EDITOR
 internal/app/app.go           Event loop, layout, menu modal, splitter, all rendering
 internal/editor/buffer.go     Position + Buffer ([]string lines), edit primitives
 internal/editor/tab.go        Tab: path, buffer, cursor, anchor, scroll, dirty state
@@ -2578,8 +2580,87 @@ jumps to it. House rules:
   /var and /tmp on macOS). `projectOverrides` tries both, normalized
   first, and Lookup / List / Remove all go through it — a key that
   resolves but cannot be deleted would be its own bug.
+- **MANAGEMENT IS A SECOND SURFACE, AND ITS SHAPE IS THE PROJECT'S LIST
+  UNDER A GLOBAL DRILL-IN** (favmanage.go, ≡ File → Manage favorites…).
+  The asymmetry is the layout: the global map is written once and shared
+  by every project, so editing it from inside one of them is the rarer
+  act and belongs a gesture deeper, while the override list for the repo
+  in front of you is what you maintain. It LISTS WHAT DOESN'T RESOLVE,
+  unlike the Go-to picker — the report/verb split one floor down: you
+  cannot go to a folder that isn't there, but a broken entry is exactly
+  the one you came here to fix. A missing marker goes on PROJECT rows
+  only; a global default this project doesn't follow is the normal case,
+  and marking those would put a warning on nearly every row.
+- **EVERY LIST ENDS WITH ITS OWN ADD ROW, SEEDED TO ITS SCOPE**, so where
+  you asked decides what you get rather than a flag you have to remember,
+  and every verb carries a `back` to the list it came from — fixing three
+  entries must not be three trips through the ≡ menu. Path is asked
+  BEFORE name, because the name's default is derived from it; the tree's
+  right-click skips that prompt entirely, since the click WAS the path
+  answer.
+- **THE SCOPE CHIP IS A CLOSURE, NOT AN App FIELD** — the commit prompt's
+  trailer chip exactly (gitcommitmsg.go), for its reason: the value
+  belongs to one invocation of one prompt. `alt+s` is its chord and the
+  hint names it, because a modal owns the keyboard and the ≡ menu is
+  unreachable from inside a prompt. It starts on GLOBAL from the tree (a
+  favorite earns its name by repeating across projects) and on the list's
+  own scope from Manage.
+- **Rename is remove-then-ADD-first.** `Add` is the only path that
+  validates a name, so a rename goes through it; doing the remove first
+  would lose the entry when the new name is refused. Nothing here
+  confirms: a favorite is a name, not data, and re-adding one is the two
+  keystrokes that made it — a dialog in front of a reversible action
+  trains people to dismiss dialogs.
+- **A malformed file REFUSES to be written.** `loadFavoriteSet` flashes
+  and returns failure rather than an empty set, because reading a syntax
+  error as "you have no favorites" on a surface the user is about to
+  write to would save over whatever the file actually held.
 - No leader key: the flat table is out of mnemonic letters, and the ≡ row
   gets the command palette for free.
+
+### Open in $EDITOR (app/openineditor.go)
+The tree's right-click row and the ≡ File row that hand a file — or a
+folder — to whatever the environment says the user's editor is. Not an
+admission that ced is inadequate: a terminal is a place where several
+tools share one workspace, and `$EDITOR` is the name that workspace
+already agreed on. House rules:
+
+- **$VISUAL beats $EDITOR**, which is the convention's own answer to
+  exactly this question: $VISUAL is what you set when a full-screen
+  program is welcome, $EDITOR the line-editor fallback. Opening a pane is
+  the full-screen case. The value is a COMMAND LINE (`ced --wait`,
+  `emacsclient -nw`), so it goes to a shell and is never split here.
+- **TIER 1 RUNS IT, TIER 0 STAGES IT** — catsRun's own split, and here it
+  is structural rather than merely careful. A cats sibling pane is a REAL
+  pty, so vim, emacs and helix all work; ced's own terminal is a REPL
+  strip and explicitly not a pty (terminal.go), so a full-screen editor
+  cannot run in it. What it CAN do is put the command on the input line
+  where the user sees it, edits it and decides. The flash says which they
+  got. **Side by side, not stacked**: menuCatsTerminal splits vertically
+  because a terminal is a strip under your work; this is a peer editor,
+  and a half-height vim is worse than a half-width one.
+- **The path is written relative to where the command will RUN.** The
+  Tier-1 pane starts in the project root, so the line reads like one the
+  user would have typed; the staged Tier-0 line is ABSOLUTE, because
+  ced's terminal has its own working directory (grsh's `cd` moves it) and
+  a relative path would silently mean somewhere else.
+- **The row NAMES the editor, not the variable** ("Open in nvim") — the
+  theme row's rule. `editorDisplayName` is the base name of the command's
+  FIRST word; the flags a user exported are noise in a popup row.
+- **No $EDITOR means no tree row, but a DIMMED ≡ row.** The popup's fixed
+  vocabulary is something users learn positions in, so a permanently
+  dimmed row there that could only ever say "it isn't set" is worse than
+  its absence (the Paste row's argument). The menu is the opposite: it is
+  where you go to find out what the editor can do, so the row stays and
+  its label names the variable to set.
+- **A directory is a legitimate target**, the project root included —
+  `vim .` and `code .` mean something, and the root is the most useful of
+  them, which is why this row is offered where Rename and Delete are not.
+- `editorEnv` is a package var; newTestApp pins it EMPTY. Not tidiness:
+  the tree row is conditional on there being an editor, so without the
+  seam the context-menu row counts would pass or fail depending on what
+  the developer exported, and openInEditor would compose a command naming
+  their real editor.
 
 ### The command line is urfave/cli/v2 (main.go)
 The CLI was a hand-rolled arg walker until `ced fav` needed subcommands.

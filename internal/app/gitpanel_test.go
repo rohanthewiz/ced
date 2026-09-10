@@ -587,9 +587,12 @@ func TestGitPanelListWidth_ClampsAndOverridesAuto(t *testing.T) {
 		t.Fatalf("user list width = %d, want 36", got)
 	}
 
+	// The ceiling is the diff pane's reserve rather than a fixed cap:
+	// asking for the world leaves exactly gitPanelMinDiffW columns of
+	// diff text, so a wide panel really can grow the list.
 	a.resizeGitPanelListWidth(100)
-	if got := a.gitPanelListW(pw); got != gitPanelMaxListW {
-		t.Fatalf("over-grow = %d, want clamped to %d", got, gitPanelMaxListW)
+	if want := pw - gitPanelMinDiffW - 3; a.gitPanelListW(pw) != want {
+		t.Fatalf("over-grow = %d, want %d (diff reserve)", a.gitPanelListW(pw), want)
 	}
 
 	a.resizeGitPanelListWidth(1)
@@ -804,5 +807,92 @@ func TestGitPanelSelectAllAndClear(t *testing.T) {
 	a.gitPanelClearChecked()
 	if a.gitPanelCheckedCount() != 0 {
 		t.Fatalf("clear → %d checked, want 0", a.gitPanelCheckedCount())
+	}
+}
+
+// TestGitPanelDividerHit_ThreeColumnGrabZone pins the widened grab zone:
+// the seam answers to its own column plus one cell each side, because a
+// one-column target is a coin flip with a mouse. Both neighbours are
+// free — the list truncates a column short of the divider and the diff
+// pane leaves a blank gutter — so nothing else loses a click. Two cells
+// out is NOT the handle; the zone must not start eating real clicks.
+func TestGitPanelDividerHit_ThreeColumnGrabZone(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanel.open = true
+	_, py, _, _ := a.gitPanelRect()
+	divX := a.gitPanelDividerX()
+
+	for _, dx := range []int{-1, 0, 1} {
+		if !a.gitPanelDividerHit(divX + dx) {
+			t.Errorf("column divX%+d should be inside the grab zone", dx)
+		}
+		a.dragMode = ""
+		if got := a.gitPanelPress(divX+dx, py+2); got != "gitlistdiv" {
+			t.Errorf("press at divX%+d = %q, want gitlistdiv", dx, got)
+		}
+	}
+	for _, dx := range []int{-2, 2} {
+		if a.gitPanelDividerHit(divX + dx) {
+			t.Errorf("column divX%+d should be outside the grab zone", dx)
+		}
+	}
+}
+
+// TestGitDividerIsGrip pins the grip segment's placement: the middle
+// three rows of a pane tall enough to sit them clear of both ends, and
+// nothing at all on a short pane, where the whole seam already reads as
+// one handle.
+func TestGitDividerIsGrip(t *testing.T) {
+	// 11 body rows → grip on rows 4,5,6.
+	for row := 0; row < 11; row++ {
+		want := row >= 4 && row <= 6
+		if got := gitDividerIsGrip(row, 11); got != want {
+			t.Errorf("row %d of 11: grip=%v, want %v", row, got, want)
+		}
+	}
+	for row := 0; row < 4; row++ {
+		if gitDividerIsGrip(row, 4) {
+			t.Errorf("row %d of a 4-row pane should carry no grip", row)
+		}
+	}
+}
+
+// TestDrawGitPanel_DividerCarriesAGrip verifies the affordance actually
+// reaches the screen: the seam's middle rows paint the heavy grip glyph
+// a step brighter than the rule, while an ordinary row stays a plain
+// line — a border and a handle have to be tellable apart at a glance.
+func TestDrawGitPanel_DividerCarriesAGrip(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanel.open = true
+	_, py, _, ph := a.gitPanelRect()
+	divX := a.gitPanelDividerX()
+	rows := ph - 1
+
+	gripRow := -1
+	for row := 0; row < rows; row++ {
+		if gitDividerIsGrip(row, rows) {
+			gripRow = row
+			break
+		}
+	}
+	if gripRow < 0 {
+		t.Fatalf("test panel of %d body rows is too short to carry a grip", rows)
+	}
+
+	a.draw()
+	a.screen.Show()
+	cells, w, _ := a.screen.(tcell.SimulationScreen).GetContents()
+	at := func(row int) (rune, tcell.Color) {
+		c := cells[(py+1+row)*w+divX]
+		fg, _, _ := c.Style.Decompose()
+		return c.Runes[0], fg
+	}
+
+	if r, fg := at(gripRow); r != gitDividerGrip || fg != a.theme.Muted {
+		t.Errorf("grip row: rune=%q fg=%v, want %q in Muted %v",
+			r, fg, gitDividerGrip, a.theme.Muted)
+	}
+	if r, fg := at(0); r != '│' || fg != a.theme.Subtle {
+		t.Errorf("plain row: rune=%q fg=%v, want │ in Subtle %v", r, fg, a.theme.Subtle)
 	}
 }

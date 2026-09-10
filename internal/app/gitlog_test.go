@@ -53,9 +53,10 @@ func TestParseGitLogCommits(t *testing.T) {
 }
 
 // TestGitLogListWidth pins the commit-list column clamps: auto mode is
-// two fifths of the panel, explicit choices clamp to the min/max band,
-// and nothing may push past three fifths of the panel — the detail pane
-// keeps its share.
+// two fifths of the panel, the ceiling is whatever leaves the detail
+// pane its reserve (so a wide terminal really can hand the list more
+// room), and the list's own floor is applied last so it wins on a panel
+// too narrow for both.
 func TestGitLogListWidth(t *testing.T) {
 	if got := gitLogListWidth(100, 0); got != 40 {
 		t.Errorf("auto on 100 cols = %d, want 40 (two fifths)", got)
@@ -63,12 +64,15 @@ func TestGitLogListWidth(t *testing.T) {
 	if got := gitLogListWidth(100, 5); got != gitLogMinListW {
 		t.Errorf("tiny desired = %d, want floor %d", got, gitLogMinListW)
 	}
-	if got := gitLogListWidth(200, 150); got != gitLogMaxListW {
-		t.Errorf("huge desired = %d, want cap %d", got, gitLogMaxListW)
+	// The reserve, not a constant, is the ceiling: on 200 columns the
+	// list may take everything the detail pane can spare.
+	if want := 200 - gitLogMinDetailW - 3; gitLogListWidth(200, 190) != want {
+		t.Errorf("huge desired = %d, want %d (detail reserve)",
+			gitLogListWidth(200, 190), want)
 	}
-	// On a narrow panel the three-fifths cap wins over the band.
-	if got := gitLogListWidth(60, 50); got != 36 {
-		t.Errorf("narrow-panel desired 50 = %d, want 36 (three fifths of 60)", got)
+	// A panel too narrow for both: the floor is applied last and wins.
+	if got := gitLogListWidth(60, 50); got != gitLogMinListW {
+		t.Errorf("narrow-panel desired 50 = %d, want floor %d", got, gitLogMinListW)
 	}
 }
 
@@ -412,4 +416,28 @@ func writeCommit(t *testing.T, repo, name, content, msg string) {
 	}
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-q", "-m", msg)
+}
+
+// TestGitLogDividerHit_ThreeColumnGrabZone pins the log seam's grab
+// zone as the changes panel's: the divider column plus one cell each
+// side, so the handle is findable with a mouse.
+func TestGitLogDividerHit_ThreeColumnGrabZone(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitLog.open = true
+	divX := a.gitLogDividerX()
+	for _, dx := range []int{-1, 0, 1} {
+		if !a.gitLogDividerHit(divX + dx) {
+			t.Errorf("column divX%+d should be inside the grab zone", dx)
+		}
+	}
+	for _, dx := range []int{-2, 2} {
+		if a.gitLogDividerHit(divX + dx) {
+			t.Errorf("column divX%+d should be outside the grab zone", dx)
+		}
+	}
+	// Closed, there is no seam at all — no column may claim the drag.
+	a.gitLog.open = false
+	if a.gitLogDividerHit(divX) || a.gitLogDividerHit(-1) {
+		t.Error("a closed log panel should own no grab zone")
+	}
 }

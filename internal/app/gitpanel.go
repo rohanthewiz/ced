@@ -52,9 +52,14 @@ const (
 
 	// File-list column bounds. 24 fits "[x] M internal/app/x.go" shapes
 	// (checkbox + code + a useful chunk of path) without wasting diff
-	// columns; 40 stops pathological growth on ultra-wide terminals.
+	// columns. The ceiling is NOT a second constant: a fixed cap made
+	// the list unable to show a deep path however wide the terminal was,
+	// which is exactly the case a drag is reached for. What the list may
+	// not do is starve the pane it exists to explain, so the reserve is
+	// stated on the DIFF side instead — the list grows until the diff
+	// text is down to gitPanelMinDiffW columns.
 	gitPanelMinListW = 24
-	gitPanelMaxListW = 40
+	gitPanelMinDiffW = 40
 
 	// gitPanelCheckboxW is the width of the select-checkbox gutter at the
 	// left of each file row — " [x] " — and therefore also the click
@@ -628,23 +633,25 @@ func (a *App) gitPanelRect() (x, y, w, h int) {
 }
 
 // gitPanelListWidth clamps a desired file-list column width for a panel
-// of total width w into the legal band: at least gitPanelMinListW, at
-// most gitPanelMaxListW, and never past half the panel so the diff pane
-// keeps its readable share. A desired <= 0 means "auto" — a third of the
-// panel. The half-panel cap is applied last so it wins on narrow strips.
+// of total width w into the legal band. A desired <= 0 means "auto" — a
+// third of the panel.
+//
+// Precedence is the Find-all dock's: the diff pane's reserve caps the
+// column, but the list's own floor is applied LAST and wins on a panel
+// too narrow for both — a file list too narrow to read is worse than a
+// cramped diff, since the list is what you steer the diff with. The
+// reserve counts the three columns the seam itself spends (divider plus
+// the blank gutter each side), so gitPanelMinDiffW really is diff TEXT.
 func gitPanelListWidth(w, desired int) int {
 	lw := desired
 	if lw <= 0 {
 		lw = w / 3
 	}
+	if max := w - gitPanelMinDiffW - 3; lw > max {
+		lw = max
+	}
 	if lw < gitPanelMinListW {
 		lw = gitPanelMinListW
-	}
-	if lw > gitPanelMaxListW {
-		lw = gitPanelMaxListW
-	}
-	if max := w / 2; lw > max {
-		lw = max
 	}
 	return lw
 }
@@ -666,6 +673,40 @@ func (a *App) gitPanelDividerX() int {
 	}
 	px, _, pw, _ := a.gitPanelRect()
 	return px + a.gitPanelListW(pw)
+}
+
+// gitDividerGrip is the glyph the middle rows of a list/diff seam carry
+// — a heavy vertical, single-width per the marker rule, deliberately
+// different in WEIGHT rather than only in color: a border and a handle
+// have to be told apart at a glance on a terminal whose contrast the
+// editor cannot vouch for.
+const gitDividerGrip = '\u2503'
+
+// gitDividerIsGrip reports whether body row `row` of a `rows`-tall pane
+// belongs to the divider's grip segment — the middle three rows. A pane
+// too short for the grip to sit clear of both ends keeps a plain rule:
+// there, the whole seam is short enough to read as one handle already.
+// Shared by both git panels, which mirror each other's shape; the grip
+// is one of the house patterns they share rather than copy.
+func gitDividerIsGrip(row, rows int) bool {
+	const grip = 3
+	if rows < grip+2 {
+		return false
+	}
+	top := (rows - grip) / 2
+	return row >= top && row < top+grip
+}
+
+// gitPanelDividerHit reports whether a body-row press at column x lands
+// on the list/diff seam. The zone is the divider column PLUS one cell
+// each side: a one-column target is a coin flip with a mouse, and both
+// neighbours are free — the list truncates its text a column short of
+// the divider (drawGitPanelListRow), and the diff pane already leaves a
+// blank gutter before its first character. Three columns is the whole
+// fix; anything wider starts eating clicks that mean something.
+func (a *App) gitPanelDividerHit(x int) bool {
+	dx := a.gitPanelDividerX()
+	return dx >= 0 && x >= dx-1 && x <= dx+1
 }
 
 // dragGitListDivTo resizes the file-list column so the divider tracks the
@@ -790,7 +831,7 @@ func (a *App) gitPanelPress(x, y int) (dragMode string) {
 			return "gitpanel"
 		}
 	}
-	if y > py && x == a.gitPanelDividerX() {
+	if y > py && a.gitPanelDividerHit(x) {
 		return "gitlistdiv"
 	}
 	a.gitPanelClick(x, y)
@@ -1008,6 +1049,7 @@ func (a *App) drawGitPanel() {
 	if a.dragMode == "gitlistdiv" {
 		divSt = tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Accent)
 	}
+	gripSt := tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Muted)
 
 	// Header: a horizontal rule carrying the Actions button, the title,
 	// the tick count, and the ✕ — it doubles as the visual border against
@@ -1075,7 +1117,15 @@ func (a *App) drawGitPanel() {
 		}
 		a.drawGitPanelListRow(row, px, ry, listW)
 		// Divider — the width resize handle, brightened while dragged.
-		a.screen.SetContent(px+listW, ry, '│', nil, divSt)
+		// Idle, a plain rule reads as a border and nothing else, so the
+		// middle rows carry a heavier grip segment in a color a step up
+		// from the rule's: the shape says "seize me here" without the
+		// divider having to shout on every row.
+		glyph, st := '│', divSt
+		if a.dragMode != "gitlistdiv" && gitDividerIsGrip(row, ph-1) {
+			glyph, st = gitDividerGrip, gripSt
+		}
+		a.screen.SetContent(px+listW, ry, glyph, nil, st)
 		// Diff cell fill, then diff text.
 		for cx := px + listW + 1; cx < px+pw; cx++ {
 			a.screen.SetContent(cx, ry, ' ', nil, diffBG)

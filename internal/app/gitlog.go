@@ -42,12 +42,14 @@ const (
 	gitLogMinHeight = 6
 	gitLogMaxHeight = 18
 
-	// Commit-list column bounds. Commits need more width than file paths
-	// (hash + subject + author + age), so the band sits wider than the
-	// changes panel's: 30 fits "● abc1234 subject…", 70 admits the
-	// author · age tail on wide terminals without starving the detail pane.
-	gitLogMinListW = 30
-	gitLogMaxListW = 70
+	// Commit-list column bounds, the changes panel's shape with the
+	// log's own numbers. Commits need more width than file paths (hash +
+	// subject + author + age), so the floor sits wider: 30 fits
+	// "● abc1234 subject…". The ceiling is stated on the DETAIL side for
+	// gitPanelMinDiffW's reason — a fixed cap stops the list showing a
+	// long subject on the very terminal that had room for it.
+	gitLogMinListW   = 30
+	gitLogMinDetailW = 44
 
 	// gitLogMinEditorRows / gitLogResizeStep mirror the changes panel's
 	// resize contract — the strip is a viewer, the editor stays primary.
@@ -460,14 +462,11 @@ func gitLogListWidth(w, desired int) int {
 	if lw <= 0 {
 		lw = w * 2 / 5
 	}
+	if max := w - gitLogMinDetailW - 3; lw > max {
+		lw = max
+	}
 	if lw < gitLogMinListW {
 		lw = gitLogMinListW
-	}
-	if lw > gitLogMaxListW {
-		lw = gitLogMaxListW
-	}
-	if max := w * 3 / 5; lw > max {
-		lw = max
 	}
 	return lw
 }
@@ -487,6 +486,14 @@ func (a *App) gitLogDividerX() int {
 	}
 	px, _, pw, _ := a.gitLogRect()
 	return px + a.gitLogListW(pw)
+}
+
+// gitLogDividerHit reports whether a press at column x lands on the
+// list/detail seam — the divider column plus one cell each side, the
+// changes panel's three-column grab zone and for its reason.
+func (a *App) gitLogDividerHit(x int) bool {
+	dx := a.gitLogDividerX()
+	return dx >= 0 && x >= dx-1 && x <= dx+1
 }
 
 // dragGitLogDivTo resizes the commit-list column so the divider tracks
@@ -666,7 +673,7 @@ func (a *App) gitLogPress(x, y int) (dragMode string) {
 	if a.gitLogFilterPress(x, y) {
 		return ""
 	}
-	if x == a.gitLogDividerX() {
+	if a.gitLogDividerHit(x) {
 		return "gitlogdiv"
 	}
 	a.gitLogClick(x, y)
@@ -843,6 +850,7 @@ func (a *App) drawGitLog() {
 	if a.dragMode == "gitlogdiv" {
 		divSt = tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Accent)
 	}
+	gripSt := tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Muted)
 
 	// Header rule + buttons. Buttons are mandatory; the title drops out
 	// on narrow panels rather than overlapping them — a control you
@@ -907,7 +915,13 @@ func (a *App) drawGitLog() {
 			a.screen.SetContent(cx, ry, ' ', nil, listBG)
 		}
 		a.drawGitLogListRow(row, px, ry, listW)
-		a.screen.SetContent(px+listW, ry, '│', nil, divSt)
+		// The grip segment, the changes panel's affordance (see
+		// gitDividerIsGrip) — a seam that says it can be seized.
+		glyph, st := '│', divSt
+		if a.dragMode != "gitlogdiv" && gitDividerIsGrip(row, a.gitLogBodyRows()) {
+			glyph, st = gitDividerGrip, gripSt
+		}
+		a.screen.SetContent(px+listW, ry, glyph, nil, st)
 		for cx := px + listW + 1; cx < px+pw; cx++ {
 			a.screen.SetContent(cx, ry, ' ', nil, detailBG)
 		}

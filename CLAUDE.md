@@ -2647,12 +2647,22 @@ already agreed on. House rules:
 - **The row NAMES the editor, not the variable** ("Open in nvim") — the
   theme row's rule. `editorDisplayName` is the base name of the command's
   FIRST word; the flags a user exported are noise in a popup row.
-- **No $EDITOR means no tree row, but a DIMMED ≡ row.** The popup's fixed
-  vocabulary is something users learn positions in, so a permanently
-  dimmed row there that could only ever say "it isn't set" is worse than
-  its absence (the Paste row's argument). The menu is the opposite: it is
-  where you go to find out what the editor can do, so the row stays and
-  its label names the variable to set.
+- **NO $EDITOR IS A REASON, NOT A GATE** — menuCopilotAuth's rule, and
+  the first cut got this wrong in a way worth recording. Both rows were
+  gated on `editorCommand() != ""` on the Paste row's argument (a popup's
+  fixed vocabulary is something users learn positions in). But the two
+  are not alike: Paste hides over something the user just did and can
+  plainly see, while this hid over a variable they may never have
+  exported — so on a machine with neither set, which is most machines,
+  the row simply never appeared and was indistinguishable from the
+  feature not existing. Both rows are now unconditional and the refusal
+  teaches, naming both variables and an `export` line. **A row nobody can
+  find is worse than a row that explains itself.**
+- **Being unconditional, it joins the FIXED vocabulary**, which is why it
+  sits ABOVE "Run in terminal…" in the tree popup rather than below it.
+  Run is still the conditional row and still last, where its own rule
+  puts it; `TestTreeContextRunRowOnlyForExecutables` pins that, and it is
+  what caught the ordering when this row was first appended.
 - **A directory is a legitimate target**, the project root included —
   `vim .` and `code .` mean something, and the root is the most useful of
   them, which is why this row is offered where Rename and Delete are not.

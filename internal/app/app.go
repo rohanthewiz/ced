@@ -620,11 +620,11 @@ func builtinMenuGroups() []menuGroup {
 			// Hand the active file (or the root) to $VISUAL / $EDITOR
 			// (openineditor.go). The keyboard twin of the tree's row, and
 			// the path that survives a terminal which swallows
-			// right-click. Unlike that row it DIMS rather than vanishing:
-			// the menu is where a user goes to find out what the editor
-			// can do, and a row that isn't there teaches nothing — the
-			// label then names the variable to set.
-			{action: (*App).menuOpenInEditor, enabled: (*App).hasOpenInEditor, labelFor: (*App).openInEditorLabel},
+			// right-click. Clickable even with nothing configured, for
+			// menuCopilotAuth's reason: the verdict is "you never
+			// exported a variable", which a dimmed row cannot say and a
+			// flash can. The label names the variable in that state.
+			{action: (*App).menuOpenInEditor, enabled: alwaysTrue, labelFor: (*App).openInEditorLabel},
 			// The file tree's multi-selection (treemarks.go). A File row
 			// because every verb behind it is a file verb, and the path
 			// that survives a terminal which swallows right-click — the

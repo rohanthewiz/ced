@@ -76,24 +76,18 @@ func TestEditorDisplayName_IsTheNameNotTheCommandLine(t *testing.T) {
 	}
 }
 
-// TestOpenInEditorLabel_NamesTheEditorOrTheVariable covers the ≡ row's
-// two states. With an editor the label says what the row does; without
-// one it names what to set — which is the only useful thing a dimmed row
-// can say, and the reason this row dims where the tree's vanishes.
+// TestOpenInEditorLabel_NamesTheEditorOrTheVariable covers the label's
+// two states. With an editor it says what the row will do; without one it
+// names what to set, which is the whole reason the row is still offered
+// in that state.
 func TestOpenInEditorLabel_NamesTheEditorOrTheVariable(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	if got := a.openInEditorLabel(); got != "Open in $EDITOR" {
 		t.Fatalf("label with no editor = %q", got)
 	}
-	if a.hasOpenInEditor() {
-		t.Fatal("the ≡ row should be disabled with no editor configured")
-	}
 	withEditorEnv(t, "helix", "")
 	if got := a.openInEditorLabel(); got != "Open in helix" {
 		t.Fatalf("label = %q, want the editor named", got)
-	}
-	if !a.hasOpenInEditor() {
-		t.Fatal("the ≡ row should be enabled — the root is always a target")
 	}
 }
 
@@ -169,12 +163,15 @@ func TestOpenInEditorTarget_FallsBackToTheRoot(t *testing.T) {
 	}
 }
 
-// TestTreeContext_EditorRowAppearsOnlyWhenThereIsOne pins the popup's
-// conditional-row rule. Its fixed vocabulary is something users learn
-// positions in, so a permanently dimmed row that could only ever say
-// "$EDITOR isn't set" would be worse than its absence — and the row must
-// appear on files AND directories, since `vim .` means something.
-func TestTreeContext_EditorRowAppearsOnlyWhenThereIsOne(t *testing.T) {
+// TestTreeContext_EditorRowIsAlwaysOffered is the regression test for a
+// row nobody could find. Gating it on $EDITOR being set meant that on a
+// machine where neither variable is exported — which is most machines,
+// including the one this was written on — the row simply never appeared,
+// indistinguishable from the feature not existing. It is now
+// menuCopilotAuth's rule: always offered, and clicking with nothing set
+// says what to set. It must appear on files, directories AND the root,
+// since `vim .` means something and the root is the most useful of them.
+func TestTreeContext_EditorRowIsAlwaysOffered(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
@@ -199,18 +196,54 @@ func TestTreeContext_EditorRowAppearsOnlyWhenThereIsOne(t *testing.T) {
 	if file.IsDir {
 		file, dir = dir, file
 	}
-	if hasEditorRow(file) || hasEditorRow(dir) || hasEditorRow(a.tree.Root) {
-		t.Fatal("no editor configured — the row must not be offered")
+
+	// newTestApp pins the environment EMPTY, which is exactly the state
+	// the old gate hid the row in.
+	for _, n := range []*filetree.Node{file, dir, a.tree.Root} {
+		if !hasEditorRow(n) {
+			t.Errorf("%s: the row must be offered even with no $EDITOR", n.Name)
+		}
+	}
+	if lbl := editorRowLabel(t, a, file); lbl != "Open in $EDITOR" {
+		t.Errorf("unset label = %q, want the variable named", lbl)
 	}
 
 	withEditorEnv(t, "", "vim")
-	if !hasEditorRow(file) {
-		t.Error("a file should offer the editor row")
+	for _, n := range []*filetree.Node{file, dir, a.tree.Root} {
+		if !hasEditorRow(n) {
+			t.Errorf("%s: the row went missing once an editor was set", n.Name)
+		}
 	}
-	if !hasEditorRow(dir) {
-		t.Error("a directory should offer it too — `vim .` means something")
+	if lbl := editorRowLabel(t, a, dir); lbl != "Open in vim" {
+		t.Errorf("set label = %q, want the editor named", lbl)
 	}
-	if !hasEditorRow(a.tree.Root) {
-		t.Error("the root is the most useful target of all")
+}
+
+// editorRowLabel reads the editor row's label out of a node's popup —
+// the label IS the row's only way to say which of its two states it is
+// in, so it is worth asserting rather than just its presence.
+func editorRowLabel(t *testing.T, a *App, n *filetree.Node) string {
+	t.Helper()
+	a.openTreeContext(n, 5, 5)
+	defer a.closeModal()
+	for _, it := range contextOf(a).items {
+		if strings.HasPrefix(it.label, "Open in ") {
+			return it.label
+		}
+	}
+	return ""
+}
+
+// TestOpenInEditor_UnsetRefusalTeachesWhatToSet is the other half of
+// making the row always reachable: its refusal is now an ADVERTISED
+// outcome rather than a corner the gate kept users out of, so it has to
+// be worth arriving at.
+func TestOpenInEditor_UnsetRefusalTeachesWhatToSet(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openInEditor(a.rootDir)
+	for _, want := range []string{"$VISUAL", "$EDITOR", "export"} {
+		if !strings.Contains(a.statusMsg, want) {
+			t.Errorf("statusMsg = %q, want it to mention %q", a.statusMsg, want)
+		}
 	}
 }

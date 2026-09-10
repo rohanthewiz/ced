@@ -306,7 +306,8 @@ names what it will run rather than the variable:
 │ Delete               │
 │ …                    │
 │ Add to favorites…    │   ← folders
-│ Open in nvim         │   ← files and folders
+│ Open in nvim         │   ← always, files and folders alike
+│ Run in terminal…     │   ← executables
 └──────────────────────┘
 ```
 
@@ -315,8 +316,11 @@ pane beside you — a real pty, so `vim`, `emacs` and `helix` all work.
 Anywhere else the command is **staged** on ced's own terminal line for
 you to press Enter on: that panel is a REPL strip rather than a pty, so a
 full-screen editor needs a real terminal, but `code`, `subl` and
-`ced --remote` run there fine. With neither variable set the tree row
-simply isn't offered.
+`ced --remote` run there fine.
+
+With neither variable set the row still appears, reading
+`Open in $EDITOR`, and tells you what to set rather than quietly going
+missing.
 
 Bare `ced` always opens the current directory — `cd myproj && ced` means
 what it says. What comes back with you is the **tabs**: each folder

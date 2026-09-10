@@ -27,13 +27,16 @@
 //     what will happen; "Open in $EDITOR" asks the user to remember what
 //     they exported. Same rule as the theme row naming the theme in force.
 //
-//   - **NO $EDITOR MEANS NO ROW.** The tree popup is deliberately small
-//     and its fixed vocabulary is something users learn positions in, so
-//     a permanently dimmed row that can only ever say "it isn't set"
-//     would be worse than its absence — the Paste row's argument. The ≡
-//     row is the opposite case and dims instead: the menu is where you go
-//     to find out what the editor can do, and a missing row there teaches
-//     nothing.
+//   - **NO $EDITOR IS A REASON, NOT A GATE.** Both rows are offered
+//     whatever the environment holds, and clicking with nothing set says
+//     so and says what to set. That is menuCopilotAuth's rule rather than
+//     the Paste row's, and the difference between the two is the whole
+//     argument: Paste hides because its precondition is something the
+//     user just did and can plainly see, while this one would hide over a
+//     variable they may never have exported — on a machine with no
+//     $EDITOR the row would simply never appear, which is indistinguish-
+//     able from the feature not existing. A row nobody can find is worse
+//     than a row that explains itself.
 //
 //   - **TIER 1 RUNS IT, TIER 0 STAGES IT** — catsRun's own split, and
 //     here it is structural rather than merely careful. Inside cats a
@@ -97,13 +100,6 @@ func editorDisplayName() string {
 	return filepath.Base(first)
 }
 
-// hasOpenInEditor gates the ≡ row: an editor is configured and there is
-// something to hand it. Cheap enough for a predicate menuLayout runs on
-// every frame the menu is open — two environment reads and a nil check.
-func (a *App) hasOpenInEditor() bool {
-	return editorCommand() != "" && a.openInEditorTarget() != ""
-}
-
 // openInEditorLabel names the editor when there is one and the variable
 // when there is not, because those are two different pieces of news: the
 // first says what the row will do, the second says what to set.
@@ -146,7 +142,11 @@ func ctxOpenInEditor(a *App, n *filetree.Node) {
 func (a *App) openInEditor(path string) {
 	cmd := editorCommand()
 	if cmd == "" {
-		a.flash("Neither $VISUAL nor $EDITOR is set")
+		// This is now the row's ADVERTISED failure rather than a corner
+		// it was gated out of, so it has to teach: name both variables
+		// (a user who set $EDITOR deserves to know $VISUAL wins) and show
+		// what setting one looks like.
+		a.flash("Neither $VISUAL nor $EDITOR is set — try:  export EDITOR=vim")
 		return
 	}
 	if path == "" {

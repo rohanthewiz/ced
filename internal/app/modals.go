@@ -959,6 +959,31 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 			action: ctxMarkActions,
 		})
 	}
+	// Favorites (favmanage.go). Directories only: a favorite names a
+	// PLACE a project keeps things, and the whole feature — reveal the
+	// folder, expand it, put the cursor in it — is about arriving
+	// somewhere rather than at something. The root is included; "the
+	// project itself" is a name worth having when several checkouts of
+	// one repo are open in different panes.
+	if n.IsDir {
+		items = append(items, contextItem{label: "Add to favorites…", action: ctxAddFavorite})
+	}
+	// Open in $EDITOR (openineditor.go) is ALWAYS offered —
+	// menuCopilotAuth's rule rather than Paste's. Paste hides because its
+	// precondition is something the user just did and can plainly see;
+	// this one would hide over a variable they may never have exported,
+	// so on a machine with no $EDITOR the row would simply never appear,
+	// indistinguishable from the feature not existing. Clicking it with
+	// nothing set says so, and says what to set. Offered on files AND
+	// directories, because `vim .` / `code .` mean something and the root
+	// is the most useful of them.
+	//
+	// Being unconditional, it joins the FIXED vocabulary and therefore
+	// sits above the one row that is still conditional on the node —
+	// which is what keeps Run in terminal… last, where its own rule puts
+	// it.
+	items = append(items, contextItem{label: a.openInEditorLabel(), action: ctxOpenInEditor})
+
 	// Run sits LAST, and only on a file the tree has already marked
 	// executable (runexec.go). Appended rather than placed at the top for
 	// the same reason Paste is appended: it is a conditional row, not part
@@ -969,24 +994,6 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	// rather than a process.
 	if !n.IsDir && n.IsExec {
 		items = append(items, contextItem{label: "Run in terminal…", action: ctxRunExecutable})
-	}
-	// Favorites (favmanage.go). Directories only: a favorite names a
-	// PLACE a project keeps things, and the whole feature — reveal the
-	// folder, expand it, put the cursor in it — is about arriving
-	// somewhere rather than at something. The root is included; "the
-	// project itself" is a name worth having when several checkouts of
-	// one repo are open in different panes.
-	if n.IsDir {
-		items = append(items, contextItem{label: "Add to favorites…", action: ctxAddFavorite})
-	}
-	// Open in $EDITOR (openineditor.go) sits last, and appears only when
-	// there IS one: the popup's fixed vocabulary is something users learn
-	// positions in, so a permanently dimmed row that could only ever say
-	// "$EDITOR isn't set" would be worse than its absence (the Paste
-	// row's argument). Offered on files AND directories, because `vim .`
-	// / `code .` mean something and the root is the most useful of them.
-	if editorCommand() != "" {
-		items = append(items, contextItem{label: a.openInEditorLabel(), action: ctxOpenInEditor})
 	}
 
 	cx, cy := a.placeContext(x, y, len(items))

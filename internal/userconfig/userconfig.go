@@ -486,6 +486,21 @@ func SkillsDir() string { return configFilePath("skills") }
 // the two config locations can never drift apart.
 func ChatsDir() string { return configFilePath("chats") }
 
+// FavoritesPath returns the canonical favorites location:
+// $XDG_CONFIG_HOME/ced/favorites.json, falling back to
+// ~/.config/ced/favorites.json (or "" when no config location resolves).
+//
+// A file of its own for mcp.json's reason rather than state.json's: it
+// is a small map somebody writes BY HAND ("plans" → "ai_docs/plans"),
+// not churn ced rewrites behind their back, so it has no business in the
+// flat config.json the ≡ toggles rewrite — and a syntax error in one
+// must not disable the other. `ced fav add` writes it back for the times
+// you would rather not open an editor to edit the editor, which is also
+// why the writer is atomic. The schema and the two scopes live in
+// internal/favorites; this package only knows where the file is, so the
+// config locations can never drift apart.
+func FavoritesPath() string { return configFilePath("favorites.json") }
+
 // PluginsDir returns the canonical plugins directory:
 // $XDG_CONFIG_HOME/ced/plugins, falling back to ~/.config/ced/plugins
 // (or "" when no config location resolves).

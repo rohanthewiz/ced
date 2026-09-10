@@ -829,6 +829,88 @@ func (t *Tree) SelectedIndex(rows []*Node) int {
 	return t.selectedIndex(rows)
 }
 
+// Reveal expands the tree down to abs and puts the cursor on it,
+// returning the node it landed on. It is what `ced fav plans` and the
+// ≡ "Reveal in tree" verb are built from: the tree is LAZY, so a folder
+// three levels down has no Node at all until something walks the path
+// and loads each directory on the way — which is precisely what a
+// "reveal" is.
+//
+// Two properties matter to callers:
+//
+//   - IT LOADS AS IT DESCENDS, so it reaches a path no one has clicked
+//     towards. loadChildren is a no-op on an already-loaded directory,
+//     so revealing a path the user has open costs nothing but the walk.
+//
+//   - IT EXPANDS ANCESTORS, NOT THE TARGET. A revealed FOLDER is left
+//     as the user last had it: opening it would dump its contents on
+//     someone who asked to be shown where it is, and a folder they had
+//     deliberately collapsed would spring open every time the tree
+//     scrolled to it. The caller expands it if that is what the gesture
+//     means.
+//
+// Scrolling is deliberately NOT done here: the viewport height belongs
+// to the app's layout, so the caller pairs this with
+// EnsureSelectedVisible. Returns (nil, false) for a path outside the
+// root, a path that doesn't exist in the tree, or one that dies on a
+// hidden segment (shouldHide drops .git and friends from reload's
+// output, so nothing under them is reachable — an honest false rather
+// than a node the renderer would never draw).
+func (t *Tree) Reveal(abs string) (*Node, bool) {
+	if t == nil || t.Root == nil || abs == "" {
+		return nil, false
+	}
+	target, err := filepath.Abs(abs)
+	if err != nil {
+		return nil, false
+	}
+	rel, err := filepath.Rel(t.Root.Path, target)
+	if err != nil {
+		return nil, false
+	}
+	if rel == "." {
+		// The root itself is always visible and has no parent row to
+		// scroll to; selecting it is the honest answer.
+		t.Selected = t.Root
+		return t.Root, true
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, false
+	}
+
+	n := t.Root
+	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
+		if seg == "" {
+			continue
+		}
+		if !n.IsDir {
+			return nil, false
+		}
+		// Load before looking: a directory nobody has expanded has an
+		// empty Children slice, which is indistinguishable from an
+		// empty directory without this.
+		if err := loadChildren(n); err != nil {
+			return nil, false
+		}
+		var next *Node
+		for _, c := range n.Children {
+			if c.Name == seg {
+				next = c
+				break
+			}
+		}
+		if next == nil {
+			return nil, false
+		}
+		// n is an ANCESTOR of the target now, so it must be open for
+		// the target's row to exist in the flattening at all.
+		n.Expanded = true
+		n = next
+	}
+	t.Selected = n
+	return n, true
+}
+
 // -----------------------------------------------------------------------------
 // Multi-selection (marks)
 // -----------------------------------------------------------------------------

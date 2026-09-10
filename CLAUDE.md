@@ -72,7 +72,9 @@ test passes against code that never sees a right-click.
 ## Architecture map
 
 ```
-main.go                       Entry — parses optional rootDir arg
+main.go                       Entry — the urfave/cli surface + `ced fav`
+internal/favorites/favorites.go favorites.json: two scopes, the walk-up resolver
+internal/app/favorites.go     RevealPath — expand the tree to a path, keep the root
 internal/app/app.go           Event loop, layout, menu modal, splitter, all rendering
 internal/editor/buffer.go     Position + Buffer ([]string lines), edit primitives
 internal/editor/tab.go        Tab: path, buffer, cursor, anchor, scroll, dirty state
@@ -2472,6 +2474,109 @@ plan: `ai_docs/cats-native-plan.md`. House rules:
   sockets, and the attention story is the half that matters when you are not
   looking at the screen.
 
+### Favorite locations (internal/favorites + app/favorites.go + main.go)
+`ced fav plans` opens the project and reveals `ai_docs/plans` in the file
+tree. A name for a place a project keeps things, and the CLI verb that
+jumps to it. House rules:
+
+- **IT REVEALS; IT DOES NOT RE-ROOT, and that gap IS the feature.**
+  `ced ai_docs/plans` already re-roots — and pays for it by throwing the
+  project away, since git status, gopls's `rootUri`, the finder index,
+  the ACP session cwd and every plugin's working directory are all
+  derived from `rootDir`. A root of `ai_docs/plans` is a workspace where
+  none of them describe the code you are working on. So the verb keeps
+  the project and moves the VIEW, which is the one thing a plain path
+  spelling structurally cannot express. If this ever grows a re-root
+  mode, it is a FLAG on the verb, never its default.
+- **RELATIVE is the whole design.** A favorite is not a bookmark to one
+  absolute directory — the recent-folders list (internal/session) is
+  already that, and it is keyed by root for a reason. This is a name for
+  a CONVENTION, which is exactly why the map is stored once, user-scoped,
+  and applied against whatever project you are standing in. A name that
+  only ever meant one directory would not be worth typing.
+- **RESOLUTION WALKS UP, and the directory that OWNS the favorite becomes
+  the root.** The verb is typed from wherever the user is standing, which
+  for a project of any size is not the project root; a version that only
+  worked from the top would be half a feature. Each candidate directory
+  is asked in FULL (its own project override, then the global default)
+  rather than looking the name up once against the start directory — the
+  override is keyed by the root that owns it, and that root is one of the
+  directories being climbed, so a single lookup would make every override
+  invisible from every subdirectory of its own project.
+- **TWO SCOPES, AND THE PROJECT ONE ONLY SHADOWS.** `projects[<root>]` is
+  a patch of individual NAMES over the defaults, never a replacement — a
+  project that renames one entry must not lose the other five. Shadowing
+  is IN PLACE in a listing (the theme registry's rule): one row per name,
+  carrying the value that will actually be used, because two rows with
+  one name is a bug report. Removing an override usually UNCOVERS a
+  global rather than unbinding the name, and `fav rm` says so — a user
+  who doesn't expect that reads the silence as the removal having failed.
+- **CONFINEMENT IS CHECKED TWICE, and the cheap check is at WRITE time.**
+  `Clean` refuses an absolute path and anything climbing out with "..",
+  so an entry that could never resolve is never written; `Resolve`
+  re-checks after the join because a lexical test alone is escapable
+  through a symlink living inside the root (the workspace-edit rule), and
+  it resolves the ROOT too or a project under /tmp reads as outside
+  itself on macOS. `Clean` runs on READ as well: a text editor will
+  happily write what `fav add` refused.
+- **"UNBOUND" AND "BOUND BUT MISSING" ARE DIFFERENT ANSWERS**, because
+  they have different fixes. A name nobody bound is a typo, so the error
+  lists the names that ARE bound — a bare "no such favorite" sends the
+  user off to read a config file. A bound name whose directory isn't
+  there is a project that doesn't follow the convention, so the error
+  names the path it looked for. Same split in the listing, where a
+  default this project doesn't follow is MARKED rather than hidden.
+- **A path in the name slot is refused AS a path.** `ced fav <name> [dir]`
+  means "no favorite named /home/me/proj" is an error about the wrong
+  thing entirely, and `fav add` refuses its own subcommand words
+  (`add`, `rm`, `list`, `path`, …) — urfave resolves a subcommand before
+  falling through to the open action, so a favorite called "list" would
+  be written happily and then be permanently unreachable. Write time is
+  the only moment the user can still pick another word.
+- **`filetree.Tree.Reveal` expands ANCESTORS, not the target**, and the
+  app expands the target itself. The tree is lazy, so a reveal is
+  genuinely "load each directory on the way down"; leaving the target as
+  it found it is what stops a future scroll-to-a-path springing open a
+  folder somebody deliberately collapsed. Arriving BY NAME is the
+  opposite case, so `RevealPath` opens it — and takes the KEYBOARD,
+  because the selection highlight only renders while the tree is
+  `Focused` and a cursor nobody can see is worse than none. A FILE
+  favorite opens a tab instead and leaves the keyboard in the editor.
+- **The reveal rides main's one-shot seam**, beside `OpenFile`: both
+  describe how this INVOCATION started rather than a property of the
+  workspace, so the folder-switch loop must not repeat either.
+- No ≡ row and no leader key yet — this is a STARTUP verb. Re-revealing a
+  favorite mid-session is a different feature (it wants a picker), and
+  `RevealPath` is already the primitive it would be built on.
+
+### The command line is urfave/cli/v2 (main.go)
+The CLI was a hand-rolled arg walker until `ced fav` needed subcommands.
+House rules for the rewrite:
+
+- **ONE PARSER.** `parseArgs` runs the REAL `cli.App` and fills a
+  `cliResult` rather than acting, which is what lets a test drive actual
+  flag definitions, actual subcommand resolution and actual error strings
+  without a tcell screen. A second "pure" parser kept beside it for
+  testability is the drift this shape exists to prevent — `resolveArgs`
+  in main_test.go is a one-line alias onto the real thing, not a copy.
+- **`actionDone` is the default action.** urfave serves `--help` and
+  `help` itself, without ever calling an Action, so the zero-ish value
+  has to mean "handled, nothing left to do". Were it `actionEdit`, a user
+  asking for help would get an editor.
+- **`helpText` is installed as the app's help TEMPLATE**, not printed by
+  a function beside it, so `--help`, `help` and a usage error all reach
+  the same words. It is a raw string, which means no backticks in it.
+- `HideVersion` plus an explicit `--version/-v/-V` flag, because main
+  owns the exact output (`ced 0.2.0`) and urfave's default spells it
+  differently. `OnUsageError` returns the message alone — urfave's
+  default buries the one line that says what was wrong under the whole
+  help block. `ExitErrHandler` is a no-op: this process decides its own
+  exit code, and a test driving the parser must not be able to kill the
+  test binary.
+- `resolveTarget` stayed a plain function. It is the one piece of the CLI
+  that is about the FILESYSTEM (dir → root, file → root+tab, missing →
+  the vim-style new-file intent) rather than about flags.
+
 ### Navigation history (app/nav.go)
 Browser-style Go back / Go forward across files (≡ menu, Esc-o / Esc-O,
 Alt+Left / Alt+Right). Recording happens CENTRALLY: openFile records the
@@ -3405,7 +3510,10 @@ loops forever.
   `<project>/.claude/skills` ced reads but doesn't own — extend the
   AGENT, not the editor. The `chats/` archive is not a
   preference either — it is the conversations themselves, the one thing in
-  the chat panel ced cannot reconstruct. `state.json` is the odd one out
+  the chat panel ced cannot reconstruct. `favorites.json` earns
+  its place the way mcp.json does: a small map somebody writes by hand
+  ("plans" → "ai_docs/plans"), naming a convention ced cannot guess.
+  `state.json` is the odd one out
   and earns its place differently again: it holds no preferences at all, only what the
   editor did — which folders you opened and where your cursor was — so
   deleting it costs convenience and changes no behavior.)

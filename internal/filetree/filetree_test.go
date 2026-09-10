@@ -1679,3 +1679,126 @@ func TestMarks_NilSafe(t *testing.T) {
 	tr.MarkRange(nil)
 	tr.SetMark(nil, true)
 }
+
+// -----------------------------------------------------------------------------
+// Reveal
+// -----------------------------------------------------------------------------
+
+// revealTree builds a project a few levels deep and returns a tree over
+// it. Nothing is expanded beyond the root, which is the state Reveal has
+// to cope with: the tree is lazy, so a folder three levels down has no
+// Node at all until something walks the path.
+func revealTree(t *testing.T) (*Tree, string) {
+	t.Helper()
+	root := t.TempDir()
+	deep := filepath.Join(root, "ai_docs", "plans", "archive")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ai_docs", "plans", "a.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tr, root
+}
+
+// TestReveal_LoadsAndExpandsTheWayDown is the whole point of the method:
+// it reaches a path nobody has clicked towards. Without the lazy load on
+// each step, an unexpanded directory has an empty Children slice that is
+// indistinguishable from an empty directory.
+func TestReveal_LoadsAndExpandsTheWayDown(t *testing.T) {
+	tr, root := revealTree(t)
+	target := filepath.Join(root, "ai_docs", "plans")
+
+	n, ok := tr.Reveal(target)
+	if !ok {
+		t.Fatal("Reveal failed on a path that exists")
+	}
+	if n.Path != target {
+		t.Fatalf("landed on %q, want %q", n.Path, target)
+	}
+	if tr.Selected != n {
+		t.Fatal("Reveal should put the cursor on the target")
+	}
+
+	// Every ancestor is open, or the target's row wouldn't exist in the
+	// flattening at all — which is what makes the row visible to the
+	// caller's EnsureSelectedVisible.
+	var found bool
+	for _, v := range tr.VisibleNodes() {
+		if v == n {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the revealed node is not among the visible rows")
+	}
+}
+
+// TestReveal_LeavesTheTargetAsItFoundIt pins the deliberate asymmetry:
+// ancestors are opened because they must be, the target is not, because
+// a scroll must never spring open a folder somebody collapsed. Arriving
+// by NAME is the caller's case to handle (app/favorites.go expands it).
+func TestReveal_LeavesTheTargetAsItFoundIt(t *testing.T) {
+	tr, root := revealTree(t)
+	n, ok := tr.Reveal(filepath.Join(root, "ai_docs", "plans"))
+	if !ok {
+		t.Fatal("Reveal failed")
+	}
+	if n.Expanded {
+		t.Fatal("Reveal expanded the target; that is the caller's call")
+	}
+	// And a target the user HAD open stays open.
+	tr.Toggle(n)
+	if again, _ := tr.Reveal(n.Path); !again.Expanded {
+		t.Fatal("Reveal collapsed a folder the user had open")
+	}
+}
+
+// TestReveal_FindsAFileAndTheRootItself covers the two ends of the
+// range: a leaf (a favorite may perfectly well name a document) and the
+// root, which is always visible and has no parent row to scroll to.
+func TestReveal_FindsAFileAndTheRootItself(t *testing.T) {
+	tr, root := revealTree(t)
+
+	file := filepath.Join(root, "ai_docs", "plans", "a.md")
+	n, ok := tr.Reveal(file)
+	if !ok || n.IsDir || n.Path != file {
+		t.Fatalf("Reveal(%q) = %+v, %v", file, n, ok)
+	}
+	if n, ok := tr.Reveal(root); !ok || n != tr.Root {
+		t.Fatalf("Reveal(root) = %+v, %v; want the root node", n, ok)
+	}
+}
+
+// TestReveal_RefusesWhatTheTreeCannotShow pins the honest false. A path
+// outside the root, one that doesn't exist, and one under a hidden
+// segment (shouldHide drops .git and node_modules from reload's output)
+// all have no row — returning a node the renderer would never draw
+// would be worse than saying so.
+func TestReveal_RefusesWhatTheTreeCannotShow(t *testing.T) {
+	tr, root := revealTree(t)
+	if err := os.MkdirAll(filepath.Join(root, ".git", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, bad := range []string{
+		"",
+		t.TempDir(),                          // a different root entirely
+		filepath.Join(root, "nope", "gone"),  // never existed
+		filepath.Join(root, ".git", "hooks"), // under a hidden segment
+		filepath.Join(root, "ai_docs", "plans", "a.md", "x"), // through a file
+	} {
+		if n, ok := tr.Reveal(bad); ok {
+			t.Errorf("Reveal(%q) = %+v, want refusal", bad, n)
+		}
+	}
+	// A nil tree is a nil answer, not a panic.
+	var nilTree *Tree
+	if _, ok := nilTree.Reveal(root); ok {
+		t.Error("Reveal on a nil tree should refuse")
+	}
+}

@@ -210,9 +210,69 @@ ced ~/code/app   # opens a specific project root
 ced main.go      # opens a file (project root = its parent dir)
 ced new-file.go  # creates the file on first save (vim-style)
 ced --last       # reopen the most recently edited folder
+ced fav plans    # open the project and reveal a named location (see below)
 ced --version    # print version and exit
 ced --help       # print short usage
 ```
+
+### Favorite locations
+
+Most projects keep things in the same places, and the paths are longer
+than the ideas. Bind a name once and jump to it from anywhere in the
+project:
+
+```sh
+ced fav add plans  ai_docs/plans
+ced fav add clsess ai_docs/claude_sessions
+ced fav add cosess ai_docs/copilot_sessions
+
+ced fav plans      # opens the project, reveals ai_docs/plans in the tree
+```
+
+`ced fav plans` **does not re-root the editor** at `ai_docs/plans` —
+`ced ai_docs/plans` already does that, and it costs you the project (git
+status, gopls, the finder index and every plugin's working directory are
+all derived from the root). What this does instead is keep the project
+and move the **view**: the file tree expands down to the folder, opens
+it, and puts the cursor on it. A favorite naming a file opens it in a tab.
+
+The name is resolved by walking **up** from where you are, so it works
+from three directories inside the project, not just from the root:
+
+```sh
+cd ~/code/app/internal/server
+ced fav plans      # still opens ~/code/app, revealing ai_docs/plans
+```
+
+The map lives in `~/.config/ced/favorites.json` and is yours to
+hand-edit. It has two scopes — a global default set, plus per-project
+overrides for the repo that spells the same idea differently:
+
+```json
+{
+  "favorites": {
+    "plans":  "ai_docs/plans",
+    "clsess": "ai_docs/claude_sessions",
+    "cosess": "ai_docs/copilot_sessions"
+  },
+  "projects": {
+    "/Users/me/code/other": { "plans": "docs/plans" }
+  }
+}
+```
+
+```sh
+ced fav                          # list what's visible from here
+ced fav add --project plans docs/plans   # override for this project only
+ced fav rm plans                 # unbind (the override first, then the default)
+ced fav path plans               # print the resolved path:
+cd "$(ced fav path plans)"       #   … for shell use
+```
+
+Paths are project-relative and confined to it: an absolute path, or one
+that climbs out with `..`, is refused when you add it. A favorite whose
+folder isn't in *this* project is listed as `missing here` rather than
+hidden — a default you don't follow everywhere is still worth seeing.
 
 Bare `ced` always opens the current directory — `cd myproj && ced` means
 what it says. What comes back with you is the **tabs**: each folder

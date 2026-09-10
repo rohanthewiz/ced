@@ -585,6 +585,21 @@ func TestPluginsDir_SharesTheConfigDirectory(t *testing.T) {
 	}
 }
 
+// TestFavoritesPath_SharesTheConfigDirectory is the same smoke test the
+// other config locations get: favorites.json must resolve beside every
+// other ced config file, which is the whole point of routing it through
+// configFilePath rather than letting internal/favorites build a path of
+// its own.
+func TestFavoritesPath_SharesTheConfigDirectory(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got, want := FavoritesPath(), filepath.Join("/xdg", "ced", "favorites.json"); got != want {
+		t.Errorf("FavoritesPath() = %q, want %q", got, want)
+	}
+	if filepath.Dir(FavoritesPath()) != filepath.Dir(DefaultPath()) {
+		t.Error("favorites.json drifted out of the config directory")
+	}
+}
+
 // TestLoadWordHLInvalid mirrors the execmarks rule: a typo'd value is an
 // error the caller can flash, not a silent fallback.
 func TestLoadWordHLInvalid(t *testing.T) {

@@ -662,6 +662,14 @@ func (m *findAllModal) ensureRowVisible(a *App) {
 	m.clampScroll(a)
 }
 
+// overflowClick hands a press on one of the list's ▴/▾ markers to the
+// shared gesture, with scrollList as the mover: the panel scrolls its own
+// window without disturbing the selection, which is what a report about
+// what lies off-screen should cost.
+func (m *findAllModal) overflowClick(a *App, x, y int) bool {
+	return a.overflowMarkerPress(x, y, func(delta int) { m.scrollList(a, delta) })
+}
+
 // scrollList moves the visible window by delta rows without touching the
 // selection — the wheel reads the list, it doesn't drive the editor.
 func (m *findAllModal) scrollList(a *App, delta int) {
@@ -1179,9 +1187,18 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	// and least of all this verb — striking a row off because the user
 	// pointed at "12 results below" is the one way this annotation could
 	// cost them something. The ✕ itself is untouched, so those two rows
-	// are still dismissable; the press falls through to plain selection.
+	// are still dismissable; the press goes to the marker's own gesture
+	// just below, which scrolls the list rather than touching a row.
 	if _, onMarker := a.overflowMarkerAt(x, y); x >= mx+mw-3 && !onMarker {
 		m.dismissRow(a, idx)
+		return
+	}
+	// The marker carved out of that zone is a target of its own: a click
+	// pages the list, a double runs it to the end (overflow.go). Unpinned
+	// this is the ONLY way in — the panel owns the modal slot, so the
+	// router's own marker hook never sees the press — and pinned it
+	// simply gets there first, moving the same list by the same rows.
+	if m.overflowClick(a, x, y) {
 		return
 	}
 	now := time.Now()

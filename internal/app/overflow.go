@@ -43,6 +43,15 @@
 //     bought exactly one thing — give me that column back — and there is
 //     no column to give back any more.
 //
+//   - IT IS ALSO A TARGET. A click pages that way, a double-click runs
+//     to that end of the document. That is the one thing the rail could
+//     do that a glyph could not — a scrollbar's trough is clickable —
+//     and it is worth more here, because the marker is drawn at the
+//     edge the reader is already looking at rather than off in a
+//     column of chrome. It is still not a verb in the sense the
+//     Find-all list means: the only state a press may change is which
+//     part of the surface is on screen.
+//
 //   - THE MARKER'S COLOR IS WHAT IS OUT THERE. The rail used to plot
 //     every off-screen diagnostic and find hit as its own cell, a
 //     minimap of positions. With no rail to plot on, that information
@@ -345,11 +354,13 @@ func pluginOffscreenKind(sev plugins.Severity) offscreenKind {
 // -----------------------------------------------------------------------------
 
 // overflowMarker is one drawn marker: the cell it occupies, which way it
-// points, the noun its popup counts in, and what is out there.
+// points, the noun its popup counts in, how tall its viewport is, and
+// what is out there.
 type overflowMarker struct {
 	x, y int
 	down bool
 	unit string // "line" for a body of text, "row" for a list
+	page int    // the viewport's height, which is what one click turns
 	off  offscreen
 
 	// overlay marks a marker whose surface is painted ABOVE the body
@@ -370,11 +381,12 @@ type overflowMarker struct {
 func (a *App) overflowMarkers() []overflowMarker {
 	out := make([]overflowMarker, 0, 6)
 
-	add := func(x, y int, down bool, unit string, o offscreen) {
+	add := func(x, y int, down bool, unit string, page int, o offscreen) {
 		if o.lines <= 0 || x < 0 || y < 0 || x >= a.width || y >= a.height {
 			return
 		}
-		out = append(out, overflowMarker{x: x, y: y, down: down, unit: unit, off: o})
+		out = append(out, overflowMarker{
+			x: x, y: y, down: down, unit: unit, page: page, off: o})
 	}
 
 	// pane adds the pair for one scrolling COLUMN of a panel: `visible`
@@ -383,8 +395,9 @@ func (a *App) overflowMarkers() []overflowMarker {
 	// independently, and spelling the arithmetic out four times is how
 	// one of them ends up off by a row.
 	pane := func(x, top, visible, scroll, total int, unit string) {
-		add(x, top, false, unit, offscreen{lines: scroll})
-		add(x, top+visible-1, true, unit, offscreen{lines: total - (scroll + visible)})
+		add(x, top, false, unit, visible, offscreen{lines: scroll})
+		add(x, top+visible-1, true, unit, visible,
+			offscreen{lines: total - (scroll + visible)})
 	}
 
 	// The editor body. The marker shares the last CONTENT column, which
@@ -404,8 +417,8 @@ func (a *App) overflowMarkers() []overflowMarker {
 				pane(ex+ew-1, ey, eh, t.MDScroll, total, "row")
 			} else {
 				above, below := a.editorOffscreen(t, t.ScrollY, t.ScrollY+eh-1)
-				add(ex+ew-1, ey, false, "line", above)
-				add(ex+ew-1, ey+eh-1, true, "line", below)
+				add(ex+ew-1, ey, false, "line", eh, above)
+				add(ex+ew-1, ey+eh-1, true, "line", eh, below)
 			}
 		}
 	}
@@ -502,8 +515,8 @@ func (a *App) overflowMarkers() []overflowMarker {
 		off, listH := a.tree.ListRows(sh)
 		if sw > 0 && listH > 0 {
 			top := a.tree.ScrollY
-			add(sx+sw-1, sy+off, false, "row", offscreen{lines: top})
-			add(sx+sw-1, sy+off+listH-1, true, "row",
+			add(sx+sw-1, sy+off, false, "row", listH, offscreen{lines: top})
+			add(sx+sw-1, sy+off+listH-1, true, "row", listH,
 				offscreen{lines: a.tree.RowCount() - (top + listH)})
 		}
 	}
@@ -559,6 +572,122 @@ func (a *App) paintOverflowMarker(m overflowMarker) {
 	a.screen.SetContent(m.x, m.y, r, nil,
 		tcell.StyleDefault.Background(bg).
 			Foreground(offscreenColor(a.theme, m.off.kind())).Bold(true))
+}
+
+// -----------------------------------------------------------------------------
+// The marker as a target
+// -----------------------------------------------------------------------------
+
+// overflowClickRecord remembers the press that landed on a marker, so a
+// second one at the same cell reads as a double even when the page the
+// first click turned took the marker off the screen.
+//
+// That case is the whole reason this is not just App.lastClick: a
+// double-click on '▴' with one page left above scrolls to the top on the
+// first press, which is exactly when the marker stops being drawn — and
+// the second press, finding nothing there, would fall through to the
+// surface underneath and move the caret (or open a file in the tree).
+// Remembering the DIRECTION as well as the cell is what lets the second
+// press be swallowed as the rest of the gesture it plainly is.
+type overflowClickRecord struct {
+	clickRecord
+	down bool
+}
+
+// overflowMarkerClick is the router's hook: a left press on a marker
+// pages that way, a second press within the double-click window runs to
+// that end of the document, and either way the event is consumed so it
+// never reaches the code, the row, or the file the glyph is sitting on
+// top of.
+//
+// It reports whether it claimed the press. The dragMode guard is not
+// belt-and-braces: this runs BEFORE handleMouse's drag-continuation
+// branches (it has to, or a press on a marker would start a selection
+// before anyone asked whether it was a marker), so without it a splitter
+// drag whose pointer swept through the editor's last column would page
+// the file it passed over.
+func (a *App) overflowMarkerClick(x, y int, btn tcell.ButtonMask) bool {
+	if btn&tcell.Button1 == 0 || a.dragMode != "" {
+		return false
+	}
+	return a.overflowMarkerPress(x, y, func(delta int) { a.scrollAt(x, y, delta) })
+}
+
+// overflowMarkerPress is the gesture itself, with the surface's own
+// mover passed in. Every caller but one hands it scrollAt, which already
+// knows how to move whichever panel a cell belongs to; the exception is
+// an UNPINNED Find-all list, which owns the modal slot, so the router
+// never reaches the panel dispatch scrollAt is built on and the list's
+// own scrollList is the only way in (findall.go).
+//
+// Both deltas are counted rather than assumed, which is what keeps a
+// click honest at the edges:
+//
+//   - A PAGE is the viewport's height less one row of overlap — the line
+//     you stopped reading on stays on screen — and never more than what
+//     is actually out there. Unclamped, a page down with three lines
+//     left would scroll into clampScroll's overscroll pad and leave the
+//     reader looking at half a screen of blank rows, which is a fine
+//     thing for a wheel to do on purpose and a poor answer to a click on
+//     an arrow that said "3 lines below".
+//
+//   - THE END is off.lines exactly, so the last line lands on the last
+//     row rather than in the middle of the pad. The marker's own count
+//     is the distance to the edge in every surface here, which is the
+//     one number nobody has to re-derive.
+func (a *App) overflowMarkerPress(x, y int, scroll func(delta int)) bool {
+	m, ok := a.overflowMarkerAt(x, y)
+	prev := a.overflowClick
+	double := !prev.when.IsZero() && prev.x == x && prev.y == y &&
+		time.Since(prev.when) < doubleClickMs
+	if !ok && !double {
+		return false
+	}
+	down := m.down
+	if !ok {
+		down = prev.down // the marker this gesture started on
+	}
+
+	if double {
+		// A triple click is not a third jump: there is nowhere further
+		// to go, and re-arming would make a fourth press page back.
+		a.overflowClick = overflowClickRecord{}
+		if ok {
+			scroll(overflowDelta(m.off.lines, down))
+		}
+		// A marker that has GONE means the first press already reached
+		// the edge, so there is nothing left to do but swallow this one.
+		return true
+	}
+
+	a.overflowClick = overflowClickRecord{
+		clickRecord: clickRecord{x: x, y: y, when: time.Now()},
+		down:        down,
+	}
+	scroll(overflowDelta(overflowPageRows(m), down))
+	return true
+}
+
+// overflowPageRows is how far one click travels: the viewport less a row
+// of overlap, floored at one (a two-row panel still has to move) and
+// capped at the distance to the edge.
+func overflowPageRows(m overflowMarker) int {
+	page := m.page - 1
+	if page < 1 {
+		page = 1
+	}
+	if page > m.off.lines {
+		page = m.off.lines
+	}
+	return page
+}
+
+// overflowDelta signs a distance for the direction the marker points in.
+func overflowDelta(n int, down bool) int {
+	if down {
+		return n
+	}
+	return -n
 }
 
 // -----------------------------------------------------------------------------

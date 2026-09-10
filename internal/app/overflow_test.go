@@ -637,3 +637,153 @@ func screenRuneAt(t *testing.T, a *App, x, y int) rune {
 	}
 	return cell.Runes[0]
 }
+
+// pressAt drives a left press through the real router, which is what
+// pins the marker's claim on it: the same event that pages the editor
+// would otherwise have moved the caret.
+func pressAt(a *App, x, y int) {
+	a.handleMouse(tcell.NewEventMouse(x, y, tcell.Button1, tcell.ModNone))
+}
+
+// TestOverflowClick_PagesTheEditor pins the single click: the down
+// marker moves the viewport one page (the height less a row of overlap)
+// and the up marker brings it back, both without touching the caret —
+// this is a reading gesture, and a click that scrolled AND moved the
+// cursor would lose the user's place in the file.
+func TestOverflowClick_PagesTheEditor(t *testing.T) {
+	a, _ := overflowApp(t, 400)
+	tab := a.activeTabPtr()
+	ex, ey, ew, eh := a.editorRect()
+	col, topRow, botRow := ex+ew-1, ey, ey+eh-1
+	caret := tab.Cursor
+
+	pressAt(a, col, botRow)
+	if tab.ScrollY != eh-1 {
+		t.Fatalf("a click on ▾ scrolled to %d, want one page (%d)", tab.ScrollY, eh-1)
+	}
+	if tab.Cursor != caret {
+		t.Errorf("the click moved the caret to %+v", tab.Cursor)
+	}
+
+	// Back up. A fresh cell record, or the press would read as the
+	// second half of a double-click on the marker below.
+	a.overflowClick = overflowClickRecord{}
+	pressAt(a, col, topRow)
+	if tab.ScrollY != 0 {
+		t.Errorf("a click on ▴ scrolled to %d, want back to the top", tab.ScrollY)
+	}
+}
+
+// TestOverflowClick_PageStopsAtTheEdge pins the clamp: with less than a
+// page left, the click travels exactly that far. Unclamped it would run
+// into clampScroll's overscroll pad, answering an arrow that said "3
+// lines below" with half a screen of blank rows.
+func TestOverflowClick_PageStopsAtTheEdge(t *testing.T) {
+	a, _ := overflowApp(t, 400)
+	tab := a.activeTabPtr()
+	ex, ey, ew, eh := a.editorRect()
+	col, botRow := ex+ew-1, ey+eh-1
+
+	tab.ScrollY = 400 - eh - 3 // three lines left below
+	pressAt(a, col, botRow)
+	if tab.ScrollY != 400-eh {
+		t.Errorf("scrolled to %d, want the last line on the last row (%d)", tab.ScrollY, 400-eh)
+	}
+	if _, ok := a.overflowMarkerAt(col, botRow); ok {
+		t.Error("a marker still points down from the end of the file")
+	}
+}
+
+// TestOverflowDoubleClick_RunsToTheEnd pins the second click: it lands
+// the far end of the document on the far edge of the viewport, and the
+// press is swallowed even when the first click already got there — the
+// marker stops being drawn at that moment, and a second press falling
+// through to the editor would drop the caret into the code beneath it.
+func TestOverflowDoubleClick_RunsToTheEnd(t *testing.T) {
+	a, _ := overflowApp(t, 400)
+	tab := a.activeTabPtr()
+	ex, ey, ew, eh := a.editorRect()
+	col, topRow, botRow := ex+ew-1, ey, ey+eh-1
+	caret := tab.Cursor
+
+	pressAt(a, col, botRow)
+	pressAt(a, col, botRow)
+	if tab.ScrollY != 400-eh {
+		t.Fatalf("a double click on ▾ scrolled to %d, want the bottom (%d)", tab.ScrollY, 400-eh)
+	}
+
+	// Two pages' worth above, so the first press of this double reaches
+	// the top and takes the marker with it; the second must still be the
+	// gesture's own rather than a click in the file.
+	tab.ScrollY = eh - 1
+	a.overflowClick = overflowClickRecord{}
+	pressAt(a, col, topRow)
+	if tab.ScrollY != 0 {
+		t.Fatalf("the first press left ScrollY at %d, want the top", tab.ScrollY)
+	}
+	pressAt(a, col, topRow)
+	if tab.ScrollY != 0 {
+		t.Errorf("the second press moved off the top to %d", tab.ScrollY)
+	}
+	if tab.Cursor != caret {
+		t.Errorf("a press on a vanished marker fell through and moved the caret to %+v", tab.Cursor)
+	}
+}
+
+// TestOverflowClick_LeavesOrdinaryCellsAlone pins the claim's edges: a
+// press one column in from the marker is an ordinary click on the file,
+// and a press mid-drag is the drag's, not the marker's — the hook runs
+// before handleMouse's drag branches, so a splitter drag sweeping through
+// the editor's last column must not page the file it passes over.
+func TestOverflowClick_LeavesOrdinaryCellsAlone(t *testing.T) {
+	a, _ := overflowApp(t, 400)
+	tab := a.activeTabPtr()
+	ex, ey, ew, eh := a.editorRect()
+	col, botRow := ex+ew-1, ey+eh-1
+
+	if a.overflowMarkerClick(col-1, botRow, tcell.Button1) {
+		t.Error("the cell beside the marker was claimed")
+	}
+	if a.overflowMarkerClick(col, botRow, tcell.ButtonSecondary) {
+		t.Error("a right press was claimed; that gesture opens a menu")
+	}
+	a.dragMode = "sidebar"
+	if a.overflowMarkerClick(col, botRow, tcell.Button1) {
+		t.Error("a press mid-drag was claimed")
+	}
+	a.dragMode = ""
+	if tab.ScrollY != 0 {
+		t.Errorf("nothing should have scrolled; ScrollY = %d", tab.ScrollY)
+	}
+}
+
+// TestOverflowClick_PagesTheTree pins that the gesture is the enumerator's
+// rather than the editor's: the same press on the sidebar's marker moves
+// the tree, through the same scrollAt every wheel event uses, and without
+// opening the file whose row the glyph shares a cell with.
+func TestOverflowClick_PagesTheTree(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 200; i++ {
+		name := filepath.Join(root, "f"+itoa(i)+".txt")
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	a := newTestApp(t, root)
+	a.refreshTreeNow()
+	sx, sy, sw, sh := a.sidebarRect()
+	off, listH := a.tree.ListRows(sh)
+	if listH <= 0 || a.tree.RowCount() <= listH {
+		t.Skipf("fixture drew %d rows into %d — no marker", a.tree.RowCount(), listH)
+	}
+	col, botRow := sx+sw-1, sy+off+listH-1
+	tabs := len(a.tabs)
+
+	pressAt(a, col, botRow)
+	if a.tree.ScrollY != listH-1 {
+		t.Errorf("tree scrolled to %d, want one page (%d)", a.tree.ScrollY, listH-1)
+	}
+	if len(a.tabs) != tabs {
+		t.Error("the press opened the file under the marker")
+	}
+}

@@ -3418,9 +3418,11 @@ House rules:
   the diff pane's case again: `mx+mw-3` is the blank cell `drawRow`
   already leaves between the text and the row's `✕`, so the marker
   covers nothing — but that cell is inside the three-cell DISMISS zone,
-  so `handleMouse` carves a drawn marker out of it. A marker is a
-  report, not a verb, and least of all THAT verb; the `✕` keeps its own
-  cell, so those two rows are still dismissable.
+  so `handleMouse` carves a drawn marker out of it. Striking a row off
+  because the user pointed at "12 results below" is the one way this
+  annotation could cost them something; the `✕` keeps its own cell, so
+  those two rows are still dismissable, and the press goes to the
+  marker's own gesture instead (below).
 - **IT IS DRAWN UNCONDITIONALLY.** No preference gates it, for the reason
   the ≡ menu's clipped-content arrows aren't gated either: content the
   user cannot see and has not been told about is the one thing a viewport
@@ -3483,6 +3485,29 @@ House rules:
   list's markers therefore say "there is more" without being able to say
   how much. That is the honest half to keep — the yes/no is what a
   viewport owes its reader — and pinning (◇) restores the rest.
+- **THE MARKER IS ALSO A TARGET: a click PAGES that way, a double-click
+  RUNS TO THAT END.** It is the one thing a rail could do that a glyph
+  could not — you could click a scrollbar's trough — and it is worth
+  more here, because the marker is drawn at the very edge the reader is
+  already looking at. That does not make it a verb in the sense the
+  Find-all rule means: the only state a press may change is which part
+  of the surface is on screen, never the document, the selection or the
+  worklist. `overflowMarkerPress` is the one gesture, and it takes the
+  surface's own mover — `scrollAt` for everything the router reaches, and
+  `scrollList` for an UNPINNED Find-all list, which owns the modal slot
+  and so is dispatched from `findAllModal.handleMouse` instead. **Both
+  distances are COUNTED, not assumed**: a page is the viewport less one
+  row of overlap and never more than `off.lines`, so a click on an arrow
+  that said "3 lines below" moves three lines rather than scrolling into
+  `clampScroll`'s overscroll pad, and the end is `off.lines` exactly, so
+  the last line lands on the last row. **A press is claimed even when the
+  marker has just gone** (`App.overflowClick` remembers the cell AND the
+  direction, which is why it is not `lastClick`): the first click of a
+  double can reach the edge, and the second one falling through would
+  drop the caret into the code — or open the file — under the glyph. The
+  gesture runs BEFORE handleMouse's drag branches, so it is gated on
+  `dragMode == ""` or a splitter drag sweeping the editor's last column
+  would page the file it passed over.
 - **Line counts floor at zero.** `clampScroll`'s overscroll pad lets the
   last line come up to the middle of the viewport, so `total - (last+1)`
   goes negative there; a marker for lines that do not exist is worse than
@@ -3533,8 +3558,9 @@ House rules:
   a two-row marker would be a column of blank air on every other row of
   the tree. That is the trade a shared-column scrollbar could not make,
   and the reason the tree stopped having one.
-- No leader key and no ≡ row: it is not a verb, and there is nothing to
-  toggle.
+- No leader key and no ≡ row: there is nothing to toggle, and the click
+  gesture is on the thing itself — a keyboard twin of "page down" is
+  already PgDn.
 
 ## Build / run
 

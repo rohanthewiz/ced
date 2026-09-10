@@ -1102,8 +1102,10 @@ func TestFindAll_FreshSearchDropsPinnedPanel(t *testing.T) {
 // shares the blank column left of the ✕, which is inside the three-cell
 // dismiss zone — and a marker is a report, not a verb: striking a row off
 // because the user pointed at "20 results below" is the one way an
-// annotation nobody asked for could cost them something. The ✕ itself is
-// untouched, so those rows are still dismissable.
+// annotation nobody asked for could cost them something. What the press
+// DOES mean is the marker's own gesture — page the list that way — which
+// leaves the selection exactly where it was. The ✕ itself is untouched,
+// so those rows are still dismissable.
 func TestFindAllRowClick_MarkerIsNotADismiss(t *testing.T) {
 	a, _ := seedFindAllLongApp(t)
 	m := openFindAllT(t, a, "count")
@@ -1113,18 +1115,21 @@ func TestFindAllRowClick_MarkerIsNotADismiss(t *testing.T) {
 		t.Skipf("fixture shows %d of %d rows — no marker is drawn", vis, len(m.view))
 	}
 	bot := my + 4 + vis - 1
-	idx := vis - 1
 	if _, ok := a.overflowMarkerAt(mx+mw-3, bot); !ok {
 		t.Fatalf("fixture drew no marker at (%d, %d)", mx+mw-3, bot)
 	}
 
 	before := len(m.view)
+	sel, scroll := m.selected, m.scroll
 	m.handleMouse(a, mx+mw-3, bot, tcell.Button1)
 	if len(m.view) != before {
 		t.Fatalf("a press on the marker dismissed a row (%d → %d)", before, len(m.view))
 	}
-	if m.selected != idx {
-		t.Errorf("marker press selected row %d, want the row under it (%d)", m.selected, idx)
+	if m.selected != sel {
+		t.Errorf("marker press moved the selection to %d, want it left at %d", m.selected, sel)
+	}
+	if m.scroll <= scroll {
+		t.Errorf("marker press scrolled to %d, want a page below %d", m.scroll, scroll)
 	}
 
 	// The ✕ beside it still means what it always did.

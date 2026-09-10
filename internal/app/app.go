@@ -968,6 +968,13 @@ type App struct {
 	// overflow.go.
 	overflowTip overflowTipState
 
+	// overflowClick is the last press that landed on a ▴/▾ marker: one
+	// click pages that way, a second at the same cell runs to the end.
+	// It is kept beside lastClick rather than folded into it because the
+	// first click can take the marker off the screen, and the second one
+	// still has to be read as part of the same gesture. See overflow.go.
+	overflowClick overflowClickRecord
+
 	clipBuf string
 	// fileClipPaths are the absolute paths armed by a Copy file/folder
 	// action; paste duplicates each under a collision-free name. Empty
@@ -2969,6 +2976,17 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		if a.completionMouse(x, y, btn) {
 			return
 		}
+	}
+
+	// A press ON a marker is the marker's own gesture — page that way,
+	// or run to the end of the document on a double — so it is claimed
+	// here rather than falling through to the code, the tree row or the
+	// list row the glyph shares its cell with. It sits after the popup
+	// (which the marker can be underneath) and after the completion and
+	// which-key overlays, both of which are drawn over the editor and so
+	// outrank an annotation on the text below them.
+	if a.overflowMarkerClick(x, y, btn) {
+		return
 	}
 
 	// Right-click handling. Over a file-tree row it opens a small context

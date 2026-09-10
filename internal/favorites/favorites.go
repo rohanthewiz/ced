@@ -259,6 +259,36 @@ func CleanName(name string) (string, error) {
 	return name, nil
 }
 
+// projectOverrides returns the override map for root, tolerating BOTH
+// spellings of the path.
+//
+// Add always writes the normalized key (absolute, cleaned, symlinks
+// resolved) so two ways of reaching one directory cannot keep two blocks
+// — the session store's rule, and it is why that normalisation exists at
+// all. But this file is HAND-EDITABLE, which is the whole reason it is a
+// file of its own, and somebody typing a project path types the spelling
+// they use: `~/code/app`, not whatever it resolves to once a symlink in
+// the middle is followed. Refusing that would be a block that parses,
+// lists, and silently never applies — the single worst failure an
+// override can have, since nothing on screen would explain it.
+//
+// Normalized first, so a key ced wrote always wins; the lexical form is
+// the fallback for a key a person wrote.
+func (s *Set) projectOverrides(root string) map[string]string {
+	if s == nil || root == "" || s.Projects == nil {
+		return nil
+	}
+	if m := s.Projects[session.Normalize(root)]; m != nil {
+		return m
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		if m := s.Projects[filepath.Clean(abs)]; m != nil {
+			return m
+		}
+	}
+	return s.Projects[filepath.Clean(root)]
+}
+
 // Lookup returns the relative path bound to name for the project rooted
 // at root, and the scope that stated it. The project override wins —
 // that is the entire point of having one — and root == "" asks the
@@ -267,11 +297,9 @@ func (s *Set) Lookup(root, name string) (string, Scope, bool) {
 	if s == nil {
 		return "", "", false
 	}
-	if root != "" {
-		if m := s.Projects[session.Normalize(root)]; m != nil {
-			if rel, ok := m[name]; ok {
-				return rel, ScopeProject, true
-			}
+	if m := s.projectOverrides(root); m != nil {
+		if rel, ok := m[name]; ok {
+			return rel, ScopeProject, true
 		}
 	}
 	if rel, ok := s.Favorites[name]; ok {
@@ -294,10 +322,8 @@ func (s *Set) List(root string) []Entry {
 	for name, rel := range s.Favorites {
 		merged[name] = Entry{Name: name, Path: rel, Scope: ScopeGlobal}
 	}
-	if root != "" {
-		for name, rel := range s.Projects[session.Normalize(root)] {
-			merged[name] = Entry{Name: name, Path: rel, Scope: ScopeProject}
-		}
+	for name, rel := range s.projectOverrides(root) {
+		merged[name] = Entry{Name: name, Path: rel, Scope: ScopeProject}
 	}
 	out := make([]Entry, 0, len(merged))
 	for _, e := range merged {
@@ -353,20 +379,23 @@ func (s *Set) Remove(root string, scope Scope, name string) (Scope, error) {
 	if s == nil {
 		return "", ErrNotFound
 	}
-	key := ""
-	if root != "" {
-		key = session.Normalize(root)
-	}
 	tryProject := func() bool {
-		if key == "" || s.Projects[key] == nil {
+		// Located through the same tolerant helper Lookup uses, or a
+		// hand-written key would be findable and undeletable.
+		m := s.projectOverrides(root)
+		if m == nil {
 			return false
 		}
-		if _, ok := s.Projects[key][name]; !ok {
+		if _, ok := m[name]; !ok {
 			return false
 		}
-		delete(s.Projects[key], name)
-		if len(s.Projects[key]) == 0 {
-			delete(s.Projects, key)
+		delete(m, name)
+		if len(m) == 0 {
+			for k, v := range s.Projects {
+				if len(v) == 0 {
+					delete(s.Projects, k)
+				}
+			}
 		}
 		return true
 	}
@@ -416,6 +445,47 @@ type Resolution struct {
 // deeper than any real checkout.
 const maxWalkUp = 40
 
+// ResolveIn resolves name STRICTLY inside root — no walking. It is the
+// half of the resolver that knows how to turn one (root, name) pair into
+// a path, and it exists as its own method because the editor needs
+// exactly that and must not have the walk.
+//
+// The distinction is not a detail. The CLI walks up because it is still
+// CHOOSING which project to open; a running editor already has one, and
+// every subsystem is derived from it. A walk there could resolve a
+// favorite in the PARENT of the workspace — a path outside the file
+// tree, which the tree would then refuse to reveal, having been handed
+// somewhere the user cannot see.
+//
+// Returns ErrNotFound when the name is bound in neither scope, and a
+// named error when it is bound but its path is missing, invalid, or
+// escapes the root.
+func (s *Set) ResolveIn(root, name string) (Resolution, error) {
+	rel, scope, ok := s.Lookup(root, name)
+	if !ok {
+		return Resolution{}, ErrNotFound
+	}
+	clean, err := Clean(rel)
+	if err != nil {
+		// A hand-edited file can hold a path Add would have refused.
+		// Name the entry AND the rule it broke — the user is looking at
+		// the file, and "invalid" alone would not tell them which line.
+		return Resolution{}, fmt.Errorf("favorite %q (%s): %w", name, scope, err)
+	}
+	abs := filepath.Join(root, clean)
+	if _, err := os.Stat(abs); err != nil {
+		return Resolution{}, fmt.Errorf("favorite %q: %s does not exist", name, abs)
+	}
+	// Confinement re-checked after the join resolves, because a lexical
+	// check alone is escapable through a symlink that lives inside the
+	// root (the workspace-edit rule). Best-effort: a path that won't
+	// resolve keeps its lexical verdict, which Clean already gave.
+	if !within(root, abs) {
+		return Resolution{}, fmt.Errorf("favorite %q resolves outside %s", name, root)
+	}
+	return Resolution{Root: root, Abs: abs, Rel: clean, Scope: scope}, nil
+}
+
 // Resolve finds the project root that owns name, starting at startDir
 // and walking up.
 //
@@ -441,33 +511,20 @@ func (s *Set) Resolve(startDir, name string) (Resolution, error) {
 		return Resolution{}, err
 	}
 
-	var bound bool       // the name exists in some scope somewhere on the walk
-	var lastTried string // the deepest candidate path, for the error message
+	// Each level is a full ResolveIn, so "resolve here" has exactly one
+	// implementation and the walk is only the loop around it.
+	var lastErr error // the deepest level's complaint, for the message
 	for i := 0; i < maxWalkUp; i++ {
-		rel, scope, ok := s.Lookup(dir, name)
-		if ok {
-			clean, cerr := Clean(rel)
-			if cerr != nil {
-				// A hand-edited file can hold a path Add would have
-				// refused. Name the entry AND the rule it broke — the
-				// user is looking at the file, and "invalid" alone
-				// would not tell them which line.
-				return Resolution{}, fmt.Errorf("favorite %q (%s): %w", name, scope, cerr)
-			}
-			bound = true
-			abs := filepath.Join(dir, clean)
-			lastTried = abs
-			if _, err := os.Stat(abs); err == nil {
-				// Confinement re-checked after the join resolves,
-				// because a lexical check alone is escapable through a
-				// symlink that lives inside the root (the workspace-edit
-				// rule). Best-effort: a path that won't resolve keeps
-				// its lexical verdict, which Clean already gave.
-				if !within(dir, abs) {
-					return Resolution{}, fmt.Errorf("favorite %q resolves outside %s", name, dir)
-				}
-				return Resolution{Root: dir, Abs: abs, Rel: clean, Scope: scope}, nil
-			}
+		got, err := s.ResolveIn(dir, name)
+		if err == nil {
+			return got, nil
+		}
+		// ErrNotFound means the name isn't bound at THIS level and the
+		// climb continues; anything else means it is bound and something
+		// about it is wrong, which is worth reporting if nothing better
+		// turns up higher.
+		if !errors.Is(err, ErrNotFound) && lastErr == nil {
+			lastErr = err
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -476,10 +533,10 @@ func (s *Set) Resolve(startDir, name string) (Resolution, error) {
 		dir = parent
 	}
 
-	if !bound {
-		return Resolution{}, ErrNotFound
+	if lastErr != nil {
+		return Resolution{}, lastErr
 	}
-	return Resolution{}, fmt.Errorf("favorite %q: %s does not exist", name, lastTried)
+	return Resolution{}, ErrNotFound
 }
 
 // within reports whether abs sits inside root once both have had their

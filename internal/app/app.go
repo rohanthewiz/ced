@@ -307,6 +307,16 @@ func builtinMenuGroups() []menuGroup {
 		{title: "Navigation", collapsible: true, items: []menuItemDef{
 			{label: "Go back", shortcut: "esc o / alt+←", action: (*App).menuNavBack, enabled: (*App).hasNavBack},
 			{label: "Go forward", shortcut: "esc O / alt+→", action: (*App).menuNavForward, enabled: (*App).hasNavForward},
+			// Named locations (favorites.go) — the mid-session twin of
+			// `ced fav <name>`. It belongs to this group's question
+			// exactly: the two rows above walk the trail you made, this
+			// one jumps to the places you named in advance. A browser's
+			// pairing — history beside bookmarks. Deliberately always
+			// enabled: a dimmed row on a machine with no favorites.json
+			// is a dead end that cannot explain itself, and the honest
+			// predicate is a file read, which menuLayout runs on every
+			// frame the menu is open.
+			{label: "Go to favorite…", action: (*App).menuGoToFavorite, enabled: alwaysTrue},
 		}},
 		{title: "Git", collapsible: true, items: []menuItemDef{
 			{label: "Next change", shortcut: "esc h", action: (*App).menuNextHunk, enabled: (*App).hasDiffHunks},

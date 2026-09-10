@@ -38,6 +38,15 @@
 //     invisible — the arrow keys would work and nothing on screen would
 //     say so. Opening a file is the opposite: the user's next keystroke
 //     belongs in the buffer.
+//
+// The ≡ Navigation row (menuGoToFavorite) is the mid-session half of the
+// same verb, and it differs from the CLI in exactly one way that matters:
+// it RESOLVES STRICTLY IN THE OPEN ROOT rather than walking up. `ced fav`
+// walks because it is still choosing which project to open; a running
+// editor already has one, and a walk here could resolve a favorite in the
+// PARENT of the workspace — a path outside the file tree, which the tree
+// would then refuse to reveal, having been handed somewhere the user
+// cannot see. favorites.ResolveIn is that half of the resolver.
 
 package app
 
@@ -45,7 +54,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/rohanthewiz/ced/internal/favorites"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
+
+// favoritesPathFn resolves favorites.json. A package var for the reason
+// every other config seam here is one: newTestApp points it at a
+// throwaway directory, so no test run can read the developer's real
+// favorites — or reveal one of their folders in a simulated editor.
+var favoritesPathFn = userconfig.FavoritesPath
 
 // RevealPath shows path in the file tree: the sidebar comes up if it was
 // hidden, every directory on the way down is loaded and expanded, and
@@ -104,4 +122,78 @@ func (a *App) RevealPath(path string) {
 	}
 	a.ensureTreeSelectionVisible()
 	a.flash(fmt.Sprintf("Revealed %s", a.relativePathFor(abs)))
+}
+
+// menuGoToFavorite opens the project's favorites as a fuzzy picker and
+// reveals whichever one is chosen — the ≡ Navigation row, and the
+// mid-session twin of `ced fav <name>`.
+//
+// It sits in Navigation rather than Search because it belongs to that
+// group's question exactly: Go back and Go forward walk the trail you
+// made, and this jumps to the places you named in advance. The pairing
+// is a browser's — history beside bookmarks.
+//
+// Two rules the surface follows:
+//
+//   - THE ROW IS ALWAYS CLICKABLE, and says why when it can't help. A
+//     dimmed row on a machine with no favorites.json is a dead end that
+//     cannot explain itself; the flash names the verb that creates one
+//     (the "Recent chats"/MCP rule). Keeping it enabled also keeps
+//     menuLayout free of a per-frame file read — predicates run on every
+//     frame the menu is open.
+//
+//   - ONLY WHAT RESOLVES IS OFFERED. The CLI's `fav list` is a REPORT,
+//     so it shows a global default this project doesn't follow, marked
+//     "missing here". A picker is a list of VERBS, and the palette has no
+//     disabled state to borrow: a row answering Enter with "that isn't
+//     here" is worse than one never offered (the code-actions rule). What
+//     was dropped is still accounted for — in the flash, when everything
+//     was.
+func (a *App) menuGoToFavorite() {
+	a.closeMenu()
+
+	set, err := favorites.Load(favoritesPathFn())
+	if err != nil {
+		// A malformed file is reported rather than read as "no
+		// favorites": the user wrote it, and silence would leave them
+		// believing the names were bound.
+		a.flash(fmt.Sprintf("Favorites: %v", err))
+		return
+	}
+
+	entries := set.List(a.rootDir)
+	items := make([]paletteItem, 0, len(entries))
+	for _, e := range entries {
+		got, rerr := set.ResolveIn(a.rootDir, e.Name)
+		if rerr != nil {
+			continue
+		}
+		abs := got.Abs
+		// Name first: the fuzzy scorer rewards early matches, and the
+		// name is what the user is typing. The path trails as context,
+		// the way the symbol picker puts its kind word last.
+		items = append(items, paletteItem{
+			label: e.Name + "  " + e.Path,
+			run:   func(a *App) { a.RevealPath(abs) },
+		})
+	}
+
+	if len(items) == 0 {
+		a.flash(favoritesEmptyReason(len(entries)))
+		return
+	}
+	a.openPicker("Go to favorite", items)
+}
+
+// favoritesEmptyReason distinguishes the two ways the picker can come up
+// empty, because they have different fixes — the same split the CLI
+// makes between an unbound name and a bound-but-missing one. "You have
+// none" wants the verb that creates one; "none of yours are here" wants
+// to say that this project doesn't follow the convention, so the user
+// doesn't go hunting for a file they know they wrote.
+func favoritesEmptyReason(bound int) string {
+	if bound == 0 {
+		return "No favorites yet — add one with:  ced fav add plans ai_docs/plans"
+	}
+	return fmt.Sprintf("None of your %d favorites exist in this project", bound)
 }

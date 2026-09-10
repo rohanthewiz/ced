@@ -2545,9 +2545,41 @@ jumps to it. House rules:
 - **The reveal rides main's one-shot seam**, beside `OpenFile`: both
   describe how this INVOCATION started rather than a property of the
   workspace, so the folder-switch loop must not repeat either.
-- No ≡ row and no leader key yet — this is a STARTUP verb. Re-revealing a
-  favorite mid-session is a different feature (it wants a picker), and
-  `RevealPath` is already the primitive it would be built on.
+- **THE ≡ ROW RESOLVES STRICTLY IN THE OPEN ROOT; THE CLI WALKS.** That
+  is the one place the two halves of the verb differ, and it is not a
+  simplification: `ced fav` walks because it is still CHOOSING a project,
+  while a running editor already has one and everything is derived from
+  it. A walk there could resolve a favorite in the PARENT of the
+  workspace — a path outside the file tree, which the tree would then
+  refuse, having been handed somewhere the user cannot see.
+  `favorites.ResolveIn` is that half of the resolver, and `Resolve` is
+  the loop around it, so "resolve here" has exactly one implementation.
+- **`fav list` is a REPORT; the ≡ picker is a list of VERBS.** The CLI
+  shows a global default this project doesn't follow, marked "missing
+  here" — hiding it would leave the user asking why a name they bound
+  isn't listed. The picker DROPS it, because the palette has no disabled
+  state to borrow and a row answering Enter with "that isn't here" is
+  worse than one never offered (the code-actions rule). Nothing is lost:
+  when everything was dropped, the flash says so.
+- **The row lives in ≡ Navigation and is never dimmed.** Go back and Go
+  forward walk the trail you made; this jumps to the places you named in
+  advance — a browser's pairing, history beside bookmarks. It stays
+  clickable with no favorites.json (the "Recent chats"/MCP rule: a dimmed
+  row is a dead end that cannot explain itself) and the flash names the
+  verb that creates one. Keeping it enabled also keeps `menuLayout` free
+  of a per-frame file read — predicates run every frame the menu is open.
+  The two empty states are different messages because they have different
+  fixes, the CLI's unbound / bound-but-missing split one floor up.
+- **A project key is read tolerantly, written normally.** `Add` writes
+  the normalized key (symlinks resolved) so one directory can't keep two
+  blocks — the session store's rule. But the file is HAND-EDITABLE, and
+  somebody typing a project path types the spelling they use, not what it
+  resolves to once a symlink in the middle is followed (every path under
+  /var and /tmp on macOS). `projectOverrides` tries both, normalized
+  first, and Lookup / List / Remove all go through it — a key that
+  resolves but cannot be deleted would be its own bug.
+- No leader key: the flat table is out of mnemonic letters, and the ≡ row
+  gets the command palette for free.
 
 ### The command line is urfave/cli/v2 (main.go)
 The CLI was a hand-rolled arg walker until `ced fav` needed subcommands.

@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rohanthewiz/ced/internal/session"
 )
 
 // seedProject builds the layout the examples assume — a project root
@@ -328,5 +330,47 @@ func TestAdd_RefusesWhatWouldNeverResolve(t *testing.T) {
 	}
 	if len(set.Favorites) != 0 {
 		t.Fatalf("a refused Add wrote something: %+v", set.Favorites)
+	}
+}
+
+// TestProjectKey_ToleratesTheSpellingAPersonWould is the regression test
+// for a block that parses, lists, and silently never applies — the worst
+// failure an override can have, since nothing on screen explains it.
+//
+// Add always writes the NORMALIZED key (symlinks resolved), so two ways
+// of reaching one directory can't keep two blocks. But this file is
+// hand-editable by design, and somebody typing a project path types the
+// spelling they use, not whatever it resolves to once a symlink in the
+// middle is followed — which on macOS is every path under /var and
+// /tmp. All three readers must find such a key, or `fav rm --project`
+// could not delete what Lookup finds.
+func TestProjectKey_ToleratesTheSpellingAPersonWould(t *testing.T) {
+	root, _ := seedProject(t)
+	normalized := session.Normalize(root)
+	if normalized == root {
+		t.Skip("this platform's temp dir needs no resolution — nothing to pin here")
+	}
+
+	// A hand-written block, keyed the way a person would type it.
+	set := &Set{
+		Favorites: map[string]string{"plans": "ai_docs/plans"},
+		Projects:  map[string]map[string]string{root: {"plans": "docs/plans"}},
+	}
+
+	if rel, scope, ok := set.Lookup(root, "plans"); !ok || rel != "docs/plans" || scope != ScopeProject {
+		t.Fatalf("Lookup = %q/%q/%v, want the hand-written override", rel, scope, ok)
+	}
+	entries := set.List(root)
+	if len(entries) != 1 || entries[0].Path != "docs/plans" {
+		t.Fatalf("List = %+v, want the override in place of the global", entries)
+	}
+	if scope, err := set.Remove(root, ScopeProject, "plans"); err != nil || scope != ScopeProject {
+		t.Fatalf("Remove = %q, %v; want the override deleted", scope, err)
+	}
+	if _, _, ok := set.Lookup(root, "plans"); !ok {
+		t.Fatal("the global should still be there after removing the override")
+	}
+	if len(set.Projects) != 0 {
+		t.Fatalf("the emptied block survived: %+v", set.Projects)
 	}
 }

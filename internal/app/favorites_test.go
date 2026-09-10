@@ -132,3 +132,194 @@ func TestRevealPath_MissingAndOutsideAreFlashed(t *testing.T) {
 		t.Fatalf("an empty reveal flashed %q", a.statusMsg)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// The ≡ Navigation row and its picker
+// -----------------------------------------------------------------------------
+
+// seedFavorites writes a favorites.json into the throwaway config
+// directory newTestApp already pinned, so a test can state what is bound
+// without going near the developer's real file.
+func seedFavorites(t *testing.T, a *App, body string) {
+	t.Helper()
+	if err := os.WriteFile(favoritesPathFn(), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// pickerRows is the picker's labels, joined — the shape every assertion
+// below wants.
+func pickerRows(t *testing.T, a *App) []string {
+	t.Helper()
+	pm, ok := a.modal.(*paletteModal)
+	if !ok {
+		t.Fatalf("modal = %T, want a picker", a.modal)
+	}
+	rows := make([]string, 0, len(pm.items))
+	for _, it := range pm.items {
+		rows = append(rows, it.label)
+	}
+	return rows
+}
+
+// TestMenuGoToFavorite_ListsAndReveals is the row's happy path: the
+// bound favorites that exist here become rows, and running one lands the
+// tree cursor on the folder — the same gesture `ced fav plans` performs,
+// mid-session.
+func TestMenuGoToFavorite_ListsAndReveals(t *testing.T) {
+	root, folder, _ := revealProject(t)
+	a := newTestApp(t, root)
+	seedFavorites(t, a, `{"favorites":{"plans":"ai_docs/plans"}}`)
+
+	a.menuGoToFavorite()
+	rows := pickerRows(t, a)
+	if len(rows) != 1 {
+		t.Fatalf("picker rows = %v, want one", rows)
+	}
+	// Name first, path trailing: the fuzzy scorer rewards early matches
+	// and the name is what the user types (the symbol picker's rule).
+	if !strings.HasPrefix(rows[0], "plans") || !strings.Contains(rows[0], "ai_docs/plans") {
+		t.Fatalf("row = %q, want the name first and the path as context", rows[0])
+	}
+
+	pm := a.modal.(*paletteModal)
+	pm.items[0].run(a)
+	if a.tree.Selected == nil || a.tree.Selected.Path != folder {
+		t.Fatalf("tree cursor = %+v, want %q", a.tree.Selected, folder)
+	}
+	if a.rootDir != root {
+		t.Fatalf("rootDir = %q, want %q — the picker must not re-root", a.rootDir, root)
+	}
+}
+
+// TestMenuGoToFavorite_OffersOnlyWhatResolvesHere pins the difference
+// between this picker and the CLI's `fav list`. That one is a REPORT, so
+// it shows a global default this project doesn't follow, marked "missing
+// here". A picker is a list of VERBS and the palette has no disabled
+// state to borrow, so a row answering Enter with "that isn't here" is
+// worse than one never offered (the code-actions rule).
+func TestMenuGoToFavorite_OffersOnlyWhatResolvesHere(t *testing.T) {
+	root, _, _ := revealProject(t)
+	a := newTestApp(t, root)
+	seedFavorites(t, a, `{"favorites":{
+		"plans":"ai_docs/plans",
+		"cosess":"ai_docs/copilot_sessions"
+	}}`)
+
+	a.menuGoToFavorite()
+	rows := pickerRows(t, a)
+	joined := strings.Join(rows, "|")
+	if !strings.Contains(joined, "plans") {
+		t.Fatalf("the resolvable favorite is missing: %q", joined)
+	}
+	if strings.Contains(joined, "cosess") {
+		t.Fatalf("a favorite with no directory here was offered: %q", joined)
+	}
+}
+
+// TestMenuGoToFavorite_ResolvesStrictlyInTheOpenRoot is the one place
+// the editor deliberately differs from the CLI. `ced fav` walks UP
+// because it is still choosing which project to open; a running editor
+// already has one, and a walk here would resolve a favorite in the
+// PARENT of the workspace — a path outside the file tree, which the tree
+// would then refuse to reveal, having been handed somewhere the user
+// cannot see.
+func TestMenuGoToFavorite_ResolvesStrictlyInTheOpenRoot(t *testing.T) {
+	parent := t.TempDir()
+	// The favorite exists in the PARENT of the workspace, not in it.
+	if err := os.MkdirAll(filepath.Join(parent, "ai_docs", "plans"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "child")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := newTestApp(t, root)
+	seedFavorites(t, a, `{"favorites":{"plans":"ai_docs/plans"}}`)
+
+	a.menuGoToFavorite()
+	if _, ok := a.modal.(*paletteModal); ok {
+		t.Fatalf("a favorite outside the open root was offered: %v", pickerRows(t, a))
+	}
+	if !strings.Contains(a.statusMsg, "exist in this project") {
+		t.Fatalf("statusMsg = %q, want it to say the favorites aren't here", a.statusMsg)
+	}
+}
+
+// TestMenuGoToFavorite_EmptyStatesTeachRatherThanDim covers both ways
+// the picker comes up with nothing, and why the row is never dimmed. A
+// dimmed row on a machine with no favorites.json is a dead end that
+// cannot explain itself; these two messages have different fixes, so
+// they are different messages (the CLI's unbound / bound-but-missing
+// split, one floor up).
+func TestMenuGoToFavorite_EmptyStatesTeachRatherThanDim(t *testing.T) {
+	root, _, _ := revealProject(t)
+
+	// Nothing bound at all: name the verb that binds one.
+	a := newTestApp(t, root)
+	a.menuGoToFavorite()
+	if a.modal != nil {
+		t.Fatalf("modal = %T, want no picker", a.modal)
+	}
+	if !strings.Contains(a.statusMsg, "ced fav add") {
+		t.Fatalf("statusMsg = %q, want it to teach the add verb", a.statusMsg)
+	}
+
+	// Bound, but none of them here: say THAT instead, so the user
+	// doesn't go hunting for a file they know they wrote.
+	b := newTestApp(t, root)
+	seedFavorites(t, b, `{"favorites":{"cosess":"ai_docs/copilot_sessions"}}`)
+	b.menuGoToFavorite()
+	if b.modal != nil {
+		t.Fatalf("modal = %T, want no picker", b.modal)
+	}
+	if !strings.Contains(b.statusMsg, "exist in this project") {
+		t.Fatalf("statusMsg = %q, want the not-here message", b.statusMsg)
+	}
+}
+
+// TestMenuGoToFavorite_MalformedFileIsReported keeps the file's one
+// error path honest. The user wrote favorites.json, so reading a syntax
+// error as "you have no favorites" would leave them believing the names
+// were bound.
+func TestMenuGoToFavorite_MalformedFileIsReported(t *testing.T) {
+	root, _, _ := revealProject(t)
+	a := newTestApp(t, root)
+	seedFavorites(t, a, `{{{`)
+
+	a.menuGoToFavorite()
+	if a.modal != nil {
+		t.Fatalf("modal = %T, want no picker", a.modal)
+	}
+	if !strings.Contains(a.statusMsg, "Favorites:") {
+		t.Fatalf("statusMsg = %q, want the parse error reported", a.statusMsg)
+	}
+}
+
+// TestMenuGoToFavorite_ProjectOverrideWins pins that the picker reads
+// the same two scopes the CLI does — the override is what a user who set
+// one expects to see, and offering the global path instead would reveal
+// the wrong folder.
+func TestMenuGoToFavorite_ProjectOverrideWins(t *testing.T) {
+	root, _, _ := revealProject(t)
+	other := filepath.Join(root, "docs", "plans")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, root)
+	seedFavorites(t, a, `{
+		"favorites":{"plans":"ai_docs/plans"},
+		"projects":{"`+root+`":{"plans":"docs/plans"}}
+	}`)
+
+	a.menuGoToFavorite()
+	rows := pickerRows(t, a)
+	if len(rows) != 1 || !strings.Contains(rows[0], "docs/plans") {
+		t.Fatalf("rows = %v, want the project override", rows)
+	}
+	a.modal.(*paletteModal).items[0].run(a)
+	if a.tree.Selected == nil || a.tree.Selected.Path != other {
+		t.Fatalf("revealed %+v, want the override's %q", a.tree.Selected, other)
+	}
+}

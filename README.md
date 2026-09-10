@@ -274,6 +274,14 @@ that climbs out with `..`, is refused when you add it. A favorite whose
 folder isn't in *this* project is listed as `missing here` rather than
 hidden — a default you don't follow everywhere is still worth seeing.
 
+Mid-session, `≡` → Navigation → **Go to favorite…** opens the same
+locations as a fuzzy picker (it's in the command palette too). It sits
+beside Go back / Go forward because it answers that group's question from
+the other end — those walk the trail you made, this jumps to the places
+you named in advance. Unlike `ced fav list`, the picker offers only what
+actually exists in the open project: every row there is something you can
+press Enter on.
+
 Bare `ced` always opens the current directory — `cd myproj && ced` means
 what it says. What comes back with you is the **tabs**: each folder
 remembers which files were open and where the cursors were, and reopening

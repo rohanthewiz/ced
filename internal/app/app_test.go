@@ -85,6 +85,14 @@ func newTestApp(t *testing.T, root string) *App {
 	sessionStatePathFn = func() string { return filepath.Join(sessionHome, "state.json") }
 	sessionConfigPathFn = func() string { return filepath.Join(sessionHome, "config.json") }
 	t.Cleanup(func() { sessionStatePathFn, sessionConfigPathFn = prevStatePath, prevSessionCfg })
+	// Same seam for favorites.json, and load-bearing for the same
+	// reason: "Go to favorite" reads the file and REVEALS what it names,
+	// so without this a test run would open one of the developer's own
+	// folders in a simulated editor. The directory starts empty, so the
+	// picker's honest answer is "no favorites yet".
+	prevFavPath := favoritesPathFn
+	favoritesPathFn = func() string { return filepath.Join(sessionHome, "favorites.json") }
+	t.Cleanup(func() { favoritesPathFn = prevFavPath })
 	// Match the shipped default (config "session" is on): the App is
 	// built by hand here, so the zero value would put every test in a
 	// state the product never ships in.
@@ -1987,16 +1995,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 154 {
-		t.Errorf("modalHeight = %d, want 154", h)
+	if h != 155 {
+		t.Errorf("modalHeight = %d, want 155", h)
 	}
-	if got := len(items); got != 148 {
-		t.Errorf("row count = %d, want 148 (2 top-zone + 131 group actions + 15 headers)", got)
+	if got := len(items); got != 149 {
+		t.Errorf("row count = %d, want 149 (2 top-zone + 132 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (151) — headers separate the
+	// one setting off the headerless Quit group (152) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 151}
+	wantDiv := []int{2, 5, 152}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2324,8 +2332,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 157 { // 154 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 157", h)
+	if h != 158 { // 155 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 158", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

@@ -2053,16 +2053,5 @@ func (a *App) drawChatRow(row chatRow, x, ry, w int, idx int) {
 // editor-facing (right) edge — the same visual language as the sidebar
 // and terminal splitters.
 func (a *App) drawChatSplitter() {
-	x := a.chatSplitterX()
-	if x < 0 {
-		return
-	}
-	fg := a.theme.Subtle
-	if a.dragMode == "chatsplit" {
-		fg = a.theme.Accent
-	}
-	style := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(fg)
-	for y := 0; y < a.height-1; y++ {
-		a.screen.SetContent(x, y, '│', nil, style)
-	}
+	a.drawVSplitter(a.chatSplitterX(), a.dragMode == "chatsplit")
 }

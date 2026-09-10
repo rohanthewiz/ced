@@ -50,7 +50,7 @@ func (a *App) closeAllModals() {
 	a.findField = textField{}
 	a.replField = textField{}
 	a.hoveredMenuRow = -1
-	a.dragMode = ""
+	a.dragMode, a.dragSplitOffset = "", 0
 	a.stopAutoScroll()
 	// The which-key overlay rides along: it never coexists with a modal
 	// or the menu, and every surface that opens one comes through here.

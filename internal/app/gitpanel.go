@@ -675,27 +675,10 @@ func (a *App) gitPanelDividerX() int {
 	return px + a.gitPanelListW(pw)
 }
 
-// gitDividerGrip is the glyph the middle rows of a list/diff seam carry
-// — a heavy vertical, single-width per the marker rule, deliberately
-// different in WEIGHT rather than only in color: a border and a handle
-// have to be told apart at a glance on a terminal whose contrast the
-// editor cannot vouch for.
-const gitDividerGrip = '\u2503'
-
-// gitDividerIsGrip reports whether body row `row` of a `rows`-tall pane
-// belongs to the divider's grip segment — the middle three rows. A pane
-// too short for the grip to sit clear of both ends keeps a plain rule:
-// there, the whole seam is short enough to read as one handle already.
-// Shared by both git panels, which mirror each other's shape; the grip
-// is one of the house patterns they share rather than copy.
-func gitDividerIsGrip(row, rows int) bool {
-	const grip = 3
-	if rows < grip+2 {
-		return false
-	}
-	top := (rows - grip) / 2
-	return row >= top && row < top+grip
-}
+// The grip glyph and the middle-rows test both live in splitter.go now
+// — the seam inside a git panel and the seams between the editor and
+// its docked strips are the same affordance, so they share one
+// implementation rather than mirroring each other's.
 
 // gitPanelDividerHit reports whether a body-row press at column x lands
 // on the list/diff seam. The zone is the divider column PLUS one cell
@@ -714,7 +697,7 @@ func (a *App) gitPanelDividerHit(x int) bool {
 // to the cursor the same way the sidebar splitter is.
 func (a *App) dragGitListDivTo(x int) {
 	px, _, _, _ := a.gitPanelRect()
-	a.resizeGitPanelListWidth(x - px)
+	a.resizeGitPanelListWidth(x - a.dragSplitOffset - px)
 }
 
 // resizeGitPanelListWidth records a user-chosen file-list column width,
@@ -832,6 +815,10 @@ func (a *App) gitPanelPress(x, y int) (dragMode string) {
 		}
 	}
 	if y > py && a.gitPanelDividerHit(x) {
+		// Carry how far off the seam the grab landed, so a three-column
+		// zone doesn't shift the divider the instant the mouse twitches
+		// (see App.dragSplitOffset).
+		a.dragSplitOffset = x - a.gitPanelDividerX()
 		return "gitlistdiv"
 	}
 	a.gitPanelClick(x, y)
@@ -1122,8 +1109,8 @@ func (a *App) drawGitPanel() {
 		// from the rule's: the shape says "seize me here" without the
 		// divider having to shout on every row.
 		glyph, st := '│', divSt
-		if a.dragMode != "gitlistdiv" && gitDividerIsGrip(row, ph-1) {
-			glyph, st = gitDividerGrip, gripSt
+		if a.dragMode != "gitlistdiv" && splitterIsGrip(row, ph-1) {
+			glyph, st = splitterGrip, gripSt
 		}
 		a.screen.SetContent(px+listW, ry, glyph, nil, st)
 		// Diff cell fill, then diff text.

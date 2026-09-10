@@ -838,25 +838,6 @@ func TestGitPanelDividerHit_ThreeColumnGrabZone(t *testing.T) {
 	}
 }
 
-// TestGitDividerIsGrip pins the grip segment's placement: the middle
-// three rows of a pane tall enough to sit them clear of both ends, and
-// nothing at all on a short pane, where the whole seam already reads as
-// one handle.
-func TestGitDividerIsGrip(t *testing.T) {
-	// 11 body rows → grip on rows 4,5,6.
-	for row := 0; row < 11; row++ {
-		want := row >= 4 && row <= 6
-		if got := gitDividerIsGrip(row, 11); got != want {
-			t.Errorf("row %d of 11: grip=%v, want %v", row, got, want)
-		}
-	}
-	for row := 0; row < 4; row++ {
-		if gitDividerIsGrip(row, 4) {
-			t.Errorf("row %d of a 4-row pane should carry no grip", row)
-		}
-	}
-}
-
 // TestDrawGitPanel_DividerCarriesAGrip verifies the affordance actually
 // reaches the screen: the seam's middle rows paint the heavy grip glyph
 // a step brighter than the rule, while an ordinary row stays a plain
@@ -870,7 +851,7 @@ func TestDrawGitPanel_DividerCarriesAGrip(t *testing.T) {
 
 	gripRow := -1
 	for row := 0; row < rows; row++ {
-		if gitDividerIsGrip(row, rows) {
+		if splitterIsGrip(row, rows) {
 			gripRow = row
 			break
 		}
@@ -888,9 +869,9 @@ func TestDrawGitPanel_DividerCarriesAGrip(t *testing.T) {
 		return c.Runes[0], fg
 	}
 
-	if r, fg := at(gripRow); r != gitDividerGrip || fg != a.theme.Muted {
+	if r, fg := at(gripRow); r != splitterGrip || fg != a.theme.Muted {
 		t.Errorf("grip row: rune=%q fg=%v, want %q in Muted %v",
-			r, fg, gitDividerGrip, a.theme.Muted)
+			r, fg, splitterGrip, a.theme.Muted)
 	}
 	if r, fg := at(0); r != '│' || fg != a.theme.Subtle {
 		t.Errorf("plain row: rune=%q fg=%v, want │ in Subtle %v", r, fg, a.theme.Subtle)

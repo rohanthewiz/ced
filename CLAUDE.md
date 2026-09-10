@@ -2967,11 +2967,50 @@ dividers `[2, 5, 149]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 
-### Sidebar splitter drag
-A drag is detected when a press lands at exactly `x == splitterX()`.
-Min widths: `minSidebarWidth = 18`, `minEditorAfterDrag = 40`. Don't
-let the editor shrink below that. A drag that MOVES the splitter also
-turns auto-fit off — see the next section for why.
+### The resizable seams (app/splitter.go)
+Every vertical rule the user drags to re-apportion columns — the
+sidebar's, a left-docked terminal strip's, the chat strip's, plus the
+list/diff seams inside both git panels, which share the grip helpers.
+House rules:
+
+- **A ONE-COLUMN GRAB ZONE IS A COIN FLIP WITH A MOUSE**, which is what
+  the git seam's fix established and what every other splitter had too.
+  A window seam's zone is the divider PLUS THE COLUMN ON ITS LEFT.
+- **The asymmetry is load-bearing, not a shortcut.** Left of a window
+  seam is the panel it resizes, and every one of them stops a column
+  short of the rule — a strip's right margin, the file tree's row tail.
+  Right of it is the EDITOR BAND, whose first column belongs to whatever
+  is docked there, and two of those put a deliberate one-cell control in
+  exactly that cell: the git panel's review column, and (flipped) the
+  file tree's own mark gutter. Trading a hard-to-hit seam for a control
+  with no second mouse path is not a trade. The git panels' INTERNAL
+  seams take both neighbours because both were verifiably blank there;
+  a window seam cannot make that claim, so it doesn't.
+- **A drag carries `App.dragSplitOffset`**, the distance between the
+  press and the seam's own column, so the rule tracks the pointer from
+  where it was seized instead of jumping under it. Gluing to the cursor
+  was fine at one column wide; at two it shifts the seam the instant the
+  mouse twitches — which for the sidebar also trips `lockTreeAutoFit`,
+  the guard that stops a press with jitter stating a width and writing
+  it to disk. All five seams carry it, so they all feel the same.
+- **A plain rule reads as a border, not as something you can seize**, so
+  the middle three rows carry a heavier glyph a step up in color
+  (`splitterGrip` / `splitterIsGrip`) — the difference is in WEIGHT
+  rather than only in hue, because a border and a handle have to be told
+  apart on a terminal whose contrast ced cannot vouch for. A live drag
+  lights the whole rule Accent, at which point the grip has nothing left
+  to say and steps back down to the plain glyph.
+- **A pane's ceiling is stated as its NEIGHBOUR's reserve, never as a
+  constant of its own** (`a.width - minEditorAfterDrag`, minus whatever
+  strip owns the other edge). A fixed cap makes a pane unable to grow on
+  the very wide terminal where a drag is reached for — the bug
+  `gitPanelMaxListW` was.
+- Min widths: `minSidebarWidth = 18`, `minEditorAfterDrag = 40`. Don't
+  let the editor shrink below that. A drag that MOVES the splitter also
+  turns auto-fit off — see the next section for why.
+- The horizontal seams (each bottom panel's header rule) are deliberately
+  untouched: a row is a much easier target than a column, and both
+  neighbours there are content rather than margin.
 
 ### Tree multi-selection (filetree's marks + app/treemarks.go)
 Tick several rows in the file tree, then run one verb over all of them.

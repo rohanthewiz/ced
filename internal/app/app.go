@@ -973,11 +973,20 @@ type App struct {
 	// every line. Reset with the buffer at each start marker.
 	pasteCR bool
 
-	statusMsg    string
-	statusUntil  time.Time
-	dragMode     string // "editor" while a drag-select is active.
-	lastClick    clickRecord
-	lastTabRects []tabRect
+	statusMsg   string
+	statusUntil time.Time
+	dragMode    string // "editor" while a drag-select is active.
+	// dragSplitOffset is how far the press that started a seam drag
+	// landed from the seam's own column. The grab zone is three columns
+	// wide (splitter.go), so a drag that glued the divider to the cursor
+	// would shift it by up to one column the instant the mouse twitched
+	// — which for the sidebar also trips lockTreeAutoFit, the very guard
+	// that exists to stop a press with jitter stating a width. Carrying
+	// the offset makes the seam track the pointer from where it was
+	// actually seized, so an unmoved grab really is a no-op.
+	dragSplitOffset int
+	lastClick       clickRecord
+	lastTabRects    []tabRect
 
 	// statusSegs is the status bar's clickable spans, re-stamped by
 	// every drawStatusBar the same way lastTabRects tracks the tab
@@ -3027,9 +3036,10 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// panel reshapes live as the user drags. The width the mouse implies
 	// depends on which edge the block hugs.
 	if leftDown && a.dragMode == "sidebar" {
-		want := x + 1
+		sx := x - a.dragSplitOffset
+		want := sx + 1
 		if a.treeOnRight() {
-			want = a.width - x
+			want = a.width - sx
 		}
 		// A drag is the user stating a width, so it takes ownership of the
 		// number back from auto-fit (which would otherwise overwrite it on
@@ -3046,14 +3056,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// Left-docked terminal resize drag: same gesture as the sidebar
 	// splitter, opposite edge.
 	if leftDown && a.dragMode == "termsplit" {
-		a.resizeTermPanelWidth(x + 1)
+		a.resizeTermPanelWidth(x - a.dragSplitOffset + 1)
 		return
 	}
 
 	// Chat strip resize drag — same gesture, same edge as the
 	// left-docked terminal (the two are never open together).
 	if leftDown && a.dragMode == "chatsplit" {
-		a.resizeChatPanelWidth(x + 1)
+		a.resizeChatPanelWidth(x - a.dragSplitOffset + 1)
 		return
 	}
 
@@ -3142,12 +3152,16 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			a.stopGitPanelWalk()
 		}
 		switch {
-		case a.splitterX() >= 0 && x == a.splitterX():
-			a.dragMode = "sidebar"
-		case a.termSplitterX() >= 0 && x == a.termSplitterX():
-			a.dragMode = "termsplit"
-		case a.chatSplitterX() >= 0 && x == a.chatSplitterX():
-			a.dragMode = "chatsplit"
+		// Each seam's grab zone is three columns wide, not one — see
+		// splitter.go for what the extra two cost and why. All three
+		// cases stay ahead of their own panel's hit-test, so the wider
+		// zone really does outrank the neighbour cell it borrows.
+		case a.sidebarSplitterHit(x):
+			a.dragMode, a.dragSplitOffset = "sidebar", x-a.splitterX()
+		case a.termSplitterHit(x):
+			a.dragMode, a.dragSplitOffset = "termsplit", x-a.termSplitterX()
+		case a.chatSplitterHit(x):
+			a.dragMode, a.dragSplitOffset = "chatsplit", x-a.chatSplitterX()
 		case a.inSidebarBlock(x):
 			a.sidebarPress(x, y, ev.Modifiers()&tcell.ModShift != 0)
 		// The chat strip spans y==0 like a left-docked terminal, so its
@@ -3219,7 +3233,7 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	}
 
 	// Button released — exit any drag mode we were in.
-	a.dragMode = ""
+	a.dragMode, a.dragSplitOffset = "", 0
 	a.stopAutoScroll()
 }
 
@@ -4549,18 +4563,7 @@ func (a *App) iconsOn() bool {
 // of the sidebar. Idle it sits in Subtle grey; while the user is dragging
 // it brightens to Accent so the active grab handle is unmistakable.
 func (a *App) drawSplitter() {
-	x := a.splitterX()
-	if x < 0 {
-		return
-	}
-	fg := a.theme.Subtle
-	if a.dragMode == "sidebar" {
-		fg = a.theme.Accent
-	}
-	style := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(fg)
-	for y := 0; y < a.height-1; y++ {
-		a.screen.SetContent(x, y, '│', nil, style)
-	}
+	a.drawVSplitter(a.splitterX(), a.dragMode == "sidebar")
 }
 
 // drawTermSplitter paints the left-docked terminal strip's resize
@@ -4568,18 +4571,7 @@ func (a *App) drawSplitter() {
 // strip's editor-facing (right) edge. No-op in the bottom-dock layout,
 // where the header rule is the grab handle instead.
 func (a *App) drawTermSplitter() {
-	x := a.termSplitterX()
-	if x < 0 {
-		return
-	}
-	fg := a.theme.Subtle
-	if a.dragMode == "termsplit" {
-		fg = a.theme.Accent
-	}
-	style := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(fg)
-	for y := 0; y < a.height-1; y++ {
-		a.screen.SetContent(x, y, '│', nil, style)
-	}
+	a.drawVSplitter(a.termSplitterX(), a.dragMode == "termsplit")
 }
 
 // drawMenuButton paints the ≡ icon in the leftmost cells of the tab bar.

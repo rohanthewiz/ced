@@ -500,7 +500,7 @@ func (a *App) gitLogDividerHit(x int) bool {
 // the mouse x during a drag.
 func (a *App) dragGitLogDivTo(x int) {
 	px, _, pw, _ := a.gitLogRect()
-	a.gitLog.listWidth = gitLogListWidth(pw, x-px)
+	a.gitLog.listWidth = gitLogListWidth(pw, x-a.dragSplitOffset-px)
 }
 
 // Header button labels. All glyphs are single-width on purpose (the
@@ -674,6 +674,7 @@ func (a *App) gitLogPress(x, y int) (dragMode string) {
 		return ""
 	}
 	if a.gitLogDividerHit(x) {
+		a.dragSplitOffset = x - a.gitLogDividerX()
 		return "gitlogdiv"
 	}
 	a.gitLogClick(x, y)
@@ -916,10 +917,10 @@ func (a *App) drawGitLog() {
 		}
 		a.drawGitLogListRow(row, px, ry, listW)
 		// The grip segment, the changes panel's affordance (see
-		// gitDividerIsGrip) — a seam that says it can be seized.
+		// splitterIsGrip) — a seam that says it can be seized.
 		glyph, st := '│', divSt
-		if a.dragMode != "gitlogdiv" && gitDividerIsGrip(row, a.gitLogBodyRows()) {
-			glyph, st = gitDividerGrip, gripSt
+		if a.dragMode != "gitlogdiv" && splitterIsGrip(row, a.gitLogBodyRows()) {
+			glyph, st = splitterGrip, gripSt
 		}
 		a.screen.SetContent(px+listW, ry, glyph, nil, st)
 		for cx := px + listW + 1; cx < px+pw; cx++ {

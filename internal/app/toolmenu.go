@@ -135,12 +135,6 @@ func (a *App) menuResetToolLayout() {
 	a.saveToolLayout()
 }
 
-// menuToggleToolStripes is the ≡ row behind the stripe preference.
-func (a *App) menuToggleToolStripes() {
-	a.closeMenu()
-	a.setToolStripes(!a.toolStripes)
-}
-
 // toolWindowsLabel names the Tool windows row with a short census of the
 // arrangement, so the row answers "where is everything?" without being
 // clicked — the theme row's trick, and the reason that row is worth its

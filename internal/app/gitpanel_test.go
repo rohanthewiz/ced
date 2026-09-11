@@ -80,10 +80,14 @@ func TestEditorRect_ShrinksForGitPanel(t *testing.T) {
 		t.Fatalf("panel bottom = %d, want flush against status bar at %d", py+ph, a.height-1)
 	}
 
+	// The find bar now sits ABOVE the bottom dock rather than below it —
+	// it is about the file in front of you, so it hugs the editor — which
+	// means the panel stays flush against the status bar and the bar
+	// comes out of the EDITOR's rows instead.
 	a.findOpen = true
 	_, py, _, ph = a.gitPanelRect()
-	if py+ph != a.height-1-findBarHeight {
-		t.Fatalf("with find bar: panel bottom = %d, want %d", py+ph, a.height-1-findBarHeight)
+	if py+ph != a.height-1 {
+		t.Fatalf("with find bar: panel bottom = %d, want it still flush at %d", py+ph, a.height-1)
 	}
 	_, _, _, hFind := a.editorRect()
 	if hFind != hAfter-findBarHeight {
@@ -577,9 +581,13 @@ func TestGitPanelListWidth_ClampsAndOverridesAuto(t *testing.T) {
 	a.gitPanel.open = true
 	_, _, pw, _ := a.gitPanelRect()
 
-	auto := a.gitPanelListW(pw) // pw is 90 here → 90/3, within [24,40]
-	if auto != 30 {
-		t.Fatalf("auto list width = %d, want 30 (panel width %d)", auto, pw)
+	// The bottom dock spans the WHOLE window (it wins the corners — the
+	// side docks stop above it), so pw is the full 120 rather than the
+	// editor band's 90. Auto is a third of it, capped by the diff pane's
+	// reserve.
+	auto := a.gitPanelListW(pw)
+	if want := gitPanelListWidth(pw, 0); auto != want {
+		t.Fatalf("auto list width = %d, want %d (panel width %d)", auto, want, pw)
 	}
 
 	a.resizeGitPanelListWidth(36)

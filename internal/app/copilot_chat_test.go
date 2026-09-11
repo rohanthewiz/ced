@@ -162,8 +162,8 @@ func TestChatDocksRightAndKeepsTheTree(t *testing.T) {
 		t.Errorf("leftBlockW = %d, want sidebar block %d", got, a.sidebarW())
 	}
 	cx, _, cw, _ := a.chatPanelRect()
-	if cx+cw != a.width-a.stripeCols(dockRight) {
-		t.Errorf("chat rect ends at %d, want the right edge %d", cx+cw, a.width-a.stripeCols(dockRight))
+	if cx+cw != a.width {
+		t.Errorf("chat rect ends at %d, want the right edge %d", cx+cw, a.width)
 	}
 	if got := a.chatSplitterX(); got != cx-1 {
 		t.Errorf("chat seam at %d, want %d — the block's leftmost column", got, cx-1)

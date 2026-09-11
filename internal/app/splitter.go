@@ -130,9 +130,17 @@ func (a *App) drawVSplitter(x int, active bool) {
 // written for; on a RIGHT dock it is to its right, so the zone flips with
 // it. Taking the left cell on both edges would spend the editor's last
 // column — exactly what the rule forbids.
-func (a *App) dockSplitterHit(side dockSide, x int) bool {
+func (a *App) dockSplitterHit(side dockSide, x, y int) bool {
 	dx := a.toolSplitterX(side)
 	if dx < 0 {
+		return false
+	}
+	// THE ROW MATTERS, because the bottom dock wins the corners: it
+	// spans the whole window and the side docks stop above it, so this
+	// column is the bottom panel's own content below that line. A
+	// column-only test claimed a press inside the git panel as a sidebar
+	// drag — the seam has to end where the panel it resizes ends.
+	if y < 0 || y >= a.sideDockRows() {
 		return false
 	}
 	if side == dockRight {
@@ -145,9 +153,9 @@ func (a *App) dockSplitterHit(side dockSide, x int) bool {
 // any. The click router asks this ONE question instead of testing three
 // panels in a fixed order, so a seam can never be shadowed by whichever
 // panel happened to be checked first.
-func (a *App) dockSplitterAt(x int) (dockSide, bool) {
+func (a *App) dockSplitterAt(x, y int) (dockSide, bool) {
 	for _, side := range []dockSide{dockLeft, dockRight} {
-		if a.dockSplitterHit(side, x) {
+		if a.dockSplitterHit(side, x, y) {
 			return side, true
 		}
 	}
@@ -158,12 +166,12 @@ func (a *App) dockSplitterAt(x int) (dockSide, bool) {
 // tree's seam. Kept as a named helper because the tree's own tests and
 // the auto-fit lock read it, but it is now just "the seam of whichever
 // edge the Project tool is docked to".
-func (a *App) sidebarSplitterHit(x int) bool {
+func (a *App) sidebarSplitterHit(x, y int) bool {
 	side := a.toolDock(toolProject)
 	if !dockIsVertical(side) || !a.sidebarShown {
 		return false
 	}
-	return a.dockSplitterHit(side, x)
+	return a.dockSplitterHit(side, x, y)
 }
 
 // drawDockSplitters paints the seam beside each vertical dock that has

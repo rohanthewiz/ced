@@ -80,7 +80,6 @@ internal/app/openineditor.go  Hand a file or folder to $VISUAL / $EDITOR
 internal/app/toolwindow.go    TOOL WINDOWS: the registry, the three edges, one visible
                               per edge, sizes per tool per axis, every dock rect
 internal/app/tooladapt.go     Each panel's show/hide verbs — the seam to the layer above
-internal/app/toolstripe.go    The one-cell tool button rails on the populated edges
 internal/app/toollayout.go    The per-project layout: encode, restore, save (state.json)
 internal/app/toolmenu.go      ≡ Tool windows: the tool picker, the edge picker, reset
 internal/app/app.go           Event loop, layout, menu modal, splitter, all rendering
@@ -2116,7 +2115,7 @@ strip. House rules:
 - It is a TOOL WINDOW (toolwindow.go), bottom by default: single
   occupancy on whatever edge it is docked to is `claimDock`'s, and
   `openComparePanel` no longer names the panels it evicts. It is also
-  the one tool whose stripe button opens a PICKER rather than the panel
+  the one tool whose ≡ show row opens a PICKER rather than the panel
   — a diff has two named sides, so there is no such thing as opening it
   empty. No leader key: the three verbs are ≡ / palette rows
   (the flat table is out of mnemonic letters, and this isn't a namespace's
@@ -3202,20 +3201,45 @@ dividers `[2, 5, 149]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 
-### Tool windows (app/toolwindow.go + tooladapt/toolstripe/toollayout/toolmenu)
+### Tool windows (app/toolwindow.go + tooladapt/toollayout/toolmenu)
 Every auxiliary panel — the file tree, both git panels, the problems
 list, the compare view, the terminal, the chat — is the same KIND of
 thing: a named window that lives on one of three edges, can be moved to
 another, and is remembered per project. It replaced six files that each
 owned their own geometry AND their own exclusivity rules. House rules:
 
-- **AN EDGE SHOWS ONE TOOL AT A TIME; the rest collapse to their stripe
-  buttons.** That is JetBrains' rule and it was also ced's, spelled out
-  six times: the bottom strip was single-occupancy, so was the left
-  edge, and every panel closed the others BY NAME. It is now stated once
-  in `claimDock`, and the panels keep only what is theirs. Two resizable
-  panels on one edge would need circular clamp math on a small window,
-  and the stripe makes switching one click.
+- **AN EDGE SHOWS ONE TOOL AT A TIME**; the rest are collapsed and the ≡
+  **Tool windows** group brings one back. That is JetBrains' rule and it
+  was also ced's, spelled out six times: the bottom strip was
+  single-occupancy, so was the left edge, and every panel closed the
+  others BY NAME. It is now stated once in `claimDock`, and the panels
+  keep only what is theirs. Two resizable panels on one edge would need
+  circular clamp math on a small window.
+- **THE BOTTOM EDGE WINS THE CORNERS.** It spans the WHOLE window and
+  the side docks stop above it (`toolRect`'s bottom case takes `x=0,
+  w=a.width`; `sideDockRows` is `bottomDockTop`). So a git panel gets the
+  full width for a file list and a diff side by side, and the file tree
+  keeps the columns it needs above. The other way round — side docks full
+  height, the bottom squeezed between them — is what ced did while the
+  only vertical strip WAS the file tree, and it reads wrong the moment
+  the bottom panel is the one being worked in: the widest surface in the
+  editor was the one getting narrowed. **A consequence worth knowing:
+  the side seam's hit test is ROW-AWARE** (`dockSplitterHit` takes y),
+  because below that line the seam's column is the bottom panel's own
+  content — a column-only test claimed a press inside the git panel as a
+  sidebar drag.
+- **THERE IS NO BUTTON RAIL.** A stripe of tool buttons on each populated
+  edge was built and then removed on the owner's verdict: the editor is
+  the whole window minus what you asked for, and a reserved column on
+  three edges is a price you go on paying for every tool you are NOT
+  looking at. Reach is the ≡ menu — the Tool windows group plus the
+  per-panel Show/Hide rows each panel already had. `"toolstripes"` went
+  with it; an entry left in a config.json is ignored, the way any key
+  this version does not model is.
+- **THE FIND BAR HUGS THE EDITOR**, not the window: it stops where the
+  side docks stop and sits ABOVE the bottom dock rather than under it.
+  It is about the file in front of you, and a bar pinned below a git
+  panel would be a long way from the line it is searching.
 - **`termDockLeft` AND THE TREE FLIP ARE GONE.** The tree used to be
   teleported to the right edge whenever the chat or a left-docked
   terminal wanted the left one — the workaround for having no right edge
@@ -3254,8 +3278,8 @@ owned their own geometry AND their own exclusivity rules. House rules:
   opened.
 - **A SHOW CAN REFUSE, and every caller reads the answer.** A chat with
   no agent binary, a compare with nothing to compare: `showTool` reports
-  whether the tool actually came up, so a stripe button never latches on
-  over a panel that never opened. Compare is the one tool whose "show"
+  whether the tool actually came up, so no caller reports a panel as
+  shown when it never opened. Compare is the one tool whose "show"
   is a QUESTION — a diff has two named sides, so an unprimed panel opens
   the source picker instead.
 - **RESIZING IS THE EDGE'S, not the panel's.** One seam per vertical
@@ -3273,47 +3297,25 @@ owned their own geometry AND their own exclusivity rules. House rules:
   transcript and the panels' own state exactly where they were — a
   layout is where things are DRAWN. A dialog in front of a reversible
   action trains people to dismiss dialogs.
+- **THE ≡ GROUP IS THREE ROWS, and the branching lives in pickers**
+  (toolmenu.go): pick a tool, then pick an edge. Seven tools times three
+  edges is twenty-one moves, and the ≡ menu already scrolls on a short
+  window where every row above the fold is contested. It also means a
+  tool added to the registry appears there with no menu change at all.
 - The Find-all list is deliberately NOT a tool window: its own file
   explains why it is not even a picker (a live preview, an Esc that puts
   the view back), and it docks TOP, an axis no tool window has. The find
   bar is not one either — it owns the keyboard and belongs to the tab.
 
-### The tool stripes (app/toolstripe.go)
-The one-cell rails on the window's populated edges, each carrying a
-button per tool assigned there. House rules:
-
-- **THEY ARE THE DISCOVERY SURFACE, which is why they are worth a
-  cell.** Single occupancy means most tools are collapsed most of the
-  time, and a collapsed panel with no button is a feature the user has
-  to remember exists. This editor already knows what that costs — "a row
-  nobody can find is worse than a row that explains itself" is the rule
-  that put Open in $EDITOR back in the tree popup unconditionally.
-- **ONE CELL, AND ONLY ON AN EDGE THAT HAS TOOLS.** An edge nobody has
-  assigned anything to draws nothing and takes nothing, which is what
-  lets a user who moves everything to the bottom get both side columns
-  back without a preference for it. `"toolstripes"` (default on) is the
-  way out for anyone who wants the cells back and is content with ≡.
-  It stays a GLOBAL preference while the layout is per project: how much
-  chrome you want on screen does not change between repositories.
-- **THE VERTICAL RAILS ARE OUTERMOST AND FULL HEIGHT; the bottom one is
-  the row directly above the status bar.** A button never moves — the
-  find bar opens ABOVE the bottom rail rather than pushing it down,
-  because chrome that shifts is chrome you have to look for.
-- **ONE ENUMERATOR** (`stripeButtons`) for draw and hit-testing, the
-  btnRect rule; glyphs are single-width per the marker rule (`runeLen`
-  counts runes, and a double-width emoji would overrun into the panel).
-  A press on the bare rail is SWALLOWED — it is chrome, and a click on
-  it must not fall through to the editor behind it.
-- Every stripe gesture has a ≡ twin (toolmenu.go), because macOS
-  Terminal swallows clicks and the stripes can be switched off.
-
 ### Per-project layouts (app/toollayout.go + internal/session)
 `session.Entry.Layout`, beside that folder's tabs. House rules:
 
-- **PER PROJECT, NOT PER USER.** A layout answers "what am I doing in
-  this repository" — a Go service wants the terminal and the problems
-  list, a docs repo wants neither. It is machine churn rewritten on
-  every folder switch, which is the split state.json exists to make.
+- **PER PROJECT, NOT PER USER, and there is no global half at all.** A
+  layout answers "what am I doing in this repository" — a Go service
+  wants the terminal and the problems list, a docs repo wants neither. It
+  is machine churn rewritten on every folder switch, which is the split
+  state.json exists to make. Nothing about tool windows lives in
+  config.json.
 - **A PROJECT WITH NO RECORD GETS THE DEFAULT**: the file tree on the
   left, the editor taking the rest. `newToolLayout` IS that default, so
   there is one definition of it rather than a restore path with opinions.

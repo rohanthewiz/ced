@@ -21,10 +21,9 @@
 // WHERE IT LIVES. session.Entry.Layout, beside that folder's tabs. It is
 // deliberately NOT in config.json: that file is hand-edited preferences
 // and this is machine churn rewritten on every folder switch and every
-// exit — the split state.json was created to make. One knob about tool
-// windows DOES stay global, and the contrast is the point: whether the
-// stripes are drawn at all is a statement about how much chrome you want
-// on screen, which does not change from project to project.
+// exit — the split state.json was created to make. There is no global
+// half at all: everything about a tool window is a statement about THIS
+// project, and the ≡ menu is how you change it.
 //
 // HOUSE RULES:
 //
@@ -56,10 +55,7 @@
 
 package app
 
-import (
-	"github.com/rohanthewiz/ced/internal/session"
-	"github.com/rohanthewiz/ced/internal/userconfig"
-)
+import "github.com/rohanthewiz/ced/internal/session"
 
 // encodeToolLayout flattens the live layout — plus which tools are on
 // screen and the file tree's width, which lives on App — into the
@@ -187,28 +183,4 @@ func (a *App) saveToolLayout() {
 	entry.Layout = a.encodeToolLayout()
 	store.Record(entry)
 	_ = store.Save(path)
-}
-
-// setToolStripes flips the stripe preference and persists it. The single
-// write path, so the ≡ row and any future surface cannot mean different
-// things by the same setting (the setChatContext shape).
-func (a *App) setToolStripes(on bool) {
-	a.toolStripes = on
-	if on {
-		a.flash("Tool stripes on")
-	} else {
-		a.flash("Tool stripes off · tools are under ≡ Tool windows")
-	}
-	if err := userconfig.SaveToolStripes(userconfig.DefaultPath(), on); err != nil {
-		a.flash("config: " + err.Error())
-	}
-}
-
-// toolStripesToggleLabel names the action the ≡ row will perform — the
-// action-not-state convention every toggle row follows.
-func (a *App) toolStripesToggleLabel() string {
-	if a.toolStripes {
-		return "Hide tool stripes"
-	}
-	return "Show tool stripes"
 }

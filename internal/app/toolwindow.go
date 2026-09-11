@@ -33,33 +33,39 @@
 //     just now stated once instead of six times. Two resizable panels on
 //     one edge would need circular clamp math on a small window, and the
 //     stripe makes switching one click.
-//   - The others on that edge are COLLAPSED to their stripe buttons
-//     (toolstripe.go), which is what keeps them findable.
+//   - The others on that edge are COLLAPSED, and the ≡ Tool windows
+//     group (toolmenu.go) is how you get them back. There is no button
+//     rail: the editor is the whole window minus what you asked for, and
+//     a reserved column on three edges is a price you go on paying for
+//     every tool you are NOT currently looking at.
 //
 // WHAT AN EDGE IS WORTH, in columns and rows:
 //
-//	┌─┬────────┬────────────────────────────────┬─┐
-//	│ │        │ tab bar                        │ │
-//	│s│  left  ├────────────────────────────────┤s│   s = stripe (1 cell)
-//	│t│  dock  │                                │t│
-//	│r│        │ editor                         │r│
-//	│i│        │                                │i│
-//	│p├────────┴────────────────────────────────┤p│
-//	│e│ bottom dock                             │e│
-//	│ ├─────────────────────────────────────────┤ │
-//	│ │ find bar                                │ │
-//	├─┴─────────────────────────────────────────┴─┤
-//	│ bottom stripe                               │
-//	├─────────────────────────────────────────────┤
-//	│ status bar                                  │
-//	└─────────────────────────────────────────────┘
+//	┌────────┬────────────────────────────────────┬────────┐
+//	│        │ tab bar                            │        │
+//	│  left  ├────────────────────────────────────┤ right  │
+//	│  dock  │                                    │  dock  │
+//	│        │ editor                             │        │
+//	│        ├────────────────────────────────────┤        │
+//	│        │ find bar                           │        │
+//	├────────┴────────────────────────────────────┴────────┤
+//	│ bottom dock                                          │
+//	├──────────────────────────────────────────────────────┤
+//	│ status bar                                           │
+//	└──────────────────────────────────────────────────────┘
 //
-// The vertical stripes are OUTERMOST and full height, so they never
-// move: a button that shifted a row when the find bar opened would be a
-// button you had to look for. The left and right docks run the full
-// height between the tab bar row and the bottom chrome, and the bottom
-// dock spans between them — the arrangement ced already had for a
-// left-docked terminal, now stated for all three edges at once.
+// THE BOTTOM EDGE WINS THE CORNERS. It spans the whole window and the
+// side docks stop above it — so a git panel gets the full width for a
+// file list and a diff side by side, and the file tree keeps the columns
+// it needs above. The other way round (side docks full height, the
+// bottom squeezed between them) is what ced did while the only vertical
+// strip WAS the file tree, and it reads wrong the moment the bottom
+// panel is the one being worked in: the widest surface in the editor was
+// the one getting narrowed.
+//
+// The find bar hugs the EDITOR rather than the window, directly above
+// the bottom dock: it is about the file in front of you, not about the
+// workspace.
 //
 // SIZES ARE PER TOOL, PER AXIS, not per edge. A file tree wants ~30
 // columns and a terminal wants ~60, so an edge-wide width would make
@@ -161,8 +167,7 @@ func dockLabel(s dockSide) string {
 // around the flag (start a shell, connect an agent, refresh a status).
 type toolDef struct {
 	id      toolID
-	title   string   // "Project", "Git", … — stripe tooltip, menu rows.
-	glyph   rune     // the stripe button. Single-width, per the marker rule.
+	title   string   // "Project", "Git", … — what the ≡ rows call it.
 	defDock dockSide // where it sits in a layout nobody has touched.
 
 	// minW / minH are the tool's own floors on each axis. They are the
@@ -216,7 +221,7 @@ var toolDefs []toolDef
 func init() {
 	toolDefs = []toolDef{
 		{
-			id: toolProject, title: "Project", glyph: '▤', defDock: dockLeft,
+			id: toolProject, title: "Project", defDock: dockLeft,
 			minW: minSidebarWidth, minH: toolMinBottomRows,
 			autoW:   func(a *App) int { return defaultSidebarWidth },
 			autoH:   func(a *App) int { return a.height / 3 },
@@ -226,7 +231,7 @@ func init() {
 			hide:    func(a *App) { a.sidebarShown = false; a.treeFocus = false },
 		},
 		{
-			id: toolGit, title: "Git", glyph: '⎇', defDock: dockBottom,
+			id: toolGit, title: "Git", defDock: dockBottom,
 			// On a vertical edge the floor is the LIST pane's own, plus
 			// the seam columns — not list + diff, which would be 67
 			// columns and make the panel undockable beside anything
@@ -244,7 +249,7 @@ func init() {
 			hide:    func(a *App) { a.closeGitPanelTool() },
 		},
 		{
-			id: toolGitLog, title: "Git log", glyph: '⑂', defDock: dockBottom,
+			id: toolGitLog, title: "Git log", defDock: dockBottom,
 			// The commit list's floor plus the seam — see the git
 			// panel above for why the DETAIL pane's reserve is not
 			// part of a vertical dock's floor.
@@ -257,7 +262,7 @@ func init() {
 			hide:    func(a *App) { a.closeGitLogTool() },
 		},
 		{
-			id: toolProblems, title: "Problems", glyph: '⚠', defDock: dockBottom,
+			id: toolProblems, title: "Problems", defDock: dockBottom,
 			minW: toolMinSideCols, minH: problemsMinHeight,
 			autoW:   func(a *App) int { return a.width / 3 },
 			autoH:   func(a *App) int { return minInt(a.height/3, problemsMaxHeight) },
@@ -267,7 +272,7 @@ func init() {
 			hide:    func(a *App) { a.closeProblemsTool() },
 		},
 		{
-			id: toolCompare, title: "Compare", glyph: '⇄', defDock: dockBottom,
+			id: toolCompare, title: "Compare", defDock: dockBottom,
 			minW: toolMinSideCols, minH: comparePanelMinHeight,
 			autoW:   func(a *App) int { return a.width / 3 },
 			autoH:   func(a *App) int { return minInt(a.height/3, comparePanelMaxHeight) },
@@ -281,7 +286,7 @@ func init() {
 			hide: func(a *App) { a.closeComparePanel() },
 		},
 		{
-			id: toolTerminal, title: "Terminal", glyph: '❯', defDock: dockBottom,
+			id: toolTerminal, title: "Terminal", defDock: dockBottom,
 			minW: termPanelMinWidth, minH: termPanelMinHeight,
 			autoW:   func(a *App) int { return a.width / 3 },
 			autoH:   func(a *App) int { return minInt(a.height/3, termPanelMaxHeight) },
@@ -291,7 +296,7 @@ func init() {
 			hide:    func(a *App) { a.hideTerminalTool() },
 		},
 		{
-			id: toolChat, title: "Chat", glyph: '✦', defDock: dockRight,
+			id: toolChat, title: "Chat", defDock: dockRight,
 			minW: chatPanelMinWidth, minH: toolMinBottomRows,
 			autoW:   func(a *App) int { return a.width / 3 },
 			autoH:   func(a *App) int { return a.height / 3 },
@@ -670,7 +675,7 @@ func (a *App) clampToolWidth(id toolID, want int) int {
 	// is a window too narrow for both floors plus the editor's — where
 	// the floor-wins rule below was always going to squeeze the editor
 	// anyway.
-	other := a.stripeCols(dockLeft) + a.stripeCols(dockRight)
+	other := 0
 	if side == dockLeft {
 		other += a.rawDockCols(dockRight)
 	} else {
@@ -711,10 +716,12 @@ func (a *App) clampToolHeight(id toolID, want int) int {
 	if !ok {
 		return want
 	}
-	// The status bar, the tool stripe, the find bar, the tab bar, and the
-	// editor's own reserve — everything the bottom edge is not allowed to
-	// eat, in the order it stacks up the window.
-	max := a.height - 1 - a.stripeRows() - a.findBarRows() - 1 - toolMinEditorRows
+	// The status bar, the find bar, the tab bar and the editor's own
+	// reserve — everything the bottom edge is not allowed to eat, in the
+	// order it stacks up the window. Its WIDTH needs no such sum: the
+	// bottom dock spans the window, so the side docks are not competing
+	// with it for columns, they are stopping above it.
+	max := a.height - 1 - a.findBarRows() - 1 - toolMinEditorRows
 	if want > max {
 		want = max
 	}
@@ -807,10 +814,8 @@ func (a *App) clampToolSizes() {
 // -----------------------------------------------------------------------------
 
 // dockCols is how many columns a vertical edge consumes: the visible
-// tool's width plus the one-column splitter beside it, or zero when the
-// edge shows nothing. It does NOT include the stripe — that is
-// stripeCols, and the two are separate because a stripe is furniture
-// that stays whether or not a panel is up.
+// tool's width, splitter column included (see toolWidth), or zero when
+// the edge shows nothing.
 func (a *App) dockCols(side dockSide) int {
 	if !dockIsVertical(side) {
 		return 0
@@ -848,35 +853,38 @@ func (a *App) toolRect(id toolID) (x, y, w, h int) {
 	case dockLeft:
 		// One column narrower than the block: the column nearest the
 		// editor belongs to the resize seam.
-		return a.stripeCols(dockLeft), 0, a.toolWidth(id) - 1, a.sideDockRows()
+		return 0, 0, a.toolWidth(id) - 1, a.sideDockRows()
 	case dockRight:
 		// Mirrored — the seam is the block's LEFTMOST column, so the
 		// panel starts one past it.
 		w = a.toolWidth(id) - 1
-		return a.width - a.stripeCols(dockRight) - w, 0, w, a.sideDockRows()
+		return a.width - w, 0, w, a.sideDockRows()
 	case dockBottom:
-		h = a.toolHeight(id)
-		lw := a.leftBlockW()
-		return lw, a.bottomDockTop(), a.width - lw - a.rightBlockW(), h
+		// FULL WIDTH. The side docks stop above it — see the file header
+		// for why the bottom edge is the one that wins the corners.
+		return 0, a.bottomDockTop(), a.width, a.toolHeight(id)
 	}
 	return 0, 0, 0, 0
 }
 
 // sideDockRows is how tall a left/right dock runs: from the top of the
-// window down to the bottom chrome (the bottom stripe and the status
-// bar). It deliberately runs PAST the bottom dock and the find bar, both
-// of which sit inside the editor's column band — the arrangement ced
-// already had for a left-docked terminal, now stated once.
+// window down to whatever the bottom dock and the status bar have taken.
+// Stopping ABOVE the bottom dock is what "the bottom edge wins the
+// corners" means in rows.
+//
+// It deliberately runs PAST the find bar, which sits inside the editor's
+// column band rather than spanning the window — the bar is about the
+// file in front of you, so it hugs the editor.
 func (a *App) sideDockRows() int {
-	return a.height - 1 - a.stripeRows()
+	return a.bottomDockTop()
 }
 
-// bottomDockTop is the screen row the bottom dock's first row sits on.
-// Everything pinned below it — the find bar, the bottom stripe, the
-// status bar — is subtracted here, which is why no other file has to
-// know the order they stack in.
+// bottomDockTop is the screen row the bottom dock's first row sits on —
+// directly above the status bar. The single place the bottom edge's
+// extent is stated, so no other file has to know what stacks up from the
+// bottom of the window.
 func (a *App) bottomDockTop() int {
-	return a.height - 1 - a.stripeRows() - a.findBarRows() - a.dockRows()
+	return a.height - 1 - a.dockRows()
 }
 
 // toolSplitterX returns the screen column of the seam beside a vertical
@@ -892,9 +900,9 @@ func (a *App) toolSplitterX(side dockSide) int {
 		return -1
 	}
 	if side == dockLeft {
-		return a.stripeCols(dockLeft) + a.dockCols(dockLeft) - 1
+		return a.dockCols(dockLeft) - 1
 	}
-	return a.width - a.stripeCols(dockRight) - a.dockCols(dockRight)
+	return a.width - a.dockCols(dockRight)
 }
 
 // -----------------------------------------------------------------------------
@@ -913,11 +921,11 @@ func (a *App) dragDockTo(side dockSide, pos int) {
 	}
 	switch side {
 	case dockLeft:
-		a.resizeToolOnDock(id, pos-a.stripeCols(dockLeft)+1)
+		a.resizeToolOnDock(id, pos+1)
 	case dockRight:
-		a.resizeToolOnDock(id, a.width-a.stripeCols(dockRight)-pos)
+		a.resizeToolOnDock(id, a.width-pos)
 	case dockBottom:
-		a.resizeToolOnDock(id, a.height-1-a.stripeRows()-a.findBarRows()-pos)
+		a.resizeToolOnDock(id, a.height-1-pos)
 	}
 }
 

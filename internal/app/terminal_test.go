@@ -765,9 +765,10 @@ func screenContainsText(scr tcell.Screen, want string) bool {
 // with the terminal MOVED to the left edge and shown there.
 //
 // Showing it evicts the file tree, which is the whole point of the tool
-// window model — an edge shows one tool at a time and the others collapse
-// to their stripe buttons. The old fixture flipped the tree across the
-// window instead, because there was no right edge to put anything on.
+// window model — an edge shows one tool at a time and the others are
+// collapsed until a ≡ row brings one back. The old fixture flipped the
+// tree across the window instead, because there was no right edge to put
+// anything on.
 func newLeftDockApp(t *testing.T) *App {
 	t.Helper()
 	a := newTestApp(t, t.TempDir())
@@ -839,8 +840,8 @@ func TestTermLeftDockCoexistsWithTreeOnTheRight(t *testing.T) {
 		t.Fatalf("different edges should coexist: tree=%v term=%v", a.sidebarShown, a.term.open)
 	}
 	sx, _, sw, _ := a.sidebarRect()
-	if sx+sw != a.width-a.stripeCols(dockRight) {
-		t.Errorf("tree rect ends at %d, want the right edge %d", sx+sw, a.width-a.stripeCols(dockRight))
+	if sx+sw != a.width {
+		t.Errorf("tree rect ends at %d, want the right edge %d", sx+sw, a.width)
 	}
 	ex, _, ew, _ := a.editorRect()
 	if ex != a.leftBlockW() || ex+ew != a.width-a.rightBlockW() {
@@ -934,9 +935,15 @@ func TestTermLeftDockCoexistsWithGitPanel(t *testing.T) {
 	if !a.gitPanel.open || !a.term.open {
 		t.Fatal("left-docked terminal and bottom git panel should coexist")
 	}
-	gx, _, _, _ := a.gitPanelRect()
-	if gx != a.leftBlockW() {
-		t.Fatalf("git panel x = %d, want %d (after the left block)", gx, a.leftBlockW())
+	// The bottom edge WINS THE CORNERS: the git panel spans the whole
+	// window and the left-docked terminal stops above it, rather than
+	// the panel being squeezed into the editor's column band.
+	gx, gy, gw, _ := a.gitPanelRect()
+	if gx != 0 || gw != a.width {
+		t.Fatalf("git panel = x %d w %d, want the full width of %d", gx, gw, a.width)
+	}
+	if _, _, _, th := a.termPanelRect(); th != gy {
+		t.Fatalf("terminal runs %d rows, want it to stop at the git panel's top (%d)", th, gy)
 	}
 }
 
@@ -1030,8 +1037,7 @@ func TestTermDockLeftMenuFlow(t *testing.T) {
 		t.Fatalf("row 0 = %q — left strip header not drawn", row0.String())
 	}
 	// The tree yielded the edge rather than flipping across the window:
-	// an edge shows one tool at a time, and its stripe button is where
-	// the tree went (toolwindow.go).
+	// an edge shows one tool at a time (toolwindow.go).
 	if a.sidebarShown {
 		t.Fatal("the terminal taking the left edge should have hidden the tree")
 	}

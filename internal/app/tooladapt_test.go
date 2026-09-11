@@ -81,8 +81,8 @@ func TestShowCompareTool_AsksWhenThereIsNothingToCompare(t *testing.T) {
 
 // TestShowChatTool_RefusesWithoutAnAgent pins the menuCopilotAuth rule
 // at the tool layer: unavailability is explained with a flash rather
-// than a silent dead end, and the verb reports false so no stripe button
-// latches on over a panel that never opened.
+// than a silent dead end, and the verb reports false so no caller can
+// report a panel as shown when it never opened.
 func TestShowChatTool_RefusesWithoutAnAgent(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.chat.dead = true

@@ -84,7 +84,7 @@ func TestSidebarSplitterHit_StartsTheDragFromEitherColumn(t *testing.T) {
 
 	// Hidden sidebar, no seam: the column it used to occupy is ordinary.
 	a.sidebarShown = false
-	if a.sidebarSplitterHit(divX) || a.sidebarSplitterHit(divX-1) {
+	if a.sidebarSplitterHit(divX, 5) || a.sidebarSplitterHit(divX-1, 5) {
 		t.Error("a hidden sidebar should own no grab zone")
 	}
 }
@@ -104,10 +104,10 @@ func TestSidebarSplitterHit_LeavesTheTreeMarkGutterAlone(t *testing.T) {
 	if got := a.splitterX(); got != sx-1 {
 		t.Fatalf("seam at %d, tree rect starts at %d — assumption broken", got, sx)
 	}
-	if a.sidebarSplitterHit(sx) {
+	if a.sidebarSplitterHit(sx, 5) {
 		t.Error("the tree's mark gutter must keep its column")
 	}
-	if !a.sidebarSplitterHit(sx-1) || !a.sidebarSplitterHit(sx-2) {
+	if !a.sidebarSplitterHit(sx-1, 5) || !a.sidebarSplitterHit(sx-2, 5) {
 		t.Error("the seam and the editor column left of it should both grab")
 	}
 }
@@ -118,7 +118,7 @@ func TestSidebarSplitterHit_LeavesTheTreeMarkGutterAlone(t *testing.T) {
 func TestTermAndChatSplitterHit_TwoColumnZone(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 
-	if a.dockSplitterHit(a.toolDock(toolTerminal), 0) || a.dockSplitterHit(a.toolDock(toolChat), 0) {
+	if a.dockSplitterHit(a.toolDock(toolTerminal), 0, 5) || a.dockSplitterHit(a.toolDock(toolChat), 0, 5) {
 		t.Error("closed strips should own no grab zone")
 	}
 
@@ -128,10 +128,10 @@ func TestTermAndChatSplitterHit_TwoColumnZone(t *testing.T) {
 	if tx < 1 {
 		t.Fatalf("left-docked terminal has no seam (x=%d)", tx)
 	}
-	if !a.dockSplitterHit(a.toolDock(toolTerminal), tx) || !a.dockSplitterHit(a.toolDock(toolTerminal), tx-1) {
+	if !a.dockSplitterHit(a.toolDock(toolTerminal), tx, 5) || !a.dockSplitterHit(a.toolDock(toolTerminal), tx-1, 5) {
 		t.Error("terminal seam should grab from its own column and the one left of it")
 	}
-	if a.dockSplitterHit(a.toolDock(toolTerminal), tx+1) {
+	if a.dockSplitterHit(a.toolDock(toolTerminal), tx+1, 5) {
 		t.Error("terminal seam must not claim the editor band's first column")
 	}
 	a.term.open = false
@@ -146,10 +146,10 @@ func TestTermAndChatSplitterHit_TwoColumnZone(t *testing.T) {
 	if cx < 1 {
 		t.Fatalf("chat strip has no seam (x=%d)", cx)
 	}
-	if !a.dockSplitterHit(dockRight, cx) || !a.dockSplitterHit(dockRight, cx+1) {
+	if !a.dockSplitterHit(dockRight, cx, 5) || !a.dockSplitterHit(dockRight, cx+1, 5) {
 		t.Error("right-edge seam should grab from its own column and the one right of it")
 	}
-	if a.dockSplitterHit(dockRight, cx-1) {
+	if a.dockSplitterHit(dockRight, cx-1, 5) {
 		t.Error("right-edge seam must not claim the editor band's last column")
 	}
 }
@@ -232,5 +232,34 @@ func TestDrawVSplitter_GripThenAccent(t *testing.T) {
 	if r, fg := at(gripRow); r != splitterRule || fg != a.theme.Accent {
 		t.Errorf("dragging: rune=%q fg=%v, want %q in Accent %v",
 			r, fg, splitterRule, a.theme.Accent)
+	}
+}
+
+// TestDockSplitterHit_EndsAtTheBottomDock is a regression pin. The
+// bottom edge wins the corners — it spans the whole window and the side
+// docks stop above it — so the seam's column is the BOTTOM PANEL's own
+// content below that line. A column-only hit test claimed a press inside
+// the git panel as a sidebar drag, which made the panel's left edge
+// unclickable and started a resize nobody asked for.
+func TestDockSplitterHit_EndsAtTheBottomDock(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	a.showTool(toolGit)
+
+	divX := a.splitterX()
+	if divX < 1 {
+		t.Fatalf("no sidebar seam (splitterX=%d)", divX)
+	}
+	if !a.sidebarSplitterHit(divX, 2) {
+		t.Error("the seam should still grab in the rows the tree occupies")
+	}
+
+	gy := a.bottomDockTop()
+	if a.sidebarSplitterHit(divX, gy) {
+		t.Error("the seam must not claim a press inside the bottom dock")
+	}
+	a.handleMouse(tcell.NewEventMouse(divX, gy+1, tcell.Button1, tcell.ModNone))
+	if _, isDock := dockForDragMode(a.dragMode); isDock {
+		t.Errorf("a press in the git panel started %q, want the panel's own gesture", a.dragMode)
 	}
 }

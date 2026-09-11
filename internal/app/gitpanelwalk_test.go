@@ -255,8 +255,10 @@ func TestGitPanelReviewButton(t *testing.T) {
 		t.Fatalf("paused label = %q", got)
 	}
 	// And it vanishes rather than overlapping the ✕ on a narrow panel.
-	a.screen.SetSize(34, 40)
-	a.width, a.height = 34, 40
+	// The panel spans the whole window now (the bottom edge wins the
+	// corners), so narrowing the panel means narrowing the window.
+	a.screen.SetSize(30, 40)
+	a.width, a.height = 30, 40
 	if got := a.gitPanelReviewRect(); got.w != 0 {
 		t.Fatalf("narrow panel button = %+v, want withheld", got)
 	}

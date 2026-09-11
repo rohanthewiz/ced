@@ -11,14 +11,12 @@ import "testing"
 
 // TestToolRegistry_WellFormed pins the registry's invariants, all of
 // which are things the rest of the feature silently assumes: ids and
-// glyphs are unique (two tools sharing a stripe cell would be one
-// button doing two things), every default edge is real, every tool
-// states both halves of the visibility pair, and every glyph is a single
-// cell — the marker rule, which the stripe depends on for its whole
-// geometry.
+// titles are unique (the ≡ pickers list one row per tool, and two rows
+// with one name is a bug report), every default edge is real, and every
+// tool states both halves of the visibility pair plus both floors.
 func TestToolRegistry_WellFormed(t *testing.T) {
 	seenID := map[toolID]bool{}
-	seenGlyph := map[rune]toolID{}
+	seenTitle := map[string]toolID{}
 	for _, d := range toolDefs {
 		if d.id == "" {
 			t.Fatal("a tool with no id")
@@ -28,14 +26,11 @@ func TestToolRegistry_WellFormed(t *testing.T) {
 		}
 		seenID[d.id] = true
 
-		if other, dup := seenGlyph[d.glyph]; dup {
-			t.Errorf("%q and %q share the stripe glyph %q", d.id, other, d.glyph)
+		if other, dup := seenTitle[d.title]; dup {
+			t.Errorf("%q and %q share the title %q", d.id, other, d.title)
 		}
-		seenGlyph[d.glyph] = d.id
+		seenTitle[d.title] = d.id
 
-		if runeLen(string(d.glyph)) != 1 {
-			t.Errorf("%q glyph %q is not single-width", d.id, d.glyph)
-		}
 		if !validDock(d.defDock) {
 			t.Errorf("%q default dock %q is not an edge", d.id, d.defDock)
 		}
@@ -71,8 +66,8 @@ func TestDefaultLayout_IsTreeLeftEditorRest(t *testing.T) {
 	if !a.sidebarShown {
 		t.Fatal("the file tree should be showing")
 	}
-	if got := a.rightBlockW(); got != a.stripeCols(dockRight) {
-		t.Errorf("rightBlockW = %d, want only the stripe (%d)", got, a.stripeCols(dockRight))
+	if got := a.rightBlockW(); got != 0 {
+		t.Errorf("rightBlockW = %d, want nothing on an unused edge", got)
 	}
 	if got := a.dockRows(); got != 0 {
 		t.Errorf("bottom dock = %d rows, want none", got)
@@ -125,8 +120,8 @@ func TestMoveTool_CarriesVisibilityAndClaims(t *testing.T) {
 		t.Errorf("the bottom edge still shows %q", id)
 	}
 	gx, _, gw, _ := a.gitPanelRect()
-	if gx+gw != a.width-a.stripeCols(dockRight) {
-		t.Errorf("git rect ends at %d, want the right edge %d", gx+gw, a.width-a.stripeCols(dockRight))
+	if gx+gw != a.width {
+		t.Errorf("git rect ends at %d, want the right edge %d", gx+gw, a.width)
 	}
 
 	// A move onto an occupied edge claims it.
@@ -329,22 +324,56 @@ func TestToolRect_ZeroWhenHidden(t *testing.T) {
 	}
 }
 
-// TestSideDockRunsPastTheBottomDock pins the arrangement: a vertical
-// dock runs the full height of the window above the bottom chrome, and
-// the bottom dock spans BETWEEN the two side blocks. Getting this the
-// other way round would have the two overlapping in a corner.
-func TestSideDockRunsPastTheBottomDock(t *testing.T) {
+// TestBottomDockWinsTheCorners pins the arrangement the whole layout
+// turns on: the bottom edge spans the WHOLE window and the side docks
+// stop above it. A git panel therefore gets the full width for its file
+// list and diff, and the file tree keeps its columns above — rather than
+// the widest surface in the editor being the one that gets narrowed.
+func TestBottomDockWinsTheCorners(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.gitIsRepo = true
 	a.showTool(toolGit) // bottom
 
-	_, sy, _, sh := a.sidebarRect()
-	if sy != 0 || sh != a.sideDockRows() {
-		t.Errorf("tree rect rows = [%d,%d), want [0,%d)", sy, sy+sh, a.sideDockRows())
+	gx, gy, gw, gh := a.gitPanelRect()
+	if gx != 0 || gw != a.width {
+		t.Errorf("bottom dock = x %d w %d, want the full width of %d", gx, gw, a.width)
 	}
-	gx, _, _, _ := a.gitPanelRect()
-	if gx != a.leftBlockW() {
-		t.Errorf("bottom dock starts at %d, want after the left block %d", gx, a.leftBlockW())
+	if gy+gh != a.height-1 {
+		t.Errorf("bottom dock ends at %d, want flush against the status bar at %d", gy+gh, a.height-1)
+	}
+
+	_, sy, _, sh := a.sidebarRect()
+	if sy != 0 || sy+sh != gy {
+		t.Errorf("tree rect rows = [%d,%d), want [0,%d) — stopping at the bottom dock", sy, sy+sh, gy)
+	}
+
+	// And with nothing on the bottom edge, the side dock takes the rows
+	// back down to the status bar.
+	a.hideTool(toolGit)
+	if _, _, _, sh := a.sidebarRect(); sh != a.height-1 {
+		t.Errorf("tree rows = %d with no bottom dock, want %d", sh, a.height-1)
+	}
+}
+
+// TestFindBarHugsTheEditor pins the one strip that does NOT span the
+// window: the find bar is about the file in front of you, so it stops
+// where the side docks stop and sits ABOVE the bottom dock rather than
+// under it — a bar pinned below a git panel would be a long way from the
+// line it is searching.
+func TestFindBarHugsTheEditor(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	a.showTool(toolGit)
+	a.findOpen = true
+
+	fx, fy, fw, fh := a.findBarRect()
+	if fx != a.leftBlockW() || fw != a.editorBandCols() {
+		t.Errorf("find bar = x %d w %d, want the editor band [%d,%d)",
+			fx, fw, a.leftBlockW(), a.leftBlockW()+a.editorBandCols())
+	}
+	_, gy, _, _ := a.gitPanelRect()
+	if fy+fh != gy {
+		t.Errorf("find bar ends at %d, want it flush above the bottom dock at %d", fy+fh, gy)
 	}
 }
 

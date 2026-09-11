@@ -287,13 +287,18 @@ func (a *App) hasReplaceable() bool {
 // -----------------------------------------------------------------------------
 
 // findBarRect returns the on-screen rectangle of the whole bar (both rows
-// when replace is open), spanning the editor's column band and pinned
-// directly above the status bar. Caller is expected to check a.findOpen
-// before drawing.
+// when replace is open), spanning the editor's column band. Caller is
+// expected to check a.findOpen before drawing.
 func (a *App) findBarRect() (x, y, w, h int) {
+	// Directly above the BOTTOM DOCK, in the editor's column band. The
+	// bar is about the file in front of you rather than about the
+	// workspace, so it hugs the editor on both axes: it stops where the
+	// side docks stop, and it sits above the bottom dock rather than
+	// below it — a bar pinned under a git panel would be a long way from
+	// the line it is searching.
 	lw := a.leftBlockW()
 	h = a.findBarRows()
-	return lw, a.height - 1 - h, a.width - lw - a.rightBlockW(), h
+	return lw, a.bottomDockTop() - h, a.width - lw - a.rightBlockW(), h
 }
 
 // findBarContains reports whether (x, y) falls on the open bar.

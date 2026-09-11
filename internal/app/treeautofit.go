@@ -64,13 +64,12 @@ func (a *App) autoFitSidebar() {
 
 	// Auto-fit only has anything to say while the tree is on a VERTICAL
 	// edge — it derives a WIDTH, and a bottom-docked tree is sized in
-	// rows. The columns the other edge has first claim on come off the
-	// top, the same bookkeeping clampToolWidth does: both stripes, and
-	// whatever dock sits opposite.
+	// rows. The columns the opposite edge has first claim on come off the
+	// top, the same bookkeeping clampToolWidth does.
 	if !dockIsVertical(a.toolDock(toolProject)) {
 		return
 	}
-	room := a.width - a.stripeCols(dockLeft) - a.stripeCols(dockRight)
+	room := a.width
 	if a.treeOnRight() {
 		room -= a.dockCols(dockLeft)
 	} else {

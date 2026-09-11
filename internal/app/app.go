@@ -256,7 +256,6 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuToolWindows, enabled: alwaysTrue, labelFor: (*App).toolWindowsLabel},
 			{label: "Move tool window…", action: (*App).menuMoveToolWindow, enabled: alwaysTrue},
 			{label: "Reset tool layout", action: (*App).menuResetToolLayout, enabled: alwaysTrue},
-			{action: (*App).menuToggleToolStripes, enabled: alwaysTrue, labelFor: (*App).toolStripesToggleLabel},
 			// The markdown preview is a VIEW of the active file, so it
 			// sits with the other rows that change how something is
 			// drawn rather than in Tab (which is about which file) or
@@ -957,14 +956,6 @@ type App struct {
 	// toollayout.go.
 	toolLayoutLoading bool
 
-	// toolStripes mirrors the persisted "toolstripes" preference
-	// (default on): whether the one-cell tool button rails are drawn on
-	// the window's populated edges. It is a USER preference rather than
-	// part of the per-project layout, because it is about how much
-	// chrome you want on screen, not about where this project's panels
-	// live. See toolstripe.go.
-	toolStripes bool
-
 	// findAllDockRight selects the Find-all list's edge: false (default)
 	// is the wide strip under the tab bar, true a tall column down the
 	// editor's right side. It lives on App rather than on the modal
@@ -1630,7 +1621,6 @@ func (a *App) loadUserConfig() {
 	a.autoSaveDelay = cfg.AutoSaveDelay
 	a.wordHLEnabled = cfg.WordHL
 	a.applyWordHighlight() // no-op at startup; matters when the config is re-read
-	a.toolStripes = cfg.ToolStripes
 	a.findAllDockRight = cfg.FindAllDock == userconfig.FindAllDockRight
 	a.copilot.enabled = cfg.Copilot
 	a.copilot.suggest = cfg.Suggestions
@@ -2148,12 +2138,12 @@ func (a *App) treeOnRight() bool {
 // plus whichever tool is showing there, splitter included. The tab bar,
 // editor, find bar, and bottom dock all start to the right of this.
 func (a *App) leftBlockW() int {
-	return a.stripeCols(dockLeft) + a.dockCols(dockLeft)
+	return a.dockCols(dockLeft)
 }
 
 // rightBlockW mirrors leftBlockW for the right edge.
 func (a *App) rightBlockW() int {
-	return a.stripeCols(dockRight) + a.dockCols(dockRight)
+	return a.dockCols(dockRight)
 }
 
 // sidebarRect returns the file tree's render rectangle, or a zero rect
@@ -2244,7 +2234,7 @@ func (a *App) editorBandRows() int {
 	// the bottom edge is showing. The five per-panel branches this
 	// replaced were the same sum written five times, and each one had to
 	// remember that a left-docked terminal costs columns instead.
-	return a.height - 2 - a.stripeRows() - a.findBarRows() - a.dockRows()
+	return a.height - 2 - a.findBarRows() - a.dockRows()
 }
 
 // editorBandCols is the editor body's column band before the Find-all
@@ -3180,14 +3170,7 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		if a.gitPanel.walk && !a.gitPanelContains(x, y) {
 			a.stopGitPanelWalk()
 		}
-		// A press on a tool stripe is the stripe's own gesture and is
-		// claimed before every panel below — the rail is chrome drawn
-		// OVER nothing, so a click on it must never fall through to the
-		// editor or the tree it sits beside.
-		if a.stripeClick(x, y) {
-			return
-		}
-		if side, ok := a.dockSplitterAt(x); ok {
+		if side, ok := a.dockSplitterAt(x, y); ok {
 			// Each seam's grab zone is two columns, not one — see
 			// splitter.go for what the extra one costs and why. This
 			// stays ahead of every panel hit-test, so the wider zone
@@ -4545,11 +4528,6 @@ func (a *App) draw() {
 	// filename, a diff line), and it keeps that cell's background — so it
 	// has to run after the surface it annotates. See overflow.go.
 	a.drawOverflowMarkers()
-
-	// The tool stripes are the outermost chrome on three edges, drawn
-	// after every panel for the seam's reason: nothing that took its
-	// columns from the stripe may paint over it.
-	a.drawToolStripes()
 
 	a.drawStatusBar()
 

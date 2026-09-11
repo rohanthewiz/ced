@@ -206,29 +206,6 @@ func TestSaveToolLayout_RespectsTheSessionToggle(t *testing.T) {
 	}
 }
 
-// TestSetToolStripes_PersistsAndFlashes covers the one knob that stays
-// GLOBAL: how much chrome you want on screen does not change from
-// project to project.
-func TestSetToolStripes_PersistsAndFlashes(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	a := newTestApp(t, t.TempDir())
-
-	a.setToolStripes(true)
-	if !a.toolStripes {
-		t.Fatal("stripes should be on")
-	}
-	if a.statusMsg == "" {
-		t.Error("the toggle should say what it did")
-	}
-	if got := a.toolStripesToggleLabel(); got != "Hide tool stripes" {
-		t.Errorf("label = %q, want the action it will perform", got)
-	}
-	a.setToolStripes(false)
-	if got := a.toolStripesToggleLabel(); got != "Show tool stripes" {
-		t.Errorf("label = %q after switching off", got)
-	}
-}
-
 // TestApplyToolLayout_SurvivesAnUnsizedWindow is a regression pin. A
 // layout is restored during New, BEFORE the first resize event has told
 // the App how many columns it has — so clamping the stored extents there

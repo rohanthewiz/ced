@@ -393,9 +393,13 @@ func TestGitLogFilterGeometry(t *testing.T) {
 
 	// Squeeze the panel until the chips can no longer coexist with a
 	// usable field: they vanish, and every chip rect becomes unhittable.
-	a.sidebarWidth = a.width - gitLogMinListW - 6
+	// The panel spans the WHOLE window now — the bottom edge wins the
+	// corners and the side docks stop above it — so squeezing it means
+	// squeezing the window, not the sidebar.
+	a.width = gitLogMinListW + 6
+	a.screen.SetSize(a.width, a.height)
 	if _, ok := a.gitLogChipsX(); ok {
-		t.Fatalf("chips should have been dropped on a %d-wide panel", a.width-a.sidebarWidth)
+		t.Fatalf("chips should have been dropped on a %d-wide panel", a.width)
 	}
 	for i := range gitLogModeChips {
 		if r := a.gitLogChipRect(i); r.contains(r.x, r.y) {

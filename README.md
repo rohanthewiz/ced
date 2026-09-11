@@ -31,8 +31,9 @@ The goals, in order:
 
 1. **Mouse-first.** Click a file to open it. Click a tab to switch.
    Click-and-drag to select text. Scroll wheel actually scrolls.
-   Drag the splitter to resize the sidebar. Right-click (or click the
-   `≡` icon, or double-tap `Esc`) for the action menu.
+   Drag the splitter to resize a panel, or its `✕` to put it away.
+   Right-click (or click the `≡` icon, or double-tap `Esc`) for the
+   action menu.
 2. **No hot-key archaeology.** Save, save & close, quit — they all live
    in a centered modal you open with one gesture. No `Ctrl+` shortcuts
    that fight `tmux`, your shell, or your terminal emulator.
@@ -49,6 +50,10 @@ The goals, in order:
 
 - **VS Code-shaped layout** — file tree on the left, tab bar across the
   top, editor in the middle, status bar at the bottom.
+- **Tool windows** — the file tree, git panel, git log, problems list,
+  compare view, terminal and chat each dock **left, right or bottom**,
+  and the arrangement is remembered per project. See
+  [Tool windows](#tool-windows).
 - **Mouse-driven everything** — click to place cursor, drag to select,
   scroll wheel scrolls, double-click selects a word, drag past the edge
   to auto-scroll a selection.
@@ -61,7 +66,8 @@ The goals, in order:
   an open clean buffer, the editor reloads it; if your buffer is dirty,
   you get a heads-up; if the file is deleted, the tab is flagged once.
 - **Toggleable, draggable sidebar** — show/hide the file tree from the
-  menu, or drag the splitter to resize it.
+  menu or its own `✕`, drag the splitter to resize it, or move it to
+  another edge entirely.
 - **Multi-select in the file tree** — click the left edge of a row (or
   press `Space` with the tree focused) to tick it, then act on the whole
   set at once: open, copy the paths, copy for paste, zip into one
@@ -215,6 +221,70 @@ ced --version    # print version and exit
 ced --help       # print short usage
 ```
 
+### Tool windows
+
+Every panel that isn't the editor is a **tool window**: the file tree,
+the git changes panel, the git log, the problems list, the compare view,
+the terminal, and the chat. Each one lives on an edge of the
+window — **left, right, or bottom** — and you can move it to another.
+
+A fresh project starts with the file tree on the left and the editor
+taking everything else. Nothing else is open.
+
+**To move one**, two picks:
+
+```
+Esc k  →  "move tool"  →  Enter  →  pick a tool  →  pick an edge
+```
+
+or the same rows in the menu: **≡ → View**
+
+| Row | What it does |
+| --- | --- |
+| `Tool windows… (2 shown)` | every tool with its state and edge; picking one shows or hides it |
+| `Move tool window…` | pick a tool, then pick an edge |
+| `Reset tool layout` | everything back to file tree left, editor rest |
+| `Dock terminal left` / `…at bottom` | the one-pick preset for the terminal |
+
+Picking an edge **moves the tool and shows it** — a "put it there"
+gesture shouldn't move something invisible.
+
+**Three things worth knowing:**
+
+- **An edge shows one tool at a time.** Move the terminal onto the left
+  edge and the file tree tucks away; it hasn't gone anywhere, it just
+  isn't on screen. Bring it back from `Tool windows…`, or put it on a
+  different edge first.
+- **The bottom edge wins the corners.** It spans the whole window, and
+  the left and right docks stop above it — so a git panel gets the full
+  width for its file list and diff while the tree keeps its columns
+  above.
+- **Every tool window has a `✕`** in its header, on every edge, plus its
+  own name and whatever count it has to report.
+
+The file tree on the left, the git panel across the bottom:
+
+```
+─ Explorer ────────────── ✕ ─│  ≡    toolmenu.go ×
+ my-project                  │    1  // =======================
+ ▸ internal/                 │    2  // File: internal/app/tool
+ ▸ ai_docs/                  ┃    3  // Created: 2026-09-10
+   README.md                 ┃    4
+─ Actions ▾ ─ Review all ▶  Git changes · 4 files ────── ✕ ─
+ [ ]  M README.md         │ diff --git a/README.md b/README.md
+ [ ]  M internal/app/a…   ┃ index baf0290..62b00c7 100644
+```
+
+**Resizing**: drag the splitter beside a left- or right-docked panel, or
+the header rule of a bottom-docked one. `Esc =` and `Esc -` step whatever
+you're working in.
+
+**Your layout is remembered per project**, alongside that folder's open
+tabs — so a Go service can keep the terminal and the problems list where
+you put them while a docs repo stays a plain wide editor. It's stored in
+`~/.config/ced/state.json`; delete that file and every project starts
+fresh.
+
 ### Favorite locations
 
 Most projects keep things in the same places, and the paths are longer
@@ -340,7 +410,9 @@ Then:
   in the tree opens a per-item context menu (New File on folders,
   Rename, Delete). macOS Terminal + tmux often swallows right-click,
   so all of those actions also live in the main `≡` menu.
-- Drag the splitter between the sidebar and editor to resize.
+- Drag the splitter between a side panel and the editor to resize it,
+  or a bottom panel's header rule to change its height. Click a panel's
+  `✕` to put it away — see [Tool windows](#tool-windows).
 - Click and drag in the editor to select; drag past the top or bottom
   edge to auto-scroll the selection.
 - **Alt+click** in the editor drops an extra caret instead of moving the
@@ -362,7 +434,9 @@ within half a second tap one of the letters below.
 | `Esc w`     | Close tab            |
 | `Esc q`     | Quit                 |
 | `Esc n`     | New file             |
-| `Esc t`     | Toggle sidebar       |
+| `Esc t`     | Toggle file tree     |
+| `Esc =`     | Grow panel           |
+| `Esc -`     | Shrink panel         |
 | `Esc /`     | Toggle line comment  |
 | `Esc f`     | Find in file         |
 | `Esc p`     | Find file in project |
@@ -1050,8 +1124,9 @@ across restarts.
 ### 5. Chat panel
 
 Open it with **≡ → Copilot → Show … chat** (the row names your current
-agent). The panel docks as a full-height strip on the **left** edge, and
-the file tree slides over to the right while it's open.
+agent). The panel docks as a full-height strip on the **right** edge by
+default; it is a [tool window](#tool-windows) like any other, so you can
+move it to the left or the bottom and the choice sticks for that project.
 
 - Type in the composer at the bottom; **`Enter` sends**. Answers stream
   in live. `↑` / `↓` recall previous prompts.
@@ -1089,9 +1164,9 @@ the file tree slides over to the right while it's open.
   text and hit `Cmd+C`. `Esc` drops a selection.
 - Drag the panel's right-edge splitter to resize; scroll wheel and
   `PgUp` / `PgDn` move through the transcript.
-- The chat panel and a **left-docked terminal** share the left edge:
-  opening one tucks the other away (a bottom-docked terminal coexists
-  fine).
+- An edge shows one tool at a time, so if you move the chat onto an edge
+  something else is using, that panel tucks away until you bring it back
+  (see [Tool windows](#tool-windows)).
 
 ### 6. Sending your code as context
 

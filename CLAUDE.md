@@ -80,7 +80,7 @@ internal/app/openineditor.go  Hand a file or folder to $VISUAL / $EDITOR
 internal/app/toolwindow.go    TOOL WINDOWS: the registry, the three edges, one visible
                               per edge, sizes per tool per axis, every dock rect
 internal/app/tooladapt.go     Each panel's show/hide verbs — the seam to the layer above
-internal/app/toolheader.go    The bottom dock's header rule + ✕, for a panel with none
+internal/app/toolheader.go    A dock's header rule, title and ✕, for a panel with none
 internal/app/toollayout.go    The per-project layout: encode, restore, save (state.json)
 internal/app/toolmenu.go      ≡ Tool windows: the tool picker, the edge picker, reset
 internal/app/app.go           Event loop, layout, menu modal, splitter, all rendering
@@ -3241,22 +3241,35 @@ owned their own geometry AND their own exclusivity rules. House rules:
   side docks stop and sits ABOVE the bottom dock rather than under it.
   It is about the file in front of you, and a bar pinned below a git
   panel would be a long way from the line it is searching.
-- **A BOTTOM DOCK HAS A HEADER, and the tool layer supplies one for the
-  panel that has none** (toolheader.go). Six of the seven tools were
+- **EVERY TOOL WINDOW HAS A HEADER, and the tool layer supplies one for
+  the panel that paints none** (toolheader.go). Six of the seven were
   BORN as bottom strips and arrived with a rule, a title and a ✕; the
-  file tree was a sidebar for the editor's whole life, so it had
-  neither — and the moment it could be docked at the bottom it had no
-  resize handle and no close button at all. `toolDef.ownHeader` says who
-  brings their own; anything that does not gets the generic one. The
-  split it introduces is the important part: **`toolRect` is the whole
-  dock and `toolBodyRect` is the content**, and `sidebarRect` returns
-  the BODY — which is why the tree's hit-testing, marks and overflow
-  markers needed no changes at all. The tree also drops its own EXPLORER
-  row there (`filetree.Tree.HideLabel`, which moves the ROW MAP and not
-  just the paint): two rows of title on a ten-row panel is a third of it
-  spent saying the same thing twice. The mark count moves into the
-  header with it — that row was the mark set's only always-visible
-  surface, and marks survive scrolling.
+  file tree was a sidebar for the editor's whole life, so it had a ✕ on
+  no dock at all, and once it could sit at the bottom it had no resize
+  handle either. `toolDef.ownHeader` says who brings their own; anything
+  that does not gets the generic one, on EVERY edge.
+- **THE HEADER COSTS NO ROWS**, because the tree gives up its own
+  EXPLORER row for it (`filetree.Tree.HideLabel`) — so it replaces a row
+  rather than adding one, and the mark count moves into it, that row
+  having been the mark set's only always-visible surface. HideLabel
+  moves the ROW MAP and not just the paint: `Render`, `ListRows`,
+  `HitTest` and `ContentWidth` all read `headerRows()`, because a click
+  map one row off its picture opens the neighbour of whatever was
+  clicked — the worst bug that file could have, and one that shows up
+  only as "the tree opens the wrong folder".
+- **THE SPLIT IT INTRODUCES IS THE LOAD-BEARING PART: `toolRect` is the
+  whole dock and `toolBodyRect` is the content**, and `sidebarRect`
+  returns the BODY — which is why the tree's hit-testing, marks and
+  overflow markers needed no changes at all. A panel that paints its own
+  header gets that row BACK from `toolBodyRect`, since for it the header
+  is part of what it draws.
+- **WHAT THE HEADER'S RULE DOES DEPENDS ON THE EDGE.** On the bottom it
+  is the height-drag handle, because there is no seam down there; on a
+  vertical edge the seam already resizes the panel, so the rule is inert
+  — but a press on it is still SWALLOWED, exactly as the EXPLORER row it
+  replaced was. **The header is also checked BEFORE the seam**: its last
+  cells sit inside the seam's two-column grab zone, and a ✕ that started
+  a resize would be a button that does not work.
 - **`termDockLeft` AND THE TREE FLIP ARE GONE.** The tree used to be
   teleported to the right edge whenever the chat or a left-docked
   terminal wanted the left one — the workaround for having no right edge

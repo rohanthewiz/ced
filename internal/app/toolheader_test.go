@@ -34,35 +34,54 @@ func bottomTreeApp(t *testing.T) *App {
 	return a
 }
 
-// TestToolNeedsHeader_OnlyTheHeaderlessOneAtTheBottom pins who gets the
-// generic header: a tool that does not paint its own, docked at the
-// bottom. Six of the seven were born as bottom strips and arrived with a
-// rule, a title and a ✕ of their own; giving them a second one would
-// draw two headers.
-func TestToolNeedsHeader_OnlyTheHeaderlessOneAtTheBottom(t *testing.T) {
+// TestToolNeedsHeader_OnlyTheOneThatPaintsNone pins who gets the generic
+// header: a showing tool that does not paint its own, on ANY edge. Six of
+// the seven were born as bottom strips and arrived with a rule, a title
+// and a ✕ of their own; giving them a second one would draw two headers.
+func TestToolNeedsHeader_OnlyTheOneThatPaintsNone(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.gitIsRepo = true
 
-	// The tree on a vertical edge: no header. The seam resizes it and
-	// its own first row is its title.
-	if a.toolNeedsHeader(toolProject) {
-		t.Error("a left-docked tree should not get the dock header")
+	for _, side := range dockSides {
+		a.moveTool(toolProject, side)
+		a.showTool(toolProject)
+		if !a.toolNeedsHeader(toolProject) {
+			t.Errorf("a %s-docked tree should get the dock header", dockLabel(side))
+		}
 	}
-	// A panel that draws its own, at the bottom: still no.
+	// A panel that draws its own never gets a second.
 	a.showTool(toolGit)
 	if a.toolNeedsHeader(toolGit) {
 		t.Error("the git panel paints its own header and must not get a second")
-	}
-	// The tree at the bottom: yes.
-	a.moveTool(toolProject, dockBottom)
-	a.showTool(toolProject)
-	if !a.toolNeedsHeader(toolProject) {
-		t.Error("a bottom-docked tree should get the dock header")
 	}
 	// And a hidden tool has nothing to put a header on.
 	a.hideTool(toolProject)
 	if a.toolNeedsHeader(toolProject) {
 		t.Error("a hidden tool should not claim a header row")
+	}
+}
+
+// TestToolHeaderIsHandle_BottomEdgeOnly pins what the rule DOES. On the
+// bottom it is the height-drag grip, because there is no seam down
+// there; on a vertical edge the seam already resizes the panel, so two
+// handles for one dimension would be one too many.
+func TestToolHeaderIsHandle_BottomEdgeOnly(t *testing.T) {
+	a := bottomTreeApp(t)
+	if !a.toolHeaderIsHandle(toolProject) {
+		t.Error("the bottom header's rule should be the drag handle")
+	}
+	a.moveTool(toolProject, dockLeft)
+	if a.toolHeaderIsHandle(toolProject) {
+		t.Error("a vertical dock resizes by its seam, not by its header rule")
+	}
+	// A press on the inert rule is still SWALLOWED — it is chrome,
+	// standing where the tree's unclickable EXPLORER row used to.
+	hx, hy, _, _ := a.toolHeaderRect(toolProject)
+	if mode := a.toolHeaderPress(toolProject, hx+1, hy); mode != "" {
+		t.Errorf("the inert rule started drag %q, want none", mode)
+	}
+	if !a.sidebarShown {
+		t.Error("a press on the rule must not close the panel")
 	}
 }
 
@@ -97,15 +116,61 @@ func TestToolBodyRect_HeaderComesOutOfTheDock(t *testing.T) {
 	}
 }
 
-// TestToolBodyRect_NoHeaderIsTheWholeDock: on a vertical edge, and for
-// every panel that draws its own, the body IS the dock.
+// TestToolBodyRect_NoHeaderIsTheWholeDock: for a panel that paints its
+// own header, the body IS the dock — that row is part of what it draws,
+// so taking it away would clip the panel by one row on every edge.
 func TestToolBodyRect_NoHeaderIsTheWholeDock(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	dx, dy, dw, dh := a.toolRect(toolProject)
-	bx, by, bw, bh := a.toolBodyRect(toolProject)
+	a.gitIsRepo = true
+	a.showTool(toolGit)
+	dx, dy, dw, dh := a.toolRect(toolGit)
+	bx, by, bw, bh := a.toolBodyRect(toolGit)
 	if bx != dx || by != dy || bw != dw || bh != dh {
 		t.Errorf("body = (%d,%d,%d,%d), want the whole dock (%d,%d,%d,%d)",
 			bx, by, bw, bh, dx, dy, dw, dh)
+	}
+}
+
+// TestToolHeaderOnAVerticalDock covers the tree's header where it
+// actually lives most of the time: the left edge. It costs no rows —
+// the tree gives up its own EXPLORER row for it — and it carries the ✕
+// the tree never had on any dock.
+func TestToolHeaderOnAVerticalDock(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	dx, dy, dw, _ := a.toolRect(toolProject)
+	hx, hy, hw, hh := a.toolHeaderRect(toolProject)
+	if hx != dx || hy != dy || hw != dw || hh != 1 {
+		t.Fatalf("header = (%d,%d,%d,%d), want the dock's first row", hx, hy, hw, hh)
+	}
+
+	a.draw()
+	if !a.tree.HideLabel {
+		t.Error("the tree should have given up its own label row")
+	}
+	// The ✕ hides the tree, through the real click path.
+	btn := a.toolHeaderCloseRect(toolProject)
+	a.handleMouse(tcell.NewEventMouse(btn.x+1, btn.y, tcell.Button1, tcell.ModNone))
+	if a.sidebarShown {
+		t.Error("clicking the ✕ should have hidden the tree")
+	}
+}
+
+// TestToolHeaderOutranksTheSeam pins the router's order. The header's
+// last cells sit inside the seam's two-column grab zone, so a ✕ checked
+// after the seam would be a button that started a resize instead of
+// closing the panel.
+func TestToolHeaderOutranksTheSeam(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	btn := a.toolHeaderCloseRect(toolProject)
+	if !a.sidebarSplitterHit(btn.x+2, btn.y) {
+		t.Skip("the ✕ does not reach the seam's grab zone in this geometry")
+	}
+	a.handleMouse(tcell.NewEventMouse(btn.x+1, btn.y, tcell.Button1, tcell.ModNone))
+	if a.dragMode != "" {
+		t.Errorf("the ✕ started drag %q, want none", a.dragMode)
+	}
+	if a.sidebarShown {
+		t.Error("the ✕ should have hidden the tree")
 	}
 }
 

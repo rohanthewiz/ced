@@ -269,7 +269,10 @@ func TestTreeClickFocusesAndSelects(t *testing.T) {
 	a := newTreeNavApp(t)
 	a.draw() // HitTest maps clicks through the rows the last render stamped
 	sx, sy, _, _ := a.sidebarRect()
-	a.sidebarClick(sx+2, sy+2) // first child row (rows 0-1 are the header)
+	// Row 0 of the BODY is the project name; the first child is row 1.
+	// (The dock header draws the panel's title above the body now, so
+	// the tree's own EXPLORER row is suppressed — see toolheader.go.)
+	a.sidebarClick(sx+2, sy+1)
 	if !a.treeFocus {
 		t.Fatal("clicking a tree row should focus the tree")
 	}

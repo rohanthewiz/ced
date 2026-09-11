@@ -60,9 +60,13 @@ func markApp(t *testing.T) (*App, map[string]*filetree.Node) {
 // press where the user would rather than at a hard-coded offset.
 func treeRowY(t *testing.T, a *App, n *filetree.Node) int {
 	t.Helper()
+	// Draw FIRST: it is what populates the hit-test's visible-row list,
+	// and also what tells the tree whether the dock is drawing its title
+	// (HideLabel) — which moves the header's row count. Asking ListRows
+	// before the draw reads the wrong offset and lands every row one out.
+	a.draw()
 	_, sy, _, sh := a.sidebarRect()
 	off, rows := a.tree.ListRows(sh)
-	a.draw() // Render populates the hit-test's visible-row list
 	for row := 0; row < rows; row++ {
 		got, ok := a.tree.HitTest(0, off+row)
 		if ok && got == n {

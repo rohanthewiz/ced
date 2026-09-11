@@ -257,18 +257,22 @@ func TestSidebarW_ShownVsHidden(t *testing.T) {
 }
 
 // TestSidebarRect checks the sidebar render rectangle reserves one cell
-// for the splitter on its right edge, and collapses to zero when hidden.
+// for the splitter on its right edge and one ROW for the dock header
+// above it, and collapses to zero when hidden.
 func TestSidebarRect(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	x, y, w, h := a.sidebarRect()
-	if x != 0 || y != 0 {
-		t.Fatalf("expected origin (0,0), got (%d,%d)", x, y)
+	// Row 0 is the dock's header rule (toolheader.go), so the tree's own
+	// rect starts one row down — it is the BODY, which is what every
+	// reader of this wants.
+	if x != 0 || y != 1 {
+		t.Fatalf("expected origin (0,1), got (%d,%d)", x, y)
 	}
 	if w != defaultSidebarWidth-1 {
 		t.Fatalf("expected w = sidebarWidth-1, got %d", w)
 	}
-	if h != a.height-1 {
-		t.Fatalf("expected h = height-1, got %d", h)
+	if h != a.height-2 {
+		t.Fatalf("expected h = height-2 (status bar + dock header), got %d", h)
 	}
 
 	a.sidebarShown = false

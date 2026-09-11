@@ -3186,20 +3186,24 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		if a.gitPanel.walk && !a.gitPanelContains(x, y) {
 			a.stopGitPanelWalk()
 		}
+		// The generic dock header is claimed before the panel it belongs
+		// to: it carries the ✕ — the only mouse path to putting the panel
+		// away — and on the bottom edge the height-drag handle, neither
+		// of which the panel's own hit-test knows about. It sits ahead of
+		// the seam check too: on a vertical edge the header's last cells
+		// are inside the seam's two-column grab zone, and a ✕ that
+		// started a resize would be a button that does not work.
+		// See toolheader.go.
+		if id, ok := a.toolHeaderAt(x, y); ok {
+			a.dragMode = a.toolHeaderPress(id, x, y)
+			return
+		}
 		if side, ok := a.dockSplitterAt(x, y); ok {
 			// Each seam's grab zone is two columns, not one — see
 			// splitter.go for what the extra one costs and why. This
 			// stays ahead of every panel hit-test, so the wider zone
 			// really does outrank the neighbour cell it borrows.
 			a.dragMode, a.dragSplitOffset = dragModeForDock(side), x-a.toolSplitterX(side)
-			return
-		}
-		// The generic bottom-dock header is claimed before the panel it
-		// belongs to: its rule is the height-drag handle and its ✕ is the
-		// only mouse path to putting the panel away, neither of which the
-		// panel's own hit-test knows about. See toolheader.go.
-		if id, ok := a.headerlessBottomTool(); ok && a.toolHeaderContains(id, x, y) {
-			a.dragMode = a.toolHeaderPress(id, x, y)
 			return
 		}
 		switch {
@@ -4540,10 +4544,10 @@ func (a *App) draw() {
 	if a.chat.open {
 		a.drawChatPanel()
 	}
-	// The generic bottom-dock header, for the one tool that does not
-	// paint its own. After the panel, so the rule is never covered by
-	// the content it labels. See toolheader.go.
-	if id, ok := a.headerlessBottomTool(); ok {
+	// The generic dock header, for the tools that do not paint their
+	// own. After the panels, so a rule is never covered by the content
+	// it labels. See toolheader.go.
+	for _, id := range a.headerlessTools() {
 		a.drawToolHeader(id)
 	}
 	// One seam per vertical edge, painted after every panel so it is

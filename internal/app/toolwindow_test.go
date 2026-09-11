@@ -342,16 +342,16 @@ func TestBottomDockWinsTheCorners(t *testing.T) {
 		t.Errorf("bottom dock ends at %d, want flush against the status bar at %d", gy+gh, a.height-1)
 	}
 
-	_, sy, _, sh := a.sidebarRect()
+	_, sy, _, sh := a.toolRect(toolProject)
 	if sy != 0 || sy+sh != gy {
-		t.Errorf("tree rect rows = [%d,%d), want [0,%d) — stopping at the bottom dock", sy, sy+sh, gy)
+		t.Errorf("tree dock rows = [%d,%d), want [0,%d) — stopping at the bottom dock", sy, sy+sh, gy)
 	}
 
 	// And with nothing on the bottom edge, the side dock takes the rows
 	// back down to the status bar.
 	a.hideTool(toolGit)
-	if _, _, _, sh := a.sidebarRect(); sh != a.height-1 {
-		t.Errorf("tree rows = %d with no bottom dock, want %d", sh, a.height-1)
+	if _, _, _, sh := a.toolRect(toolProject); sh != a.height-1 {
+		t.Errorf("tree dock rows = %d with no bottom dock, want %d", sh, a.height-1)
 	}
 }
 

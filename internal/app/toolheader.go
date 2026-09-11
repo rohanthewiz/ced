@@ -5,10 +5,9 @@
 // Copyright: 2026 Rohan Allison. All rights reserved.
 // =============================================================================
 
-// toolheader.go draws the header rule a BOTTOM-DOCKED tool window wears
-// when it does not draw one of its own: the rule itself, the panel's
-// name, and a ✕ to put it away — with the rule outside the button
-// doubling as the height-drag handle.
+// toolheader.go draws the header a tool window wears when it does not
+// draw one of its own: a rule across the dock, the panel's name and
+// whatever count it has to add, and a ✕ to put it away.
 //
 // WHY IT EXISTS FOR A SET OF ONE. Six of the seven tools already draw
 // their own header, because six of them were BORN as bottom strips: the
@@ -16,17 +15,15 @@
 // arrived with a rule, a title and a ✕ because that is what a bottom
 // strip in this editor looks like. The file tree is the exception — it
 // was a left-hand sidebar for the editor's whole life, where the seam
-// resizes it and the ≡ row hides it, so it never needed either
-// affordance. The moment it could be docked at the bottom it had
-// NEITHER: no seam down there, no ✕ anywhere, and the only way back was
-// a menu row you had to already know about.
+// resizes it and the ≡ row hides it, so it had no ✕ on ANY dock, and the
+// only way to put it away was a menu row you had to already know about.
 //
 // So the header is stated generically rather than bolted onto the tree.
 // `toolDef.ownHeader` says which tools bring their own; anything that
-// does not gets this one for free, on whichever edge it needs it. That
-// is a small amount of code and it is the truthful model — "a bottom
-// dock has a header" — rather than a special case that the next
-// headerless tool would have to discover the same way.
+// does not gets this one, on every edge. That is a small amount of code
+// and it is the truthful model — "a tool window has a header" — rather
+// than a special case the next headerless tool would have to discover
+// the same way.
 //
 // HOUSE RULES:
 //
@@ -42,23 +39,30 @@
 //     every other bottom panel already uses, so a user who has dragged
 //     one has dragged all of them.
 //
-//   - IT IS ONLY DRAWN ON THE BOTTOM EDGE. On a vertical one the seam
-//     is the resize affordance and the tool's own first row is its
-//     title; a header there would cost a row of content on the edge
-//     where rows are scarcest, to say something already on screen.
+//   - IT IS DRAWN ON EVERY EDGE, and it costs no rows anywhere. The
+//     tree gives up its own EXPLORER row for it (HideLabel), so the
+//     header REPLACES a row rather than adding one — the same title, the
+//     same mark count, plus a ✕ the tree never had on any dock.
+//
+//   - WHAT THE RULE DOES DEPENDS ON THE EDGE. On the bottom it is the
+//     height-drag handle, because there is no seam down there. On a
+//     vertical edge the seam already resizes the panel, so the rule is
+//     inert — but a press on it is still SWALLOWED, exactly as the
+//     EXPLORER row it replaced was: it is chrome, not a tree row.
 
 package app
 
 import "github.com/gdamore/tcell/v2"
 
 // toolNeedsHeader reports whether a tool gets the generic header: it is
-// showing, it is on the bottom edge, and it does not draw one itself.
+// showing and it does not draw one itself. Every edge, because a panel
+// wants a name and a ✕ wherever it is sitting.
 func (a *App) toolNeedsHeader(id toolID) bool {
 	d, ok := toolDefFor(id)
-	if !ok || d.ownHeader || !d.isOpen(a) {
+	if !ok || d.ownHeader {
 		return false
 	}
-	return a.toolDock(id) == dockBottom
+	return d.isOpen(a)
 }
 
 // toolHeaderRows is how many rows of a tool's dock the generic header
@@ -81,6 +85,14 @@ func (a *App) toolBodyRect(id toolID) (x, y, w, h int) {
 		h -= n
 	}
 	return
+}
+
+// toolHeaderIsHandle reports whether this header's rule is the panel's
+// resize grip. Only on the bottom edge: a vertical dock has a seam
+// (splitter.go), and two handles for one dimension would be one too
+// many — the rule would be a control that sometimes did nothing.
+func (a *App) toolHeaderIsHandle(id toolID) bool {
+	return a.toolNeedsHeader(id) && a.toolDock(id) == dockBottom
 }
 
 // toolHeaderRect is the header row itself, or a zero rect when the tool
@@ -141,7 +153,7 @@ func (a *App) drawToolHeader(id toolID) {
 	}
 	th := a.theme
 	ruleSt := tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Subtle)
-	if a.dragMode == dragModeForDock(dockBottom) {
+	if a.toolHeaderIsHandle(id) && a.dragMode == dragModeForDock(dockBottom) {
 		ruleSt = tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Accent)
 	}
 	titleSt := tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Accent).Bold(true)
@@ -155,10 +167,15 @@ func (a *App) drawToolHeader(id toolID) {
 	// The title is DROPPED rather than overlapped when the dock is too
 	// narrow to hold both — the problems header's rule, for its reason:
 	// the ✕ is a control and the title is a label, so the label is what
-	// yields.
-	title := a.toolHeaderTitle(id)
-	if tx := hx + 1; tx+runeLen(title) <= close.x {
-		drawAt(a.screen, tx, hy, title, titleSt)
+	// yields. It sheds its COUNT first and its name only after that, so
+	// a narrow sidebar loses the annotation before it loses the word
+	// telling you what the panel is.
+	tx := hx + 1
+	for _, title := range []string{a.toolHeaderTitle(id), " " + toolTitle(id) + " "} {
+		if tx+runeLen(title) <= close.x {
+			drawAt(a.screen, tx, hy, title, titleSt)
+			break
+		}
 	}
 }
 
@@ -173,17 +190,35 @@ func (a *App) toolHeaderPress(id toolID, x, y int) string {
 		a.hideTool(id)
 		return ""
 	}
+	if !a.toolHeaderIsHandle(id) {
+		// Inert, but still swallowed: this row is chrome, and it stands
+		// where the tree's own (unclickable) EXPLORER row used to.
+		return ""
+	}
 	a.dragSplitOffset = 0
 	return dragModeForDock(dockBottom)
 }
 
-// headerlessBottomTool reports which showing tool, if any, is wearing
-// the generic header right now. The click router asks once instead of
-// walking the registry, and the draw pass uses it for the same reason.
-func (a *App) headerlessBottomTool() (toolID, bool) {
-	id, ok := a.visibleTool(dockBottom)
-	if !ok || !a.toolNeedsHeader(id) {
-		return "", false
+// headerlessTools lists every showing tool wearing the generic header,
+// one per edge at most. The draw pass walks it, and the click router
+// asks toolHeaderAt, so neither has to know which tools those are.
+func (a *App) headerlessTools() []toolID {
+	var out []toolID
+	for _, side := range dockSides {
+		if id, ok := a.visibleTool(side); ok && a.toolNeedsHeader(id) {
+			out = append(out, id)
+		}
 	}
-	return id, true
+	return out
+}
+
+// toolHeaderAt reports which tool's generic header (x, y) lands on, if
+// any — the click router's single question.
+func (a *App) toolHeaderAt(x, y int) (toolID, bool) {
+	for _, id := range a.headerlessTools() {
+		if a.toolHeaderContains(id, x, y) {
+			return id, true
+		}
+	}
+	return "", false
 }

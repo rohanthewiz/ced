@@ -80,10 +80,11 @@ type gitLogCommit struct {
 // panel — reopening puts the user back on the commit they were reading.
 type gitLogState struct {
 	open bool
-	// height / listWidth are the user-chosen dimensions from drags or
-	// the resize leaders; 0 means "auto". Session-only, like the changes
-	// panel's — ced deliberately has no layout config.
-	height    int
+	// listWidth is the user-chosen commit-list column count from a
+	// list/detail divider drag; 0 means "auto". Session-only. The
+	// panel's own SIZE is not here: a tool window's extent lives in the
+	// layout, per tool and per axis (toolwindow.go), which is what gets
+	// remembered per project. Read it through gitLogHeight.
 	listWidth int
 	commits   []gitLogCommit
 	// truncated marks a list cut at gitLogMaxCommits, so the title can
@@ -130,21 +131,9 @@ func (a *App) menuToggleGitLog() {
 	if !a.gitLog.open && !a.gitIsRepo {
 		return
 	}
-	a.gitLog.open = !a.gitLog.open
-	if a.gitLog.open {
-		a.gitPanel.open = false
-		a.problems.open = false
-		a.closeComparePanel()
-		if !a.termDockLeft {
-			a.term.open = false
-			a.term.focused = false
-		}
-		// The EXPLICIT refresh, not the pipeline one: re-opening the
-		// panel with a filter still applied must re-run the search
-		// (the pipeline refresh deliberately leaves search results
-		// alone — see refreshGitLogCommits).
-		a.gitLogRefreshNow()
-	}
+	// Single occupancy is claimDock's, and the refresh belongs to
+	// openGitLogTool. See toolwindow.go.
+	a.toggleTool(toolGitLog)
 }
 
 // gitLogToggleLabel is the dynamic menu label — reads as the action it
@@ -370,86 +359,48 @@ func (a *App) handleGitLogShow(e *gitLogShowEvent) {
 // Geometry — one source for draw AND mouse routing
 // -----------------------------------------------------------------------------
 
-// gitLogHeight returns the panel's row count for the current window —
-// user choice wins, auto mode takes a third of the screen, both
-// re-clamped against the live window. Mirrors gitPanelHeight.
-func (a *App) gitLogHeight() int {
-	h := a.gitLog.height
-	if h == 0 {
-		h = a.height / 3
-		if h > gitLogMaxHeight {
-			h = gitLogMaxHeight
-		}
-	}
-	if h < gitLogMinHeight {
-		h = gitLogMinHeight
-	}
-	if max := a.maxGitLogHeight(); h > max {
-		h = max
-	}
-	return h
-}
+// gitLogHeight returns the panel's row count when docked to the bottom
+// edge. A thin read
+// of the tool layer, which owns the stored number and the clamp — see
+// toolwindow.go. Mirrors gitPanelHeight, as it always did.
+func (a *App) gitLogHeight() int { return a.toolHeight(toolGitLog) }
 
-// maxGitLogHeight is the tallest the panel may grow while leaving the
-// editor its minimum working rows — the hard limit even explicit drags
-// respect.
-func (a *App) maxGitLogHeight() int {
-	max := a.height - 2 - gitLogMinEditorRows
-	max -= a.findBarRows()
-	if max < gitLogMinHeight {
-		max = gitLogMinHeight
-	}
-	return max
-}
-
-// resizeGitLog records a user-chosen height, clamped to the legal band,
-// and re-clamps the scroll offsets against the new viewport.
+// resizeGitLog records a user-chosen height and re-clamps the scroll
+// offsets against the new viewport. The clamp itself is the tool
+// layer's — one band for every tool on every edge. See toolwindow.go.
 func (a *App) resizeGitLog(target int) {
-	if target < gitLogMinHeight {
-		target = gitLogMinHeight
-	}
-	if max := a.maxGitLogHeight(); target > max {
-		target = max
-	}
-	a.gitLog.height = target
+	a.setToolHeight(toolGitLog, target)
 	a.gitLogClampScrolls()
 }
 
-// dragGitLogTo resizes the panel so its header rule tracks the mouse
-// row during a drag.
+// dragGitLogTo resizes the panel so its header rule tracks the mouse row
+// during a drag. Only the bottom edge has a header-rule handle; a
+// vertical dock resizes by its seam instead.
 func (a *App) dragGitLogTo(y int) {
-	bottom := a.height - 1
-	bottom -= a.findBarRows()
-	a.resizeGitLog(bottom - y)
+	a.dragDockTo(dockBottom, y)
 }
 
 // growGitLog / shrinkGitLog are the Esc-= / Esc-- targets while the log
-// owns the bottom strip. Silent no-ops while collapsed, per the leader
-// contract; single occupancy guarantees at most one panel acts.
+// is the tool being resized. Silent no-ops while collapsed, per the
+// leader contract.
 func (a *App) growGitLog() {
 	if !a.gitLog.open {
 		return
 	}
-	a.resizeGitLog(a.gitLogHeight() + gitLogResizeStep)
+	a.growDock(a.toolDock(toolGitLog), gitLogResizeStep)
 }
 
-// shrinkGitLog steps the panel shorter; see growGitLog.
+// shrinkGitLog steps the panel smaller; see growGitLog.
 func (a *App) shrinkGitLog() {
 	if !a.gitLog.open {
 		return
 	}
-	a.resizeGitLog(a.gitLogHeight() - gitLogResizeStep)
+	a.shrinkDock(a.toolDock(toolGitLog), gitLogResizeStep)
 }
 
-// gitLogRect returns the panel's on-screen rectangle — the same slot the
-// changes panel occupies (they swap, never stack).
-func (a *App) gitLogRect() (x, y, w, h int) {
-	lw := a.leftBlockW()
-	h = a.gitLogHeight()
-	y = a.height - 1 - h
-	y -= a.findBarRows()
-	return lw, y, a.width - lw - a.rightBlockW(), h
-}
+// gitLogRect returns the panel's on-screen rectangle, wherever it is
+// docked — see toolRect.
+func (a *App) gitLogRect() (x, y, w, h int) { return a.toolRect(toolGitLog) }
 
 // gitLogListWidth clamps a desired commit-list column width for a panel
 // of total width w: at least gitLogMinListW, at most gitLogMaxListW, and

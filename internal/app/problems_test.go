@@ -232,14 +232,14 @@ func TestProblemsHeightClamps(t *testing.T) {
 		t.Errorf("tiny resize = %d, want floor %d", got, problemsMinHeight)
 	}
 	a.resizeProblems(1000)
-	if got, max := a.problemsHeight(), a.maxProblemsHeight(); got != max {
+	if got, max := a.problemsHeight(), a.clampToolHeight(toolProblems, a.height); got != max {
 		t.Errorf("huge resize = %d, want cap %d", got, max)
 	}
 	if got := a.problemsHeight(); a.height-2-got < problemsMinEditorRows {
 		t.Errorf("panel of %d rows starves the editor on a %d-row window", got, a.height)
 	}
 	// Auto mode: a third of the window, under the ceiling.
-	a.problems.height = 0
+	a.tools().size[toolProblems] = toolSize{}
 	if got := a.problemsHeight(); got != a.height/3 {
 		t.Errorf("auto height = %d, want %d", got, a.height/3)
 	}

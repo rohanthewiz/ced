@@ -77,6 +77,12 @@ internal/favorites/favorites.go favorites.json: two scopes, the walk-up resolver
 internal/app/favorites.go     RevealPath — expand the tree to a path, keep the root
 internal/app/favmanage.go     ≡ Manage favorites: the two lists, the verbs, the scope chip
 internal/app/openineditor.go  Hand a file or folder to $VISUAL / $EDITOR
+internal/app/toolwindow.go    TOOL WINDOWS: the registry, the three edges, one visible
+                              per edge, sizes per tool per axis, every dock rect
+internal/app/tooladapt.go     Each panel's show/hide verbs — the seam to the layer above
+internal/app/toolstripe.go    The one-cell tool button rails on the populated edges
+internal/app/toollayout.go    The per-project layout: encode, restore, save (state.json)
+internal/app/toolmenu.go      ≡ Tool windows: the tool picker, the edge picker, reset
 internal/app/app.go           Event loop, layout, menu modal, splitter, all rendering
 internal/editor/buffer.go     Position + Buffer ([]string lines), edit primitives
 internal/editor/tab.go        Tab: path, buffer, cursor, anchor, scroll, dirty state
@@ -1448,7 +1454,7 @@ House rules:
   ACP client and Copilot is just the default entry in a small agent
   registry (`chatAgents`: Copilot, Claude Code via `claude-code-acp`,
   Gemini via `gemini --experimental-acp`). ONE panel, switchable
-  backend — never a second panel; the left edge is single-occupancy.
+  backend — never a second panel; an edge is single-occupancy.
   The ≡ "Chat agent" row opens the registry as a picker; unlike the
   model picker it KEEPS the current agent, annotated "(current —
   restart)", because re-picking is the deliberate crash-retry gesture
@@ -1466,13 +1472,16 @@ House rules:
   downstream of the spawn — turns, streaming, the model roster picker,
   context attachments (embedded or fenced-text fallback) — is already
   agent-agnostic; keep it that way.
-- **Docked LEFT, tree flips RIGHT** (owner preference). Every layout
-  helper pivots on `treeOnRight()` (`termDockLeft || chat.open`) and
-  `leftBlockW()` — don't reintroduce per-feature geometry branches.
-  The left edge is SINGLE-OCCUPANCY: opening chat closes a
-  left-docked terminal and vice versa (same rationale as the bottom
-  strip's terminal/git exclusivity); a bottom-docked terminal
-  coexists.
+- **It is a TOOL WINDOW, docked RIGHT by default** (toolwindow.go).
+  `chatPanelRect` is a read of `toolRect` and the width comes from the
+  layout — don't reintroduce per-feature geometry branches. It used to
+  dock LEFT and flip the file tree across the window, which was the
+  workaround for the editor having no right edge; the right edge now
+  exists, so the tree stays where the user put it. Single occupancy is
+  per EDGE and is `claimDock`'s: whatever else is showing on the chat's
+  edge yields, and the evicted tool keeps its own dock assignment so
+  re-opening it evicts the chat right back. ONE panel, switchable
+  backend — never a second panel.
 - **Turns**: Enter → `session/prompt` (blocks for the whole turn —
   `CallWithTimeout`, never the 5s default) while `session/update`
   notifications stream `agent_message_chunk`s into the transcript;
@@ -2104,9 +2113,12 @@ strip. House rules:
 - Guards mirror fileio's open guards — size checked on the STAT, one NUL
   in the first 8KB is binary — because a file ced won't open has no lines
   worth diffing either.
-- Single occupancy with the git panels and a bottom-docked terminal, both
-  directions, via `growBottomPanel`/`shrinkBottomPanel` and each opener
-  closing the others. No leader key: the three verbs are ≡ / palette rows
+- It is a TOOL WINDOW (toolwindow.go), bottom by default: single
+  occupancy on whatever edge it is docked to is `claimDock`'s, and
+  `openComparePanel` no longer names the panels it evicts. It is also
+  the one tool whose stripe button opens a PICKER rather than the panel
+  — a diff has two named sides, so there is no such thing as opening it
+  empty. No leader key: the three verbs are ≡ / palette rows
   (the flat table is out of mnemonic letters, and this isn't a namespace's
   worth of surface).
 
@@ -2283,10 +2295,11 @@ the changes panel: commits on the left (● marks ref-decorated rows;
 gitpanel.go's shape rather than sharing code — the house patterns are
 the shared part. House rules:
 
-- **Single-occupancy in every direction**: log, changes panel, compare,
-  and a bottom-docked terminal swap, never stack — each opener closes
-  the others. `growBottomPanel`/`shrinkBottomPanel` fan out to all
-  four; single occupancy guarantees at most one acts.
+- **It is a TOOL WINDOW** (toolwindow.go), bottom by default, and single
+  occupancy on its edge is `claimDock`'s — the log no longer closes the
+  changes panel, the compare view and the terminal by name. Its rect,
+  height and width are reads of the layer, so the same panel drawn on
+  the right edge runs full height and resizes by that edge's seam.
 - **Verbs live behind `Actions ▾`** (openPicker, the house rule):
   cherry-pick, revert, reset, detached checkout, branch/tag creation,
   the two copies. Labels name the branch and hash they'll touch. Reset
@@ -2913,25 +2926,19 @@ docs/EMBEDDING.md), hosted as a REPL strip. NOT a PTY — do not add
 one, or a VT emulator; full-screen child apps (vim, htop) are out of
 scope by design. House rules:
 
-- **Two dock modes, one toggle**: the terminal is a bottom strip by
-  default, or a full-height vertical strip on the LEFT (≡ → "Dock
-  terminal left") — that layout also flips the file tree to the RIGHT
-  edge. `App.termDockLeft` drives it; `leftBlockW`/`rightBlockW` are
-  the geometry pivots every rect helper goes through. Persisted as
-  `"termdock"` in config.json. Bottom mode resizes by header-rule
-  drag (rows); left mode by its vertical splitter (columns). The dock
-  toggle also OPENS a closed terminal — flipping the layout must never
-  leave nothing where the terminal should be (that reads as the layout
-  breaking, not a mode change). Keep the Show/Hide terminal and dock
-  rows in the View-toggles group near the TOP of the ≡ menu — the menu
-  scrolls on short windows and these rows must stay above the fold
-  (pinned by `TestMenuLayout_TerminalRowsAboveTheFold`).
-- **Single-occupancy bottom strip**: while BOTTOM-docked, the terminal,
-  the git panels and the compare panel swap, never stack (opening one
-  collapses the others). Two resizable bottom strips would need circular
-  height-clamp math on small windows — keep the exclusivity. A
-  LEFT-docked terminal doesn't compete for the bottom, so it coexists
-  with them; flipping back to bottom evicts whatever is there.
+- **It is a TOOL WINDOW** (toolwindow.go), so its edge, its size and its
+  exclusivity are not its own business any more: `termPanelRect` is a
+  read of `toolRect`, `termPanelHeight`/`termPanelWidth` read the
+  layout, and `claimDock` decides who yields. It defaults to the bottom
+  edge; the ≡ "Dock terminal left" row survives as a named PRESET over
+  `moveTool`, and it still OPENS a closed terminal — moving something
+  invisible reads as the row doing nothing. Keep the Show/Hide terminal
+  and dock rows in the View-toggles group near the TOP of the ≡ menu —
+  the menu scrolls on short windows and these rows must stay above the
+  fold (pinned by `TestMenuLayout_TerminalRowsAboveTheFold`).
+- **Bottom mode resizes by header-rule drag (rows); a vertical edge by
+  its seam (columns).** `termPanelPress` refuses the header-rule drag on
+  a vertical edge, where a height would mean nothing.
 - **Focus flag, not a modal**: `term.focused` routes plain editing
   keys to the input line; Esc stays global so leaders and the
   double-Esc menu keep working from inside the terminal. Any click
@@ -3195,11 +3202,146 @@ dividers `[2, 5, 149]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 
+### Tool windows (app/toolwindow.go + tooladapt/toolstripe/toollayout/toolmenu)
+Every auxiliary panel — the file tree, both git panels, the problems
+list, the compare view, the terminal, the chat — is the same KIND of
+thing: a named window that lives on one of three edges, can be moved to
+another, and is remembered per project. It replaced six files that each
+owned their own geometry AND their own exclusivity rules. House rules:
+
+- **AN EDGE SHOWS ONE TOOL AT A TIME; the rest collapse to their stripe
+  buttons.** That is JetBrains' rule and it was also ced's, spelled out
+  six times: the bottom strip was single-occupancy, so was the left
+  edge, and every panel closed the others BY NAME. It is now stated once
+  in `claimDock`, and the panels keep only what is theirs. Two resizable
+  panels on one edge would need circular clamp math on a small window,
+  and the stripe makes switching one click.
+- **`termDockLeft` AND THE TREE FLIP ARE GONE.** The tree used to be
+  teleported to the right edge whenever the chat or a left-docked
+  terminal wanted the left one — the workaround for having no right edge
+  at all. Now the chat DEFAULTS to the right, the tree is just a tool
+  docked left, and an edge that is claimed simply hands the slot over.
+  `treeOnRight()` survives as a question about where the user put the
+  Project tool, not as a layout rule. The `"termdock"` config key is
+  retired: it still PARSES (a key ced wrote itself must never become a
+  startup error — the retired `"scrollbar"` treatment) and nothing reads
+  it. The ≡ "Dock terminal left" row survives as a named PRESET over
+  `moveTool`, because it is the move people were already making daily.
+- **SIZES ARE PER TOOL, PER AXIS.** A tree wants ~30 columns and a
+  terminal ~60, so an edge-wide width would make every switch a resize;
+  and a terminal dragged tall at the bottom keeps that height when it
+  comes back from the left. Zero means auto and the tool derives it from
+  the window, which is what a tool nobody has resized keeps forever — so
+  a differently shaped screen re-derives instead of restoring a number
+  chosen for another one. **A width is the whole BLOCK, splitter
+  included** — the convention every width in this editor already used,
+  which is what let stored numbers keep meaning the same thing.
+- **THE FILE TREE'S WIDTH IS THE ONE SPECIAL CASE, and it has a
+  reason**: auto-fit re-derives `App.sidebarWidth` on every frame, so
+  that field is the LIVE number and a copy in the layout's size map
+  would be a second one that could disagree with the screen. So
+  `storedToolWidth` reads through to it. One honest special case beats
+  two numbers that can drift.
+- **THE OPPOSITE EDGE IS MEASURED RAW.** Each vertical edge's clamp asks
+  what the other spends; asking through the OTHER's clamp is a stack
+  overflow rather than a layout, so `rawDockCols` answers with the
+  stored/auto width before clamping. `TestOppositeDocksDoNotRecurse` is
+  what fails if somebody tidies it away.
+- **A HIDDEN TOOL HAS A ZERO RECT.** `toolRect` returns nothing for a
+  tool that is not showing, which is what makes every `xxxContains`
+  helper correct by construction instead of by remembering to check a
+  flag first. It also means a panel's rect must be read AFTER it is
+  opened.
+- **A SHOW CAN REFUSE, and every caller reads the answer.** A chat with
+  no agent binary, a compare with nothing to compare: `showTool` reports
+  whether the tool actually came up, so a stripe button never latches on
+  over a panel that never opened. Compare is the one tool whose "show"
+  is a QUESTION — a diff has two named sides, so an unprimed panel opens
+  the source picker instead.
+- **RESIZING IS THE EDGE'S, not the panel's.** One seam per vertical
+  edge (splitter.go), one drag mode per edge, and the bottom edge keeps
+  each panel's own header rule. `growBottomPanel` / `shrinkBottomPanel`
+  (Esc-= / Esc--) aim at `resizeTargetDock`: the edge holding the tool
+  that owns the keyboard, else the bottom — which is what they did
+  before, when the bottom was the only place a resizable panel could be.
+- **THE SEAM'S BORROWED COLUMN MIRRORS.** splitter.go's rule is that the
+  extra grab cell comes from the PANEL side, never the editor band. On a
+  left dock the panel is to the seam's left; on a right dock it is to
+  its right, so the zone flips with it.
+- **NOTHING ABOUT A LAYOUT IS DESTRUCTIVE, so nothing confirms.** Moving,
+  hiding and resetting all leave the tabs, the shell session, the chat
+  transcript and the panels' own state exactly where they were — a
+  layout is where things are DRAWN. A dialog in front of a reversible
+  action trains people to dismiss dialogs.
+- The Find-all list is deliberately NOT a tool window: its own file
+  explains why it is not even a picker (a live preview, an Esc that puts
+  the view back), and it docks TOP, an axis no tool window has. The find
+  bar is not one either — it owns the keyboard and belongs to the tab.
+
+### The tool stripes (app/toolstripe.go)
+The one-cell rails on the window's populated edges, each carrying a
+button per tool assigned there. House rules:
+
+- **THEY ARE THE DISCOVERY SURFACE, which is why they are worth a
+  cell.** Single occupancy means most tools are collapsed most of the
+  time, and a collapsed panel with no button is a feature the user has
+  to remember exists. This editor already knows what that costs — "a row
+  nobody can find is worse than a row that explains itself" is the rule
+  that put Open in $EDITOR back in the tree popup unconditionally.
+- **ONE CELL, AND ONLY ON AN EDGE THAT HAS TOOLS.** An edge nobody has
+  assigned anything to draws nothing and takes nothing, which is what
+  lets a user who moves everything to the bottom get both side columns
+  back without a preference for it. `"toolstripes"` (default on) is the
+  way out for anyone who wants the cells back and is content with ≡.
+  It stays a GLOBAL preference while the layout is per project: how much
+  chrome you want on screen does not change between repositories.
+- **THE VERTICAL RAILS ARE OUTERMOST AND FULL HEIGHT; the bottom one is
+  the row directly above the status bar.** A button never moves — the
+  find bar opens ABOVE the bottom rail rather than pushing it down,
+  because chrome that shifts is chrome you have to look for.
+- **ONE ENUMERATOR** (`stripeButtons`) for draw and hit-testing, the
+  btnRect rule; glyphs are single-width per the marker rule (`runeLen`
+  counts runes, and a double-width emoji would overrun into the panel).
+  A press on the bare rail is SWALLOWED — it is chrome, and a click on
+  it must not fall through to the editor behind it.
+- Every stripe gesture has a ≡ twin (toolmenu.go), because macOS
+  Terminal swallows clicks and the stripes can be switched off.
+
+### Per-project layouts (app/toollayout.go + internal/session)
+`session.Entry.Layout`, beside that folder's tabs. House rules:
+
+- **PER PROJECT, NOT PER USER.** A layout answers "what am I doing in
+  this repository" — a Go service wants the terminal and the problems
+  list, a docs repo wants neither. It is machine churn rewritten on
+  every folder switch, which is the split state.json exists to make.
+- **A PROJECT WITH NO RECORD GETS THE DEFAULT**: the file tree on the
+  left, the editor taking the rest. `newToolLayout` IS that default, so
+  there is one definition of it rather than a restore path with opinions.
+- **THE STORED DOCK MAP IS SPARSE.** An entry exists only for a tool the
+  user actually moved, so an unarranged project writes almost nothing
+  and a default changed in a later version reaches everyone who never
+  touched that tool.
+- **RESTORING GOES THROUGH `showTool`, and is silent per entry.** A tool
+  can refuse on this machine; an unknown id or edge costs that entry and
+  nothing else (the theme registry's rule). The user asked to open a
+  FOLDER — a wall of messages about panels is noise.
+- **THE LAYOUT IS RESTORED BEFORE THE WINDOW HAS A SIZE**, during New.
+  So `clampToolSizes` REFUSES to clamp a zero-size window: doing so
+  floored every remembered extent to its minimum, which read as the
+  editor forgetting the layout it had just promised to remember. Reads
+  clamp anyway, which is what makes skipping the write-back safe.
+  `TestApplyToolLayout_SurvivesAnUnsizedWindow` pins it.
+- **A RESTORE MUST NOT WRITE BACK.** Restoring shows each tool through
+  the ordinary verb, and those verbs persist — so `toolLayoutLoading`
+  latches for the duration, or reading a layout would rewrite it once
+  per tool, each time recording a half-restored arrangement.
+
 ### The resizable seams (app/splitter.go)
-Every vertical rule the user drags to re-apportion columns — the
-sidebar's, a left-docked terminal strip's, the chat strip's, plus the
-list/diff seams inside both git panels, which share the grip helpers.
-House rules:
+Every vertical rule the user drags to re-apportion columns. There is now
+exactly ONE per EDGE rather than one per panel — the seam belongs to the
+left or right dock and resizes whichever tool window is showing there
+(toolwindow.go) — plus the list/diff seams inside both git panels, which
+share the grip helpers. House rules:
 
 - **A ONE-COLUMN GRAB ZONE IS A COIN FLIP WITH A MOUSE**, which is what
   the git seam's fix established and what every other splitter had too.
@@ -3647,7 +3789,11 @@ loops forever.
 
 - `Ctrl+` editor shortcuts (they fight tmux/terminals — that's the
   whole reason the action menu exists).
-- A config file / dotfile. ced is opinionated. (The files under
+- A config file / dotfile. ced is opinionated. (`"termdock"` is the one
+  key that has been RETIRED: tool windows made every panel's edge a
+  per-project fact in state.json, so a global "where does the terminal
+  go" answer no longer means anything. A stale entry still parses and is
+  ignored, like `"scrollbar"` before it. The files under
   `~/.config/ced/` are the deliberate exceptions, and each earned it by
   being something ced cannot know for you: which shell aliases you use,
   which formatters your repo trusts, which MCP servers and credentials

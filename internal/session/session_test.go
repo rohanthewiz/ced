@@ -447,3 +447,64 @@ func TestTouchKeepsTheRecentRing(t *testing.T) {
 		t.Fatalf("Touch dropped the ring: %+v", e)
 	}
 }
+
+// A folder's tool-window layout survives the round trip, and its maps
+// come back keyed the way they went in. The layout is opaque to this
+// package — internal/app owns what the strings mean — so what is pinned
+// here is only that nothing is lost or reshaped between Record and Load.
+func TestLayoutRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	root := t.TempDir()
+
+	s := &Store{}
+	s.Record(Entry{Root: root, Layout: &Layout{
+		Docks: map[string]string{"terminal": "left"},
+		Sizes: map[string]ToolSize{"terminal": {W: 44}, "git": {H: 12}},
+		Open:  []string{"terminal", "git"},
+	}})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	back, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	e, ok := back.Find(root)
+	if !ok || e.Layout == nil {
+		t.Fatalf("layout did not survive the round trip: %+v", e)
+	}
+	if got := e.Layout.Docks["terminal"]; got != "left" {
+		t.Errorf("Docks[terminal] = %q, want left", got)
+	}
+	if got := e.Layout.Sizes["terminal"]; got.W != 44 || got.H != 0 {
+		t.Errorf("Sizes[terminal] = %+v, want {W:44}", got)
+	}
+	if got := e.Layout.Sizes["git"]; got.H != 12 || got.W != 0 {
+		t.Errorf("Sizes[git] = %+v, want {H:12}", got)
+	}
+	if len(e.Layout.Open) != 2 || e.Layout.Open[0] != "terminal" {
+		t.Errorf("Open = %v, want [terminal git] in that order", e.Layout.Open)
+	}
+}
+
+// A folder with no layout stores no layout: the key is omitted entirely
+// rather than written as null, which is what keeps state.json readable
+// for the overwhelmingly common case of a project nobody has
+// rearranged.
+func TestLayoutOmittedWhenAbsent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	s := &Store{}
+	s.Record(Entry{Root: t.TempDir()})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(data), "layout") {
+		t.Errorf("state.json mentions layout with none set:\n%s", data)
+	}
+}

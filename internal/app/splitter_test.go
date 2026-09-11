@@ -66,17 +66,18 @@ func TestSidebarSplitterHit_StartsTheDragFromEitherColumn(t *testing.T) {
 	if divX < 1 {
 		t.Fatalf("test app has no sidebar seam (splitterX=%d)", divX)
 	}
+	want := dragModeForDock(dockLeft)
 	for _, off := range []int{-1, 0} {
 		a.dragMode = ""
 		a.handleMouse(tcell.NewEventMouse(divX+off, 5, tcell.Button1, 0))
-		if a.dragMode != "sidebar" {
-			t.Errorf("press at divX%+d started %q, want a sidebar drag", off, a.dragMode)
+		if a.dragMode != want {
+			t.Errorf("press at divX%+d started %q, want %q", off, a.dragMode, want)
 		}
 		a.handleMouse(tcell.NewEventMouse(divX+off, 5, tcell.ButtonNone, 0))
 	}
 	a.dragMode = ""
 	a.handleMouse(tcell.NewEventMouse(divX+1, 5, tcell.Button1, 0))
-	if a.dragMode == "sidebar" {
+	if a.dragMode == want {
 		t.Error("the editor band's first column must not grab the seam")
 	}
 	a.handleMouse(tcell.NewEventMouse(divX+1, 5, tcell.ButtonNone, 0))
@@ -117,33 +118,39 @@ func TestSidebarSplitterHit_LeavesTheTreeMarkGutterAlone(t *testing.T) {
 func TestTermAndChatSplitterHit_TwoColumnZone(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 
-	if a.termSplitterHit(0) || a.chatSplitterHit(0) {
+	if a.dockSplitterHit(a.toolDock(toolTerminal), 0) || a.dockSplitterHit(a.toolDock(toolChat), 0) {
 		t.Error("closed strips should own no grab zone")
 	}
 
-	a.term.open, a.termDockLeft = true, true
-	tx := a.termSplitterX()
+	a.moveTool(toolTerminal, dockLeft)
+	a.term.open = true
+	tx := a.toolSplitterX(dockLeft)
 	if tx < 1 {
 		t.Fatalf("left-docked terminal has no seam (x=%d)", tx)
 	}
-	if !a.termSplitterHit(tx) || !a.termSplitterHit(tx-1) {
+	if !a.dockSplitterHit(a.toolDock(toolTerminal), tx) || !a.dockSplitterHit(a.toolDock(toolTerminal), tx-1) {
 		t.Error("terminal seam should grab from its own column and the one left of it")
 	}
-	if a.termSplitterHit(tx + 1) {
+	if a.dockSplitterHit(a.toolDock(toolTerminal), tx+1) {
 		t.Error("terminal seam must not claim the editor band's first column")
 	}
-	a.term.open, a.termDockLeft = false, false
+	a.term.open = false
+	a.moveTool(toolTerminal, dockBottom)
 
+	// The chat defaults to the RIGHT edge, where the borrowed cell
+	// MIRRORS: the panel is to the seam's right, so that is the column
+	// the zone may take. Taking the left one there would spend the
+	// editor band's last column — the thing the rule forbids.
 	a.chat.open = true
 	cx := a.chatSplitterX()
 	if cx < 1 {
 		t.Fatalf("chat strip has no seam (x=%d)", cx)
 	}
-	if !a.chatSplitterHit(cx) || !a.chatSplitterHit(cx-1) {
-		t.Error("chat seam should grab from its own column and the one left of it")
+	if !a.dockSplitterHit(dockRight, cx) || !a.dockSplitterHit(dockRight, cx+1) {
+		t.Error("right-edge seam should grab from its own column and the one right of it")
 	}
-	if a.chatSplitterHit(cx + 1) {
-		t.Error("chat seam must not claim the editor band's first column")
+	if a.dockSplitterHit(dockRight, cx-1) {
+		t.Error("right-edge seam must not claim the editor band's last column")
 	}
 }
 
@@ -220,7 +227,7 @@ func TestDrawVSplitter_GripThenAccent(t *testing.T) {
 			r, fg, splitterRule, a.theme.Subtle)
 	}
 
-	a.dragMode = "sidebar"
+	a.dragMode = dragModeForDock(dockLeft)
 	a.draw()
 	if r, fg := at(gripRow); r != splitterRule || fg != a.theme.Accent {
 		t.Errorf("dragging: rune=%q fg=%v, want %q in Accent %v",

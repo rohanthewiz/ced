@@ -102,7 +102,7 @@ func (a *App) RevealPath(path string) {
 	}
 
 	if !a.sidebarShown {
-		a.sidebarShown = true
+		a.showTool(toolProject)
 	}
 	node, ok := a.tree.Reveal(abs)
 	if !ok {

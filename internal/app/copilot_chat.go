@@ -184,10 +184,8 @@ type chatState struct {
 	// a preference, not connection state.
 	agent chatAgentDef
 
-	// width is the user-chosen strip width from a splitter drag, 0 for
-	// "auto" (a third of the screen). Session-only, like the terminal
-	// strip's width.
-	width int
+	// The strip's SIZE lives in the tool layout (toolwindow.go), per
+	// axis; read it through chatPanelWidth or a.toolHeight(toolChat).
 
 	client   copilotConn // same generic call surface as the sidecar
 	starting bool        // async spawn + handshake in flight
@@ -1371,8 +1369,7 @@ func (a *App) chatToggleLabel() string {
 func (a *App) menuToggleChat() {
 	a.closeMenu()
 	if a.chat.open {
-		a.chat.open = false
-		a.chat.focused = false
+		a.chatClosePanel()
 		return
 	}
 	a.chatOpenPanel()
@@ -1423,15 +1420,14 @@ func (a *App) chatOpenPanel() {
 // refusal there would hide the saved text on exactly the machine where
 // it is the only thing left of the conversation.
 func (a *App) chatRevealPanel() {
+	// Whatever else is showing on the chat's edge yields — which edge
+	// that is, and who yields, is the tool-window layer's answer now
+	// (claimDock). The evicted tool keeps its own dock assignment, so
+	// re-opening it evicts the chat right back.
+	a.claimDock(toolChat)
 	a.chat.open = true
 	a.chat.focused = true
 	a.term.focused = false
-	// Left-edge single occupancy: a left-docked terminal yields the
-	// strip (its dock preference survives — reopening it evicts the
-	// chat right back). A bottom-docked terminal coexists.
-	if a.termDockLeft && a.term.open {
-		a.term.open = false
-	}
 }
 
 // chatModelLabel names the ≡ Copilot row for the model picker: the
@@ -1556,76 +1552,52 @@ func (a *App) handleChatModelSet(e *chatModelSetEvent) {
 // -----------------------------------------------------------------------------
 
 // chatStripW is the total column count the chat strip consumes (panel
-// + its splitter column): zero when closed. The layout helpers pivot
-// on this exactly like termStripW.
+// + its splitter column): zero when closed or when it is docked to an
+// edge that is sized in rows. Kept as a named helper for the callers
+// that ask "how wide is the chat", but it is now a read of the tool
+// layer like every other panel's.
 func (a *App) chatStripW() int {
-	if !a.chat.open {
+	if !a.chat.open || !dockIsVertical(a.toolDock(toolChat)) {
 		return 0
 	}
 	return a.chatPanelWidth()
 }
 
-// chatSplitterX returns the strip's resize handle column (its
-// rightmost cell), or -1 when the panel is closed — the same contract
-// as termSplitterX.
+// chatSplitterX returns the seam beside the chat strip, or -1 when there
+// is none — the panel is closed, or docked where seams are horizontal.
 func (a *App) chatSplitterX() int {
-	if sw := a.chatStripW(); sw > 0 {
-		return sw - 1
+	if !a.chat.open {
+		return -1
 	}
-	return -1
+	return a.toolSplitterX(a.toolDock(toolChat))
 }
 
-// chatPanelWidth returns the strip's column count for the current
-// window: user width wins, auto mode takes a third of the screen, both
-// re-clamped live so a window resize can't squeeze the editor out.
-func (a *App) chatPanelWidth() int {
-	w := a.chat.width
-	if w == 0 {
-		w = a.width / 3
-	}
-	if w < chatPanelMinWidth {
-		w = chatPanelMinWidth
-	}
-	if max := a.maxChatPanelWidth(); w > max {
-		w = max
-	}
-	return w
-}
+// chatPanelWidth returns the strip's column count on a vertical edge — a
+// thin read of the tool layer, which owns the stored number and the
+// clamp. Its row count on the bottom edge is a.toolHeight(toolChat).
+func (a *App) chatPanelWidth() int { return a.toolWidth(toolChat) }
 
-// maxChatPanelWidth is the widest the strip may grow while the editor
-// keeps its minimum working columns next to the (right-docked) sidebar.
-func (a *App) maxChatPanelWidth() int {
-	max := a.width - a.sidebarW() - minEditorAfterDrag
-	if max < chatPanelMinWidth {
-		max = chatPanelMinWidth
-	}
-	return max
-}
-
-// resizeChatPanelWidth records a user-chosen strip width, clamped to
-// the legal band, re-pinning the tail if the re-wrap moved it.
+// resizeChatPanelWidth records a user-chosen strip width, re-pinning the
+// tail if the re-wrap moved it.
 func (a *App) resizeChatPanelWidth(target int) {
-	if target < chatPanelMinWidth {
-		target = chatPanelMinWidth
-	}
-	if max := a.maxChatPanelWidth(); target > max {
-		target = max
-	}
+	a.setToolWidth(toolChat, target)
+	a.chatAfterResize()
+}
+
+// chatAfterResize re-clamps the transcript against a viewport that just
+// changed shape, keeping a bottom-pinned view pinned — the terminal's
+// termAfterResize, for the chat's rows.
+func (a *App) chatAfterResize() {
 	atBottom := a.chatAtBottom()
-	a.chat.width = target
 	a.chatPanelScroll(0) // re-clamp against the re-wrapped row count
 	if atBottom {
 		a.chat.scroll = a.chatMaxScroll()
 	}
 }
 
-// chatPanelRect returns the panel's on-screen rectangle: a full-height
-// strip on the left edge, one column narrower than the strip — the
-// rightmost column belongs to the splitter, same convention as the
-// left-docked terminal.
-func (a *App) chatPanelRect() (x, y, w, h int) {
-	return 0, 0, a.chatStripW() - 1, a.height - 1
-}
+// chatPanelRect returns the panel's on-screen rectangle, wherever it is
+// docked. See toolRect.
+func (a *App) chatPanelRect() (x, y, w, h int) { return a.toolRect(toolChat) }
 
 // chatPanelContains reports whether (x, y) falls inside the open panel.
 func (a *App) chatPanelContains(x, y int) bool {
@@ -2049,9 +2021,7 @@ func (a *App) drawChatRow(row chatRow, x, ry, w int, idx int) {
 	}
 }
 
-// drawChatSplitter paints the strip's resize handle on its
-// editor-facing (right) edge — the same visual language as the sidebar
-// and terminal splitters.
-func (a *App) drawChatSplitter() {
-	a.drawVSplitter(a.chatSplitterX(), a.dragMode == "chatsplit")
-}
+// The chat strip's resize seam is drawn by the DOCK, not by the panel:
+// one seam per edge, painted once for whichever tool is showing there
+// (drawDockSplitters in splitter.go). The per-panel drawChatSplitter
+// this replaced was one of three that had converged on identical code.

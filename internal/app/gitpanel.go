@@ -143,10 +143,12 @@ func gitPanelCheckbox(checked bool) string {
 // puts the user back where they were, same as the sidebar toggle.
 type gitPanelState struct {
 	open bool
-	// height is the user-chosen row count from a header drag or the
-	// resize leaders; 0 means "auto" (a third of the screen). Session-
-	// only, like sidebarWidth — ced deliberately has no layout config.
-	height int
+	// The panel's SIZE no longer lives here: a tool window's extent is
+	// stored per tool and per axis in the layout (toolwindow.go), which
+	// is what lets the same panel be dragged wide on the bottom edge and
+	// narrow on the left without the two numbers fighting — and what
+	// gets remembered per project. Read it through gitPanelHeight /
+	// gitPanelHeight, or a.toolWidth(toolGit) on a vertical edge.
 	// listWidth is the user-chosen file-list column count from a
 	// list/diff divider drag; 0 means "auto" (a third of the panel).
 	// The horizontal twin of height, same session-only lifetime.
@@ -214,26 +216,10 @@ func (a *App) menuToggleGitPanel() {
 	if !a.gitPanel.open && !a.gitIsRepo {
 		return
 	}
-	a.gitPanel.open = !a.gitPanel.open
-	if !a.gitPanel.open {
-		// A survey can't outlive the surface it walks. The reviewed
-		// marks do, so reopening offers "Resume 3/7 ▶".
-		a.stopGitPanelWalk()
-	}
-	if a.gitPanel.open {
-		// Single-occupancy bottom strip: a bottom-docked terminal
-		// yields (its session and scrollback survive — Esc-` brings
-		// it right back), and so does the git log panel. A left-docked
-		// strip isn't competing for the bottom, so it stays.
-		a.gitLog.open = false
-		a.problems.open = false
-		a.closeComparePanel()
-		if !a.termDockLeft {
-			a.term.open = false
-			a.term.focused = false
-		}
-		a.refreshGitPanelFiles()
-	}
+	// Single occupancy on whichever edge the panel is docked to is
+	// claimDock's job now, and the panel's own open/close machinery is
+	// openGitPanelTool / closeGitPanelTool. See toolwindow.go.
+	a.toggleTool(toolGit)
 }
 
 // gitPanelToggleLabel is the dynamic menu label — reads as the action
@@ -543,94 +529,54 @@ func (a *App) handleGitPanelDiff(e *gitPanelDiffEvent) {
 // Geometry — one source for draw AND mouse routing
 // -----------------------------------------------------------------------------
 
-// gitPanelHeight returns the panel's row count for the current window.
-// A user-set height (drag / resize leaders) wins; auto mode takes a
-// third of the screen capped at gitPanelMaxHeight. Both are re-clamped
-// against the live window every call, so a terminal resize can never
-// leave a remembered height that squeezes the editor out.
-func (a *App) gitPanelHeight() int {
-	h := a.gitPanel.height
-	if h == 0 {
-		h = a.height / 3
-		if h > gitPanelMaxHeight {
-			h = gitPanelMaxHeight
-		}
-	}
-	if h < gitPanelMinHeight {
-		h = gitPanelMinHeight
-	}
-	if max := a.maxGitPanelHeight(); h > max {
-		h = max
-	}
-	return h
-}
+// gitPanelHeight returns the panel's row count when it is docked to the
+// bottom edge. A thin read of the tool layer, which owns the stored number
+// and the one clamp every tool on every edge goes through — a user-set
+// extent wins, auto derives from the window, and both are re-clamped
+// live so a terminal resize can never leave a remembered size that
+// squeezes the editor out. See toolwindow.go.
+func (a *App) gitPanelHeight() int { return a.toolHeight(toolGit) }
 
-// maxGitPanelHeight is the tallest the panel may grow while leaving
-// the editor its minimum working rows. A user drag may exceed the
-// auto-mode cap (gitPanelMaxHeight) — an explicit choice outranks the
-// default's restraint — but never this hard limit.
-func (a *App) maxGitPanelHeight() int {
-	max := a.height - 2 - gitPanelMinEditorRows
-	max -= a.findBarRows()
-	if max < gitPanelMinHeight {
-		max = gitPanelMinHeight
-	}
-	return max
-}
-
-// resizeGitPanel records a user-chosen height, clamped to the legal
-// band, and re-clamps the scroll offsets against the new viewport.
+// resizeGitPanel records a user-chosen height and re-clamps the scroll
+// offsets against the new viewport.
 func (a *App) resizeGitPanel(target int) {
-	if target < gitPanelMinHeight {
-		target = gitPanelMinHeight
-	}
-	if max := a.maxGitPanelHeight(); target > max {
-		target = max
-	}
-	a.gitPanel.height = target
+	a.setToolHeight(toolGit, target)
 	a.gitPanelClampScrolls()
 }
 
 // dragGitPanelTo resizes the panel so its header rule tracks the mouse
 // row during a drag — same "glued to the cursor" feel as the sidebar
-// splitter.
+// splitter. Only the bottom edge has a header-rule handle; a vertical
+// dock resizes by its seam instead (see splitter.go).
 func (a *App) dragGitPanelTo(y int) {
-	bottom := a.height - 1
-	bottom -= a.findBarRows()
-	a.resizeGitPanel(bottom - y)
+	a.dragDockTo(dockBottom, y)
 }
 
 // growGitPanel / shrinkGitPanel are the Esc-= / Esc-- leader targets.
 // Silent no-ops while the panel is collapsed, per the leader contract.
 // There are deliberately no menu rows for these: resize has a primary
-// mouse path (dragging the header), the same reasoning that leaves the
-// sidebar splitter without menu entries.
+// mouse path (dragging the header or the seam), the same reasoning that
+// leaves the splitters without menu entries.
 func (a *App) growGitPanel() {
 	if !a.gitPanel.open {
 		return
 	}
-	a.resizeGitPanel(a.gitPanelHeight() + gitPanelResizeStep)
+	a.growDock(a.toolDock(toolGit), gitPanelResizeStep)
 }
 
-// shrinkGitPanel steps the panel shorter; see growGitPanel.
+// shrinkGitPanel steps the panel smaller; see growGitPanel.
 func (a *App) shrinkGitPanel() {
 	if !a.gitPanel.open {
 		return
 	}
-	a.resizeGitPanel(a.gitPanelHeight() - gitPanelResizeStep)
+	a.shrinkDock(a.toolDock(toolGit), gitPanelResizeStep)
 }
 
-// gitPanelRect returns the panel's on-screen rectangle: editor-width
-// (the column band between the docked side blocks), sitting directly
-// above the find bar (when open) and the status bar — the editor
-// shrinks to make room (see editorRect).
-func (a *App) gitPanelRect() (x, y, w, h int) {
-	lw := a.leftBlockW()
-	h = a.gitPanelHeight()
-	y = a.height - 1 - h
-	y -= a.findBarRows()
-	return lw, y, a.width - lw - a.rightBlockW(), h
-}
+// gitPanelRect returns the panel's on-screen rectangle, wherever it is
+// docked — see toolRect. On the bottom edge that is the editor-wide band
+// above the find bar and the stripe; on a vertical one, a full-height
+// strip one column narrower than the block.
+func (a *App) gitPanelRect() (x, y, w, h int) { return a.toolRect(toolGit) }
 
 // gitPanelListWidth clamps a desired file-list column width for a panel
 // of total width w into the legal band. A desired <= 0 means "auto" — a

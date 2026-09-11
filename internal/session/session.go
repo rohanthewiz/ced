@@ -90,6 +90,48 @@ type Entry struct {
 	Tabs   []TabState `json:"tabs,omitempty"`
 	Active int        `json:"active,omitempty"`
 	Recent []string   `json:"recent,omitempty"`
+
+	// Layout is the project's TOOL WINDOW arrangement — which edge each
+	// panel is docked to, how big it is there, and which ones were open.
+	// It belongs here rather than in config.json for the reason the tab
+	// list does: a layout is something you arrange for a PROJECT (a Go
+	// service wants the terminal and the problems list; a docs repo
+	// wants neither), and it is machine-written churn rather than a
+	// preference anybody hand-edits.
+	//
+	// The type is deliberately opaque to this package: session persists
+	// state, it does not model the editor's panels. internal/app owns the
+	// shape and encodes it — see toollayout.go — which is what keeps a
+	// tool added there from needing a field added here.
+	Layout *Layout `json:"layout,omitempty"`
+}
+
+// Layout is one project's tool-window arrangement as it goes to disk.
+//
+// WHY IT IS MOSTLY MAPS. `Docks` is SPARSE — an entry exists only for a
+// tool the user has actually moved — so a project nobody has rearranged
+// stores nothing at all, and a tool that gains a different default in a
+// later version reaches the users who never touched it. The alternative,
+// writing every tool's edge on every save, would freeze today's defaults
+// into every state file ced has ever written.
+//
+// `Open` is a LIST rather than a per-tool flag for the same reason and
+// one more: the editor's rule is that an edge shows at most one tool, so
+// what needs remembering is the short list of tools that were up, not a
+// bit for each of the ones that were not.
+type Layout struct {
+	Docks map[string]string   `json:"docks,omitempty"`
+	Sizes map[string]ToolSize `json:"sizes,omitempty"`
+	Open  []string            `json:"open,omitempty"`
+}
+
+// ToolSize is one tool's remembered extent on each axis, in cells. Zero
+// on an axis means "never resized" and is omitted, so the tool derives
+// that dimension from the window instead of restoring a number chosen on
+// a differently shaped screen.
+type ToolSize struct {
+	W int `json:"w,omitempty"`
+	H int `json:"h,omitempty"`
 }
 
 // Store is the whole state file: folders in most-recently-opened order.

@@ -93,7 +93,7 @@ func TestMenuToggleGitLog_SingleOccupancy(t *testing.T) {
 
 	a.gitIsRepo = true
 	a.gitPanel.open = true
-	a.term.open = true // bottom-docked (termDockLeft false)
+	a.term.open = true // bottom-docked, the terminal's default edge
 	a.menuToggleGitLog()
 	if !a.gitLog.open {
 		t.Fatal("git log did not open in a repo")
@@ -112,7 +112,7 @@ func TestMenuToggleGitLog_SingleOccupancy(t *testing.T) {
 
 	// A left-docked terminal does NOT compete for the bottom.
 	a.gitPanel.open = false
-	a.termDockLeft = true
+	a.moveTool(toolTerminal, dockLeft)
 	a.term.open = true
 	a.menuToggleGitLog()
 	if !a.gitLog.open || !a.term.open {

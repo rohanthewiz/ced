@@ -142,7 +142,7 @@ func TestAutoFitSidebar_FlippedLayoutLeavesTheLeftStrip(t *testing.T) {
 	a := autoFitApp(t)
 	a.tree.Root.Name = "a-really-quite-long-project-directory-name-here"
 	a.width = 200
-	a.termDockLeft = true
+	a.moveTool(toolTerminal, dockLeft)
 	a.term.open = true
 	a.autoFitSidebar()
 

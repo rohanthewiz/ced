@@ -1492,3 +1492,77 @@ func TestSaveTreeAutoFit_RoundTripsAndPreserves(t *testing.T) {
 		t.Fatal("unknown key was dropped by the save round-trip")
 	}
 }
+
+// TestDefaultsToolStripesOn pins the documented default: the one-cell
+// tool button rails are drawn unless the user opts out. They are the
+// only surface that says what tool windows exist and where each one
+// lives without opening a menu, so hiding them is the deliberate choice.
+func TestDefaultsToolStripesOn(t *testing.T) {
+	if !Defaults().ToolStripes {
+		t.Error("ToolStripes default = false, want true")
+	}
+}
+
+// TestToolStripesRoundTrip covers the key end to end and pins the
+// saveKey guarantee every ≡ toggle depends on: writing one preference
+// leaves the neighbours in the file untouched.
+func TestToolStripesRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"icons":"on","mystery":"keep me"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveToolStripes(p, false); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.ToolStripes {
+		t.Error("ToolStripes = true after saving off")
+	}
+	if cfg.Icons != IconsOn {
+		t.Errorf("Icons = %q, want it untouched", cfg.Icons)
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(data), "mystery") {
+		t.Errorf("saveKey dropped an unknown key:\n%s", data)
+	}
+}
+
+// TestLoadToolStripesRejectsNonsense: the key follows every other
+// on/off preference — a typo is REPORTED rather than silently ignored,
+// because a value the user believes is in effect and is not is the worst
+// outcome a settings file can produce.
+func TestLoadToolStripesRejectsNonsense(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"toolstripes":"maybe"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Error("Load accepted toolstripes:\"maybe\"")
+	}
+}
+
+// TestLoadRetiredTermDockKey pins that a config.json from before tool
+// windows still loads. "termdock" answered "which edge does the terminal
+// go on" globally; every panel's edge is now a per-project fact in
+// state.json, so the key has no meaning left — but a key ced wrote
+// itself must never become a startup error. Same treatment "scrollbar"
+// got.
+func TestLoadRetiredTermDockKey(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"termdock":"left","icons":"on"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load with a retired key: %v", err)
+	}
+	if cfg.Icons != IconsOn {
+		t.Errorf("Icons = %q, want %q — the rest of the file must still parse", cfg.Icons, IconsOn)
+	}
+}

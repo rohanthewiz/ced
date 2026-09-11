@@ -544,9 +544,11 @@ func TestDrawChatAttachments_Smoke(t *testing.T) {
 	scr.Show()
 
 	cells, w, _ := scr.GetContents()
+	// The panel's own columns — the chat docks right, so x==0 is the tree.
+	cx, _, cw, _ := a.chatPanelRect()
 	readRow := func(y int) string {
 		var sb strings.Builder
-		for x := 0; x < a.chatStripW(); x++ {
+		for x := cx; x < cx+cw; x++ {
 			if c := cells[y*w+x]; len(c.Runes) > 0 {
 				sb.WriteRune(c.Runes[0])
 			}

@@ -6,10 +6,12 @@
 // =============================================================================
 
 // splitter.go is the one place a resizable WINDOW seam is described —
-// the three vertical rules the user drags to re-apportion the screen's
-// columns: the sidebar's, a left-docked terminal strip's, and the chat
-// strip's. It also holds the grip glyph and the middle-rows test the
-// git panels' internal list/diff seams share.
+// the vertical rules the user drags to re-apportion the screen's
+// columns. There is now exactly ONE per edge rather than one per panel:
+// the seam belongs to the left or right DOCK, and whichever tool window
+// is showing there is what it resizes (see toolwindow.go). It also holds
+// the grip glyph and the middle-rows test the git panels' internal
+// list/diff seams share.
 //
 // It exists because the git panels' seam was fixed three ways at once
 // and the window seams had two of the same problems. The house rules,
@@ -41,8 +43,8 @@
 //
 // The ceiling half of that fix — stating a pane's maximum as the
 // reserve its NEIGHBOUR keeps rather than as a constant of its own — is
-// already how all three window seams clamp (`a.width -
-// minEditorAfterDrag`, minus whatever strip owns the other edge), so
+// how every dock clamps (clampToolWidth: `a.width -
+// minEditorAfterDrag`, minus whatever the opposite edge spends), so
 // there was nothing to port there.
 
 package app
@@ -101,9 +103,10 @@ func (a *App) drawVSplitter(x int, active bool) {
 	style := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(fg)
 	gripStyle := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(a.theme.Muted)
 
-	// The status bar owns the bottom row, so the seam runs to height-1
-	// and the grip is centred on that extent — not on the window's.
-	rows := a.height - 1
+	// The status bar owns the bottom row and the bottom tool stripe (when
+	// there is one) the row above it, so the seam runs to whatever those
+	// leave and the grip is centred on THAT extent — not on the window's.
+	rows := a.sideDockRows()
 	for y := 0; y < rows; y++ {
 		glyph, st := splitterRule, style
 		if !active && splitterIsGrip(y, rows) {
@@ -113,25 +116,89 @@ func (a *App) drawVSplitter(x int, active bool) {
 	}
 }
 
-// sidebarSplitterHit reports whether a press at column x grabs the
-// sidebar's seam. Classic layout borrows the file tree's row tail;
-// flipped, it borrows the editor band's last column — code, or the
-// blank margin a docked panel's right-hand pane already leaves.
+// dockSplitterHit reports whether a press at column x grabs the seam
+// beside a vertical dock. It replaced one hit-tester per PANEL — the
+// sidebar's, the terminal strip's, the chat strip's — with one per EDGE,
+// which is the change that made every panel movable: a seam belongs to
+// the edge, and the tool showing there is whatever the layout says.
+//
+// THE BORROWED COLUMN MIRRORS. The file header's rule is that the extra
+// cell is taken from the PANEL side, never from the editor band, because
+// the panel stops a column short of its rule in every layout while the
+// band's first column can carry a deliberate one-cell control. On a LEFT
+// dock the panel is to the seam's left, which is the case that rule was
+// written for; on a RIGHT dock it is to its right, so the zone flips with
+// it. Taking the left cell on both edges would spend the editor's last
+// column — exactly what the rule forbids.
+func (a *App) dockSplitterHit(side dockSide, x int) bool {
+	dx := a.toolSplitterX(side)
+	if dx < 0 {
+		return false
+	}
+	if side == dockRight {
+		return x >= dx && x <= dx+1
+	}
+	return splitterHit(dx, x)
+}
+
+// dockSplitterAt reports which edge's seam a press at column x grabs, if
+// any. The click router asks this ONE question instead of testing three
+// panels in a fixed order, so a seam can never be shadowed by whichever
+// panel happened to be checked first.
+func (a *App) dockSplitterAt(x int) (dockSide, bool) {
+	for _, side := range []dockSide{dockLeft, dockRight} {
+		if a.dockSplitterHit(side, x) {
+			return side, true
+		}
+	}
+	return dockNone, false
+}
+
+// sidebarSplitterHit reports whether a press at column x grabs the file
+// tree's seam. Kept as a named helper because the tree's own tests and
+// the auto-fit lock read it, but it is now just "the seam of whichever
+// edge the Project tool is docked to".
 func (a *App) sidebarSplitterHit(x int) bool {
-	return splitterHit(a.splitterX(), x)
+	side := a.toolDock(toolProject)
+	if !dockIsVertical(side) || !a.sidebarShown {
+		return false
+	}
+	return a.dockSplitterHit(side, x)
 }
 
-// termSplitterHit reports whether a press at column x grabs a
-// left-docked terminal strip's seam. The strip's own rect stops a
-// column short of it (termPanelRect), so the borrowed cell is margin.
-func (a *App) termSplitterHit(x int) bool {
-	return splitterHit(a.termSplitterX(), x)
+// drawDockSplitters paints the seam beside each vertical dock that has
+// something showing. One call for both edges, so a new edge would have
+// one place to be added rather than one draw function per panel.
+func (a *App) drawDockSplitters() {
+	for _, side := range []dockSide{dockLeft, dockRight} {
+		a.drawVSplitter(a.toolSplitterX(side), a.dragMode == dragModeForDock(side))
+	}
 }
 
-// chatSplitterHit reports whether a press at column x grabs the chat
-// strip's seam. Same margin as the terminal's, and the transcript's ⧉
-// action buttons stop a further column short of it (chatActionRect), so
-// nothing clickable is spent.
-func (a *App) chatSplitterHit(x int) bool {
-	return splitterHit(a.chatSplitterX(), x)
+// dragModeForDock names the drag a seam starts. The modes stay STRINGS
+// on App.dragMode beside the editor's and the panels' own, so the click
+// router's shape is unchanged; they are just derived from the edge now
+// instead of from which panel was open.
+func dragModeForDock(side dockSide) string {
+	switch side {
+	case dockLeft:
+		return "docksplit-left"
+	case dockRight:
+		return "docksplit-right"
+	case dockBottom:
+		return "docksplit-bottom"
+	}
+	return ""
+}
+
+// dockForDragMode is dragModeForDock's inverse: which edge a live drag
+// belongs to, and whether it is a dock drag at all. The router asks it
+// once instead of testing three mode strings by name.
+func dockForDragMode(mode string) (dockSide, bool) {
+	for _, side := range dockSides {
+		if dragModeForDock(side) == mode {
+			return side, true
+		}
+	}
+	return dockNone, false
 }

@@ -119,10 +119,8 @@ type problemRow struct {
 // problems you are looking at" can never disagree.
 type problemsState struct {
 	open bool
-	// height is the user-chosen row count from a drag or the resize
-	// leaders; 0 means "auto". Session-only, like every other panel's —
-	// ced deliberately has no layout config.
-	height int
+	// The panel's SIZE lives in the tool layout (toolwindow.go), per
+	// tool and per axis; read it through problemsHeight.
 
 	rows []problemRow
 	view []int
@@ -157,23 +155,10 @@ type problemsState struct {
 // rather than whenever the server last spoke.
 func (a *App) menuToggleProblems() {
 	a.closeMenu()
-	a.problems.open = !a.problems.open
-	if !a.problems.open {
-		return
-	}
-	a.gitPanel.open = false
-	a.gitLog.open = false
-	a.closeComparePanel()
-	if !a.termDockLeft {
-		a.term.open = false
-		a.term.focused = false
-	}
-	a.refreshProblems()
-	// Land on the active file's first problem. The panel lists the whole
-	// project, but the user arrived here from a specific file (the status
-	// segment, or the file they were reading) and the row they meant is
-	// almost never row one of some other file.
-	a.problemsSelectActiveFile()
+	// Single occupancy is claimDock's, and the refresh plus the
+	// land-on-the-active-file rule belong to openProblemsTool. See
+	// toolwindow.go.
+	a.toggleTool(toolProblems)
 }
 
 // problemsToggleLabel names the action the row will perform — the
@@ -403,86 +388,47 @@ func (a *App) problemsSelectActiveFile() {
 // Geometry
 // -----------------------------------------------------------------------------
 
-// problemsHeight returns the panel's row count for the current window —
-// user choice wins, auto mode takes a third of the screen, both
-// re-clamped against the live window. Mirrors gitLogHeight.
-func (a *App) problemsHeight() int {
-	h := a.problems.height
-	if h == 0 {
-		h = a.height / 3
-		if h > problemsMaxHeight {
-			h = problemsMaxHeight
-		}
-	}
-	if h < problemsMinHeight {
-		h = problemsMinHeight
-	}
-	if max := a.maxProblemsHeight(); h > max {
-		h = max
-	}
-	return h
-}
+// problemsHeight returns the panel's row count when docked to the bottom
+// edge. A thin read
+// of the tool layer, which owns the stored number and the one clamp
+// every tool goes through — see toolwindow.go.
+func (a *App) problemsHeight() int { return a.toolHeight(toolProblems) }
 
-// maxProblemsHeight is the tallest the panel may grow while leaving the
-// editor its minimum working rows — the hard limit even explicit drags
-// respect.
-func (a *App) maxProblemsHeight() int {
-	max := a.height - 2 - problemsMinEditorRows
-	max -= a.findBarRows()
-	if max < problemsMinHeight {
-		max = problemsMinHeight
-	}
-	return max
-}
-
-// resizeProblems records a user-chosen height, clamped to the legal
-// band, and re-clamps the scroll against the new viewport.
+// resizeProblems records a user-chosen height and re-clamps the scroll
+// against the new viewport.
 func (a *App) resizeProblems(target int) {
-	if target < problemsMinHeight {
-		target = problemsMinHeight
-	}
-	if max := a.maxProblemsHeight(); target > max {
-		target = max
-	}
-	a.problems.height = target
+	a.setToolHeight(toolProblems, target)
 	a.problemsClampScroll()
 }
 
 // dragProblemsPanelTo resizes the panel so its header rule tracks the
-// mouse row during a drag.
+// mouse row during a drag. Only the bottom edge has a header-rule
+// handle; a vertical dock resizes by its seam instead.
 func (a *App) dragProblemsPanelTo(y int) {
-	bottom := a.height - 1
-	bottom -= a.findBarRows()
-	a.resizeProblems(bottom - y)
+	a.dragDockTo(dockBottom, y)
 }
 
 // growProblems / shrinkProblems are the Esc-= / Esc-- targets while the
-// panel owns the bottom strip. Silent no-ops while collapsed, per the
-// leader contract; single occupancy guarantees at most one panel acts.
+// panel is the tool being resized. Silent no-ops while collapsed, per
+// the leader contract.
 func (a *App) growProblems() {
 	if !a.problems.open {
 		return
 	}
-	a.resizeProblems(a.problemsHeight() + problemsResizeStep)
+	a.growDock(a.toolDock(toolProblems), problemsResizeStep)
 }
 
-// shrinkProblems steps the panel shorter; see growProblems.
+// shrinkProblems steps the panel smaller; see growProblems.
 func (a *App) shrinkProblems() {
 	if !a.problems.open {
 		return
 	}
-	a.resizeProblems(a.problemsHeight() - problemsResizeStep)
+	a.shrinkDock(a.toolDock(toolProblems), problemsResizeStep)
 }
 
-// problemsRect returns the panel's on-screen rectangle — the same slot
-// the git panels occupy (they swap, never stack).
-func (a *App) problemsRect() (x, y, w, h int) {
-	lw := a.leftBlockW()
-	h = a.problemsHeight()
-	y = a.height - 1 - h
-	y -= a.findBarRows()
-	return lw, y, a.width - lw - a.rightBlockW(), h
-}
+// problemsRect returns the panel's on-screen rectangle, wherever it is
+// docked — see toolRect.
+func (a *App) problemsRect() (x, y, w, h int) { return a.toolRect(toolProblems) }
 
 // problemsContains reports whether (x, y) falls inside the open panel.
 func (a *App) problemsContains(x, y int) bool {

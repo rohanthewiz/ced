@@ -691,7 +691,7 @@ func TestLeaders_ResizeGitPanel(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 
 	grow(a)
-	if a.gitPanel.height != 0 {
+	if a.tools().size[toolGit].H != 0 {
 		t.Fatal("resize leaders must no-op while the panel is collapsed")
 	}
 

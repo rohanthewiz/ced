@@ -246,6 +246,17 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuToggleWordHighlight, enabled: alwaysTrue, labelFor: (*App).wordHighlightToggleLabel},
 			{shortcut: "esc `", action: (*App).menuToggleTerminal, enabled: alwaysTrue, labelFor: (*App).termToggleLabel},
 			{action: (*App).menuToggleTermDock, enabled: alwaysTrue, labelFor: (*App).termDockToggleLabel},
+			// The tool-window rows sit directly under the terminal's,
+			// because the terminal dock row above them is the one-verb
+			// special case of what they do generally (toolmenu.go) — and
+			// inside View for the reason the terminal rows are: this is
+			// where a user goes looking for "how the window is arranged",
+			// and the group is deliberately three rows so it costs the
+			// above-the-fold budget as little as a subject this size can.
+			{action: (*App).menuToolWindows, enabled: alwaysTrue, labelFor: (*App).toolWindowsLabel},
+			{label: "Move tool window…", action: (*App).menuMoveToolWindow, enabled: alwaysTrue},
+			{label: "Reset tool layout", action: (*App).menuResetToolLayout, enabled: alwaysTrue},
+			{action: (*App).menuToggleToolStripes, enabled: alwaysTrue, labelFor: (*App).toolStripesToggleLabel},
 			// The markdown preview is a VIEW of the active file, so it
 			// sits with the other rows that change how something is
 			// drawn rather than in Tab (which is about which file) or
@@ -931,12 +942,28 @@ type App struct {
 	// read, kept in step by applyWordHighlight. See wordhl.go.
 	wordHLEnabled bool
 
-	// termDockLeft selects the alternate layout: the terminal panel
-	// docks as a vertical strip on the LEFT edge and the file tree
-	// flips to the RIGHT edge. False is the classic layout (tree
-	// left, terminal a bottom strip). Persisted via userconfig
-	// ("termdock"), toggled from the ≡ menu.
-	termDockLeft bool
+	// toolLayoutState is the TOOL WINDOW layout: which edge each panel
+	// is docked to and how big it is there. It is the thing remembered
+	// per project (state.json — see toollayout.go), and it is what
+	// replaced the per-panel exclusivity rules that used to be spelled
+	// out in six files. nil until first use; every reader goes through
+	// a.tools(), which materialises the default. See toolwindow.go.
+	toolLayoutState *toolLayout
+
+	// toolLayoutLoading is true only while a remembered layout is being
+	// installed (applyToolLayout). Restoring SHOWS each tool through the
+	// ordinary verb, and those verbs persist — so without this latch,
+	// reading a layout would write it back one tool at a time. See
+	// toollayout.go.
+	toolLayoutLoading bool
+
+	// toolStripes mirrors the persisted "toolstripes" preference
+	// (default on): whether the one-cell tool button rails are drawn on
+	// the window's populated edges. It is a USER preference rather than
+	// part of the per-project layout, because it is about how much
+	// chrome you want on screen, not about where this project's panels
+	// live. See toolstripe.go.
+	toolStripes bool
 
 	// findAllDockRight selects the Find-all list's edge: false (default)
 	// is the wide strip under the tab bar, true a tall column down the
@@ -1603,7 +1630,7 @@ func (a *App) loadUserConfig() {
 	a.autoSaveDelay = cfg.AutoSaveDelay
 	a.wordHLEnabled = cfg.WordHL
 	a.applyWordHighlight() // no-op at startup; matters when the config is re-read
-	a.termDockLeft = cfg.TermDock == userconfig.TermDockLeft
+	a.toolStripes = cfg.ToolStripes
 	a.findAllDockRight = cfg.FindAllDock == userconfig.FindAllDockRight
 	a.copilot.enabled = cfg.Copilot
 	a.copilot.suggest = cfg.Suggestions
@@ -2105,83 +2132,75 @@ func (a *App) sidebarW() int {
 	return a.sidebarWidth
 }
 
-// treeOnRight reports whether the file tree lives on the RIGHT edge —
-// true whenever something else claims the left one: the left-docked
-// terminal layout, or the Copilot chat panel (which docks left with
-// the tree on the right by explicit owner preference). Every layout
-// helper that used to pivot on termDockLeft alone pivots on this, so
-// both left-strip features flip the whole UI through one predicate.
+// treeOnRight reports whether the file tree currently lives on the
+// RIGHT edge. It used to be a LAYOUT RULE — the tree was flipped across
+// the window whenever the chat or a left-docked terminal wanted the left
+// edge, because there was no other way to have two vertical panels. Now
+// it is just a question about where the user put the Project tool, and
+// the answer is read only by surfaces that genuinely care which side of
+// the editor the tree sits on.
 func (a *App) treeOnRight() bool {
-	return a.termDockLeft || a.chat.open
+	return a.toolDock(toolProject) == dockRight
 }
 
-// leftBlockW is how many columns the left-docked block consumes: the
-// sidebar in the classic layout, the chat strip or the terminal strip
-// (whichever is open — the left edge is single-occupancy) in the
-// flipped layouts. The tab bar, editor, find bar, and bottom panels
-// all start to the right of this.
+// leftBlockW is how many columns the window's left edge consumes in
+// total: the tool stripe (when that edge has tools and stripes are on)
+// plus whichever tool is showing there, splitter included. The tab bar,
+// editor, find bar, and bottom dock all start to the right of this.
 func (a *App) leftBlockW() int {
-	if a.chat.open {
-		return a.chatStripW()
-	}
-	if a.termDockLeft {
-		return a.termStripW()
-	}
-	return a.sidebarW()
+	return a.stripeCols(dockLeft) + a.dockCols(dockLeft)
 }
 
-// rightBlockW mirrors leftBlockW for the right edge: zero in the
-// classic layout, the sidebar block in the flipped ones.
+// rightBlockW mirrors leftBlockW for the right edge.
 func (a *App) rightBlockW() int {
-	if a.treeOnRight() {
-		return a.sidebarW()
-	}
-	return 0
+	return a.stripeCols(dockRight) + a.dockCols(dockRight)
 }
 
-// sidebarRect returns the file tree's render rectangle (one column
-// narrower than the sidebar block — the column nearest the editor
-// belongs to the resize splitter). Zero width when hidden. In the
-// flipped layout the block hugs the right edge with the splitter on
-// its left.
+// sidebarRect returns the file tree's render rectangle, or a zero rect
+// when the tree is hidden. It is now a thin read of the tool layout, so
+// the tree lands wherever the user docked it — including the BOTTOM
+// edge, which the column-based helpers this replaced could not express.
 func (a *App) sidebarRect() (x, y, w, h int) {
-	sw := a.sidebarW()
-	if sw <= 0 {
-		return 0, 0, 0, 0
-	}
-	if a.treeOnRight() {
-		return a.width - sw + 1, 0, sw - 1, a.height - 1
-	}
-	return 0, 0, sw - 1, a.height - 1
+	return a.toolRect(toolProject)
 }
 
-// splitterX returns the x coordinate of the sidebar's resize splitter
-// column, or -1 when the sidebar is hidden (no splitter to draw or
-// click). Classic layout: the block's rightmost column; flipped: its
-// leftmost.
+// splitterX returns the x coordinate of the resize seam beside the file
+// tree, or -1 when the tree is hidden or docked somewhere that has no
+// vertical seam (the bottom edge, whose panels resize by their header
+// rule instead).
 func (a *App) splitterX() int {
-	if !a.sidebarShown {
+	side := a.toolDock(toolProject)
+	if !dockIsVertical(side) || !a.sidebarShown {
 		return -1
 	}
-	if a.treeOnRight() {
-		return a.width - a.sidebarWidth
-	}
-	return a.sidebarWidth - 1
+	return a.toolSplitterX(side)
 }
 
-// inSidebarBlock reports whether column x falls inside the sidebar
-// block (tree + splitter), whichever edge it is docked to. The click
-// and scroll routers use this instead of comparing against raw widths
-// so they stay layout-agnostic.
+// inSidebarBlock reports whether column x falls inside the file tree's
+// block (tree + splitter) while it is docked to a vertical edge. It is
+// kept as a COLUMN test because that is what its callers ask — "did this
+// press land on the side of the window the tree owns" — and it answers
+// false outright for a bottom-docked tree, whose callers want
+// sidebarContains instead.
 func (a *App) inSidebarBlock(x int) bool {
-	sw := a.sidebarW()
-	if sw <= 0 {
+	dx := a.splitterX()
+	if dx < 0 {
 		return false
 	}
 	if a.treeOnRight() {
-		return x >= a.width-sw
+		return x >= dx
 	}
-	return x < sw
+	return x <= dx
+}
+
+// sidebarContains is inSidebarBlock's rect-shaped twin: whether (x, y)
+// lands on the drawn tree, on whichever edge it is docked. Click routing
+// goes through this so a bottom-docked tree is reachable at all; the
+// column test above survives for the handful of callers that really are
+// asking about a vertical band (the seam's grab zone, drag auto-scroll).
+func (a *App) sidebarContains(x, y int) bool {
+	sx, sy, sw, sh := a.sidebarRect()
+	return sw > 0 && x >= sx && x < sx+sw && y >= sy && y < sy+sh
 }
 
 // resizeSidebar applies the user's desired sidebar width while clamping it
@@ -2190,22 +2209,15 @@ func (a *App) inSidebarBlock(x int) bool {
 // left-docked terminal strip already claimed). Tiny windows that can't
 // satisfy both fall back to the minimum and let the editor shrink.
 func (a *App) resizeSidebar(target int) {
-	if target < minSidebarWidth {
-		target = minSidebarWidth
-	}
-	max := a.width - minEditorAfterDrag
-	if a.treeOnRight() {
-		// Whichever strip owns the left edge (chat or terminal) has
-		// first claim on those columns.
-		max -= a.leftBlockW()
-	}
-	if max < minSidebarWidth {
-		max = minSidebarWidth
-	}
-	if target > max {
-		target = max
-	}
-	a.sidebarWidth = target
+	// The clamp is the tool layer's — one band, stated once, for every
+	// tool on every edge (see clampToolWidth): the tree's own floor,
+	// what the OTHER vertical edge already spends, and the editor's
+	// reserve beside it. Both numbers are then written, because
+	// sidebarWidth is the tree's live width (auto-fit re-derives it every
+	// frame) and the layout's copy is what gets remembered per project.
+	w := a.clampToolWidth(toolProject, target)
+	a.sidebarWidth = w
+	a.setToolWidth(toolProject, w)
 }
 
 // tabBarRect returns the tab bar's screen rectangle (one row tall),
@@ -2227,24 +2239,12 @@ func (a *App) tabBarRect() (x, y, w, h int) {
 // does the Find-all popup — none of them can ask editorRect, which
 // already subtracts them.
 func (a *App) editorBandRows() int {
-	h := a.height - 2
-	h -= a.findBarRows()
-	if a.gitPanel.open {
-		h -= a.gitPanelHeight()
-	}
-	if a.gitLog.open {
-		h -= a.gitLogHeight()
-	}
-	if a.compare.open {
-		h -= a.comparePanelHeight()
-	}
-	if a.problems.open {
-		h -= a.problemsHeight()
-	}
-	if a.term.open && !a.termDockLeft {
-		h -= a.termPanelHeight()
-	}
-	return h
+	// One subtraction per pinned strip, in the order they stack up from
+	// the status bar: the tool stripe, the find bar, and whichever tool
+	// the bottom edge is showing. The five per-panel branches this
+	// replaced were the same sum written five times, and each one had to
+	// remember that a left-docked terminal costs columns instead.
+	return a.height - 2 - a.stripeRows() - a.findBarRows() - a.dockRows()
 }
 
 // editorBandCols is the editor body's column band before the Find-all
@@ -3074,39 +3074,26 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
-	// Sidebar resize drag: keep the splitter glued to the mouse x so the
-	// panel reshapes live as the user drags. The width the mouse implies
-	// depends on which edge the block hugs.
-	if leftDown && a.dragMode == "sidebar" {
-		sx := x - a.dragSplitOffset
-		want := sx + 1
-		if a.treeOnRight() {
-			want = a.width - sx
+	// Dock resize drag: keep the seam glued to the mouse x so the panel
+	// reshapes live. ONE branch per EDGE rather than one per panel — the
+	// seam resizes whichever tool that edge is showing, so a tool moved
+	// across the window inherits the gesture instead of needing its own.
+	//
+	// The file tree is the one tool with a second owner of its width:
+	// auto-fit re-derives it every frame, so a drag that actually MOVES
+	// the seam takes the number back. Gated on the movement because a
+	// press with a pixel of jitter is not a statement about anything, and
+	// the lock writes a preference to disk.
+	if leftDown && a.dragMode != "" {
+		if side, ok := dockForDragMode(a.dragMode); ok {
+			if id, showing := a.visibleTool(side); showing && id == toolProject {
+				if x-a.dragSplitOffset != a.toolSplitterX(side) {
+					a.lockTreeAutoFit()
+				}
+			}
+			a.dragDockTo(side, x-a.dragSplitOffset)
+			return
 		}
-		// A drag is the user stating a width, so it takes ownership of the
-		// number back from auto-fit (which would otherwise overwrite it on
-		// the next expand). Gated on the splitter actually MOVING: a press
-		// with a pixel of jitter isn't a statement about anything, and this
-		// writes a preference to disk.
-		if want != a.sidebarWidth {
-			a.lockTreeAutoFit()
-		}
-		a.resizeSidebar(want)
-		return
-	}
-
-	// Left-docked terminal resize drag: same gesture as the sidebar
-	// splitter, opposite edge.
-	if leftDown && a.dragMode == "termsplit" {
-		a.resizeTermPanelWidth(x - a.dragSplitOffset + 1)
-		return
-	}
-
-	// Chat strip resize drag — same gesture, same edge as the
-	// left-docked terminal (the two are never open together).
-	if leftDown && a.dragMode == "chatsplit" {
-		a.resizeChatPanelWidth(x - a.dragSplitOffset + 1)
-		return
 	}
 
 	// Chat transcript drag-select: the panel captures the mouse, so the
@@ -3182,7 +3169,7 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// The tree follows the same click-where-you-want-to-type rule:
 		// a press outside the sidebar hands the keyboard back; a press
 		// on a tree row (sidebarClick) takes it, and moves the cursor.
-		if a.treeFocus && !a.inSidebarBlock(x) {
+		if a.treeFocus && !a.sidebarContains(x, y) {
 			a.treeFocus = false
 		}
 		// So does a running survey — and it matters most here, because
@@ -3193,18 +3180,23 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		if a.gitPanel.walk && !a.gitPanelContains(x, y) {
 			a.stopGitPanelWalk()
 		}
+		// A press on a tool stripe is the stripe's own gesture and is
+		// claimed before every panel below — the rail is chrome drawn
+		// OVER nothing, so a click on it must never fall through to the
+		// editor or the tree it sits beside.
+		if a.stripeClick(x, y) {
+			return
+		}
+		if side, ok := a.dockSplitterAt(x); ok {
+			// Each seam's grab zone is two columns, not one — see
+			// splitter.go for what the extra one costs and why. This
+			// stays ahead of every panel hit-test, so the wider zone
+			// really does outrank the neighbour cell it borrows.
+			a.dragMode, a.dragSplitOffset = dragModeForDock(side), x-a.toolSplitterX(side)
+			return
+		}
 		switch {
-		// Each seam's grab zone is three columns wide, not one — see
-		// splitter.go for what the extra two cost and why. All three
-		// cases stay ahead of their own panel's hit-test, so the wider
-		// zone really does outrank the neighbour cell it borrows.
-		case a.sidebarSplitterHit(x):
-			a.dragMode, a.dragSplitOffset = "sidebar", x-a.splitterX()
-		case a.termSplitterHit(x):
-			a.dragMode, a.dragSplitOffset = "termsplit", x-a.termSplitterX()
-		case a.chatSplitterHit(x):
-			a.dragMode, a.dragSplitOffset = "chatsplit", x-a.chatSplitterX()
-		case a.inSidebarBlock(x):
+		case a.sidebarContains(x, y):
 			a.sidebarPress(x, y, ev.Modifiers()&tcell.ModShift != 0)
 		// The chat strip spans y==0 like a left-docked terminal, so its
 		// hit-test also runs before the tab-bar row case.
@@ -3274,7 +3266,13 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
-	// Button released — exit any drag mode we were in.
+	// Button released — exit any drag mode we were in. A dock drag
+	// states a size the user will expect to find again, so it is
+	// persisted HERE rather than on every pixel of the drag: one write
+	// per gesture, at the moment the gesture is finished.
+	if _, wasDock := dockForDragMode(a.dragMode); wasDock {
+		a.saveToolLayout()
+	}
 	a.dragMode, a.dragSplitOffset = "", 0
 	a.stopAutoScroll()
 }
@@ -3303,7 +3301,10 @@ func (a *App) handleMenuMouse(x, y int, btn tcell.ButtonMask) {
 
 // scrollAt scrolls whichever panel the (x, y) cursor is over.
 func (a *App) scrollAt(x, y, delta int) {
-	if a.inSidebarBlock(x) {
+	// A rect test, not a column one: the file tree is a tool window now
+	// and can be docked at the BOTTOM, where a column test would claim
+	// the whole width of the editor above it.
+	if a.sidebarContains(x, y) {
 		a.tree.Scroll(delta)
 		return
 	}
@@ -3353,7 +3354,7 @@ func (a *App) scrollAt(x, y, delta int) {
 // and neither does the terminal strip, so we only honor horizontal wheel
 // events when they fall inside the editor pane.
 func (a *App) scrollAtH(x, y, delta int) {
-	if a.inSidebarBlock(x) {
+	if a.sidebarContains(x, y) {
 		return
 	}
 	if a.term.open && a.termPanelContains(x, y) {
@@ -4407,7 +4408,10 @@ func (a *App) menuRefreshTree() {
 // snap back when it returns.
 func (a *App) menuToggleSidebar() {
 	a.closeMenu()
-	a.sidebarShown = !a.sidebarShown
+	// Through the tool layer, so showing the tree claims its edge from
+	// whatever else was there and the change is remembered for this
+	// project. See toolwindow.go.
+	a.toggleTool(toolProject)
 }
 
 // sidebarToggleLabel returns the label the toggle row should display given
@@ -4494,7 +4498,6 @@ func (a *App) draw() {
 		a.tree.Focused = a.treeFocus
 		sx, sy, sw, sh := a.sidebarRect()
 		a.tree.Render(a.screen, a.theme, sx, sy, sw, sh)
-		a.drawSplitter()
 	}
 
 	a.drawTabBar()
@@ -4520,12 +4523,13 @@ func (a *App) draw() {
 	}
 	if a.term.open {
 		a.drawTermPanel()
-		a.drawTermSplitter()
 	}
 	if a.chat.open {
 		a.drawChatPanel()
-		a.drawChatSplitter()
 	}
+	// One seam per vertical edge, painted after every panel so it is
+	// never covered by the one it resizes. See splitter.go.
+	a.drawSplitter()
 	if a.findOpen {
 		a.drawFindBar()
 	}
@@ -4541,6 +4545,11 @@ func (a *App) draw() {
 	// filename, a diff line), and it keeps that cell's background — so it
 	// has to run after the surface it annotates. See overflow.go.
 	a.drawOverflowMarkers()
+
+	// The tool stripes are the outermost chrome on three edges, drawn
+	// after every panel for the seam's reason: nothing that took its
+	// columns from the stripe may paint over it.
+	a.drawToolStripes()
 
 	a.drawStatusBar()
 
@@ -4601,19 +4610,12 @@ func (a *App) iconsOn() bool {
 	return a.tree != nil && a.tree.IconsEnabled
 }
 
-// drawSplitter paints a 1-column vertical line at the editor-facing edge
-// of the sidebar. Idle it sits in Subtle grey; while the user is dragging
-// it brightens to Accent so the active grab handle is unmistakable.
+// drawSplitter paints the seam beside whichever vertical dock has
+// something showing. Idle each sits in Subtle grey; while the user is
+// dragging one it brightens to Accent so the active grab handle is
+// unmistakable. One call for both edges — see drawDockSplitters.
 func (a *App) drawSplitter() {
-	a.drawVSplitter(a.splitterX(), a.dragMode == "sidebar")
-}
-
-// drawTermSplitter paints the left-docked terminal strip's resize
-// handle — the same visual language as the sidebar splitter, on the
-// strip's editor-facing (right) edge. No-op in the bottom-dock layout,
-// where the header rule is the grab handle instead.
-func (a *App) drawTermSplitter() {
-	a.drawVSplitter(a.termSplitterX(), a.dragMode == "termsplit")
+	a.drawDockSplitters()
 }
 
 // drawMenuButton paints the ≡ icon in the leftmost cells of the tab bar.
@@ -4647,17 +4649,36 @@ func (a *App) drawEmptyEditor() {
 		}
 	}
 	cy := ey + eh/2
-	msg1 := "No file open"
-	msg2 := "Click a file in the tree, or  ≡  for the menu"
-	cx1 := ex + (ew-len([]rune(msg1)))/2
-	for i, r := range msg1 {
-		a.screen.SetContent(cx1+i, cy-1, r, nil, bold)
-	}
-	cx2 := ex + (ew-len([]rune(msg2)))/2
-	for i, r := range msg2 {
-		a.screen.SetContent(cx2+i, cy+1, r, nil, muted)
-	}
+	// Both lines are CENTRED AND CLIPPED to the editor band. The clip is
+	// not belt and braces: a tool window docked to a vertical edge takes
+	// columns off this band, so a placeholder that ran past its own
+	// width would paint over the seam and into the panel beside it — the
+	// one thing a "nothing here" screen must not do.
+	a.drawCentered("No file open", ex, cy-1, ew, bold)
+	a.drawCentered("Click a file in the tree, or  ≡  for the menu", ex, cy+1, ew, muted)
 	a.screen.HideCursor()
+}
+
+// drawCentered paints s centred in the w-column band starting at x,
+// clipped to it on both sides. Centring alone is what the placeholder
+// used to do, and it was correct only while the editor band was the
+// whole window minus a sidebar.
+func (a *App) drawCentered(s string, x, y, w int, style tcell.Style) {
+	runes := []rune(s)
+	if w <= 0 {
+		return
+	}
+	start := x + (w-len(runes))/2
+	if start < x {
+		start = x
+	}
+	for i, r := range runes {
+		cx := start + i
+		if cx < x || cx >= x+w {
+			continue
+		}
+		a.screen.SetContent(cx, y, r, nil, style)
+	}
 }
 
 // drawTooSmall paints a centred error message when the terminal window is

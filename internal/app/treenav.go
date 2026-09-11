@@ -56,7 +56,7 @@ func (a *App) menuFocusTree() {
 		return
 	}
 	if !a.sidebarShown {
-		a.sidebarShown = true
+		a.showTool(toolProject)
 	}
 	a.focusTree()
 }

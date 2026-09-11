@@ -88,41 +88,42 @@ func TestMenuToggleChat_OpensAndExplains(t *testing.T) {
 	}
 }
 
-// TestChatLeftEdgeSingleOccupancy pins the eviction in both directions:
-// opening chat closes a LEFT-docked terminal (bottom-docked coexists),
-// and re-opening the left-docked terminal evicts the chat.
-func TestChatLeftEdgeSingleOccupancy(t *testing.T) {
+// TestChatEdgeSingleOccupancy pins the eviction in both directions on
+// whichever edge the two tools share. The chat defaults to the RIGHT
+// edge now, so the pair only competes once one of them is moved — which
+// is the whole change: edges are single-occupancy, and which tools share
+// an edge is the user's arrangement rather than a rule in the code.
+func TestChatEdgeSingleOccupancy(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	wireChat(a)
 
-	// Chat evicts the left-docked terminal…
-	a.termDockLeft = true
-	a.term.open = true
+	// Different edges by default: the two coexist.
+	a.moveTool(toolTerminal, dockLeft)
+	a.showTool(toolTerminal)
+	a.menuToggleChat()
+	if !a.chat.open || !a.term.open {
+		t.Fatalf("left terminal and right chat should coexist: chat=%v term=%v", a.chat.open, a.term.open)
+	}
+
+	// Move the terminal onto the chat's edge: the chat yields…
+	a.moveTool(toolTerminal, dockRight)
+	a.showTool(toolTerminal)
+	if a.chat.open || !a.term.open {
+		t.Fatalf("terminal taking the right edge should evict chat: chat=%v term=%v", a.chat.open, a.term.open)
+	}
+
+	// …and showing the chat again takes it back.
 	a.menuToggleChat()
 	if !a.chat.open || a.term.open {
-		t.Fatalf("chat open should evict left terminal: chat=%v term=%v", a.chat.open, a.term.open)
-	}
-
-	// …and the terminal takes the edge back.
-	a.menuToggleTerminal()
-	if !a.term.open || a.chat.open {
-		t.Fatalf("left terminal should evict chat: chat=%v term=%v", a.chat.open, a.term.open)
-	}
-
-	// A bottom-docked terminal coexists with the chat strip.
-	a.term.open = false
-	a.termDockLeft = false
-	a.menuToggleChat()
-	a.menuToggleTerminal()
-	if !a.chat.open || !a.term.open {
-		t.Fatalf("bottom terminal should coexist: chat=%v term=%v", a.chat.open, a.term.open)
+		t.Fatalf("chat should reclaim the right edge: chat=%v term=%v", a.chat.open, a.term.open)
 	}
 }
 
-// TestChatDockFlipEvictsChat pins the other reclaim path: flipping the
-// terminal dock to the left (which force-opens the terminal there)
-// takes the edge from an open chat panel.
-func TestChatDockFlipEvictsChat(t *testing.T) {
+// TestChatDockFlipKeepsChat pins the consequence of the chat's default
+// edge moving to the right: the legacy "Dock terminal left" row no
+// longer competes with it at all. It used to evict the chat, because
+// both wanted the one vertical edge the editor had.
+func TestChatDockFlipKeepsChat(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	wireChat(a)
 	a.menuToggleChat()
@@ -130,37 +131,42 @@ func TestChatDockFlipEvictsChat(t *testing.T) {
 		t.Fatal("setup: chat should be open")
 	}
 	a.menuToggleTermDock() // bottom → left, opens the terminal there
-	if !a.termDockLeft || !a.term.open || a.chat.open {
-		t.Fatalf("dock flip: dockLeft=%v term=%v chat=%v", a.termDockLeft, a.term.open, a.chat.open)
+	if a.toolDock(toolTerminal) != dockLeft || !a.term.open || !a.chat.open {
+		t.Fatalf("dock flip: dock=%v term=%v chat=%v", a.toolDock(toolTerminal), a.term.open, a.chat.open)
 	}
 }
 
-// TestChatLayoutFlipsTreeRight pins the geometry contract: an open chat
-// strip owns the left block, the sidebar flips to the right edge, and
-// the strip's splitter sits on its rightmost column.
-func TestChatLayoutFlipsTreeRight(t *testing.T) {
+// TestChatDocksRightAndKeepsTheTree pins the geometry contract that
+// replaced the tree flip: an open chat strip owns the RIGHT block, the
+// file tree stays exactly where it was on the left, and the strip's seam
+// sits on its leftmost column (mirrored, because the panel is to its
+// right).
+func TestChatDocksRightAndKeepsTheTree(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	wireChat(a)
 	if a.treeOnRight() {
-		t.Fatal("classic layout should keep the tree left")
+		t.Fatal("the tree should start on the left")
 	}
 	a.menuToggleChat()
 
-	if !a.treeOnRight() {
-		t.Fatal("open chat should flip the tree right")
+	if a.treeOnRight() {
+		t.Fatal("opening chat must not move the file tree any more")
 	}
-	if got := a.leftBlockW(); got != a.chatStripW() {
-		t.Errorf("leftBlockW = %d, want chat strip %d", got, a.chatStripW())
+	if !a.sidebarShown {
+		t.Fatal("chat on the right edge must not evict a left-docked tree")
 	}
-	if got := a.rightBlockW(); got != a.sidebarW() {
-		t.Errorf("rightBlockW = %d, want sidebar %d", got, a.sidebarW())
+	if got := a.rightBlockW(); got != a.chatStripW() {
+		t.Errorf("rightBlockW = %d, want chat strip %d", got, a.chatStripW())
 	}
-	if got := a.chatSplitterX(); got != a.chatStripW()-1 {
-		t.Errorf("chatSplitterX = %d, want %d", got, a.chatStripW()-1)
+	if got := a.leftBlockW(); got != a.sidebarW() {
+		t.Errorf("leftBlockW = %d, want sidebar block %d", got, a.sidebarW())
 	}
-	sx, _, _, _ := a.sidebarRect()
-	if sx != a.width-a.sidebarW()+1 {
-		t.Errorf("sidebar x = %d, want right-docked %d", sx, a.width-a.sidebarW()+1)
+	cx, _, cw, _ := a.chatPanelRect()
+	if cx+cw != a.width-a.stripeCols(dockRight) {
+		t.Errorf("chat rect ends at %d, want the right edge %d", cx+cw, a.width-a.stripeCols(dockRight))
+	}
+	if got := a.chatSplitterX(); got != cx-1 {
+		t.Errorf("chat seam at %d, want %d — the block's leftmost column", got, cx-1)
 	}
 }
 
@@ -172,12 +178,12 @@ func TestResizeChatPanelWidth_Clamps(t *testing.T) {
 	a.chat.open = true
 
 	a.resizeChatPanelWidth(1)
-	if a.chat.width != chatPanelMinWidth {
-		t.Errorf("tiny target: width = %d, want %d", a.chat.width, chatPanelMinWidth)
+	if a.toolWidth(toolChat) != chatPanelMinWidth {
+		t.Errorf("tiny target: width = %d, want %d", a.toolWidth(toolChat), chatPanelMinWidth)
 	}
 	a.resizeChatPanelWidth(9999)
-	if a.chat.width != a.maxChatPanelWidth() {
-		t.Errorf("huge target: width = %d, want %d", a.chat.width, a.maxChatPanelWidth())
+	if a.toolWidth(toolChat) != a.clampToolWidth(toolChat, a.width) {
+		t.Errorf("huge target: width = %d, want %d", a.toolWidth(toolChat), a.clampToolWidth(toolChat, a.width))
 	}
 }
 
@@ -475,8 +481,11 @@ func TestDrawChatPanel_Smoke(t *testing.T) {
 	scr.Show()
 
 	cells, w, _ := scr.GetContents()
+	// Read the panel's OWN columns rather than the window's first few:
+	// the chat docks on the right edge now, so x==0 is the file tree.
+	cx, _, cw, _ := a.chatPanelRect()
 	var header strings.Builder
-	for x := 0; x < a.chatStripW(); x++ {
+	for x := cx; x < cx+cw; x++ {
 		c := cells[0*w+x]
 		if len(c.Runes) > 0 {
 			header.WriteRune(c.Runes[0])
@@ -493,7 +502,7 @@ func TestDrawChatPanel_Smoke(t *testing.T) {
 	scr.Show()
 	cells, w, _ = scr.GetContents()
 	header.Reset()
-	for x := 0; x < a.chatStripW(); x++ {
+	for x := cx; x < cx+cw; x++ {
 		c := cells[0*w+x]
 		if len(c.Runes) > 0 {
 			header.WriteRune(c.Runes[0])

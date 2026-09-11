@@ -74,9 +74,8 @@ const (
 // compareState is the panel's whole state.
 type compareState struct {
 	open bool
-	// height is the user-chosen row count from a drag or the resize
-	// leaders; 0 means auto. Session-only, like every other panel size.
-	height int
+	// The panel's SIZE lives in the tool layout (toolwindow.go), per
+	// tool and per axis; read it through comparePanelHeight.
 
 	// oldLabel / newLabel name the two sides in the header and in the
 	// diff's --- / +++ lines.
@@ -455,18 +454,12 @@ func (a *App) compareTextWithSelection(oldLabel, text string) {
 // Open / close
 // -----------------------------------------------------------------------------
 
-// openComparePanel claims the bottom strip. Single occupancy: the git
-// panels and a bottom-docked terminal yield, exactly as they do to each
-// other.
+// openComparePanel puts the diff on screen, claiming whichever edge it
+// is docked to from whatever that edge was showing. Which edge that is,
+// and who yields, is the tool-window layer's answer — see claimDock.
 func (a *App) openComparePanel() {
+	a.claimDock(toolCompare)
 	a.compare.open = true
-	a.gitPanel.open = false
-	a.gitLog.open = false
-	a.problems.open = false
-	if !a.termDockLeft {
-		a.term.open = false
-		a.term.focused = false
-	}
 }
 
 // closeComparePanel collapses the panel and disarms any pending paste —
@@ -482,85 +475,46 @@ func (a *App) closeComparePanel() {
 // Geometry — one source for draw AND mouse routing
 // -----------------------------------------------------------------------------
 
-// comparePanelHeight returns the panel's row count for the current
-// window; mirrors gitPanelHeight.
-func (a *App) comparePanelHeight() int {
-	h := a.compare.height
-	if h == 0 {
-		h = a.height / 3
-		if h > comparePanelMaxHeight {
-			h = comparePanelMaxHeight
-		}
-	}
-	if h < comparePanelMinHeight {
-		h = comparePanelMinHeight
-	}
-	if max := a.maxComparePanelHeight(); h > max {
-		h = max
-	}
-	return h
-}
+// comparePanelHeight returns the panel's row count when docked to the
+// bottom edge. A thin read of the tool layer, which owns the stored number and the one
+// clamp every tool goes through — see toolwindow.go.
+func (a *App) comparePanelHeight() int { return a.toolHeight(toolCompare) }
 
-// maxComparePanelHeight is the tallest the panel may grow while leaving
-// the editor its minimum working rows.
-func (a *App) maxComparePanelHeight() int {
-	max := a.height - 2 - comparePanelMinEditorRows
-	max -= a.findBarRows()
-	if max < comparePanelMinHeight {
-		max = comparePanelMinHeight
-	}
-	return max
-}
-
-// resizeComparePanel records a user-chosen height, clamped to the legal
-// band, and re-clamps the scroll offset against the new viewport.
+// resizeComparePanel records a user-chosen height and re-clamps the
+// scroll offset against the new viewport.
 func (a *App) resizeComparePanel(target int) {
-	if target < comparePanelMinHeight {
-		target = comparePanelMinHeight
-	}
-	if max := a.maxComparePanelHeight(); target > max {
-		target = max
-	}
-	a.compare.height = target
+	a.setToolHeight(toolCompare, target)
 	a.compareClampScroll()
 }
 
 // dragComparePanelTo resizes the panel so its header rule tracks the
-// mouse row during a drag.
+// mouse row during a drag. Only the bottom edge has a header-rule
+// handle; a vertical dock resizes by its seam instead.
 func (a *App) dragComparePanelTo(y int) {
-	bottom := a.height - 1
-	bottom -= a.findBarRows()
-	a.resizeComparePanel(bottom - y)
+	a.dragDockTo(dockBottom, y)
 }
 
 // growComparePanel / shrinkComparePanel are the Esc-= / Esc-- targets
-// while the compare panel owns the strip. Silent no-ops while collapsed,
-// per the leader contract; single occupancy guarantees at most one of
-// the bottom panels acts.
+// while the compare panel is the tool being resized. Silent no-ops while
+// collapsed, per the leader contract.
 func (a *App) growComparePanel() {
 	if !a.compare.open {
 		return
 	}
-	a.resizeComparePanel(a.comparePanelHeight() + comparePanelResizeStep)
+	a.growDock(a.toolDock(toolCompare), comparePanelResizeStep)
 }
 
-// shrinkComparePanel steps the panel shorter; see growComparePanel.
+// shrinkComparePanel steps the panel smaller; see growComparePanel.
 func (a *App) shrinkComparePanel() {
 	if !a.compare.open {
 		return
 	}
-	a.resizeComparePanel(a.comparePanelHeight() - comparePanelResizeStep)
+	a.shrinkDock(a.toolDock(toolCompare), comparePanelResizeStep)
 }
 
-// comparePanelRect returns the panel's on-screen rectangle — the same
-// slot the git panels occupy.
-func (a *App) comparePanelRect() (x, y, w, h int) {
-	lw := a.leftBlockW()
-	h = a.comparePanelHeight()
-	y = a.height - 1 - h
-	y -= a.findBarRows()
-	return lw, y, a.width - lw - a.rightBlockW(), h
-}
+// comparePanelRect returns the panel's on-screen rectangle, wherever it
+// is docked — see toolRect.
+func (a *App) comparePanelRect() (x, y, w, h int) { return a.toolRect(toolCompare) }
 
 // comparePanelContains reports whether (x, y) falls inside the panel.
 func (a *App) comparePanelContains(x, y int) bool {

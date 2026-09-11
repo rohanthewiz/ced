@@ -24,8 +24,6 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/grsh"
-
-	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // fakeTermEval satisfies termEvaluator with recordable, controllable
@@ -464,7 +462,7 @@ func TestTermResizeClamp(t *testing.T) {
 		t.Errorf("height after tiny resize = %d, want floor %d", got, termPanelMinHeight)
 	}
 	a.resizeTermPanel(1000)
-	if got, max := a.termPanelHeight(), a.maxTermPanelHeight(); got != max {
+	if got, max := a.termPanelHeight(), a.clampToolHeight(toolTerminal, a.height); got != max {
 		t.Errorf("height after huge resize = %d, want ceiling %d", got, max)
 	}
 }
@@ -764,21 +762,25 @@ func screenContainsText(scr tcell.Screen, want string) bool {
 // -----------------------------------------------------------------------------
 
 // newLeftDockApp is the shared fixture for left-dock tests: a test app
-// flipped into the alternate layout with the terminal open.
+// with the terminal MOVED to the left edge and shown there.
+//
+// Showing it evicts the file tree, which is the whole point of the tool
+// window model — an edge shows one tool at a time and the others collapse
+// to their stripe buttons. The old fixture flipped the tree across the
+// window instead, because there was no right edge to put anything on.
 func newLeftDockApp(t *testing.T) *App {
 	t.Helper()
 	a := newTestApp(t, t.TempDir())
-	a.termDockLeft = true
-	a.term.open = true
+	a.moveTool(toolTerminal, dockLeft)
+	a.showTool(toolTerminal)
 	a.ensureTermSession()
 	return a
 }
 
-// TestTermLeftDockGeometry pins the flipped layout's shape: the strip
-// hugs the left edge full-height, its splitter sits on its rightmost
-// column, the sidebar block hugs the right edge with its splitter on
-// the block's leftmost column, and the editor band between them keeps
-// its full height (a left-docked terminal costs columns, not rows).
+// TestTermLeftDockGeometry pins the left-docked strip's shape: it hugs
+// the left edge full-height, its seam sits on its rightmost column, and
+// the editor band keeps its full HEIGHT — a vertically docked terminal
+// costs columns, not rows.
 func TestTermLeftDockGeometry(t *testing.T) {
 	a := newLeftDockApp(t)
 
@@ -789,59 +791,73 @@ func TestTermLeftDockGeometry(t *testing.T) {
 	if got := a.leftBlockW(); got != strip {
 		t.Fatalf("leftBlockW = %d, want strip width %d", got, strip)
 	}
-	if got := a.termSplitterX(); got != strip-1 {
-		t.Fatalf("termSplitterX = %d, want %d", got, strip-1)
+	if got := a.toolSplitterX(dockLeft); got != strip-1 {
+		t.Fatalf("left seam x = %d, want %d", got, strip-1)
 	}
 	px, py, pw, ph := a.termPanelRect()
 	if px != 0 || py != 0 || pw != strip-1 || ph != a.height-1 {
 		t.Fatalf("termPanelRect = (%d,%d,%d,%d), want (0,0,%d,%d)", px, py, pw, ph, strip-1, a.height-1)
 	}
+	if _, _, _, eh := a.editorRect(); eh != a.height-2 {
+		t.Fatalf("editor height = %d, want %d — a vertical dock must cost columns, not rows",
+			eh, a.height-2)
+	}
+}
 
-	if got := a.splitterX(); got != a.width-a.sidebarWidth {
-		t.Fatalf("sidebar splitterX = %d, want %d", got, a.width-a.sidebarWidth)
+// TestTermLeftDockEvictsTheTree pins single occupancy on the left edge:
+// the tree was showing there, the terminal takes the slot, and the tree
+// is hidden rather than teleported to the other side of the window.
+func TestTermLeftDockEvictsTheTree(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	if !a.sidebarShown {
+		t.Fatal("fixture should start with the tree showing")
+	}
+	a.moveTool(toolTerminal, dockLeft)
+	a.showTool(toolTerminal)
+	if a.sidebarShown {
+		t.Error("the left edge shows one tool at a time — the tree should have yielded")
+	}
+	if id, ok := a.visibleTool(dockLeft); !ok || id != toolTerminal {
+		t.Errorf("left edge shows %q (%v), want the terminal", id, ok)
+	}
+	// And back: showing the tree again evicts the terminal.
+	a.showTool(toolProject)
+	if a.term.open {
+		t.Error("the tree reclaiming the edge should have evicted the terminal")
+	}
+}
+
+// TestTermLeftDockCoexistsWithTreeOnTheRight is the arrangement that
+// replaced the old automatic flip: the user moves the TREE to the right
+// edge, and then both strips are up at once, one per edge.
+func TestTermLeftDockCoexistsWithTreeOnTheRight(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.moveTool(toolProject, dockRight)
+	a.moveTool(toolTerminal, dockLeft)
+	a.showTool(toolTerminal)
+	if !a.sidebarShown || !a.term.open {
+		t.Fatalf("different edges should coexist: tree=%v term=%v", a.sidebarShown, a.term.open)
 	}
 	sx, _, sw, _ := a.sidebarRect()
-	if sx != a.width-a.sidebarWidth+1 || sw != a.sidebarWidth-1 {
-		t.Fatalf("sidebarRect x=%d w=%d, want x=%d w=%d", sx, sw, a.width-a.sidebarWidth+1, a.sidebarWidth-1)
+	if sx+sw != a.width-a.stripeCols(dockRight) {
+		t.Errorf("tree rect ends at %d, want the right edge %d", sx+sw, a.width-a.stripeCols(dockRight))
 	}
-	if !a.inSidebarBlock(a.width-1) || a.inSidebarBlock(0) {
-		t.Fatal("inSidebarBlock should track the right-docked block")
-	}
-
-	ex, ey, ew, eh := a.editorRect()
-	if ex != strip {
-		t.Fatalf("editor x = %d, want %d (starts after the strip)", ex, strip)
-	}
-	if ew != a.width-strip-a.sidebarW() {
-		t.Fatalf("editor w = %d, want %d", ew, a.width-strip-a.sidebarW())
-	}
-	if eh != a.height-2 {
-		t.Fatalf("editor h = %d, want %d — a left-docked terminal must not cost rows", eh, a.height-2)
-	}
-	if ey != 1 {
-		t.Fatalf("editor y = %d, want 1", ey)
-	}
-	// Tab bar and menu button follow the strip, not the sidebar.
-	tx, _, tw, _ := a.tabBarRect()
-	if tx != strip || tw != a.width-strip-a.sidebarW() {
-		t.Fatalf("tabBarRect x=%d w=%d, want x=%d w=%d", tx, tw, strip, a.width-strip-a.sidebarW())
-	}
-	mx, _, _, _ := a.menuButtonRect()
-	if mx != strip {
-		t.Fatalf("menu button x = %d, want %d", mx, strip)
+	ex, _, ew, _ := a.editorRect()
+	if ex != a.leftBlockW() || ex+ew != a.width-a.rightBlockW() {
+		t.Errorf("editor band = [%d,%d), want [%d,%d)", ex, ex+ew, a.leftBlockW(), a.width-a.rightBlockW())
 	}
 }
 
 // TestTermLeftDockSplitterDrag drives the full mouse gesture through
-// handleMouse: press on the strip's splitter column arms the termsplit
-// drag, and dragging right widens the strip (glued to the cursor).
+// handleMouse: a press on the left edge's seam arms that edge's drag,
+// and dragging right widens the strip (glued to the cursor).
 func TestTermLeftDockSplitterDrag(t *testing.T) {
 	a := newLeftDockApp(t)
-	splitX := a.termSplitterX()
+	splitX := a.toolSplitterX(dockLeft)
 
 	a.handleMouse(tcell.NewEventMouse(splitX, 10, tcell.Button1, tcell.ModNone))
-	if a.dragMode != "termsplit" {
-		t.Fatalf("dragMode = %q, want termsplit", a.dragMode)
+	if want := dragModeForDock(dockLeft); a.dragMode != want {
+		t.Fatalf("dragMode = %q, want %q", a.dragMode, want)
 	}
 	target := splitX + 10
 	a.handleMouse(tcell.NewEventMouse(target, 10, tcell.Button1, tcell.ModNone))
@@ -855,25 +871,34 @@ func TestTermLeftDockSplitterDrag(t *testing.T) {
 	}
 }
 
-// TestTermLeftDockSidebarDragFromRight verifies the sidebar splitter
-// gesture in the flipped layout: dragging the handle LEFT grows the
-// right-docked tree.
-func TestTermLeftDockSidebarDragFromRight(t *testing.T) {
-	a := newLeftDockApp(t)
-	splitX := a.splitterX()
+// TestRightDockSplitterDragMirrors pins the right edge's gesture: the
+// seam is the block's LEFTMOST column, so dragging it LEFT widens the
+// panel. The mirror is what makes one drag handler serve both edges.
+func TestRightDockSplitterDragMirrors(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.moveTool(toolTerminal, dockRight)
+	a.showTool(toolTerminal)
+	a.ensureTermSession()
+
+	splitX := a.toolSplitterX(dockRight)
+	if splitX < 1 {
+		t.Fatalf("right-docked terminal has no seam (x=%d)", splitX)
+	}
 	a.handleMouse(tcell.NewEventMouse(splitX, 10, tcell.Button1, tcell.ModNone))
-	if a.dragMode != "sidebar" {
-		t.Fatalf("dragMode = %q, want sidebar", a.dragMode)
+	if want := dragModeForDock(dockRight); a.dragMode != want {
+		t.Fatalf("dragMode = %q, want %q", a.dragMode, want)
 	}
-	a.handleMouse(tcell.NewEventMouse(splitX-5, 10, tcell.Button1, tcell.ModNone))
-	if got := a.sidebarWidth; got != a.width-(splitX-5) {
-		t.Fatalf("sidebar width after drag = %d, want %d", got, a.width-(splitX-5))
+	target := splitX - 6
+	a.handleMouse(tcell.NewEventMouse(target, 10, tcell.Button1, tcell.ModNone))
+	if got, want := a.termPanelWidth(), a.width-target; got != want {
+		t.Fatalf("strip width after drag = %d, want %d", got, want)
 	}
+	a.handleMouse(tcell.NewEventMouse(target, 10, tcell.ButtonNone, tcell.ModNone))
 }
 
 // TestTermLeftDockWidthResizeClamp pins the width band: never narrower
 // than termPanelMinWidth, never so wide the editor loses its minimum
-// columns next to the sidebar.
+// columns next to whatever the other edge spends.
 func TestTermLeftDockWidthResizeClamp(t *testing.T) {
 	a := newLeftDockApp(t)
 	a.resizeTermPanelWidth(1)
@@ -881,91 +906,75 @@ func TestTermLeftDockWidthResizeClamp(t *testing.T) {
 		t.Errorf("width after tiny resize = %d, want floor %d", got, termPanelMinWidth)
 	}
 	a.resizeTermPanelWidth(1000)
-	if got, max := a.termPanelWidth(), a.maxTermPanelWidth(); got != max {
+	if got, max := a.termPanelWidth(), a.clampToolWidth(toolTerminal, a.width); got != max {
 		t.Errorf("width after huge resize = %d, want ceiling %d", got, max)
 	}
 }
 
-// TestTermLeftDockHeaderIsNotAGrabHandle: in the flipped layout the
-// strip is resized by its vertical splitter; a press on the header row
-// must focus the panel, not arm a height drag that makes no sense.
+// TestTermLeftDockHeaderIsNotAGrabHandle: on a vertical edge the strip
+// is resized by its seam; a press on the header row must focus the
+// panel, not arm a height drag that makes no sense there.
 func TestTermLeftDockHeaderIsNotAGrabHandle(t *testing.T) {
 	a := newLeftDockApp(t)
 	a.term.focused = false
 	_, py, _, _ := a.termPanelRect()
 	if a.termPanelPress(2, py) {
-		t.Fatal("header press in left dock must not start a resize drag")
+		t.Fatal("header press in a vertical dock must not start a resize drag")
 	}
 }
 
-// TestTermLeftDockCoexistsWithGitPanel: the single-occupancy rule is
-// about the BOTTOM strip. A left-docked terminal and the git panel
-// don't compete, so opening one must not evict the other — and
-// flipping back to bottom dock restores the exclusivity.
+// TestTermLeftDockCoexistsWithGitPanel: single occupancy is per EDGE. A
+// left-docked terminal and a bottom-docked git panel don't compete, so
+// opening one must not evict the other — and the git panel's band starts
+// after the strip.
 func TestTermLeftDockCoexistsWithGitPanel(t *testing.T) {
 	a := newLeftDockApp(t)
 	a.gitIsRepo = true
 	a.menuToggleGitPanel()
 	if !a.gitPanel.open || !a.term.open {
-		t.Fatal("left-docked terminal and git panel should coexist")
+		t.Fatal("left-docked terminal and bottom git panel should coexist")
 	}
-	// Their rects must not overlap: the git panel starts after the strip.
 	gx, _, _, _ := a.gitPanelRect()
-	if gx != a.termStripW() {
-		t.Fatalf("git panel x = %d, want %d (after the strip)", gx, a.termStripW())
+	if gx != a.leftBlockW() {
+		t.Fatalf("git panel x = %d, want %d (after the left block)", gx, a.leftBlockW())
 	}
 }
 
-// TestMenuToggleTermDock flips the layout flag, persists it to the
-// user config, and re-imposes bottom-strip exclusivity when the
-// terminal comes back down onto an open git panel.
+// TestMenuToggleTermDock drives the legacy dock row: it moves the
+// terminal between the left edge and the bottom, opens it either way,
+// and re-imposes the destination edge's single occupancy.
 func TestMenuToggleTermDock(t *testing.T) {
-	cfgDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", cfgDir)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	a := newTestApp(t, t.TempDir())
 
 	a.menuToggleTermDock()
-	if !a.termDockLeft {
-		t.Fatal("toggle should flip to left dock")
+	if a.toolDock(toolTerminal) != dockLeft {
+		t.Fatal("toggle should flip to the left edge")
 	}
 	if !a.term.open {
 		t.Fatal("flipping the dock should open a closed terminal")
 	}
-	cfg, err := userconfig.Load(userconfig.DefaultPath())
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	if cfg.TermDock != userconfig.TermDockLeft {
-		t.Fatalf("persisted termdock = %q, want left", cfg.TermDock)
-	}
 
 	// Open the git panel alongside in the flipped layout, then flip
-	// back: the bottom strip is single-occupancy again, so the git
-	// panel yields.
+	// back: the bottom edge is single-occupancy, so the git panel yields.
 	a.gitIsRepo = true
 	a.menuToggleGitPanel()
 	if !a.gitPanel.open {
 		t.Fatal("git panel should open alongside a left-docked terminal")
 	}
 	a.menuToggleTermDock()
-	if a.termDockLeft {
-		t.Fatal("second toggle should flip back to bottom dock")
+	if a.toolDock(toolTerminal) == dockLeft {
+		t.Fatal("second toggle should flip back to the bottom edge")
 	}
 	if a.gitPanel.open {
 		t.Fatal("returning the terminal to the bottom must evict the git panel")
 	}
-	cfg, _ = userconfig.Load(userconfig.DefaultPath())
-	if cfg.TermDock != userconfig.TermDockBottom {
-		t.Fatalf("persisted termdock = %q, want bottom", cfg.TermDock)
-	}
 }
 
 // TestMenuToggleTermDockOpensClosedTerminal pins the fix for "dock
-// terminal left flips the tree to the right but nothing shows on the
-// left": picking a dock is a put-the-terminal-THERE gesture, so a
-// closed terminal must open (and focus) as part of the flip — in both
-// directions. Flipping to the bottom additionally evicts the git panel
-// (single-occupancy strip).
+// terminal left moves the layout but nothing shows on the left": picking
+// a dock is a put-the-terminal-THERE gesture, so a closed terminal must
+// open (and focus) as part of the flip — in both directions.
 func TestMenuToggleTermDockOpensClosedTerminal(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	a := newTestApp(t, t.TempDir())
@@ -979,7 +988,7 @@ func TestMenuToggleTermDockOpensClosedTerminal(t *testing.T) {
 	}
 
 	// Close it, open the git panel, flip back down: the terminal
-	// reopens at the bottom and reclaims the strip from the git panel.
+	// reopens at the bottom and reclaims the edge from the git panel.
 	a.menuToggleTerminal()
 	a.gitIsRepo = true
 	a.gitPanel.open = true
@@ -988,7 +997,7 @@ func TestMenuToggleTermDockOpensClosedTerminal(t *testing.T) {
 		t.Fatal("flipping back to bottom should reopen a closed terminal")
 	}
 	if a.gitPanel.open {
-		t.Fatal("bottom flip must evict the git panel (single-occupancy strip)")
+		t.Fatal("bottom flip must evict the git panel (single-occupancy edge)")
 	}
 }
 
@@ -1002,9 +1011,9 @@ func TestTermDockLeftMenuFlow(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 
 	a.openMenu()
-	clickMenuRowByLabel(t, a, "Dock terminal left (tree right)")
-	if !a.termDockLeft || !a.term.open {
-		t.Fatalf("dockLeft=%v open=%v after menu flip — want both true", a.termDockLeft, a.term.open)
+	clickMenuRowByLabel(t, a, "Dock terminal left")
+	if a.toolDock(toolTerminal) != dockLeft || !a.term.open {
+		t.Fatalf("dock=%v open=%v after menu flip — want left+open", a.toolDock(toolTerminal), a.term.open)
 	}
 
 	a.draw()
@@ -1020,9 +1029,11 @@ func TestTermDockLeftMenuFlow(t *testing.T) {
 	if !strings.Contains(row0.String(), " Terminal ") {
 		t.Fatalf("row 0 = %q — left strip header not drawn", row0.String())
 	}
-	sx, _, _, _ := a.sidebarRect()
-	if sx <= a.width/2 {
-		t.Fatalf("sidebar x = %d — tree should be docked on the right half", sx)
+	// The tree yielded the edge rather than flipping across the window:
+	// an edge shows one tool at a time, and its stripe button is where
+	// the tree went (toolwindow.go).
+	if a.sidebarShown {
+		t.Fatal("the terminal taking the left edge should have hidden the tree")
 	}
 }
 

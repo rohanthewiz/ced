@@ -250,12 +250,15 @@ func TestTryGitLogContextClick_Boundaries(t *testing.T) {
 	a.gitIsRepo = true
 	a.gitLog.commits = []gitLogCommit{{Hash: strings.Repeat("a", 40), Short: "aaa1111"}}
 
-	px, py, _, _ := a.gitLogRect()
-	if a.tryGitLogContextClick(px+2, py+2) {
+	if a.tryGitLogContextClick(2, a.height-4) {
 		t.Error("a closed panel must not claim the gesture")
 	}
 
 	a.gitLog.open = true
+	// The rect is read AFTER opening: a tool window that is not showing
+	// has a ZERO rect now, which is what makes every xxxContains helper
+	// correct by construction rather than by remembering to check a flag.
+	px, py, _, _ := a.gitLogRect()
 	if a.tryGitLogContextClick(px+2, py-1) {
 		t.Error("a point above the panel must not claim the gesture")
 	}

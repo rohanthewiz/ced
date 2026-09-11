@@ -1828,8 +1828,8 @@ func TestHandleMouse_SidebarSplitterDrag(t *testing.T) {
 	splitX := a.splitterX()
 	ev := tcell.NewEventMouse(splitX, 5, tcell.Button1, tcell.ModNone)
 	a.handleMouse(ev)
-	if a.dragMode != "sidebar" {
-		t.Fatalf("expected sidebar drag, got %q", a.dragMode)
+	if want := dragModeForDock(dockLeft); a.dragMode != want {
+		t.Fatalf("expected the left edge's seam drag, got %q", a.dragMode)
 	}
 	// Continue dragging — resizes.
 	ev = tcell.NewEventMouse(splitX+5, 5, tcell.Button1, tcell.ModNone)
@@ -2003,16 +2003,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 157 {
-		t.Errorf("modalHeight = %d, want 157", h)
+	if h != 161 {
+		t.Errorf("modalHeight = %d, want 161", h)
 	}
-	if got := len(items); got != 151 {
-		t.Errorf("row count = %d, want 151 (2 top-zone + 134 group actions + 15 headers)", got)
+	if got := len(items); got != 155 {
+		t.Errorf("row count = %d, want 155 (2 top-zone + 138 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
 	// one setting off the headerless Quit group (154) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 154}
+	wantDiv := []int{2, 5, 158}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2275,7 +2275,7 @@ func TestDrawMenu_HeaderChevronReflectsFold(t *testing.T) {
 func TestMenuLayout_TerminalRowsAboveTheFold(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	items, _, _ := a.menuLayout()
-	for _, want := range []string{"Show terminal", "Dock terminal left (tree right)"} {
+	for _, want := range []string{"Show terminal", "Dock terminal left"} {
 		found := false
 		for _, item := range items {
 			if item.labelFor == nil || item.labelFor(a) != want {
@@ -2340,8 +2340,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 160 { // 157 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 160", h)
+	if h != 164 { // 161 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 164", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

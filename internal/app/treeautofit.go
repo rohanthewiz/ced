@@ -58,18 +58,23 @@ func (a *App) autoFitSidebar() {
 	}
 	// Belt and braces: a drag turns the preference off on its first
 	// motion, so this only covers the press-and-hold before that.
-	if a.dragMode == "sidebar" {
+	if _, dragging := dockForDragMode(a.dragMode); dragging {
 		return
 	}
 
-	// Columns the OTHER docked strip has first claim on. In the classic
-	// layout that's nothing — the sidebar IS the left block — while in the
-	// flipped one (chat or a left-docked terminal) the strip owns the left
-	// edge and the tree shares what's left with the editor. Same
-	// bookkeeping resizeSidebar's clamp does.
-	room := a.width
+	// Auto-fit only has anything to say while the tree is on a VERTICAL
+	// edge — it derives a WIDTH, and a bottom-docked tree is sized in
+	// rows. The columns the other edge has first claim on come off the
+	// top, the same bookkeeping clampToolWidth does: both stripes, and
+	// whatever dock sits opposite.
+	if !dockIsVertical(a.toolDock(toolProject)) {
+		return
+	}
+	room := a.width - a.stripeCols(dockLeft) - a.stripeCols(dockRight)
 	if a.treeOnRight() {
-		room -= a.leftBlockW()
+		room -= a.dockCols(dockLeft)
+	} else {
+		room -= a.dockCols(dockRight)
 	}
 
 	max := room - autoFitMinEditor

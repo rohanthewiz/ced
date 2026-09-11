@@ -132,6 +132,14 @@ func (a *App) recordSession() {
 	// that preference governs reopening tabs, not remembering where the
 	// user has been — the line folder-recency already draws.
 	e.Recent = a.recentFiles
+	// The tool-window arrangement rides the same entry and the same
+	// write, for the recent ring's reason: it is what the editor DID
+	// here, and the one gesture that ends a session is the one place
+	// nothing can have been missed. Every layout gesture also saves as
+	// it happens (saveToolLayout) — this catches the drag that was still
+	// in flight, and the case where session restore is off but the user
+	// turns it on later.
+	e.Layout = a.encodeToolLayout()
 	a.sessionStore.Record(e)
 	a.saveSessionStore()
 }
@@ -152,7 +160,18 @@ func (a *App) restoreSession() {
 		return
 	}
 	e, ok := a.sessionStore.Find(a.rootDir)
-	if !ok || len(e.Tabs) == 0 {
+	if !ok {
+		return
+	}
+	// The layout comes back FIRST and unconditionally — before any tab,
+	// and even for a folder whose tab list is empty. Before, because
+	// wireTab and the panels' own refreshes read the geometry, so a
+	// layout installed afterwards would have every restored tab measured
+	// against the default one; unconditionally, because "I closed every
+	// file but I keep the terminal on the left here" is a real and
+	// ordinary state to leave a project in.
+	a.applyToolLayout(e.Layout)
+	if len(e.Tabs) == 0 {
 		return
 	}
 	active, restored := -1, 0

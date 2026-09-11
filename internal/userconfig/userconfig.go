@@ -200,11 +200,24 @@ type Config struct {
 	// to have any menu shape at all, for a setting nobody adjusts twice.
 	AutoSaveDelay time.Duration
 
-	// TermDock is the terminal panel's home edge. Defaults to the
-	// bottom strip; "left" selects the alternate layout (terminal
-	// vertical on the left, file tree on the right). Persisted by
-	// the ≡ layout toggle, same as AutoSave.
+	// TermDock WAS the terminal panel's home edge, back when the
+	// terminal was the only panel with a choice of two. Tool windows
+	// (internal/app/toolwindow.go) replaced it: every panel now has an
+	// edge, the assignment is PER PROJECT, and it lives in state.json
+	// beside the tab list rather than in this file of global
+	// preferences. The field survives so an existing config.json still
+	// PARSES — a key ced wrote itself must never become a startup error
+	// — but nothing reads it. Same treatment the retired "scrollbar"
+	// key got.
 	TermDock TermDock
+
+	// ToolStripes controls whether the one-cell tool button rails are
+	// drawn on the window's populated edges. Defaults to on: they are
+	// the only surface that says what tool windows exist and where each
+	// one lives without opening a menu. Off gives the cells back to
+	// anyone content to reach the tools from ≡. Persisted by the ≡ view
+	// toggle, same as AutoSave.
+	ToolStripes bool
 
 	// FindAllDock is the Find-all list's edge. Defaults to the top
 	// strip. Persisted by the popup's own ◨ button and the ≡ view
@@ -342,7 +355,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, TreeAutoFit: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
+	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, ToolStripes: true, FindAllDock: FindAllDockTop, ExecMarks: true, TreeAutoFit: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -363,6 +376,7 @@ type fileFormat struct {
 	FindAllDock   string `json:"findalldock,omitempty"`
 	ExecMarks     string `json:"execmarks,omitempty"`
 	TreeAutoFit   string `json:"treeautofit,omitempty"`
+	ToolStripes   string `json:"toolstripes,omitempty"`
 	WordHL        string `json:"wordhl,omitempty"`
 	Copilot       string `json:"copilot,omitempty"`
 	Suggestions   string `json:"suggestions,omitempty"`
@@ -634,6 +648,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(ff.ToolStripes)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.ToolStripes = true
+	case "off":
+		cfg.ToolStripes = false
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: toolstripes must be \"on\" or \"off\" (got %q)",
+			path, ff.ToolStripes,
+		)
+	}
+
 	switch strings.ToLower(strings.TrimSpace(ff.WordHL)) {
 	case "":
 		// field omitted — keep default
@@ -826,6 +854,16 @@ func SaveTreeAutoFit(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "treeautofit", val)
+}
+
+// SaveToolStripes persists the tool-stripe preference into the config
+// file at path. See saveKey for the round-trip guarantees.
+func SaveToolStripes(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "toolstripes", val)
 }
 
 // SaveWordHL persists the matching-word-highlight preference into the

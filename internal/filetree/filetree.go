@@ -109,6 +109,18 @@ type Tree struct {
 	// reload.
 	ExecMarks bool
 
+	// HideLabel drops the all-caps EXPLORER row, shifting the project
+	// name and the whole list up by one. It is set when the CALLER is
+	// drawing the title itself — a bottom-docked tree wears the same
+	// header rule, name and ✕ button every other bottom panel does
+	// (app/toolheader.go), and stacking "EXPLORER" under "Explorer"
+	// would spend a third row of a ten-row panel saying it twice.
+	//
+	// It changes the row MAP, not just the paint: headerRows is what
+	// Render, ListRows, HitTest and ContentWidth all read, so the click
+	// map can never drift one row off the picture.
+	HideLabel bool
+
 	// Selected is the keyboard-navigation cursor: the row arrow keys
 	// move and Enter acts on. Distinct from ActiveFolder/ActiveFile —
 	// those describe the EDITOR's state, this one is a position in the
@@ -298,9 +310,26 @@ func flattenInto(n *Node, depth int, out *[]flatNode) {
 	}
 }
 
-// treeHeaderRows is how many rows Render spends above the file list: the
-// all-caps EXPLORER label and the project name.
+// treeHeaderRows is how many rows Render spends above the file list when
+// the tree draws its own label: the all-caps EXPLORER row and the
+// project name.
 const treeHeaderRows = 2
+
+// headerRows is how many rows THIS tree spends above the list — one
+// fewer when HideLabel is set, because whoever set it is drawing the
+// title themselves.
+//
+// Every row-mapping in this file goes through it (Render, ListRows,
+// HitTest, ContentWidth), which is what stops the two arrangements
+// disagreeing about which screen row is which node. A tree whose click
+// map is one row off its paint is the worst bug this file could have,
+// and it would only show up as "clicking a folder opens its neighbour".
+func (t *Tree) headerRows() int {
+	if t.HideLabel {
+		return treeHeaderRows - 1
+	}
+	return treeHeaderRows
+}
 
 // Render draws the tree into the rectangle (x, y, w, h). Each visible row
 // is also remembered (in t.visible) so HitTest can map a click back to a
@@ -320,20 +349,26 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	// has been selected. Render bold/Accent when it *is* the active
 	// folder, plain text otherwise — same visual rule the children
 	// rows follow, so the highlight is honest.
-	headerStyle := tcell.StyleDefault.Background(bg).Foreground(th.Muted).Bold(true)
-	drawString(scr, x, y, w, " EXPLORER", headerStyle)
-	// The mark count rides the EXPLORER row, right-aligned. It is the
-	// multi-selection's only ALWAYS-visible surface: marks survive
-	// scrolling and folding, so without a count here a user could run a
-	// delete over rows that are nowhere on screen. Nothing is drawn when
-	// the set is empty, and auto-fit makes no allowance for it (the
-	// overflow markers' rule — an allowance would be blank air on every
-	// other row of the tree).
-	if n := t.MarkCount(); n > 0 {
-		label := strconv.Itoa(n) + " " + markGlyph
-		if col := w - runeLen(label) - 1; col > runeLen(" EXPLORER") {
-			drawString(scr, x+col, y, w-col,
-				label, tcell.StyleDefault.Background(bg).Foreground(th.Accent).Bold(true))
+	if !t.HideLabel {
+		headerStyle := tcell.StyleDefault.Background(bg).Foreground(th.Muted).Bold(true)
+		drawString(scr, x, y, w, " EXPLORER", headerStyle)
+		// The mark count rides the EXPLORER row, right-aligned. It is the
+		// multi-selection's only ALWAYS-visible surface: marks survive
+		// scrolling and folding, so without a count here a user could run a
+		// delete over rows that are nowhere on screen. Nothing is drawn when
+		// the set is empty, and auto-fit makes no allowance for it (the
+		// overflow markers' rule — an allowance would be blank air on every
+		// other row of the tree).
+		//
+		// With the label suppressed the count is NOT moved down onto the
+		// project-name row: it would land on a click target, and the
+		// caller drawing the title is drawing the count with it.
+		if n := t.MarkCount(); n > 0 {
+			label := strconv.Itoa(n) + " " + markGlyph
+			if col := w - runeLen(label) - 1; col > runeLen(" EXPLORER") {
+				drawString(scr, x+col, y, w-col,
+					label, tcell.StyleDefault.Background(bg).Foreground(th.Accent).Bold(true))
+			}
 		}
 	}
 	rootActive := t.ActiveFolder == "" || t.ActiveFolder == t.Root.Path
@@ -341,7 +376,7 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	if rootActive {
 		rootStyle = tcell.StyleDefault.Background(bg).Foreground(th.Accent).Bold(true)
 	}
-	drawString(scr, x, y+1, w, " "+t.Root.Name, rootStyle)
+	drawString(scr, x, y+t.headerRows()-1, w, " "+t.Root.Name, rootStyle)
 
 	// Build the flat list of visible rows from the root's children.
 	flat := make([]flatNode, 0, 128)
@@ -572,8 +607,12 @@ func (t *Tree) ContentWidth() int {
 		return 0
 	}
 	// The header block Render draws above the list: the all-caps label
-	// and the project name, both with the same one-column gutter.
-	w := runeLen(" EXPLORER")
+	// (when it is drawn at all) and the project name, both with the same
+	// one-column gutter.
+	w := 0
+	if !t.HideLabel {
+		w = runeLen(" EXPLORER")
+	}
 	if n := runeLen(" " + t.Root.Name); n > w {
 		w = n
 	}
@@ -658,38 +697,40 @@ func (t *Tree) RowCount() int {
 
 // ListRows splits a render rect of h rows the way Render does: the
 // offset of the first list row from the top of the rect, and how many
-// rows the list gets under the two-row header (the EXPLORER label and
-// the project name).
+// rows the list gets under the header (the EXPLORER label, unless
+// HideLabel, and the project name).
 //
-// It exists so nothing outside this package has to hard-code that "2".
-// The overflow markers span the LIST, not the header — those two rows
+// It exists so nothing outside this package has to hard-code the header
+// size. The overflow markers span the LIST, not the header — those rows
 // scroll with nothing, and the project name is itself a click target.
 func (t *Tree) ListRows(h int) (offset, rows int) {
-	rows = h - treeHeaderRows
+	off := t.headerRows()
+	rows = h - off
 	if rows < 0 {
 		rows = 0
 	}
-	return treeHeaderRows, rows
+	return off, rows
 }
 
 // HitTest maps a click within the tree's render rectangle to a Node.
-// Row 0 is the "EXPLORER" header (not clickable). Row 1 is the project
-// root name — clicking it returns t.Root so the caller can set the
-// active folder back to the project root, which is otherwise
-// unreachable once the user has selected any subfolder. Rows 2+ map
-// into the rendered children list.
+// The "EXPLORER" header, when drawn, is row 0 and is not clickable. The
+// LAST header row is the project root name — clicking it returns t.Root
+// so the caller can set the active folder back to the project root,
+// which is otherwise unreachable once the user has selected any
+// subfolder. The rows below map into the rendered children list.
 //
 // ok=false means the click landed on the EXPLORER header or empty
 // space below the last entry.
 func (t *Tree) HitTest(localX, localY int) (*Node, bool) {
 	_ = localX
-	if localY < 1 {
+	root := t.headerRows() - 1
+	if localY < root {
 		return nil, false
 	}
-	if localY == 1 {
+	if localY == root {
 		return t.Root, true
 	}
-	row := localY - 2
+	row := localY - root - 1
 	if row < 0 || row >= len(t.visible) {
 		return nil, false
 	}

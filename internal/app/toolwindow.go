@@ -181,6 +181,13 @@ type toolDef struct {
 	// window.
 	autoW, autoH func(*App) int
 
+	// ownHeader says the panel paints its own header rule, title and ✕.
+	// Six of the seven do, because they were born as bottom strips; the
+	// file tree did not, because it was a sidebar for the editor's whole
+	// life. A tool that says false gets the generic one on the bottom
+	// edge — see toolheader.go.
+	ownHeader bool
+
 	// isOpen / setOpen are the panel's visibility flag, read and written.
 	// setOpen is used for the CLOSE half of exclusivity (evicting the
 	// tool an edge is handing over) and must not do machinery — hide
@@ -221,7 +228,13 @@ var toolDefs []toolDef
 func init() {
 	toolDefs = []toolDef{
 		{
-			id: toolProject, title: "Project", defDock: dockLeft,
+			// "Explorer", not JetBrains' "Project": it is the word ced
+			// already uses for this panel everywhere else — the ≡ row
+			// says "Show file explorer", and the tree's own suppressed
+			// label said EXPLORER. A tool window's title is what the
+			// pickers and the dock header call it, so it has to be the
+			// name the user already has for it.
+			id: toolProject, title: "Explorer", defDock: dockLeft,
 			minW: minSidebarWidth, minH: toolMinBottomRows,
 			autoW:   func(a *App) int { return defaultSidebarWidth },
 			autoH:   func(a *App) int { return a.height / 3 },
@@ -240,7 +253,8 @@ func init() {
 			// what you steer the diff with, and gitPanelListWidth
 			// already compresses the diff pane to nothing rather than
 			// refusing.
-			minW: gitPanelMinListW + 4, minH: gitPanelMinHeight,
+			ownHeader: true,
+			minW:      gitPanelMinListW + 4, minH: gitPanelMinHeight,
 			autoW:   func(a *App) int { return a.width / 3 },
 			autoH:   func(a *App) int { return minInt(a.height/3, gitPanelMaxHeight) },
 			isOpen:  func(a *App) bool { return a.gitPanel.open },
@@ -253,7 +267,8 @@ func init() {
 			// The commit list's floor plus the seam — see the git
 			// panel above for why the DETAIL pane's reserve is not
 			// part of a vertical dock's floor.
-			minW: gitLogMinListW + 4, minH: gitLogMinHeight,
+			ownHeader: true,
+			minW:      gitLogMinListW + 4, minH: gitLogMinHeight,
 			autoW:   func(a *App) int { return a.width / 3 },
 			autoH:   func(a *App) int { return minInt(a.height/3, gitLogMaxHeight) },
 			isOpen:  func(a *App) bool { return a.gitLog.open },
@@ -263,7 +278,8 @@ func init() {
 		},
 		{
 			id: toolProblems, title: "Problems", defDock: dockBottom,
-			minW: toolMinSideCols, minH: problemsMinHeight,
+			ownHeader: true,
+			minW:      toolMinSideCols, minH: problemsMinHeight,
 			autoW:   func(a *App) int { return a.width / 3 },
 			autoH:   func(a *App) int { return minInt(a.height/3, problemsMaxHeight) },
 			isOpen:  func(a *App) bool { return a.problems.open },
@@ -273,7 +289,8 @@ func init() {
 		},
 		{
 			id: toolCompare, title: "Compare", defDock: dockBottom,
-			minW: toolMinSideCols, minH: comparePanelMinHeight,
+			ownHeader: true,
+			minW:      toolMinSideCols, minH: comparePanelMinHeight,
 			autoW:   func(a *App) int { return a.width / 3 },
 			autoH:   func(a *App) int { return minInt(a.height/3, comparePanelMaxHeight) },
 			isOpen:  func(a *App) bool { return a.compare.open },
@@ -287,7 +304,8 @@ func init() {
 		},
 		{
 			id: toolTerminal, title: "Terminal", defDock: dockBottom,
-			minW: termPanelMinWidth, minH: termPanelMinHeight,
+			ownHeader: true,
+			minW:      termPanelMinWidth, minH: termPanelMinHeight,
 			autoW:   func(a *App) int { return a.width / 3 },
 			autoH:   func(a *App) int { return minInt(a.height/3, termPanelMaxHeight) },
 			isOpen:  func(a *App) bool { return a.term.open },
@@ -297,7 +315,8 @@ func init() {
 		},
 		{
 			id: toolChat, title: "Chat", defDock: dockRight,
-			minW: chatPanelMinWidth, minH: toolMinBottomRows,
+			ownHeader: true,
+			minW:      chatPanelMinWidth, minH: toolMinBottomRows,
 			autoW:   func(a *App) int { return a.width / 3 },
 			autoH:   func(a *App) int { return a.height / 3 },
 			isOpen:  func(a *App) bool { return a.chat.open },

@@ -58,7 +58,7 @@ func TestMenuToolWindows_ListsEveryTool(t *testing.T) {
 func TestToolPickerLabel_NameFirst(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	label := a.toolPickerLabel(toolProject)
-	if !strings.HasPrefix(label, "Project") {
+	if !strings.HasPrefix(label, "Explorer") {
 		t.Errorf("label = %q, want it to start with the tool's name", label)
 	}
 	if !strings.Contains(label, "shown") || !strings.Contains(label, "left") {
@@ -160,7 +160,7 @@ func TestToolLayoutSummary_SortedByEdge(t *testing.T) {
 	if first != a.toolLayoutSummary() {
 		t.Fatal("the summary is not stable across calls")
 	}
-	if !strings.HasPrefix(first, "left: Project*") {
+	if !strings.HasPrefix(first, "left: Explorer*") {
 		t.Errorf("summary = %q, want it to open with the showing left-edge tool", first)
 	}
 	if strings.Index(first, "left:") > strings.Index(first, "bottom:") {

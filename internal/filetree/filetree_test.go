@@ -1802,3 +1802,82 @@ func TestReveal_RefusesWhatTheTreeCannotShow(t *testing.T) {
 		t.Error("Reveal on a nil tree should refuse")
 	}
 }
+
+// TestHideLabel_ShiftsTheWholeRowMap pins the property the bottom-dock
+// header depends on: suppressing the EXPLORER row moves the project name
+// and the whole list up by one, and Render, ListRows and HitTest all
+// follow it together. A click map one row off its paint would open the
+// neighbour of whatever was clicked — the worst bug this file could
+// have, and one that only shows up as "the tree opens the wrong folder".
+func TestHideLabel_ShiftsTheWholeRowMap(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"alpha", "beta"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	tr, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	off, rows := tr.ListRows(10)
+	if off != 2 || rows != 8 {
+		t.Fatalf("with the label: ListRows(10) = (%d,%d), want (2,8)", off, rows)
+	}
+	tr.HideLabel = true
+	off, rows = tr.ListRows(10)
+	if off != 1 || rows != 9 {
+		t.Fatalf("without the label: ListRows(10) = (%d,%d), want (1,9)", off, rows)
+	}
+
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatalf("screen: %v", err)
+	}
+	defer scr.Fini()
+	scr.SetSize(40, 12)
+	tr.Render(scr, theme.Default(), 0, 0, 40, 12)
+
+	// Row 0 is now the project name, not the label.
+	scr.Show()
+	cells, w, _ := scr.GetContents()
+	var row0 strings.Builder
+	for x := 0; x < w; x++ {
+		if c := cells[x]; len(c.Runes) > 0 {
+			row0.WriteRune(c.Runes[0])
+		}
+	}
+	if got := strings.TrimSpace(row0.String()); got != filepath.Base(dir) {
+		t.Errorf("row 0 = %q, want the project name %q", got, filepath.Base(dir))
+	}
+
+	// And hit-testing agrees: row 0 is the root, row 1 the first child.
+	if n, ok := tr.HitTest(0, 0); !ok || n != tr.Root {
+		t.Errorf("HitTest row 0 = %v (%v), want the root", n, ok)
+	}
+	if n, ok := tr.HitTest(0, 1); !ok || n == nil || n.Name != "alpha" {
+		t.Errorf("HitTest row 1 = %v (%v), want the first child alpha", n, ok)
+	}
+}
+
+// TestHideLabel_ContentWidthDropsTheLabel: the auto-fit measurement
+// shares Render's row construction (the one-source rule), so a header
+// row that is not drawn must not be measured either — it would reserve
+// columns for text nobody can see.
+func TestHideLabel_ContentWidthDropsTheLabel(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ab") // shorter than " EXPLORER"
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tr, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	with := tr.ContentWidth()
+	tr.HideLabel = true
+	without := tr.ContentWidth()
+	if without >= with {
+		t.Errorf("ContentWidth = %d without the label, want less than %d", without, with)
+	}
+}

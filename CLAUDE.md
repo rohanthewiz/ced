@@ -80,6 +80,7 @@ internal/app/openineditor.go  Hand a file or folder to $VISUAL / $EDITOR
 internal/app/toolwindow.go    TOOL WINDOWS: the registry, the three edges, one visible
                               per edge, sizes per tool per axis, every dock rect
 internal/app/tooladapt.go     Each panel's show/hide verbs — the seam to the layer above
+internal/app/toolheader.go    The bottom dock's header rule + ✕, for a panel with none
 internal/app/toollayout.go    The per-project layout: encode, restore, save (state.json)
 internal/app/toolmenu.go      ≡ Tool windows: the tool picker, the edge picker, reset
 internal/app/app.go           Event loop, layout, menu modal, splitter, all rendering
@@ -3240,6 +3241,22 @@ owned their own geometry AND their own exclusivity rules. House rules:
   side docks stop and sits ABOVE the bottom dock rather than under it.
   It is about the file in front of you, and a bar pinned below a git
   panel would be a long way from the line it is searching.
+- **A BOTTOM DOCK HAS A HEADER, and the tool layer supplies one for the
+  panel that has none** (toolheader.go). Six of the seven tools were
+  BORN as bottom strips and arrived with a rule, a title and a ✕; the
+  file tree was a sidebar for the editor's whole life, so it had
+  neither — and the moment it could be docked at the bottom it had no
+  resize handle and no close button at all. `toolDef.ownHeader` says who
+  brings their own; anything that does not gets the generic one. The
+  split it introduces is the important part: **`toolRect` is the whole
+  dock and `toolBodyRect` is the content**, and `sidebarRect` returns
+  the BODY — which is why the tree's hit-testing, marks and overflow
+  markers needed no changes at all. The tree also drops its own EXPLORER
+  row there (`filetree.Tree.HideLabel`, which moves the ROW MAP and not
+  just the paint): two rows of title on a ten-row panel is a third of it
+  spent saying the same thing twice. The mark count moves into the
+  header with it — that row was the mark set's only always-visible
+  surface, and marks survive scrolling.
 - **`termDockLeft` AND THE TREE FLIP ARE GONE.** The tree used to be
   teleported to the right edge whenever the chat or a left-docked
   terminal wanted the left one — the workaround for having no right edge
@@ -3284,7 +3301,11 @@ owned their own geometry AND their own exclusivity rules. House rules:
   the source picker instead.
 - **RESIZING IS THE EDGE'S, not the panel's.** One seam per vertical
   edge (splitter.go), one drag mode per edge, and the bottom edge keeps
-  each panel's own header rule. `growBottomPanel` / `shrinkBottomPanel`
+  each panel's own header rule. **The pointer coordinate follows the
+  axis** — a vertical seam tracks the COLUMN, the bottom header rule
+  tracks the ROW. Passing x for all three was silently harmless until
+  the generic dock header started using the bottom edge's own drag mode;
+  before that, every bottom panel dragged through a mode of its own. `growBottomPanel` / `shrinkBottomPanel`
   (Esc-= / Esc--) aim at `resizeTargetDock`: the edge holding the tool
   that owns the keyboard, else the bottom — which is what they did
   before, when the bottom was the only place a resizable panel could be.

@@ -2150,8 +2150,13 @@ func (a *App) rightBlockW() int {
 // when the tree is hidden. It is now a thin read of the tool layout, so
 // the tree lands wherever the user docked it — including the BOTTOM
 // edge, which the column-based helpers this replaced could not express.
+//
+// It is the BODY rect, not the whole dock: a bottom-docked tree wears
+// the generic header rule (toolheader.go), and everything that reads
+// this — the render, hit-testing, the marks, the overflow markers —
+// wants the rows the tree actually draws into.
 func (a *App) sidebarRect() (x, y, w, h int) {
-	return a.toolRect(toolProject)
+	return a.toolBodyRect(toolProject)
 }
 
 // splitterX returns the x coordinate of the resize seam beside the file
@@ -3064,10 +3069,17 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
-	// Dock resize drag: keep the seam glued to the mouse x so the panel
+	// Dock resize drag: keep the seam glued to the mouse so the panel
 	// reshapes live. ONE branch per EDGE rather than one per panel — the
 	// seam resizes whichever tool that edge is showing, so a tool moved
 	// across the window inherits the gesture instead of needing its own.
+	//
+	// THE POINTER COORDINATE FOLLOWS THE AXIS: a vertical edge's seam
+	// tracks the COLUMN, the bottom edge's header rule tracks the ROW.
+	// Passing x for all three was silently wrong for the bottom one,
+	// which only started using this branch when the generic dock header
+	// arrived (toolheader.go) — before that every bottom panel dragged
+	// through its own mode.
 	//
 	// The file tree is the one tool with a second owner of its width:
 	// auto-fit re-derives it every frame, so a drag that actually MOVES
@@ -3076,12 +3088,16 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// the lock writes a preference to disk.
 	if leftDown && a.dragMode != "" {
 		if side, ok := dockForDragMode(a.dragMode); ok {
-			if id, showing := a.visibleTool(side); showing && id == toolProject {
-				if x-a.dragSplitOffset != a.toolSplitterX(side) {
-					a.lockTreeAutoFit()
+			pos := y
+			if dockIsVertical(side) {
+				pos = x - a.dragSplitOffset
+				if id, showing := a.visibleTool(side); showing && id == toolProject {
+					if pos != a.toolSplitterX(side) {
+						a.lockTreeAutoFit()
+					}
 				}
 			}
-			a.dragDockTo(side, x-a.dragSplitOffset)
+			a.dragDockTo(side, pos)
 			return
 		}
 	}
@@ -3176,6 +3192,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			// stays ahead of every panel hit-test, so the wider zone
 			// really does outrank the neighbour cell it borrows.
 			a.dragMode, a.dragSplitOffset = dragModeForDock(side), x-a.toolSplitterX(side)
+			return
+		}
+		// The generic bottom-dock header is claimed before the panel it
+		// belongs to: its rule is the height-drag handle and its ✕ is the
+		// only mouse path to putting the panel away, neither of which the
+		// panel's own hit-test knows about. See toolheader.go.
+		if id, ok := a.headerlessBottomTool(); ok && a.toolHeaderContains(id, x, y) {
+			a.dragMode = a.toolHeaderPress(id, x, y)
 			return
 		}
 		switch {
@@ -4479,6 +4503,12 @@ func (a *App) draw() {
 		// only consumer, and pushing it here beats chasing every place
 		// treeFocus flips.
 		a.tree.Focused = a.treeFocus
+		// The tree drops its own EXPLORER row when the dock is drawing a
+		// header above it — stacking "EXPLORER" under "Project" would
+		// spend a third row of a ten-row panel saying it twice. Pushed
+		// here, beside the other per-draw re-syncs, so nothing has to
+		// chase every path that re-docks the tree.
+		a.tree.HideLabel = a.toolNeedsHeader(toolProject)
 		sx, sy, sw, sh := a.sidebarRect()
 		a.tree.Render(a.screen, a.theme, sx, sy, sw, sh)
 	}
@@ -4509,6 +4539,12 @@ func (a *App) draw() {
 	}
 	if a.chat.open {
 		a.drawChatPanel()
+	}
+	// The generic bottom-dock header, for the one tool that does not
+	// paint its own. After the panel, so the rule is never covered by
+	// the content it labels. See toolheader.go.
+	if id, ok := a.headerlessBottomTool(); ok {
+		a.drawToolHeader(id)
 	}
 	// One seam per vertical edge, painted after every panel so it is
 	// never covered by the one it resizes. See splitter.go.

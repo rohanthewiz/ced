@@ -124,6 +124,7 @@ func (a *App) recordSession() {
 			Col:     t.Cursor.Col,
 			ScrollY: t.ScrollY,
 			ScrollX: t.ScrollX,
+			Wrap:    t.IsSoftWrap(),
 		})
 	}
 	e.Active = active
@@ -195,6 +196,10 @@ func (a *App) restoreSession() {
 		// cursorMoved so the next Render scrolls the cursor into view
 		// instead. Same argument the Find-all popup's Esc path makes.
 		pos := editor.Position{Line: ts.Line, Col: ts.Col}
+		// Wrap goes on BEFORE RestoreView: SetSoftWrap arms a caret reveal
+		// and zeroes ScrollX, and the restore is what clears the one and
+		// puts back the stored scroll over the other.
+		t.SetSoftWrap(ts.Wrap)
 		t.RestoreView(pos, pos, ts.ScrollY, ts.ScrollX)
 		a.tabs = append(a.tabs, t)
 		restored++

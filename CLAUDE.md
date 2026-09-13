@@ -93,6 +93,8 @@ internal/editor/markdown.go   Markdown VIEW: the per-tab flag, the row cache, th
 internal/editor/markdownblocks.go  Blocks → display rows: headings, code, lists, quotes, tables
 internal/editor/markdowninline.go  One line of markdown → styled spans
 internal/app/markdown.go      Preview toggle, its surfaces, and the pane's four differences
+internal/editor/softwrap.go   Soft wrap layout: row starts, row-unit scroll/hit-test/Up-Down
+internal/app/softwrap.go      Soft wrap toggle: tree + editor right-click rows, ≡ View, status
 internal/editor/syntax.go     Re-lex settle policy + the style-grid patch
 internal/app/syntax.go        The settle timer that wakes the loop for the re-lex
 internal/app/tabbar.go        Tab strip: scroll, overflow button, switching
@@ -728,6 +730,47 @@ right-click menus, the status bar's `preview` segment. House rules:
   and raw HTML passes through muted. A link renders its TEXT, since a
   terminal has nothing to click and repeating every href would double a
   link-dense document to say what the source says one keystroke away.
+
+### Soft wrap (editor/softwrap.go + app/softwrap.go)
+A long line drawn across as many rows as it needs. The right-click row
+on a FILE in the tree ("Soft Wrap" / "Stop Soft Wrap") is the primary
+door and opens the file already wrapped; the editor's right-click menu,
+the ≡ **View** row and the status bar's ` · wrap` segment are the rest.
+House rules:
+
+- **A VIEW FLAG PER TAB, beside `mdView`.** The buffer, undo, EditRev and
+  every LSP column are untouched. Not a config key: the same repo holds
+  files that want it and files that don't. It DOES ride the session
+  (`session.TabState.Wrap`) — unlike a preview, it's how you chose to
+  keep reading the file. Restore calls `SetSoftWrap` BEFORE
+  `RestoreView`, which clears the reveal SetSoftWrap armed.
+- **`ScrollY` STAYS A LINE INDEX.** The viewport starts at the top of
+  line ScrollY; wrap changes what each line costs in rows, never what the
+  offset counts — which is why the overflow counts, the Find-all restore,
+  the session and the wheel needed no changes. The stated price: a single
+  line taller than the viewport shows its first screenful only.
+- **ONE LAYOUT.** `wrapLayout` (spliced ghost text included, because
+  Render wraps the spliced row) feeds Render, `HitTest`, `PosScreenCell`,
+  `EnsureVisible`, `CenterOnCursor`, `CursorLineVisible`, Up/Down and
+  `LastVisibleLine`. Render now places the hardware cursor through
+  `PosScreenCell` rather than its own copy of the math. Any new code that
+  maps a screen row to a line must ask `HitTest` — `ScrollY + row` is
+  wrong under wrap (gitblame's column press was the one site that did).
+- **`wrapW` is cached from the last render** (the `annCols` rule) for the
+  helpers handed no width: Up/Down, `CursorLineVisible`,
+  `LastVisibleLine`. Until the first wrapped render they answer unwrapped,
+  which is what the screen still shows.
+- **Rows wrap one cell short of the pane.** The end-of-line caret on an
+  exactly-full row needs a cell, and the vertical overflow marker paints
+  that column on the first and last row. Words break first (whitespace
+  stays on the row it ends, so no rune is dropped); an unbreakable run is
+  cut at the edge. A column equal to a row's start belongs to THAT row —
+  `paintCarets` takes the row's `[from, to)` span plus `lastRow` so a
+  secondary caret on a boundary isn't painted twice.
+- **Up/Down step by SCREEN ROW** when wrapped (`moveVisualRows`, only for
+  a pure vertical move), keeping the offset within the row; Home/End stay
+  logical-line. The flash says so because it's the one change a user
+  could mistake for a bug. No leader key (the flat table is full).
 
 ### Find verbs — options, replace, go to line (editor/find.go,
 ### editor/replace.go, app/find.go, app/goto.go)
@@ -3197,8 +3240,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 129 group actions + 15 headers (146), height 152,
-dividers `[2, 5, 149]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 138 group actions + 15 headers (155), height 161,
+dividers `[2, 5, 158]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

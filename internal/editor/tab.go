@@ -138,6 +138,16 @@ type Tab struct {
 	// be resolved once a width is known, which is the draw's to know.
 	mdView        bool
 	MDScroll      int
+
+	// Soft wrap (softwrap.go). softWrap is a view flag like mdView: the
+	// buffer is untouched, only the drawing changes. wrapW is the row width
+	// the LAST RENDER wrapped at (0 = not wrapping), cached for the
+	// geometry helpers that are not handed a width — Up/Down, the caret's
+	// visibility check, the overflow markers' last line — for the annCols
+	// reason: they must answer about the frame on screen.
+	softWrap bool
+	wrapW    int
+
 	mdRows        []MDRow
 	mdRev         int
 	mdWidth       int
@@ -739,6 +749,18 @@ func (t *Tab) MoveCursor(dLine, dCol int, extend bool) {
 
 // moveCursorAt is the single-caret core of MoveCursor.
 func (t *Tab) moveCursorAt(dLine, dCol int, extend bool) {
+	// Wrapped, a vertical step is a display ROW, not a buffer line — see
+	// moveVisualRows. Only the pure vertical case: no caller combines the
+	// two axes, and a diagonal in row units would have no obvious meaning.
+	if t.wrapW > 0 && dLine != 0 && dCol == 0 {
+		t.moveVisualRows(dLine, t.wrapW)
+		if !extend {
+			t.Anchor = t.Cursor
+		}
+		t.cursorMoved = true
+		t.breakUndoGroup()
+		return
+	}
 	cur := t.Cursor
 	if dLine != 0 {
 		cur.Line += dLine
@@ -869,7 +891,15 @@ func (t *Tab) RestoreView(cursor, anchor Position, scrollY, scrollX int) {
 // scroll only when they have to (CenterOnCursor's "off-screen only"
 // rule) ask this first, rather than each re-deriving the window bounds.
 func (t *Tab) CursorLineVisible(viewH int) bool {
-	return viewH > 0 && t.Cursor.Line >= t.ScrollY && t.Cursor.Line < t.ScrollY+viewH
+	if viewH <= 0 || t.Cursor.Line < t.ScrollY {
+		return false
+	}
+	// Wrapped, the lines above the caret may take several rows each, so
+	// "on screen" is a row count rather than a line difference.
+	if t.wrapW > 0 {
+		return t.wrapRowsBefore(t.ScrollY, t.Cursor.Line, t.wrapW, viewH) < viewH
+	}
+	return t.Cursor.Line < t.ScrollY+viewH
 }
 
 // CenterOnCursor scrolls the viewport so the cursor's LINE sits in the
@@ -897,7 +927,11 @@ func (t *Tab) CenterOnCursor(viewW, viewH int) {
 		return
 	}
 	t.EnsureVisible(viewW, viewH)
-	t.ScrollY = t.Cursor.Line - viewH/2
+	if ww := t.wrapWidthFor(viewW); ww > 0 {
+		t.centerOnCursorWrapped(ww, viewH)
+	} else {
+		t.ScrollY = t.Cursor.Line - viewH/2
+	}
 	if t.ScrollY < 0 {
 		t.ScrollY = 0
 	}
@@ -934,6 +968,13 @@ func (t *Tab) AnnotationCols() (start, end int) {
 // caller passes the editor area's width and height because the Tab itself
 // doesn't know its render rect.
 func (t *Tab) EnsureVisible(viewW, viewH int) {
+	if ww := t.wrapWidthFor(viewW); ww > 0 {
+		t.ensureVisibleWrapped(ww, viewH)
+		if t.ScrollY < 0 {
+			t.ScrollY = 0
+		}
+		return
+	}
 	contentW := viewW - t.gutterCols() - 1
 	if contentW < 1 {
 		contentW = 1
@@ -985,6 +1026,13 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		t.StyleStale = false
 		t.styleDefer = false
 	}
+	// The wrap width is measured before anything reads it: EnsureVisible
+	// below scrolls in row units when it is set. A wrapped view has no
+	// horizontal scroll, whatever a stale restore or a wheel left behind.
+	t.wrapW = t.wrapWidthFor(w)
+	if t.wrapW > 0 {
+		t.ScrollX = 0
+	}
 	// Only re-center on the cursor if the cursor moved this tick. Doing it
 	// every render fights the user when they scroll with the wheel.
 	if t.cursorMoved {
@@ -1025,6 +1073,10 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		annW, annByLine = 0, nil
 	}
 	t.annCols = annW
+	// The annotation column is only settled now, and it moves the content
+	// edge — so the wrap width is re-derived against it, or a column that
+	// switched on this frame would wrap rows one annotation too wide.
+	t.wrapW = t.wrapWidthFor(w)
 
 	contentX := x + t.gutterCols() + 1
 	contentW := w - t.gutterCols() - 1
@@ -1032,65 +1084,24 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		contentW = 1
 	}
 
-	for row := 0; row < h; row++ {
-		lineIdx := t.ScrollY + row
-		if lineIdx >= t.Buffer.LineCount() {
-			break
-		}
-		cy := y + row
+	// The walk is by LINE, and each line paints one or more screen rows:
+	// exactly one unwrapped, as many as wrapStarts laid out under soft
+	// wrap. `row` is the screen row the next painted row lands on, so the
+	// loop ends at whichever runs out first — the viewport or the buffer.
+	row := 0
+	for lineIdx := t.ScrollY; row < h && lineIdx < t.Buffer.LineCount(); lineIdx++ {
 		isCursorLine := lineIdx == t.Cursor.Line
 
 		// Pick the row background — a hair lighter on the cursor's line so
 		// the eye can catch where the caret is from across the screen.
+		// Every row of a wrapped cursor line takes it: the highlight is
+		// about the LINE, and lighting one fragment would read as a
+		// selection of that fragment.
 		lineBg := bg
 		if isCursorLine {
 			lineBg = th.LineHL
 		}
 		lineBgStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Text)
-
-		// Re-paint this row with its (possibly highlighted) bg.
-		for cx := x; cx < x+w; cx++ {
-			scr.SetContent(cx, cy, ' ', nil, lineBgStyle)
-		}
-
-		// Gutter / line number, right-aligned with one trailing space.
-		numStr := fmt.Sprintf("%*d", gutterWidth-1, lineIdx+1)
-		gutterStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
-		if isCursorLine {
-			gutterStyle = gutterStyle.Foreground(th.AccentSoft)
-		}
-		for i, r := range numStr {
-			scr.SetContent(x+i, cy, r, nil, gutterStyle)
-		}
-
-		// Annotation column — text about the line rather than of it
-		// (git blame today). Drawn before the mark cell so the mark
-		// keeps its place immediately left of the code, where the eye
-		// has always found it. Clipped, never wrapped: the source sized
-		// the column, and a row that overran it would push the code.
-		if annW > 0 {
-			annStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
-			if ann, ok := annByLine[lineIdx]; ok {
-				st := annStyle.Foreground(ann.FG)
-				col := 0
-				for _, r := range ann.Text {
-					if col >= annW {
-						break
-					}
-					scr.SetContent(x+gutterWidth+col, cy, r, nil, st)
-					col += RuneVisualWidth(r, col)
-				}
-			}
-		}
-
-		// Gutter mark column — the single cell between the annotation
-		// column (when there is one) and the code. Blank on unmarked
-		// lines, so with no sources active the layout is pixel-identical
-		// to the pre-decoration renderer.
-		if mk, ok := markByLine[lineIdx]; ok {
-			markStyle := tcell.StyleDefault.Background(lineBg).Foreground(mk.FG)
-			scr.SetContent(x+t.gutterCols(), cy, mk.Glyph, nil, markStyle)
-		}
 
 		// Line content: effective styles first, then the paint walk.
 		// We walk from the start of the line so tab stops anchor to col 0
@@ -1132,77 +1143,152 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 				Foreground(th.Muted).Attributes(tcell.AttrItalic)
 			runes, rowStyles = t.ghostOverlay(lineIdx, runes, rowStyles, ghostStyle)
 		}
-		scrollVisual := LineVisualCol(runes, t.ScrollX)
-		visualCol := 0 // visual cell offset from the start of the LINE
-		for runeIdx, r := range runes {
-			width := RuneVisualWidth(r, visualCol)
-			if runeIdx >= t.ScrollX {
-				// Once we're past ScrollX, paint each cell of this rune.
-				// The rune's first cell shows the actual glyph (or ' '
-				// for tabs); padding cells for a multi-cell tab show a
-				// space so the trailing tab area still gets the right bg.
-				st := rowStyles[runeIdx]
-				glyph := r
-				if r == '\t' {
-					glyph = ' '
+
+		// The rows this line paints. Unwrapped there is one, and it starts
+		// wherever ScrollX says; wrapped, wrapStarts decides — laid out
+		// over the SPLICED runes, which is the same input wrapLayout hands
+		// the geometry helpers, so the paint and a click agree.
+		starts := []int{t.ScrollX}
+		if t.wrapW > 0 {
+			starts = wrapStarts(runes, t.wrapW)
+		}
+
+		for seg := 0; seg < len(starts) && row < h; seg++ {
+			cy := y + row
+			row++
+			from := starts[seg]
+			to := wrapRowEnd(starts, seg, len(runes))
+			lastRow := seg == len(starts)-1
+
+			// Re-paint this row with its (possibly highlighted) bg.
+			for cx := x; cx < x+w; cx++ {
+				scr.SetContent(cx, cy, ' ', nil, lineBgStyle)
+			}
+
+			// The gutter — number, annotation, mark — is about the LINE, so
+			// only its first row carries it. A blank number on the rows
+			// below is what tells a wrapped continuation from a real line,
+			// without spending a glyph on it.
+			if seg == 0 {
+				// Gutter / line number, right-aligned with one trailing space.
+				numStr := fmt.Sprintf("%*d", gutterWidth-1, lineIdx+1)
+				gutterStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
+				if isCursorLine {
+					gutterStyle = gutterStyle.Foreground(th.AccentSoft)
 				}
-				for cell := 0; cell < width; cell++ {
-					sc := visualCol - scrollVisual + cell
-					if sc < 0 {
-						continue
+				for i, r := range numStr {
+					scr.SetContent(x+i, cy, r, nil, gutterStyle)
+				}
+
+				// Annotation column — text about the line rather than of it
+				// (git blame today). Drawn before the mark cell so the mark
+				// keeps its place immediately left of the code, where the eye
+				// has always found it. Clipped, never wrapped: the source sized
+				// the column, and a row that overran it would push the code.
+				if annW > 0 {
+					annStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
+					if ann, ok := annByLine[lineIdx]; ok {
+						st := annStyle.Foreground(ann.FG)
+						col := 0
+						for _, r := range ann.Text {
+							if col >= annW {
+								break
+							}
+							scr.SetContent(x+gutterWidth+col, cy, r, nil, st)
+							col += RuneVisualWidth(r, col)
+						}
 					}
-					if sc >= contentW {
-						break
-					}
-					ch := glyph
-					if cell > 0 {
-						ch = ' '
-					}
-					scr.SetContent(contentX+sc, cy, ch, nil, st)
+				}
+
+				// Gutter mark column — the single cell between the annotation
+				// column (when there is one) and the code. Blank on unmarked
+				// lines, so with no sources active the layout is pixel-identical
+				// to the pre-decoration renderer.
+				if mk, ok := markByLine[lineIdx]; ok {
+					markStyle := tcell.StyleDefault.Background(lineBg).Foreground(mk.FG)
+					scr.SetContent(x+t.gutterCols(), cy, mk.Glyph, nil, markStyle)
 				}
 			}
-			visualCol += width
-		}
 
-		// Overflow affordance: paint a muted '‹' / '›' over the leftmost /
-		// rightmost content cell when the line extends past the viewport
-		// in that direction. Without this hint a terminal user has no way
-		// to tell that more content exists off-screen — there's no
-		// scrollbar to clue them in. visualCol now equals the total
-		// visual width of the line; scrollVisual is the visual cell
-		// corresponding to ScrollX.
-		//
-		// The app paints its VERTICAL overflow marker in this same column
-		// on the viewport's first and last row (app/overflow.go), and
-		// wins there: "the file runs on" outranks "this line runs on",
-		// because the line's own arrow is repeated on every other long
-		// row while that marker has exactly one place to be.
-		overflowStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
-		if t.ScrollX > 0 {
-			scr.SetContent(contentX, cy, '‹', nil, overflowStyle)
-		}
-		if visualCol-scrollVisual > contentW {
-			scr.SetContent(contentX+contentW-1, cy, '›', nil, overflowStyle)
-		}
+			// The paint walk. It runs from the start of the LINE so tab
+			// stops anchor to col 0 — a tab one cell into the line still
+			// expands to the next stop, not the next-stop-from-the-row's-
+			// start — and paints only runes in [from, to). Unwrapped, from
+			// is ScrollX and to is the line's end; wrapped, they are one
+			// row's span. scrollVisual is the visual column the row's first
+			// cell shows, in both cases.
+			scrollVisual := LineVisualCol(runes, from)
+			visualCol := 0 // visual cell offset from the start of the LINE
+			for runeIdx, r := range runes {
+				width := RuneVisualWidth(r, visualCol)
+				if runeIdx >= to {
+					break
+				}
+				if runeIdx >= from {
+					// Paint each cell of this rune. The rune's first cell
+					// shows the actual glyph (or ' ' for tabs); padding cells
+					// for a multi-cell tab show a space so the trailing tab
+					// area still gets the right bg.
+					st := rowStyles[runeIdx]
+					glyph := r
+					if r == '\t' {
+						glyph = ' '
+					}
+					for cell := 0; cell < width; cell++ {
+						sc := visualCol - scrollVisual + cell
+						if sc < 0 {
+							continue
+						}
+						if sc >= contentW {
+							break
+						}
+						ch := glyph
+						if cell > 0 {
+							ch = ' '
+						}
+						scr.SetContent(contentX+sc, cy, ch, nil, st)
+					}
+				}
+				visualCol += width
+			}
 
-		// Secondary carets sitting on this row. Painted here rather than
-		// emitted as decoration spans because a caret is a zero-width
-		// POSITION: the one at the end of a line has no cell for a Span
-		// to cover, and end-of-line is exactly where a column of carets
-		// lands after Home/End. See multicaret.go.
-		t.paintCarets(scr, th, lineIdx, cy, contentX, contentW, lineBg)
+			// Overflow affordance: paint a muted '‹' / '›' over the leftmost /
+			// rightmost content cell when the line extends past the viewport
+			// in that direction. Without this hint a terminal user has no way
+			// to tell that more content exists off-screen — there's no
+			// scrollbar to clue them in. Unwrapped, the walk above stopped at
+			// the line's end, so visualCol is its total visual width.
+			// Wrapped, nothing is ever off to either side, so no arrows.
+			//
+			// The app paints its VERTICAL overflow marker in this same column
+			// on the viewport's first and last row (app/overflow.go), and
+			// wins there: "the file runs on" outranks "this line runs on",
+			// because the line's own arrow is repeated on every other long
+			// row while that marker has exactly one place to be.
+			if t.wrapW == 0 {
+				overflowStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
+				if t.ScrollX > 0 {
+					scr.SetContent(contentX, cy, '‹', nil, overflowStyle)
+				}
+				if visualCol-scrollVisual > contentW {
+					scr.SetContent(contentX+contentW-1, cy, '›', nil, overflowStyle)
+				}
+			}
+
+			// Secondary carets sitting on this row. Painted here rather than
+			// emitted as decoration spans because a caret is a zero-width
+			// POSITION: the one at the end of a line has no cell for a Span
+			// to cover, and end-of-line is exactly where a column of carets
+			// lands after Home/End. See multicaret.go.
+			t.paintCarets(scr, th, lineIdx, cy, contentX, contentW, lineBg, from, to, lastRow)
+		}
 	}
 
-	// Position the hardware cursor at its visual column (so a cursor
-	// past a tab lands at the tab's *end* cell, not just rune-Col cells
-	// to the right of ScrollX).
-	cy := y + (t.Cursor.Line - t.ScrollY)
-	cursorRunes := t.Buffer.LineRunes(t.Cursor.Line)
-	cursorVisual := LineVisualCol(cursorRunes, t.Cursor.Col)
-	scrollVisual := LineVisualCol(cursorRunes, t.ScrollX)
-	cx := contentX + (cursorVisual - scrollVisual)
-	if cy >= y && cy < y+h && cx >= contentX && cx < contentX+contentW {
-		scr.ShowCursor(cx, cy)
+	// Position the hardware cursor through PosScreenCell — the same math
+	// hit-testing and the popups use, so a caret past a tab lands at the
+	// tab's end cell and a caret on a wrapped row lands on that row.
+	if dx, dy, ok := t.PosScreenCell(t.Cursor, w, h); ok {
+		scr.ShowCursor(x+dx, y+dy)
 	} else {
 		scr.HideCursor()
 	}
@@ -1226,6 +1312,9 @@ func (t *Tab) CursorScreenCell(w, h int) (dx, dy int, ok bool) {
 // offset, the tab-stop arithmetic, the "scrolled out of view" answer —
 // is identical, which is why the caret flavour is now one line.
 func (t *Tab) PosScreenCell(p Position, w, h int) (dx, dy int, ok bool) {
+	if ww := t.wrapWidthFor(w); ww > 0 {
+		return t.posScreenCellWrapped(p, ww, h)
+	}
 	contentX := t.gutterCols() + 1
 	contentW := w - t.gutterCols() - 1
 	if contentW < 1 {
@@ -1245,6 +1334,9 @@ func (t *Tab) PosScreenCell(p Position, w, h int) (dx, dy int, ok bool) {
 func (t *Tab) HitTest(localX, localY, w, h int) (Position, bool) {
 	if localY < 0 || localY >= h {
 		return Position{}, false
+	}
+	if ww := t.wrapWidthFor(w); ww > 0 {
+		return t.hitTestWrapped(localX, localY, ww)
 	}
 	contentX := t.gutterCols() + 1
 	line := t.ScrollY + localY
@@ -1291,6 +1383,13 @@ func (t *Tab) Scroll(deltaLines int) {
 // mouse-wheel dispatcher can treat horizontal and vertical wheels
 // symmetrically.
 func (t *Tab) ScrollH(deltaCols int) {
+	// Wrapped, every line already fits the pane; a horizontal wheel that
+	// shifted it would only slide text off the left edge with nothing to
+	// reveal on the right.
+	if t.softWrap {
+		t.ScrollX = 0
+		return
+	}
 	t.ScrollX += deltaCols
 	if t.ScrollX < 0 {
 		t.ScrollX = 0

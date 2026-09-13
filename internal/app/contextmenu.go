@@ -178,6 +178,13 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 			label: "Preview", action: (*App).toggleMarkdownView, enabled: alwaysTrue,
 		})
 	}
+	// Soft wrap (softwrap.go), beside Preview for the tree menu's reason:
+	// both are about how the file is drawn. Unconditional, unlike Preview —
+	// every text file can have a long line — and labelled by the state the
+	// click produces, so a wrapped file offers the way back out.
+	items = append(items, editorContextItem{
+		label: softWrapContextLabel(tab.IsSoftWrap()), action: (*App).toggleSoftWrap, enabled: alwaysTrue,
+	})
 	if word := a.contextSearchWord(tab); word != "" {
 		items = append(items, editorContextItem{
 			label:   "Search project for \"" + word + "\"",

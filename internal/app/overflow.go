@@ -416,7 +416,11 @@ func (a *App) overflowMarkers() []overflowMarker {
 				total := len(a.markdownRows(t))
 				pane(ex+ew-1, ey, eh, t.MDScroll, total, "row")
 			} else {
-				above, below := a.editorOffscreen(t, t.ScrollY, t.ScrollY+eh-1)
+				// LastVisibleLine rather than ScrollY+eh-1: under soft
+				// wrap the lines above the bottom row take several rows
+				// each, and a line plainly on screen must not be
+				// counted as "below".
+				above, below := a.editorOffscreen(t, t.ScrollY, t.LastVisibleLine(eh))
 				add(ex+ew-1, ey, false, "line", eh, above)
 				add(ex+ew-1, ey+eh-1, true, "line", eh, below)
 			}

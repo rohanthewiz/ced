@@ -72,6 +72,11 @@ type TabState struct {
 	Col     int    `json:"col,omitempty"`
 	ScrollY int    `json:"scrolly,omitempty"`
 	ScrollX int    `json:"scrollx,omitempty"`
+	// Wrap is the tab's soft-wrap view flag. It rides the session because
+	// it is how the user chose to keep reading that file, not a glance —
+	// see app/softwrap.go. omitempty keeps an unwrapped tab's entry the
+	// shape it always had.
+	Wrap bool `json:"wrap,omitempty"`
 }
 
 // Entry is one folder's remembered workspace. Root is always an

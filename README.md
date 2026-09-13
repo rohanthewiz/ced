@@ -58,6 +58,9 @@ The goals, in order:
   scroll wheel scrolls, double-click selects a word, drag past the edge
   to auto-scroll a selection.
 - **Syntax highlighting** for dozens of languages via Chroma.
+- **Soft wrap, per file** — right-click a file in the tree (or in the
+  editor) and pick **Soft Wrap** to read long lines folded at the pane's
+  edge. See [Soft wrap](#soft-wrap).
 - **Action menu** opened with the `≡` icon, right-click, or double-tap
   `Esc`. Keyboard navigation works too — arrow keys + `Enter`.
 - **Live file tree** — auto-refreshes every 10 seconds so files added
@@ -553,6 +556,20 @@ the find tint are already saying it, against the code itself.
 Nothing gates the markers: they cost no layout, and a viewport that
 silently runs on past its last row is the one thing an editor must never
 do.
+
+### Soft wrap
+
+Right-click a file in the tree and choose **Soft Wrap**: the file opens
+with long lines folded across as many rows as they need, breaking between
+words where it can. The same row is in the editor's own right-click menu
+and in `≡` → **View**; on a wrapped file it reads **Stop Soft Wrap**.
+
+Wrap is per file, and nothing about the file changes — it is only drawn
+differently. While it's on, `↑`/`↓` move one screen row at a time (so a
+long paragraph doesn't jump by the whole paragraph), `Home`/`End` still
+go to the ends of the real line, and the status bar shows ` · wrap`
+(click it to unwrap). A wrapped file stays wrapped when its tabs come
+back in your next session.
 
 ### Matching word highlight
 

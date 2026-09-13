@@ -268,6 +268,13 @@ func builtinMenuGroups() []menuGroup {
 			// isn't one", which the filename already says.
 			{shortcut: "esc v", action: (*App).menuToggleMarkdownView,
 				enabled: (*App).hasMarkdownPreview, labelFor: (*App).markdownToggleLabel},
+			// Soft wrap (softwrap.go) — the other "how is this file drawn"
+			// toggle, so it sits under Preview, below the fold-pinned
+			// terminal rows for the same reason. The ≡ twin of the tree's
+			// and the editor's right-click rows, for the terminal that
+			// swallows right-click. Dims with no text tab in front.
+			{action: (*App).menuToggleSoftWrap,
+				enabled: (*App).hasSoftWrapTarget, labelFor: (*App).softWrapToggleLabel},
 			// The Find-all list's edge. Here rather than in Search
 			// because it's a layout preference like the terminal dock
 			// above it — and because it's the only keyboard path to the

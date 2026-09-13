@@ -52,6 +52,13 @@ const imageMode = "image"
 // Foreground = top pixel, background = bottom pixel.
 const upperHalfBlock = '▀'
 
+// IsImagePath is isImageExt for callers outside the package — the tree's
+// context menu, which offers text-view rows (soft wrap) only on files that
+// will open as text.
+func IsImagePath(path string) bool {
+	return isImageExt(path)
+}
+
 // isImageExt reports whether path's extension is one we know how to
 // decode. Case-insensitive so "FOO.PNG" works the same as "foo.png".
 func isImageExt(path string) bool {

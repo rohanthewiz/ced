@@ -2007,16 +2007,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 160 {
-		t.Errorf("modalHeight = %d, want 160", h)
+	if h != 161 {
+		t.Errorf("modalHeight = %d, want 161", h)
 	}
-	if got := len(items); got != 154 {
-		t.Errorf("row count = %d, want 154 (2 top-zone + 137 group actions + 15 headers)", got)
+	if got := len(items); got != 155 {
+		t.Errorf("row count = %d, want 155 (2 top-zone + 138 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (154) — headers separate the
+	// one setting off the headerless Quit group (158) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 157}
+	wantDiv := []int{2, 5, 158}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2344,8 +2344,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 163 { // 160 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 163", h)
+	if h != 164 { // 161 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 164", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

@@ -405,7 +405,7 @@ func TestOpenTreeContext_File(t *testing.T) {
 	}
 	a.openTreeContext(node, 5, 5)
 	wantLabels := []string{"Rename", "Delete", "Copy", "Zip", "Copy rel path", "Copy abs path",
-		"Select", "Open in $EDITOR"}
+		"Soft Wrap", "Select", "Open in $EDITOR"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("file context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))
 	}

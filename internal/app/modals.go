@@ -931,6 +931,19 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 			items = append(items, contextItem{label: a.ctxPreviewSourceLabel(n), action: ctxPreviewMarkdown})
 		}
 	}
+	// Soft Wrap / Stop Soft Wrap (softwrap.go) sits directly under Preview:
+	// both change how a file is DRAWN, and side by side on a .md file they
+	// read as the two ways to make a document legible. Offered on every
+	// text file rather than conditionally — a long line can live in any of
+	// them — so it varies by node KIND the way New File does, never by
+	// state. One row, labelled by the clicked file's own tab, the Preview
+	// pair's rule.
+	if ctxSoftWrapOffered(n) {
+		items = append(items, contextItem{
+			label:  softWrapContextLabel(a.wrappingPath(n.Path)),
+			action: ctxToggleSoftWrap,
+		})
+	}
 	// The multi-selection (treemarks.go). Two rows, and both earn their
 	// place in a popup this small:
 	//

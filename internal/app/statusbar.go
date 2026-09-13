@@ -123,6 +123,13 @@ func (a *App) statusLeftSegments() []statusSegment {
 		segs = append(segs, statusSegment{text: " · preview",
 			onClick: (*App).toggleMarkdownView})
 	}
+	// Soft wrap changes what Up and Down do, and a mode that changes the
+	// keys has to be visible. Clicking it unwraps — the reader who just
+	// noticed the label is usually asking how to turn it off.
+	if tab.IsSoftWrap() && !tab.IsMarkdownView() {
+		segs = append(segs, statusSegment{text: " · wrap",
+			onClick: (*App).toggleSoftWrap})
+	}
 	return segs
 }
 

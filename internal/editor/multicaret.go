@@ -452,18 +452,27 @@ func (t *Tab) applyAtCarets(mutating bool, op func()) {
 // That's also why the blink is CaretsHidden and not a style attribute:
 // SGR blink toggles the glyph, and a caret past the end of a line has no
 // glyph to toggle — the cell it paints is a space.
-func (t *Tab) paintCarets(scr tcell.Screen, th theme.Theme, lineIdx, cy, contentX, contentW int, lineBg tcell.Color) {
+//
+// from / to bound the rune columns drawn on this screen row — ScrollX to
+// the line's end unwrapped, one wrapped row's span under soft wrap — and
+// lastRow says whether the row ends the line. A caret at exactly `to` on
+// a row that does NOT end the line belongs to the next row, where Render
+// draws that column; painting it here too would show one caret twice.
+func (t *Tab) paintCarets(scr tcell.Screen, th theme.Theme, lineIdx, cy, contentX, contentW int, lineBg tcell.Color, from, to int, lastRow bool) {
 	if len(t.Carets) == 0 || t.CaretsHidden {
 		return
 	}
 	runes := t.Buffer.LineRunes(lineIdx)
-	scrollVisual := LineVisualCol(runes, t.ScrollX)
+	scrollVisual := LineVisualCol(runes, from)
 	style := wordHighlightStyle(th, lineBg)
 	for _, c := range t.Carets {
 		if c.Cursor.Line != lineIdx {
 			continue
 		}
 		col := c.Cursor.Col
+		if col > to || (col == to && !lastRow) {
+			continue
+		}
 		sc := LineVisualCol(runes, col) - scrollVisual
 		if sc < 0 || sc >= contentW {
 			continue

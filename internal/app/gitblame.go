@@ -657,7 +657,7 @@ func (a *App) blameColumnPress(x, y int) bool {
 	if t == nil || t.IsImage() {
 		return false
 	}
-	ex, ey, _, eh := a.editorRect()
+	ex, ey, ew, eh := a.editorRect()
 	start, end := t.AnnotationCols()
 	if start == end {
 		return false
@@ -666,7 +666,14 @@ func (a *App) blameColumnPress(x, y int) bool {
 	if lx < start || lx >= end || ly < 0 || ly >= eh {
 		return false
 	}
-	line := t.ScrollY + ly
+	// The screen row → line mapping goes through HitTest rather than
+	// ScrollY+ly: under soft wrap a line can span several rows, and the
+	// blank rows beside a wrapped continuation still belong to its line.
+	pos, hit := t.HitTest(lx, ly, ew, eh)
+	if !hit {
+		return true // inside the column, below the buffer — still ours.
+	}
+	line := pos.Line
 	b, ok := a.fileBlames[t.Path].at(line)
 	if !ok || b.Hash == "" {
 		return true // inside the column, nothing to reveal — still ours.

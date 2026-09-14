@@ -1608,8 +1608,7 @@ nothing else: you get one warning, and the rest of the registry loads.
 │   ├── theme/                # Named themes: palette derivation + registry
 │   └── version/              # Single-line version constant
 ├── .github/workflows/        # Auto-release pipeline
-├── .goreleaser.yml           # Cross-compile + brew formula config
-├── Formula/                  # Homebrew formula (written by CI)
+├── .goreleaser.yml           # Cross-compile + GitHub Release archives
 └── Makefile
 ```
 
@@ -1632,21 +1631,24 @@ needs a corresponding `_test.go` — see CLAUDE.md for the bar.
 
 ## Releases
 
-Releases are fully automated. Every push to `main`:
+Releases are cut deliberately: ordinary pushes to `main` ship nothing.
+Push to the `release` branch (cut it from `main`) and
+[`.github/workflows/release.yml`](.github/workflows/release.yml):
 
 1. Reads `internal/version/version.go`.
 2. If that file was hand-edited in the pushed commit, the version is
    used as-is (this is how you bump major or minor: edit the constant
    manually). Otherwise the patch number is auto-bumped and committed
-   back to `main` with `[skip ci]`.
+   back to `release` with `[skip ci]`.
 3. Tags `v<x.y.z>` and pushes the tag.
 4. [GoReleaser](https://goreleaser.com/) cross-compiles for
-   linux/darwin × amd64/arm64, attaches archives to a GitHub
-   Release, and pushes an updated formula into `Formula/ced.rb`
-   on this same repo.
+   linux/darwin × amd64/arm64 and attaches the archives and
+   `checksums.txt` to a GitHub Release — what the install script and
+   the manual binary install download.
 
-No PAT, no separate tap repo — the default workflow `GITHUB_TOKEN` is
-enough since the formula lives in the source repo.
+There is no Homebrew formula: ced is installed through the cats plugin
+host, which builds from source. Merge `release` back into `main`
+afterwards to bring `version.go` current.
 
 ## License
 

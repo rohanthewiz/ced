@@ -65,9 +65,11 @@ test passes against code that never sees a right-click.
 ## Module / repo
 
 - Module: `github.com/rohanthewiz/ced`
-- Binary name: `ced` (one word, lowercase — Makefile, goreleaser,
-  brew formula all assume this)
-- Brew tap: this same repo, `Formula/` directory (no separate tap repo)
+- Binary name: `ced` (one word, lowercase — Makefile, goreleaser, the
+  cats plugin manifest's `bin` entry and install.sh all assume this)
+- Official install: the cats plugin (`cats-plugin.toml`), which links
+  `~/.cats/bin/ced`. **No Homebrew formula** — the tap (`Formula/`) and
+  goreleaser's `brews:` block were removed on 2026-09-14.
 
 ## Architecture map
 
@@ -3832,10 +3834,11 @@ Once a run does start (pushed or dispatched), the workflow:
    as-is (manual major/minor bump). **Otherwise** the patch is
    auto-bumped, committed back to `release` with `[skip ci]`, and pushed.
 3. Tags `v<x.y.z>`.
-4. GoReleaser cross-compiles, attaches archives to a GitHub Release,
-   and writes `Formula/ced.rb` back into this repo (using the
-   default `GITHUB_TOKEN` — no PAT). The formula commit also carries
-   `[skip ci]` to break the loop.
+4. GoReleaser cross-compiles and attaches the archives and
+   `checksums.txt` to a GitHub Release. **Nothing else** — the Homebrew
+   formula step (`brews:` writing `Formula/ced.rb` back into this repo)
+   was removed on 2026-09-14, so a release run makes no commit after the
+   version bump.
 
 **Step 2 inspects the TIP commit only** (`git diff HEAD~1..HEAD`), which
 makes pinning a version fragile in a non-obvious way: stack a follow-up
@@ -3860,9 +3863,11 @@ ever wanted, starts fresh. Git history has the old tree.
 `main` is left untouched by a release run — merge `release` back into
 main yourself to bring its `version.go` current.
 
-If you're touching the workflow or `.goreleaser.yml`, make sure both
-auto-commits keep their `[skip ci]` markers — without them the workflow
-loops forever.
+If you're touching the workflow or `.goreleaser.yml`, make sure the
+version-bump auto-commit keeps its `[skip ci]` marker — without it the
+workflow loops forever. (It is the only auto-commit left since the
+Homebrew formula commit went away; don't add a goreleaser step that
+commits back without the same marker.)
 
 ## What NOT to add
 
@@ -3902,5 +3907,9 @@ loops forever.
   "a command line plus a place to put its stdout", that line has moved.
 - CGO dependencies. The whole point is one static binary.
 - Tree-sitter. We use Chroma intentionally — pure Go, no setup.
-- A separate `homebrew-tap` repo. The formula lives here under
-  `Formula/` and that's deliberate.
+- A Homebrew formula or tap — in this repo or a separate `homebrew-tap`
+  repo. The in-repo `Formula/` and goreleaser's `brews:` block were
+  removed on 2026-09-14: ced's official install is the cats plugin, which
+  builds from source and links `~/.cats/bin/ced`. A second channel means a
+  second `ced` on PATH drifting behind the plugin build — the exact
+  problem that removal fixed. Release archives stay for install.sh.

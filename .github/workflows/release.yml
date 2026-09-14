@@ -15,10 +15,9 @@
 #      pushes.
 #   2. Tags v<x.y.z> and pushes the tag.
 #   3. Runs goreleaser to cross-compile binaries (linux/darwin ×
-#      amd64/arm64), package them, attach them to a GitHub Release, and
-#      push an updated Homebrew formula into Formula/ in this same repo
-#      (using the default GITHUB_TOKEN — no separate tap repo or PAT
-#      required).
+#      amd64/arm64), package them, and attach them to a GitHub Release.
+#      No Homebrew formula is published — that step was removed on
+#      2026-09-14; ced's official install is the cats plugin.
 #
 # main is left untouched by a release run — merge `release` back into
 # main yourself to bring its version.go current.
@@ -137,6 +136,7 @@ jobs:
           version: latest
           args: release --clean
         env:
-          # Same-repo brew formula push uses the default workflow token —
-          # no separate tap repo or PAT needed.
+          # GoReleaser needs the default workflow token to create the GitHub
+          # Release and upload the archives. It no longer pushes a Homebrew
+          # formula, so nothing else is written back to the repo.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

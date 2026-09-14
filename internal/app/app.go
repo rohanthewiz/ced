@@ -668,6 +668,11 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Copy selection", shortcut: "cmd+c", action: (*App).menuCopy, enabled: (*App).hasSelection},
 			{label: "Cut selection", action: (*App).menuCut, enabled: (*App).hasSelection},
 			{label: "Paste", shortcut: "cmd+v", action: (*App).menuPaste, enabled: (*App).hasClipboard},
+			// Whole-buffer selection, beside the clipboard verbs it feeds:
+			// select all, then Copy / Cut / Compare. No leader key (the flat
+			// table is out of mnemonic letters); the row gives the command
+			// palette its entry for free.
+			{label: "Select all", action: (*App).menuSelectAll, enabled: (*App).hasSelectableTab},
 			{label: "Toggle line comment", shortcut: "esc /", action: (*App).menuToggleLineComment, enabled: (*App).hasCommentableTab},
 			{label: "Duplicate line", shortcut: "ctrl+d", action: (*App).menuDuplicateLines, enabled: (*App).hasEditableTab},
 			{label: "Move line up", shortcut: "alt+↑", action: (*App).menuMoveLinesUp, enabled: (*App).hasEditableTab},
@@ -4378,6 +4383,37 @@ func (a *App) menuClose() {
 func (a *App) menuCopy() {
 	a.closeMenu()
 	a.copySelection()
+}
+
+// menuSelectAll selects the whole active file — the ≡ / palette door onto
+// selectAllInFile.
+func (a *App) menuSelectAll() {
+	a.closeMenu()
+	a.selectAllInFile()
+}
+
+// selectAllInFile selects the entire buffer of the active tab. It is the
+// one implementation behind the ≡ Edit row, the palette entry and the
+// editor's right-click row, so the three can never disagree about what
+// "all" covers. Tab.SelectAll drops secondary carets itself.
+//
+// Refuses the same tabs hasSelectableTab dims: an image has no buffer, and
+// a markdown preview has no visible caret or selection — a selection made
+// there would silently become the argument of the next Cut the moment the
+// user flipped back to source.
+func (a *App) selectAllInFile() {
+	if !a.hasSelectableTab() {
+		return
+	}
+	a.activeTabPtr().SelectAll()
+}
+
+// hasSelectableTab reports whether the active tab is a text buffer
+// currently shown as source, i.e. one where a selection is both possible
+// and visible. See selectAllInFile for why a preview doesn't qualify.
+func (a *App) hasSelectableTab() bool {
+	t := a.activeTabPtr()
+	return t != nil && !t.IsImage() && t.Buffer != nil && !t.IsMarkdownView()
 }
 
 // menuCut cuts the current selection.

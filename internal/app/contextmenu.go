@@ -138,6 +138,10 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 		// pasteClipboard's hint flash explains the OSC 52 read gap,
 		// which a dimmed row never could.
 		{label: "Paste", action: (*App).pasteClipboard, enabled: alwaysTrue},
+		// Part of the fixed vocabulary: every text file can be selected
+		// whole, and the popup only opens over a source-view text tab (a
+		// preview gets openPreviewContext), so the row never needs dimming.
+		{label: "Select all", action: (*App).selectAllInFile, enabled: alwaysTrue},
 		{label: "Compare selection with paste…", action: (*App).compareSelectionWithPaste, enabled: (*App).hasSelection},
 	}
 	// The cats split (catssplit.go), appended conditionally like the search

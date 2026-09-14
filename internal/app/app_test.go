@@ -2007,16 +2007,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 161 {
-		t.Errorf("modalHeight = %d, want 161", h)
+	if h != 162 {
+		t.Errorf("modalHeight = %d, want 162", h)
 	}
-	if got := len(items); got != 155 {
-		t.Errorf("row count = %d, want 155 (2 top-zone + 138 group actions + 15 headers)", got)
+	if got := len(items); got != 156 {
+		t.Errorf("row count = %d, want 156 (2 top-zone + 139 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (158) — headers separate the
+	// one setting off the headerless Quit group (159) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 158}
+	wantDiv := []int{2, 5, 159}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2024,6 +2024,43 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 		if dividers[i] != d {
 			t.Errorf("dividers[%d] = %d, want %d", i, dividers[i], d)
 		}
+	}
+}
+
+// TestMenuSelectAll pins the ≡ Edit "Select all" row: it selects the whole
+// buffer and drops secondary carets, and its predicate dims on the tabs
+// where a selection can't be seen — no tab, and a markdown preview (a
+// selection made there would silently arm the next Cut in source view).
+func TestMenuSelectAll(t *testing.T) {
+	root := t.TempDir()
+	p := writeStatusTestFile(t, root, "notes.md", "# Title\n\nbody\n")
+	a := newTestApp(t, root)
+	if a.hasSelectableTab() {
+		t.Fatal("Select all should be dimmed with no tab open")
+	}
+	a.openFile(p)
+	tab := a.activeTabPtr()
+	if !a.hasSelectableTab() {
+		t.Fatal("Select all should be enabled on a text tab")
+	}
+
+	tab.Carets = []editor.Caret{{Cursor: editor.Position{Line: 2, Col: 1}}}
+	a.menuSelectAll()
+	if got := tab.SelectionText(); got != "# Title\n\nbody\n" {
+		t.Fatalf("selection = %q, want the whole buffer", got)
+	}
+	if len(tab.Carets) != 0 {
+		t.Fatalf("secondary carets should be dropped, got %d", len(tab.Carets))
+	}
+
+	tab.MoveCursorTo(editor.Position{}, false)
+	tab.SetMarkdownView(true)
+	if a.hasSelectableTab() {
+		t.Fatal("Select all should be dimmed in a markdown preview")
+	}
+	a.selectAllInFile()
+	if tab.HasSelection() {
+		t.Fatal("selectAllInFile must not select inside a preview")
 	}
 }
 
@@ -2344,8 +2381,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 164 { // 161 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 164", h)
+	if h != 165 { // 162 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 165", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

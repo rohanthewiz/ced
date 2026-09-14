@@ -157,6 +157,35 @@ func TestEditorContextCopyAndSearchRows(t *testing.T) {
 	}
 }
 
+// TestEditorContextSelectAllRow pins the right-click Select all row: it is
+// in the fixed vocabulary, enabled, and selects the whole buffer — even
+// though the right-click itself just collapsed any selection by moving
+// the caret to the click point.
+func TestEditorContextSelectAllRow(t *testing.T) {
+	root := t.TempDir()
+	p := writeStatusTestFile(t, root, "all.txt", "alpha beta\ngamma\n")
+	a := newTestApp(t, root)
+	a.openFile(p)
+	tab := a.activeTabPtr()
+
+	m := openEditorContextAt(t, a, 2, 0)
+	i := contextRowIndex(m, "Select all")
+	if i < 0 {
+		t.Fatalf("no Select all row; rows: %v", labelsOf(m))
+	}
+	if !m.items[i].enabled(a) {
+		t.Fatal("Select all row should be enabled on a text tab")
+	}
+	m.hover = i
+	m.activate(a)
+	if a.modal != nil {
+		t.Fatal("activating Select all should close the popup")
+	}
+	if got := tab.SelectionText(); got != "alpha beta\ngamma\n" {
+		t.Fatalf("selection = %q, want the whole buffer", got)
+	}
+}
+
 // labelsOf lists the popup's row labels for failure messages.
 func labelsOf(m *editorContextModal) []string {
 	out := make([]string, len(m.items))

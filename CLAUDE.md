@@ -3240,8 +3240,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 138 group actions + 15 headers (155), height 161,
-dividers `[2, 5, 158]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 139 group actions + 15 headers (156), height 162,
+dividers `[2, 5, 159]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

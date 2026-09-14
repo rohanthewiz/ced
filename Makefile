@@ -41,8 +41,8 @@ install: build
 	install -m 0755 bin/$(BINARY) /usr/local/bin/$(BINARY)
 
 # alt installs into ~/bin under the short name $(ALT_BINARY). Useful when
-# /usr/local/bin needs sudo, or to keep a personal build alongside a
-# brew-installed ced without shadowing it.
+# /usr/local/bin needs sudo, or to keep a personal build alongside the cats
+# plugin's ced (~/.cats/bin/ced) without shadowing it.
 alt: build
 	install -m 0755 bin/$(BINARY) ~/bin/$(ALT_BINARY)
 

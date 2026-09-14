@@ -161,37 +161,10 @@ row beside cats-todo, not as a coding agent.
 
 The sections below cover running ced without cats.
 
-### macOS / Linux (Homebrew)
+### Linux / macOS (one-line install script)
 
-The Homebrew formula is published into this repo's `Formula/` directory.
-Tap it by URL (no `homebrew-*` repo naming convention required), then
-install:
-
-```sh
-brew tap rohanthewiz/ced https://github.com/rohanthewiz/ced
-brew install rohanthewiz/ced/ced
-```
-
-### Updating
-
-When a new release ships, refresh the tap and upgrade:
-
-```sh
-brew update
-brew upgrade rohanthewiz/ced/ced
-```
-
-### Uninstalling
-
-```sh
-brew uninstall rohanthewiz/ced/ced
-brew untap rohanthewiz/ced
-```
-
-### Linux (one-line install script)
-
-The simplest way to drop ced onto a Linux box (or any macOS that
-isn't using Homebrew) is the install script:
+The simplest way to drop ced onto a Linux box or a Mac without cats is
+the install script:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/rohanthewiz/ced/main/install.sh | sh

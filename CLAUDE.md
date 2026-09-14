@@ -3789,7 +3789,7 @@ House rules:
 make run          # go run . in current dir
 make build        # build to ./bin/ced
 make build-linux  # cross-compile linux/amd64
-make install      # go install to $GOPATH/bin
+make install      # build, then copy ./bin/ced to /usr/local/bin (may need sudo)
 make tidy         # go mod tidy
 make clean        # rm -rf bin
 ```

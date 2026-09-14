@@ -231,8 +231,11 @@ Download the archive for your OS/arch, extract it, and drop the
 ```sh
 git clone https://github.com/rohanthewiz/ced.git
 cd ced
-make install        # builds and installs to $GOPATH/bin
+make install        # builds ./bin/ced, then installs it to /usr/local/bin (may need sudo)
 ```
+
+`make build` alone leaves the binary at `./bin/ced` if you'd rather put it
+on your `$PATH` yourself.
 
 ## Usage
 

@@ -203,6 +203,21 @@ attached to every [GitHub Release](https://github.com/rohanthewiz/ced/releases).
 Download the archive for your OS/arch, extract it, and drop the
 `ced` binary somewhere on your `$PATH`.
 
+### Inside cats (as a plugin)
+
+ced ships a `cats-plugin.toml`, so the cats plugin host can build and
+launch it like any other cats tool:
+
+```sh
+catctl plugin install rohanthewiz/ced   # or `catctl plugin link .` from a checkout
+catctl plugin run rohanthewiz.ced       # opens ced on the current directory
+```
+
+A ced pane is listed in the cats sidebar's AGENTS section as a tool
+row beside cats-todo, not as a coding agent. The plugin does not put
+its build on your `$PATH`, so it never shadows a Homebrew or
+install-script `ced`.
+
 ### From source
 
 ```sh

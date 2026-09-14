@@ -1,0 +1,60 @@
+# =============================================================================
+# File: cats-plugin.toml
+# Author: Rohan Allison <rohanthewiz@gmail.com>
+# Created: 2026-09-13
+# Copyright: 2026 Rohan Allison. All rights reserved.
+# =============================================================================
+#
+# cats-plugin.toml registers ced with the cats plugin host, the same way
+# cats-todo and gonotes are registered.
+#
+#   Install:            catctl plugin install rohanthewiz/ced
+#   Local development:  catctl plugin link .   (from this checkout)
+#   Launch:             catctl plugin run rohanthewiz.ced
+#
+# Written against ../cats-todo/cats-plugin.toml, the reference manifest.
+#
+# A TOOL, NOT AN AGENT. ced still reports its state over the hook socket
+# (internal/cats/hooks.go): that label is how cats' pane.open_file finds the
+# editor pane and how a blocked question reaches a phone. cats lists a pane
+# whose agent label is one of its configured editors (`editor.agents`,
+# ["ced"] by default) under the AGENTS section's plugin rows, beside
+# cats-todo, rather than among the coding agents taking turns. This manifest
+# is what gives that row its plugin identity (CATS_PLUGIN_ID) and puts
+# "ced" in the ⌘K palette.
+#
+# Being a plugin and being a cats-native client stay orthogonal (the gonotes
+# manifest's point): everything in internal/cats works identically whether
+# the pane was opened by this manifest or by `ced` typed into a shell.
+
+id = "rohanthewiz.ced"
+name = "ced"
+# Informational only — the host does not compare it. internal/version is the
+# release source of truth, and release CI bumps that file, not this one.
+version = "0.3.0"
+description = "A mouse-first terminal code editor: file tree, tabs, syntax highlighting, LSP, git panels and an agent chat panel — cats-native, so paths clicked anywhere in cats open in it."
+# grsh (the embedded terminal panel) is POSIX-only, the same reason
+# .goreleaser.yml ships linux/darwin alone.
+platforms = ["linux", "macos"]
+
+# Build the binary at install/link time; the host runs this once in the plugin
+# root. ced is a pure-Go module with no CGO, so a plain `go build .` is the
+# whole build. bin/ is already .gitignore'd, so a linked checkout's working
+# tree stays clean.
+[[build]]
+command = ["sh", "-c", "mkdir -p bin && go build -o bin/ced ."]
+
+# The editor, opened on the tab's cwd — the directory `plugin run` was invoked
+# from, or the focused pane's. Bare `ced` roots at the current directory by
+# design (session restore brings that folder's tabs back), so no argument is
+# needed and none is passed: a hardcoded path would root every launch at the
+# same project.
+#
+# NO [bin] ENTRY, deliberately. It would symlink this build into ~/.cats/bin,
+# which shadows a Homebrew or install.sh ced on PATH — and cats' own editor
+# spawn (`editor.command`) resolves `ced` through PATH, so installing the
+# plugin would silently swap which ced every clicked path opens in.
+[[actions]]
+id = "edit"
+title = "ced — this project"
+command = ["./bin/ced"]

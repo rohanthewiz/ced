@@ -41,14 +41,14 @@ platforms = ["linux", "macos"]
 # symlinks it into the cats bin dir (~/.cats/bin/ced -> <plugins-root>/<id>/
 # bin/ced), which `catctl shellinit` and every cats pane put first on PATH.
 #
-# TRADE-OFF, CHOSEN KNOWINGLY. That link shadows any other ced on PATH — a
-# Homebrew or install.sh copy included — and cats' editor spawn
-# (`editor.command`) resolves `ced` through PATH, so installing this plugin
-# makes the plugin build the ced every clicked path opens in. The alternative
-# was worse in practice: the actions ran the fresh plugin build while shells,
-# agents and clicked paths kept a hand-installed copy that drifted a release
-# behind. One build per name wins. To keep a separate ced in charge, uninstall
-# the plugin or put that copy ahead of ~/.cats/bin on PATH.
+# The plugin IS the official install of ced, so this link is meant to be the
+# `ced` everywhere: a shell, an agent, and cats' editor spawn
+# (`editor.command`, which resolves `ced` through PATH) all get the same build
+# the actions below launch. Leaving it out split one name across two builds —
+# the actions ran the fresh plugin build while everything that looked `ced` up
+# on PATH kept a hand-built copy a release behind. Because ~/.cats/bin leads
+# PATH, any other ced (a `make install` or dev build) is shadowed; to run one
+# of those instead, call it by path.
 bin = ["./bin/ced"]
 
 # Build the binary at install/link time; the host runs this once in the plugin

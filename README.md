@@ -138,6 +138,29 @@ The goals, in order:
 
 ## Install
 
+### Inside cats (as a plugin) — the official install
+
+ced is installed through [cats](https://github.com/rohanthewiz/cats): it
+ships a `cats-plugin.toml`, so the cats plugin host builds, launches and
+updates it like any other cats tool:
+
+```sh
+catctl plugin install rohanthewiz/ced   # or `catctl plugin link .` from a checkout
+catctl plugin run rohanthewiz.ced       # opens ced on the current directory
+catctl plugin update rohanthewiz.ced    # fetch and rebuild
+```
+
+The plugin puts its build on your `$PATH` as `~/.cats/bin/ced` (every
+cats pane has that directory first; add `eval "$(catctl shellinit zsh)"`
+to your rc file for terminals outside cats). That makes it the `ced`
+everywhere — a shell, an agent, and the editor cats opens clicked paths
+in — and it shadows any other `ced` further down `$PATH`.
+
+A ced pane is listed in the cats sidebar's AGENTS section as a tool
+row beside cats-todo, not as a coding agent.
+
+The sections below cover running ced without cats.
+
 ### macOS / Linux (Homebrew)
 
 The Homebrew formula is published into this repo's `Formula/` directory.
@@ -202,21 +225,6 @@ Pre-built binaries for Linux and macOS (amd64 + arm64) are
 attached to every [GitHub Release](https://github.com/rohanthewiz/ced/releases).
 Download the archive for your OS/arch, extract it, and drop the
 `ced` binary somewhere on your `$PATH`.
-
-### Inside cats (as a plugin)
-
-ced ships a `cats-plugin.toml`, so the cats plugin host can build and
-launch it like any other cats tool:
-
-```sh
-catctl plugin install rohanthewiz/ced   # or `catctl plugin link .` from a checkout
-catctl plugin run rohanthewiz.ced       # opens ced on the current directory
-```
-
-A ced pane is listed in the cats sidebar's AGENTS section as a tool
-row beside cats-todo, not as a coding agent. The plugin does not put
-its build on your `$PATH`, so it never shadows a Homebrew or
-install-script `ced`.
 
 ### From source
 

@@ -59,9 +59,10 @@ func screenHasText(t *testing.T, a *App, want string) bool {
 }
 
 // TestOpenFind_OpensBarEmpty drops the user into a focused find bar
-// with an empty input. Pre-fill from a prior query is intentionally
-// not done — closing the bar already clears find state, so each Esc-f
-// is a fresh search.
+// with an empty input when nothing is selected. Pre-fill from a prior
+// query is intentionally not done — closing the bar already clears find
+// state, so each Esc-f is a fresh search. A selection is the one thing
+// that does seed it (see the tests below).
 func TestOpenFind_OpensBarEmpty(t *testing.T) {
 	a := seedFindApp(t, "foo bar foo")
 	a.openFind()
@@ -70,6 +71,122 @@ func TestOpenFind_OpensBarEmpty(t *testing.T) {
 	}
 	if a.findField.String() != "" {
 		t.Fatalf("input should be empty, got %q", a.findField.String())
+	}
+}
+
+// TestOpenFind_SeedsFromSelection pins the default the user asked for:
+// with text selected, the bar opens holding it and the search has
+// already run, so the hits are lit and Enter walks them without a
+// keystroke spent retyping what was on screen.
+func TestOpenFind_SeedsFromSelection(t *testing.T) {
+	a := seedFindApp(t, "foo bar foo")
+	tab := a.activeTabPtr()
+
+	// Select the SECOND "foo" left-to-right, which leaves the cursor at
+	// the selection's end — the case that used to skip past its own hit.
+	tab.Anchor = editor.Position{Line: 0, Col: 8}
+	tab.Cursor = editor.Position{Line: 0, Col: 11}
+
+	a.openFind()
+
+	if got := a.findField.String(); got != "foo" {
+		t.Fatalf("seeded query = %q, want %q", got, "foo")
+	}
+	if tab.FindQuery != "foo" {
+		t.Errorf("tab query = %q, want the search to have run", tab.FindQuery)
+	}
+	if len(tab.FindMatches) != 2 {
+		t.Fatalf("expected 2 matches, got %d", len(tab.FindMatches))
+	}
+	// The highlighted occurrence is the CURRENT match, not the next one:
+	// the cursor stays where the user was looking.
+	if tab.FindIndex != 1 {
+		t.Errorf("FindIndex = %d, want the selected hit (1)", tab.FindIndex)
+	}
+	if tab.Cursor != (editor.Position{Line: 0, Col: 8}) {
+		t.Errorf("cursor = %+v, want the start of the selected hit", tab.Cursor)
+	}
+}
+
+// TestOpenFind_SeedsFromRightToLeftSelection is the same gesture made
+// backwards (anchor after cursor). Selection direction is an accident of
+// how the user dragged; it must not change which hit the bar lands on.
+func TestOpenFind_SeedsFromRightToLeftSelection(t *testing.T) {
+	a := seedFindApp(t, "foo bar foo")
+	tab := a.activeTabPtr()
+	tab.Anchor = editor.Position{Line: 0, Col: 11}
+	tab.Cursor = editor.Position{Line: 0, Col: 8}
+
+	a.openFind()
+
+	if got := a.findField.String(); got != "foo" {
+		t.Fatalf("seeded query = %q, want %q", got, "foo")
+	}
+	if tab.FindIndex != 1 {
+		t.Errorf("FindIndex = %d, want the selected hit (1)", tab.FindIndex)
+	}
+}
+
+// TestOpenFind_MultiLineSelectionDoesNotSeed keeps the bar empty for a
+// blob with newlines in it: FindAll matches within a line, so that is
+// not a search term — the same refusal findAllSelectionQuery makes for
+// every other find verb.
+func TestOpenFind_MultiLineSelectionDoesNotSeed(t *testing.T) {
+	a := seedFindApp(t, "foo bar\nfoo baz")
+	tab := a.activeTabPtr()
+	tab.Anchor = editor.Position{Line: 0, Col: 0}
+	tab.Cursor = editor.Position{Line: 1, Col: 3}
+
+	a.openFind()
+
+	if got := a.findField.String(); got != "" {
+		t.Fatalf("multi-line selection seeded %q, want an empty bar", got)
+	}
+	if tab.FindQuery != "" {
+		t.Errorf("tab query = %q, want no search to have run", tab.FindQuery)
+	}
+}
+
+// TestOpenReplace_SeedsFromSelection pins that the replace row inherits
+// the seed: Esc-e goes through openFind, so "replace what I highlighted"
+// needs no retyping either, and the caret still starts in the query
+// field.
+func TestOpenReplace_SeedsFromSelection(t *testing.T) {
+	a := seedFindApp(t, "foo bar foo")
+	tab := a.activeTabPtr()
+	tab.Anchor = editor.Position{Line: 0, Col: 0}
+	tab.Cursor = editor.Position{Line: 0, Col: 3}
+
+	a.openReplace()
+
+	if !a.findReplaceOpen {
+		t.Fatal("openReplace did not reveal the replace row")
+	}
+	if got := a.findField.String(); got != "foo" {
+		t.Fatalf("seeded query = %q, want %q", got, "foo")
+	}
+	if a.findFocus != findFocusQuery {
+		t.Errorf("focus = %d, want the query field", a.findFocus)
+	}
+}
+
+// TestOpenReplace_OnOpenBarKeepsTypedQuery guards the mid-search case:
+// the user typed a query, then reached for Esc-e. Re-seeding from a
+// stale selection there would throw away what they just typed.
+func TestOpenReplace_OnOpenBarKeepsTypedQuery(t *testing.T) {
+	a := seedFindApp(t, "foo bar foo")
+	a.openFind()
+	for _, r := range "bar" {
+		a.handleFindKey(keyEv(tcell.KeyRune, r))
+	}
+	tab := a.activeTabPtr()
+	tab.Anchor = editor.Position{Line: 0, Col: 0}
+	tab.Cursor = editor.Position{Line: 0, Col: 3} // a selection appears
+
+	a.openReplace()
+
+	if got := a.findField.String(); got != "bar" {
+		t.Fatalf("query = %q, want the typed %q to survive", got, "bar")
 	}
 }
 

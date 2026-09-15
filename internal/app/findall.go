@@ -275,6 +275,12 @@ func (a *App) openFindAllFromBar() {
 // there could only ever be answered "yes, that", which makes it a
 // keystroke charged for nothing.
 //
+// It is shared by every find verb in the editor — this list, find in
+// project, the editor's right-click "Find all", and the find bar, which
+// opens seeded with it (find.go). One spelling, so a selection means
+// the same thing whichever of them the user reaches for; two would drift
+// exactly where a user would notice.
+//
 // Everything else the context merely IMPLIES (what's left in the find
 // bar, the word the cursor happens to be sitting in), and an implication
 // is a guess. Guesses belong in the prompt as a pre-fill

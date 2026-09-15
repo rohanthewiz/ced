@@ -62,28 +62,57 @@ const (
 	findAllLabel     = " All "
 )
 
-// openFind shows the find bar with an empty input. We don't pre-fill
-// the user's last query because closing the bar already clears find
-// state — Esc means "I'm done searching." Each Esc-f opens a fresh
-// search.
+// openFind shows the find bar, seeded with the SELECTION when there is
+// one and empty otherwise.
+//
+// Both halves are the same rule findAllSelectionQuery states one floor
+// down: a single-line selection is the user pointing at the exact text,
+// so searching for it costs a keystroke nobody would rather spend
+// retyping it, and it cannot be a wrong guess. Everything the context
+// merely IMPLIES stays out — in particular the last query, because
+// closing the bar already clears find state and Esc means "I'm done
+// searching", so each Esc-f is still a fresh search. (A multi-line
+// selection is not a search term — FindAll matches within a line — and
+// findAllSelectionQuery refuses it, which leaves the bar empty.)
+//
+// A seeded bar searches immediately: the highlights are painted and the
+// hit is focused before the user touches another key, which is the
+// whole point of not having to type it.
 func (a *App) openFind() {
 	tab := a.activeTabPtr()
 	if tab == nil || tab.IsImage() {
 		return
 	}
+	// Read the selection BEFORE anything can disturb it — findApplyQuery
+	// collapses it onto the match it focuses, so by then it is gone.
+	seed := a.findAllSelectionQuery()
+	selStart, _ := editor.PosOrdered(tab.Anchor, tab.Cursor)
+
 	a.closeAllModals() // a modal would otherwise eat our keystrokes
 	a.findOpen = true
 	a.findReplaceOpen = false
 	a.findFocus = findFocusQuery
-	a.findField = newTextField("")
+	a.findField = newTextField(seed)
 	a.replField = newTextField("")
 	a.applyFindOptions()
+	if seed != "" {
+		// SetFindQuery picks the current hit with FirstMatchAtOrAfter
+		// (the cursor), and a left-to-right selection leaves the cursor
+		// at its END — past the very occurrence the query came from. So
+		// collapse to the selection's START first: the highlighted text
+		// becomes the current match and Enter moves on to the next one,
+		// instead of the bar opening by jumping the view somewhere else.
+		tab.MoveCursorTo(selStart, false)
+		a.findApplyQuery()
+	}
 }
 
 // openReplace opens the bar with the replace row showing and the caret in
 // the query field — you have to say WHAT to replace before you can say
-// what with. Reopening an already-open bar just reveals the row, so
-// Esc-e is also "I've found it, now let me change it" mid-search.
+// what with, and openFind may already have answered that from the
+// selection. Reopening an already-open bar just reveals the row (and so
+// never clobbers a query the user typed), which is what makes Esc-e
+// "I've found it, now let me change it" mid-search.
 func (a *App) openReplace() {
 	tab := a.activeTabPtr()
 	if tab == nil || tab.IsImage() {

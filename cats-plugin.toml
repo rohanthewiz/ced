@@ -31,7 +31,7 @@ id = "rohanthewiz.ced"
 name = "ced"
 # Informational only — the host does not compare it. internal/version is the
 # release source of truth, and release CI bumps that file, not this one.
-version = "0.3.0"
+version = "0.3.1"
 description = "A mouse-first terminal code editor: file tree, tabs, syntax highlighting, LSP, git panels and an agent chat panel — cats-native, so paths clicked anywhere in cats open in it."
 # grsh (the embedded terminal panel) is POSIX-only, the same reason
 # .goreleaser.yml ships linux/darwin alone.

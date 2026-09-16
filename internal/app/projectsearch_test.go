@@ -14,15 +14,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
+
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/search"
 )
 
-// TestFindInProject_AsksUnlessSomethingIsSelected pins the seeding rule
-// the in-file list also keeps: only a selection searches silently, and
-// everything else opens the prompt with the guess pre-filled rather than
-// spending a whole-tree walk on it.
-func TestFindInProject_AsksUnlessSomethingIsSelected(t *testing.T) {
+// TestFindInProject_AlwaysAsksAndSeedsFromTheSelection pins the seeding
+// rule: Find in project ALWAYS opens the prompt (a whole-tree walk is
+// worth one Enter to confirm), and the box is pre-filled with the
+// selection when there is one, else the word under the cursor.
+func TestFindInProject_AlwaysAsksAndSeedsFromTheSelection(t *testing.T) {
 	a, root := projectSearchApp(t)
 	a.openFile(filepath.Join(root, "alpha.go"))
 	tab := a.activeTabPtr()
@@ -30,7 +32,7 @@ func TestFindInProject_AsksUnlessSomethingIsSelected(t *testing.T) {
 		t.Fatal("fixture did not open")
 	}
 
-	// A bare cursor inside "needle" is an implication, so ced asks.
+	// A bare cursor inside "needle" pre-fills the word.
 	tab.MoveCursorTo(editor.Position{Line: 2, Col: 7}, false)
 	a.menuFindInProject()
 	m, ok := a.modal.(*promptModal)
@@ -42,12 +44,27 @@ func TestFindInProject_AsksUnlessSomethingIsSelected(t *testing.T) {
 	}
 	a.closeModal()
 
-	// A single-line selection is the user naming the text: no prompt.
-	tab.Anchor = editor.Position{Line: 2, Col: 5}
-	tab.Cursor = editor.Position{Line: 2, Col: 11}
+	// A single-line selection seeds the prompt verbatim — including a
+	// span that is not a whole word, which the cursor rule could never
+	// have produced — and still waits for Enter.
+	tab.Anchor = editor.Position{Line: 2, Col: 6}
+	tab.Cursor = editor.Position{Line: 2, Col: 13}
 	a.menuFindInProject()
-	if _, ok := a.modal.(*promptModal); ok {
-		t.Error("a selection must search without asking first")
+	m, ok = a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("with a selection, modal = %T, want a promptModal seeded with it", a.modal)
+	}
+	if got := m.field.String(); got != "eedle()" {
+		t.Errorf("prompt pre-fill from selection = %q, want %q", got, "eedle()")
+	}
+	a.closeModal()
+
+	// A multi-line selection is not a search term, so the seed falls
+	// back to the word under the cursor (the selection's end).
+	tab.Anchor = editor.Position{Line: 0, Col: 0}
+	tab.Cursor = editor.Position{Line: 2, Col: 7}
+	if got := a.projectSearchSeed(); got != "needle" {
+		t.Errorf("seed with a multi-line selection = %q, want the cursor word %q", got, "needle")
 	}
 }
 
@@ -192,6 +209,46 @@ func TestProjectSearch_AcceptOpensTheFileAtTheHit(t *testing.T) {
 	}
 	if tab.FindQuery != "needle" {
 		t.Fatalf("the hit should be lit in the opened file, FindQuery = %q", tab.FindQuery)
+	}
+}
+
+// TestProjectSearch_ClickOpensTheFileAndKeepsTheList pins the mouse
+// contract for every list of cross-file results: a single click on a row
+// navigates to that file and line the way the in-file list's click
+// previews, and the list STAYS so the next row is one more click away.
+// A double-click is still the accept, which closes it.
+func TestProjectSearch_ClickOpensTheFileAndKeepsTheList(t *testing.T) {
+	a, root := projectSearchApp(t)
+	runProjectSearch(t, a, root, "needle", []string{"alpha.go", "sub/bravo.go"})
+	m := a.modal.(*findAllModal)
+	mx, my, _, _ := m.rect(a)
+	x, y := mx+8, my+4+2 // the third visible row: the second hit in sub/bravo.go
+	want := m.rows[2]
+
+	m.handleMouse(a, x, y, tcell.Button1)
+
+	if a.modal != m {
+		t.Fatalf("a single click must keep the list open, modal = %T", a.modal)
+	}
+	tab := a.activeTabPtr()
+	if tab == nil || tab.Path != want.path {
+		t.Fatalf("click opened %v, want %q", tab, want.path)
+	}
+	if tab.Cursor.Line != want.line || tab.Cursor.Col != want.col {
+		t.Fatalf("cursor at %+v, want line %d col %d", tab.Cursor, want.line, want.col)
+	}
+	if tab.FindQuery != "needle" {
+		t.Fatalf("the hit should be lit in the opened file, FindQuery = %q", tab.FindQuery)
+	}
+
+	// A second click on the same row inside the double-click window is
+	// the accept: the jump is already made, and the list goes.
+	m.handleMouse(a, x, y, tcell.Button1)
+	if a.modal != nil {
+		t.Fatalf("a double-click must close the list, got %T", a.modal)
+	}
+	if len(a.tabs) != 1 {
+		t.Fatalf("clicking one row twice must open one tab, got %d", len(a.tabs))
 	}
 }
 

@@ -61,27 +61,43 @@ type projectSearchEvent struct {
 // When satisfies the tcell.Event interface.
 func (e *projectSearchEvent) When() time.Time { return e.when }
 
-// menuFindInProject is the ≡ Search row and the Esc-P leader: search the
-// whole project for a selected region, or ask what to look for.
+// menuFindInProject is the ≡ Search row and the Esc-P leader: ask what
+// to look for across the whole project, with the box already holding
+// the best answer ced has.
 //
-// Seeding follows find-all exactly — a single-line selection runs
-// straight away (findAllSelectionQuery), anything else opens the prompt
-// pre-filled with findAllPromptSeed — because the two features are the
-// same question at two scopes and answering them differently would be a
-// trap. It matters more here, if anything: this one walks the whole
-// tree, so a guessed query spends real time before it can be corrected.
+// Unlike the in-file list, a selection does NOT search silently here.
+// Find-all's rule is that a single-line selection is the user pointing
+// at the exact text, so asking could only be answered "yes, that" — and
+// in a single open buffer the search costs nothing, so a wrong guess is
+// a free retry. A project search is a whole-tree walk: the user reaches
+// for it with a selection that is usually the RIGHT NEIGHBOURHOOD of
+// the query rather than the query itself (a call site to trim to the
+// identifier, a message to cut down to its stable part), and the only
+// moment to adjust it is before the walk starts. So the selection SEEDS
+// the prompt — Enter runs it unchanged, one keystroke, and typing
+// replaces it — the way the find bar opens holding it (find.go).
 func (a *App) menuFindInProject() {
 	a.closeMenu()
-	if q := a.findAllSelectionQuery(); q != "" {
-		a.startProjectSearch(q)
-		return
-	}
 	// Captured before openPrompt for the reason openFindAll documents:
 	// opening a modal clears the find bar that may be seeding this.
-	seed := a.findAllPromptSeed()
+	seed := a.projectSearchSeed()
 	a.openPrompt("Find in project", "searches every file", seed, func(app *App, v string) {
 		app.startProjectSearch(v)
 	})
+}
+
+// projectSearchSeed is what pre-fills the Find in project prompt, in
+// priority order: a single-line selection (the user named the text),
+// then everything findAllPromptSeed already ranks — the find bar's
+// query, then the word under the cursor. The selection goes through
+// findAllSelectionQuery rather than a second reading of the tab, so
+// "what counts as a selectable search term" (single line, non-empty)
+// has one spelling across every find verb.
+func (a *App) projectSearchSeed() string {
+	if q := a.findAllSelectionQuery(); q != "" {
+		return q
+	}
+	return a.findAllPromptSeed()
 }
 
 // hasProjectSearch gates the menu row: the finder's index is the file
@@ -216,25 +232,37 @@ func (a *App) projectSearchLabel(path string) string {
 // row names, put the cursor on the hit, and close the list.
 //
 // The list closes FIRST, so the editor band is back to full height before
-// the cursor is placed — otherwise the centering below would measure
-// against a band the panel is still taking rows out of, and the line
-// would land off-centre the moment the panel left.
+// the cursor is placed — otherwise the centering in jumpToSelected would
+// measure against a band the panel is still taking rows out of, and the
+// line would land off-centre the moment the panel left.
 func (m *findAllModal) openSelected(a *App) {
-	rp := m.selectedRow()
-	if rp == nil {
-		if !m.pinned {
-			a.closeModal()
-		}
-		return
-	}
-	r := *rp
 	// A pinned list is a worklist: the jump commits but the panel stays.
 	if !m.pinned {
 		a.closeModal()
 	}
-	if r.path == "" {
+	m.jumpToSelected(a)
+}
+
+// jumpToSelected opens the file the highlighted row names and puts the
+// cursor on the hit, leaving the list exactly as it is. It is the
+// navigation half of openSelected, split out because a single CLICK on
+// a row wants it WITHOUT the close: the pointer is already on the list,
+// so the user is working the results — look at this one, then that
+// one — and a list that vanished under the first click would have to be
+// re-run to see the second. That is the in-file list's preview contract
+// (a click moves the editor, the list stays), and it is safe here for
+// the reason keyboard walking is NOT: a click is one deliberate gesture
+// per file opened, not a tab left behind for every row scrolled past.
+//
+// The band is read AFTER the caller has decided whether the panel is
+// still there, so the centering measures against the rows the editor
+// will actually have.
+func (m *findAllModal) jumpToSelected(a *App) {
+	rp := m.selectedRow()
+	if rp == nil || rp.path == "" {
 		return
 	}
+	r := *rp
 	a.openFile(r.path)
 	tab := a.activeTabPtr()
 	if tab == nil || tab.Path != r.path {

@@ -1217,6 +1217,17 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	m.selectRow(a, idx)
 	if double {
 		m.accept(a)
+		return
+	}
+	// In-file, selectRow's preview has already moved the editor onto the
+	// row. Project mode previews nothing on a SELECTION (keyboard walking
+	// must not open a file per row), but a click is one gesture per
+	// file, so it navigates — opening the file at the hit with the list
+	// left in place, for the reader who is working through the results
+	// one at a time. Every project-mode producer (search, references,
+	// the workspace-edit receipt) gets this for free.
+	if m.project {
+		m.jumpToSelected(a)
 	}
 }
 

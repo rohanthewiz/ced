@@ -962,23 +962,32 @@ Esc contract and the mouse story. House rules:
   keystroke — firing the LSP's didOpen, Copilot's didOpen, every plugin's
   open hook and a syntax pass, and leaving a tab behind for every row
   merely scrolled past. The row IS the preview (it carries the whole line
-  with the hit lit); Enter or a double-click opens. Esc therefore
-  restores nothing, and `restoreFind` returns early — project mode never
-  borrowed the tab's find state and writing it would clobber what the
-  active tab legitimately holds. A preview mode, if ever wanted, needs a
+  with the hit lit); Enter or a double-click opens and closes the list.
+  **A single CLICK on a row navigates too — opens the file at the hit —
+  and leaves the list in place** (`jumpToSelected`, the navigation half
+  of `openSelected`). That is the in-file list's click contract, and it
+  is safe where keyboard walking is not because a click is one deliberate
+  gesture per file opened. Every project-mode producer (search,
+  references, the workspace-edit receipt) inherits it. Esc restores
+  nothing, and `restoreFind` returns early — project mode never borrowed
+  the tab's find state and writing it would clobber what the active tab
+  legitimately holds. A keyboard preview mode, if ever wanted, needs a
   real preview-TAB concept (one reusable slot), not a special case here.
 - **Labels truncate from the FRONT.** The distinguishing part of a path
   is its tail; twenty rows reading `internal/app/…` say nothing. The
   column caps at a share of the panel, not a constant — the two docks
   differ by a factor of three in width.
 - Results arrive as a generation-stamped event and are dropped if stale
-  or if a modal/menu took the slot meanwhile. Seeding reuses the in-file
-  rule exactly — a single-line selection runs, anything else prompts
-  pre-filled: the two features are one question at two scopes, and
-  seeding them differently would be a trap. It matters more here, if
-  anything, since a guessed query spends a whole-tree walk before the
-  user can correct it. Leader is `Esc P`, the shifted twin of `Esc p`
-  (names vs. contents).
+  or if a modal/menu took the slot meanwhile. **It ALWAYS prompts, and a
+  single-line selection SEEDS the prompt** (`projectSearchSeed`:
+  selection, then the find bar, then the cursor word) — the one place
+  the in-file list's "only a selection searches silently" rule is
+  deliberately not followed. In a buffer a wrong guess is a free retry;
+  here it spends a whole-tree walk, and the selection is usually the
+  right neighbourhood of the query rather than the query itself, so the
+  moment to trim it is before Enter. Enter on the seed is still one
+  keystroke. Leader is `Esc P`, the shifted twin of `Esc p` (names vs.
+  contents).
 
 ### LSP integration (internal/lsp + app/lsp.go)
 The client is a hand-rolled JSON-RPC subset — do NOT add an LSP

@@ -1072,8 +1072,24 @@ deliberately doesn't re-probe on its own.
 
 ### 2. Pick your chat backend
 
-**≡ → Copilot → Chat agent: …** opens the list. Your pick persists as
-`"chatagent"` in `~/.config/ced/config.json`.
+**The default chat backend is Copilot.** With no `"chatagent"` key in
+your config (or one naming an agent this build doesn't know), the chat
+panel talks to `copilot-language-server`.
+
+To change the default, either:
+
+- **From the menu:** **≡ → Copilot → Chat agent: …** opens the list.
+  Your pick is saved immediately and becomes the default for every
+  future session.
+- **By hand:** set `"chatagent"` in `~/.config/ced/config.json`
+  (`$XDG_CONFIG_HOME/ced/config.json` if you set that) to one of
+  `"copilot"`, `"claude"` or `"gemini"`, then restart ced:
+
+  ```json
+  { "chatagent": "copilot" }
+  ```
+
+  Delete the key to go back to the default (Copilot).
 
 > The ≡ menu opens with every section folded, so this is a click on the
 > **Copilot** header first, then the row. Every AI setting lives in that
@@ -1414,7 +1430,7 @@ Every switch lives in the `≡ → Copilot` menu and persists to
   "suggestions": "off",      // keep Copilot sign-in and chat, but no ghost text
   "chatcontext": "off",      // don't auto-attach the current file to prompts
   "chatwrite": "off",        // read-only chat: the agent may not change files
-  "chatagent": "claude",     // which chat backend: "copilot", "claude", "gemini"
+  "chatagent": "copilot",    // chat backend: "copilot" (default), "claude", "gemini"
   "chatmodel": "<model-id>"  // preferred model for the chat session
 }
 ```

@@ -3267,6 +3267,19 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		case y == a.height-1:
 			a.statusBarClick(x, y)
 		case y > 0 && y < a.height-1:
+			// ⌘+click goes to the definition of the symbol under the
+			// pointer — or to its usages, when the pointer is already ON
+			// the definition. A mouse report has no ⌘ bit, so cats spells
+			// it CTRL+ALT (its inputenc.mouseMods), the one combination
+			// that is representable and that nobody presses on purpose;
+			// ModMeta is accepted too for a host that ever encodes it.
+			// Plain Ctrl+click and plain Alt+click are NOT this gesture:
+			// Alt is the caret above, Ctrl is left free. Starts no drag,
+			// for the caret's reason (lsp.go). Checked BEFORE the Alt branch:
+			// the ⌘ spelling carries Alt, and multicaret would claim it.
+			if isMetaClick(ev.Modifiers()) && a.editorGoToPress(x, y) {
+				return
+			}
 			// Alt+click drops (or lifts) an extra caret instead of
 			// moving the one you have — the multi-line editing gesture.
 			// It deliberately starts no drag: the press placed a caret,

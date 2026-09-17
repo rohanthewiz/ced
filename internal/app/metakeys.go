@@ -57,9 +57,13 @@
 //     internal/inputenc: the mouse test matrix has shift and ctrl+alt
 //     cases and no super case) and tcell's own SGR decoder has no ModMeta
 //     path to decode into. The gesture would need a mouse protocol nobody
-//     implements. Go-to-definition therefore stays Esc-d / the editor's
-//     right-click menu, and ced's one modified click stays Alt+click for
-//     multicaret — which is bit 8, the bit ⌘ would have had to borrow.
+//     implements. So cats SPELLS ⌘ on a mouse event as CTRL+ALT (its
+//     inputenc.mouseMods): bits 8+16, the one combination that is both
+//     representable and free, since ctrl alone and alt alone are gestures
+//     programs bind. ced's router reads that pair — or a real ModMeta,
+//     should a host ever encode one — as ⌘+click (isMetaClick, lsp.go)
+//     and runs go-to-definition under the pointer. Alt+click stays
+//     multicaret's, and plain Ctrl+click is deliberately left unbound.
 //
 // WHERE THE LAYER IS LIVE TODAY
 //

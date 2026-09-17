@@ -1009,9 +1009,26 @@ framework dependency. House rules it must keep obeying:
   `documentChanges: true` and an EMPTY `resourceOperations`, which is how
   a server learns ced can apply text edits but cannot create, rename or
   delete files on its behalf — see the workspace-edit section.
-- Leaders: Esc-d definition, Esc-i hover, Esc-I signature help, Esc-D
-  the file's symbol outline, Esc-R references, Esc-c code actions, Esc-E
-  rename. The ≡ Code group also carries the multi-file undo row, which
+- **Go to definition FLIPS TO USAGES at the declaration.** A server asked
+  about a declaration answers with the declaration itself, so a plain
+  jump would move nothing; `handleLSPDefinition` detects that
+  (`definitionIsHere`: same file, request position inside the range,
+  end inclusive for WordRange's reason) and runs `menuFindReferences`
+  from that position instead — JetBrains' ⌘B turn. Only while the tab
+  that asked is still in front.
+- **⌘+click is the definition verb's modified click** (`editorGoToPress`):
+  caret placed under the pointer first, then the same verb, so at a
+  declaration the click opens the usages. A mouse report has no ⌘ bit
+  (SGR carries only shift/alt/ctrl — metakeys.go's header), so **cats
+  spells ⌘ on a mouse event as CTRL+ALT** (its `inputenc.mouseMods`) and
+  `isMetaClick` reads that pair, or a real `ModMeta`, as the gesture.
+  Plain Alt+click stays multicaret's and **plain Ctrl+click is left
+  unbound** on purpose, so a host that can deliver one keeps a modified
+  click of its own. Starts no drag (Alt+click's rule). On a file with no
+  server the caret still moves and the flash says why.
+- Leaders: Esc-d definition (or usages), Esc-i hover, Esc-I signature
+  help, Esc-D the file's symbol outline, Esc-R references, Esc-c code
+  actions, Esc-E rename. The ≡ Code group also carries the multi-file undo row, which
   has no leader (see that section). Definition jumps record into the
   app-wide navigation history (nav.go) — there is no LSP-private jump
   stack.

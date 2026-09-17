@@ -569,6 +569,20 @@ func (a *App) menuGoToDefinition() {
 // suppressed and the origin is recorded explicitly with the request's
 // exact cursor position — a same-file jump moves only the cursor, which
 // openFile's path-change recording would miss.
+//
+// WHEN THE ANSWER IS WHERE THE QUESTION WAS ASKED, THE VERB FLIPS TO
+// USAGES. A server asked for the definition of a declaration answers with
+// the declaration itself, so a plain jump would move nothing and read as
+// the key doing nothing. JetBrains' ⌘B makes the same turn — at the
+// declaration, "go to definition" shows the usages — and it is the
+// natural second half of the question: standing on a symbol, the two
+// places a reader wants to be are where it is defined and where it is
+// used, and one of those is always somewhere else. The references list
+// opens through menuFindReferences, the one spelling of that verb, from
+// the request's own position (re-placed, in case a keystroke landed in
+// the round trip) — and only while the tab that asked is still in front,
+// because a list about a file the user has since left would be answering
+// a question nobody is looking at.
 func (a *App) handleLSPDefinition(e *lspDefinitionEvent) {
 	if e.err != nil || len(e.locs) == 0 {
 		a.flash("No definition found")
@@ -577,6 +591,15 @@ func (a *App) handleLSPDefinition(e *lspDefinitionEvent) {
 	target := lsp.URIToPath(e.locs[0].URI)
 	if target == "" {
 		a.flash("Definition is not in a plain file")
+		return
+	}
+	if a.definitionIsHere(e, target) {
+		t := a.activeTabPtr()
+		if t == nil || t.Path != e.fromPath {
+			return
+		}
+		t.MoveCursorTo(e.fromPos, false)
+		a.menuFindReferences()
 		return
 	}
 	a.nav.suppress = true
@@ -588,6 +611,77 @@ func (a *App) handleLSPDefinition(e *lspDefinitionEvent) {
 	}
 	a.recordNav(navLoc{path: e.fromPath, pos: e.fromPos})
 	t.MoveCursorTo(editorPosFor(t, e.locs[0].Range.Start), false)
+}
+
+// definitionIsHere reports whether the definition the server named is
+// the very symbol the request was made on: same file, and the request's
+// position inside the location's range. The end is INCLUSIVE — the caret
+// sits past the last rune of a word you just typed or clicked the tail
+// of, and WordRange's courtesy for that case is the one every other
+// symbol verb here extends.
+//
+// The range is measured against the tab that asked, since a Range is
+// UTF-16 columns and only that buffer can turn them into rune columns.
+// A tab that has since closed cannot be "here" — the caller then falls
+// through to a plain jump, which reopens it.
+func (a *App) definitionIsHere(e *lspDefinitionEvent, target string) bool {
+	if target != e.fromPath {
+		return false
+	}
+	var t *editor.Tab
+	for _, tab := range a.tabs {
+		if tab.Path == e.fromPath {
+			t = tab
+			break
+		}
+	}
+	if t == nil || t.Buffer == nil {
+		return false
+	}
+	start := editorPosFor(t, e.locs[0].Range.Start)
+	end := editorPosFor(t, e.locs[0].Range.End)
+	return !editor.PosLess(e.fromPos, start) && !editor.PosLess(end, e.fromPos)
+}
+
+// isMetaClick reports whether a mouse event's modifiers spell ⌘: a real
+// ModMeta, or the CTRL+ALT pair cats' encoder substitutes for it because
+// the mouse wire has no Super bit (metakeys.go's header has the wire
+// details). Ctrl alone and Alt alone are deliberately NOT ⌘ — Alt+click
+// is multicaret's, and Ctrl+click is left unbound so a host that CAN
+// deliver a plain Ctrl+click keeps a modified click of its own.
+func isMetaClick(mods tcell.ModMask) bool {
+	if mods&tcell.ModMeta != 0 {
+		return true
+	}
+	return mods&(tcell.ModCtrl|tcell.ModAlt) == tcell.ModCtrl|tcell.ModAlt
+}
+
+// editorGoToPress is ⌘+click: the definition verb at the pointer. The
+// caret is placed FIRST, so the request asks about the symbol under the
+// pointer rather than wherever the cursor was, and so a click on a file
+// with no language server still does what a click does. It starts no
+// drag, for Alt+click's reason: the press was a verb, and a stray wiggle
+// afterwards must not turn it into a selection.
+//
+// The verb is menuGoToDefinition itself, not a copy: at a declaration the
+// same click therefore opens the usages, which is the whole gesture.
+func (a *App) editorGoToPress(x, y int) bool {
+	tab := a.activeTabPtr()
+	if tab == nil || tab.IsImage() || tab.IsMarkdownView() {
+		return false
+	}
+	ex, ey, ew, eh := a.editorRect()
+	pos, ok := tab.HitTest(x-ex, y-ey, ew, eh)
+	if !ok {
+		return false
+	}
+	tab.MoveCursorTo(pos, false)
+	if !a.hasLSPActions() {
+		a.flash("Go to definition: no language server for this file")
+		return true
+	}
+	a.menuGoToDefinition()
+	return true
 }
 
 // -----------------------------------------------------------------------------

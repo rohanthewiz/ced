@@ -557,6 +557,152 @@ func TestDefinitionNoResult(t *testing.T) {
 	}
 }
 
+// TestDefinitionAtTheDeclarationOpensUsages pins the verb's second half:
+// when the server's answer is the very symbol the question was asked on,
+// nothing jumps (there is nowhere to go) and the references request goes
+// out from that position instead — the JetBrains turn.
+func TestDefinitionAtTheDeclarationOpensUsages(t *testing.T) {
+	a, fake, goPath := newLSPTestApp(t)
+	a.openFile(goPath)
+	tab := a.activeTabPtr()
+	tab.Buffer = editor.NewBuffer("package main\nvar counter = 1\n")
+	tab.EditRev++
+	origin := editor.Position{Line: 1, Col: 7} // on "counter"
+	tab.MoveCursorTo(origin, false)
+
+	a.handleLSPDefinition(&lspDefinitionEvent{
+		when: time.Now(), fromPath: goPath, fromPos: origin,
+		locs: []lsp.Location{{URI: lsp.PathToURI(goPath), Range: lsp.Range{
+			Start: lsp.Position{Line: 1, Character: 4},
+			End:   lsp.Position{Line: 1, Character: 11},
+		}}},
+	})
+
+	if len(a.nav.back) != 0 {
+		t.Error("a definition that is already here must not record a jump")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		calls := fake.callLog()
+		if len(calls) > 0 && calls[len(calls)-1] == "references:main.go:true" {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	calls := fake.callLog()
+	if len(calls) == 0 || calls[len(calls)-1] != "references:main.go:true" {
+		t.Fatalf("calls = %v, want a references request for the symbol", calls)
+	}
+	if tab.Cursor != origin {
+		t.Errorf("cursor = %+v, want it left at the origin %+v", tab.Cursor, origin)
+	}
+
+	// The inclusive end: a caret just past the word (where a click on
+	// its last letter, or typing it, leaves the caret) still counts.
+	ev := &lspDefinitionEvent{fromPath: goPath, fromPos: editor.Position{Line: 1, Col: 11},
+		locs: []lsp.Location{{URI: lsp.PathToURI(goPath), Range: lsp.Range{
+			Start: lsp.Position{Line: 1, Character: 4}, End: lsp.Position{Line: 1, Character: 11}}}}}
+	if !a.definitionIsHere(ev, goPath) {
+		t.Error("a caret at the word's end should still be 'here'")
+	}
+	ev.fromPos = editor.Position{Line: 1, Col: 12}
+	if a.definitionIsHere(ev, goPath) {
+		t.Error("a caret past the word is not on the definition")
+	}
+	ev.fromPos, ev.locs[0].URI = origin, lsp.PathToURI(filepath.Join(a.rootDir, "other.go"))
+	if a.definitionIsHere(ev, filepath.Join(a.rootDir, "other.go")) {
+		t.Error("a definition in another file is never 'here'")
+	}
+}
+
+// TestMetaClickGoesToDefinition pins the modified click: a ⌘+click —
+// which cats delivers as ctrl+alt, the only spelling the mouse wire has
+// room for — places the caret under the pointer, fires the definition
+// request from there, and starts no drag, so a wiggle afterwards selects
+// nothing. A plain Ctrl+click is NOT the gesture: it is an ordinary
+// click that leaves Ctrl free for the host.
+func TestMetaClickGoesToDefinition(t *testing.T) {
+	a, fake, goPath := newLSPTestApp(t)
+	a.openFile(goPath)
+	tab := a.activeTabPtr()
+	fake.defLocs = []lsp.Location{{URI: lsp.PathToURI(goPath),
+		Range: lsp.Range{Start: lsp.Position{Line: 0, Character: 0}}}}
+
+	ex, ey, ew, eh := a.editorRect()
+	dx, dy, ok := tab.PosScreenCell(editor.Position{Line: 2, Col: 5}, ew, eh)
+	if !ok {
+		t.Fatal("target cell off screen")
+	}
+	// Plain Ctrl+click first: a click, nothing more.
+	a.handleMouse(tcell.NewEventMouse(ex+dx, ey+dy, tcell.Button1, tcell.ModCtrl))
+	if tab.Cursor != (editor.Position{Line: 2, Col: 5}) {
+		t.Fatalf("ctrl+click cursor = %+v, want the clicked cell", tab.Cursor)
+	}
+	if a.dragMode != "editor" {
+		t.Errorf("ctrl+click dragMode = %q, want the ordinary editor drag", a.dragMode)
+	}
+	a.handleMouse(tcell.NewEventMouse(ex+dx, ey+dy, tcell.ButtonNone, tcell.ModNone)) // release
+	a.lastClick = clickRecord{}                                                       // not a double
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
+
+	for _, mods := range []tcell.ModMask{tcell.ModCtrl | tcell.ModAlt, tcell.ModMeta} {
+		tab.MoveCursorTo(editor.Position{Line: 3, Col: 0}, false)
+		a.lastClick = clickRecord{}
+		a.handleMouse(tcell.NewEventMouse(ex+dx, ey+dy, tcell.Button1, mods))
+		if tab.Cursor != (editor.Position{Line: 2, Col: 5}) {
+			t.Fatalf("mods %v: cursor = %+v, want the clicked cell", mods, tab.Cursor)
+		}
+		if a.dragMode != "" {
+			t.Errorf("mods %v: dragMode = %q, want none after a verb click", mods, a.dragMode)
+		}
+		a.handleMouse(tcell.NewEventMouse(ex+dx, ey+dy, tcell.ButtonNone, tcell.ModNone))
+		if !isMetaClick(mods) {
+			t.Fatalf("isMetaClick(%v) = false", mods)
+		}
+	}
+	for _, mods := range []tcell.ModMask{tcell.ModCtrl, tcell.ModAlt, tcell.ModShift, tcell.ModNone} {
+		if isMetaClick(mods) {
+			t.Errorf("isMetaClick(%v) = true, want false", mods)
+		}
+	}
+	deadline := time.After(2 * time.Second)
+	for tab.Cursor.Line != 0 {
+		ch := make(chan tcell.Event, 1)
+		go func() { ch <- a.screen.PollEvent() }()
+		select {
+		case ev := <-ch:
+			a.handleEvent(ev)
+		case <-deadline:
+			t.Fatal("definition event never arrived")
+		}
+	}
+	if len(a.nav.back) == 0 {
+		t.Error("the click's jump should record its origin")
+	}
+}
+
+// TestMetaClickWithoutLSPStillPlacesTheCaret: on a file no server
+// handles the click is still a click — the caret moves and the flash
+// says why nothing else happened.
+func TestMetaClickWithoutLSPStillPlacesTheCaret(t *testing.T) {
+	a, _, _ := newLSPTestApp(t)
+	txt := filepath.Join(a.rootDir, "notes.txt")
+	if err := os.WriteFile(txt, []byte("one\ntwo words\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a.openFile(txt)
+	tab := a.activeTabPtr()
+	ex, ey, ew, eh := a.editorRect()
+	dx, dy, _ := tab.PosScreenCell(editor.Position{Line: 1, Col: 4}, ew, eh)
+	a.handleMouse(tcell.NewEventMouse(ex+dx, ey+dy, tcell.Button1, tcell.ModCtrl|tcell.ModAlt))
+	if tab.Cursor != (editor.Position{Line: 1, Col: 4}) {
+		t.Fatalf("cursor = %+v, want the clicked cell", tab.Cursor)
+	}
+	if !strings.Contains(a.statusMsg, "no language server") {
+		t.Errorf("flash = %q, want the refusal to name the reason", a.statusMsg)
+	}
+}
+
 // TestMenuGoToDefinitionAsync is the end-to-end round trip: menu action
 // → request goroutine → posted event → handled on the main loop. Pins
 // that the plumbing is actually connected, with a deadline so a broken

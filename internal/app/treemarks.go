@@ -35,8 +35,9 @@
 //     that would no-op are omitted rather than dimmed.
 //   - **Every surface has a keyboard twin** (the macOS-Terminal rule):
 //     marking is a gutter click, a Space press, or a right-click row;
-//     the verbs are the picker, reachable from the ≡ File menu, the
-//     context menu and `A` in the focused tree.
+//     the verbs are the picker, reachable from the ≡ File menu (and so
+//     the palette) and the context menu. It had an `A` key in the
+//     focused tree too, until typing there became a name search.
 //   - **Destructive verbs confirm, naming the blast radius**
 //     (fileops.go's rule) — and here that matters more than anywhere
 //     else in the editor, because the set can hold rows that are
@@ -164,7 +165,7 @@ func ctxToggleMark(a *App, n *filetree.Node) {
 }
 
 // ctxMarkActions opens the multi-selection's verb list from the tree's
-// context menu — the same picker the ≡ File row and the `A` key open,
+// context menu — the same picker the ≡ File row opens,
 // at the point where the user is already pointing at the set.
 func ctxMarkActions(a *App, _ *filetree.Node) {
 	a.openTreeMarkActions()
@@ -231,9 +232,8 @@ func treeMarkLabel(nodes []*filetree.Node) string {
 // -----------------------------------------------------------------------------
 
 // openTreeMarkActions gathers the current targets and opens the verb
-// list. Shared by the ≡ File row, the tree's context menu and the `A`
-// key, so all three offer exactly the same verbs against exactly the
-// same selection.
+// list. Shared by the ≡ File row and the tree's context menu, so both
+// offer exactly the same verbs against exactly the same selection.
 func (a *App) openTreeMarkActions() {
 	targets := a.treeMarkTargets()
 	if len(targets) == 0 {

@@ -147,6 +147,14 @@ type Tree struct {
 	// rows the next action covers.
 	Marked map[string]bool
 
+	// Filter is the type-to-find pattern (filter.go): rows inside
+	// FilterScope whose names CONTAIN it are drawn with the matching
+	// letters lit. Empty means no filter, the common case.
+	// FilterScope is the absolute path of the folder being searched,
+	// held as a path for the reason Marked is.
+	Filter      string
+	FilterScope string
+
 	// markAnchor is the last row a mark gesture landed on — the fixed
 	// end of a range extension (shift-click, MarkRange). Held as a
 	// *Node rather than a path because a range is a span of VISIBLE
@@ -403,6 +411,9 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		dirty := t.isDirty(item.Node)
 		selected := t.Focused && t.Selected != nil && item.Node == t.Selected
 		drawNodeRow(scr, th, x, listTop+row, w, item, active, activeFile, dirty, t.IconsEnabled, t.ExecMarks, selected, t.IsMarked(item.Node))
+		if start, k := t.filterSpan(item.Node); k > 0 {
+			paintFilterMatch(scr, th, x, listTop+row, w, nameColumn(item, t.IconsEnabled, t.ExecMarks)+start, k)
+		}
 		visible = append(visible, item.Node)
 	}
 	t.visible = visible

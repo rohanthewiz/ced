@@ -4,7 +4,8 @@
 // =============================================================================
 
 // Tests for the file tree's keyboard layer: focus handoff, arrow
-// navigation, expand/collapse, Enter, typeahead, and the n/N/d/r verbs.
+// navigation, expand/collapse, Enter, and that letters are never
+// commands. Typing to find a name has its own file (treefilter_test.go).
 
 package app
 
@@ -136,103 +137,21 @@ func TestTreeEnterOpensFile(t *testing.T) {
 	}
 }
 
-func TestTreeTypeaheadJumpsAndCycles(t *testing.T) {
-	a := newTreeNavApp(t)
-	a.menuFocusTree()
-	rows := a.tree.VisibleNodes()
-	a.tree.Selected = rows[0] // adir
-
-	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone))
-	if a.tree.Selected.Name != "afile.txt" {
-		t.Fatalf("typeahead should jump to the NEXT a-name, got %s", a.tree.Selected.Name)
-	}
-	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone))
-	if a.tree.Selected.Name != "adir" {
-		t.Fatalf("typeahead should wrap and cycle, got %s", a.tree.Selected.Name)
-	}
-}
-
-func TestTreeVerbsOpenPrompts(t *testing.T) {
-	a := newTreeNavApp(t)
-	a.menuFocusTree()
-	rows := a.tree.VisibleNodes()
-
-	// 'n' on a folder: new-file prompt targeting it.
-	a.tree.Selected = rows[0] // adir
-	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'n', tcell.ModNone))
-	if a.modal == nil {
-		t.Fatal("n should open the New file prompt")
-	}
-	if a.activeFolder != rows[0].Path {
-		t.Fatalf("n should target the selected folder, got %s", a.activeFolder)
-	}
-	a.closeModal()
-
-	// 'r' on a file: rename prompt.
-	a.treeFocus = true
-	sel := func(name string) {
-		for _, r := range a.tree.VisibleNodes() {
-			if r.Name == name {
-				a.tree.Selected = r
-				return
-			}
+// TestTreeLettersAreNeverCommands pins that no letter fires a verb in the
+// focused tree: n/N/d/r/A used to open New file / New folder / Delete /
+// Rename / the marks picker, which made "readme" open a Rename prompt at
+// its first keystroke. Each must start a search and open nothing.
+func TestTreeLettersAreNeverCommands(t *testing.T) {
+	for _, r := range "nNdrA" {
+		a := newTreeNavApp(t)
+		a.menuFocusTree()
+		pressRune(a, r)
+		if a.modal != nil {
+			t.Fatalf("%q opened a modal", r)
 		}
-		t.Fatalf("no row named %s", name)
-	}
-	sel("notes.txt")
-	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModNone))
-	if a.modal == nil {
-		t.Fatal("r should open the Rename prompt")
-	}
-	a.closeModal()
-
-	// 'd': delete confirm.
-	a.treeFocus = true
-	sel("notes.txt")
-	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'd', tcell.ModNone))
-	if a.modal == nil {
-		t.Fatal("d should open the Delete confirm")
-	}
-}
-
-// TestTreeNewFolderKey pins 'N' as the shifted twin of 'n': it resolves
-// the same target (the selected folder, or a selected file's parent) and
-// opens the New folder prompt, which creates a directory rather than a
-// file — the tree's keyboard door onto the right-click row.
-func TestTreeNewFolderKey(t *testing.T) {
-	a := newTreeNavApp(t)
-	a.menuFocusTree()
-	rows := a.tree.VisibleNodes()
-
-	// On a folder: targets the folder itself.
-	a.tree.Selected = rows[0] // adir
-	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'N', tcell.ModNone))
-	pm, ok := a.modal.(*promptModal)
-	if !ok {
-		t.Fatalf("N should open the New folder prompt, got %T", a.modal)
-	}
-	if a.activeFolder != rows[0].Path {
-		t.Fatalf("N should target the selected folder, got %s", a.activeFolder)
-	}
-	pm.field = newTextField("sub")
-	pm.submit(a)
-	if info, err := os.Stat(filepath.Join(rows[0].Path, "sub")); err != nil || !info.IsDir() {
-		t.Fatalf("N should create a directory: err=%v", err)
-	}
-
-	// On a file: targets the file's parent, not the file.
-	a.treeFocus = true
-	for _, r := range a.tree.VisibleNodes() {
-		if r.Name == "notes.txt" {
-			a.tree.Selected = r
+		if a.tree.Filter != string(r) {
+			t.Fatalf("%q should start a search, filter = %q", r, a.tree.Filter)
 		}
-	}
-	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'N', tcell.ModNone))
-	if a.modal == nil {
-		t.Fatal("N on a file should still open the New folder prompt")
-	}
-	if a.activeFolder != a.tree.Root.Path {
-		t.Fatalf("N on a root-level file should target the root, got %s", a.activeFolder)
 	}
 }
 
@@ -244,7 +163,7 @@ func TestTreeFocusedKeysDontEditBuffer(t *testing.T) {
 	before := tab.Buffer.String()
 
 	a.menuFocusTree()
-	for _, r := range "zqy" { // unbound runes: typeahead misses, never edits
+	for _, r := range "zqy" { // unbound runes: type-to-find misses, never edits
 		a.handleKey(tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone))
 	}
 	pressTreeKey(a, tcell.KeyDown)

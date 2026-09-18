@@ -9,16 +9,24 @@
 // user hit a wall. This file closes the gap and makes the tree
 // symmetric with the rest of the editor: mouse-first, keys as
 // accelerators. Esc-T (or the ≡ View row) moves focus into the tree;
-// then arrows walk the rows, →/← expand and collapse, Enter opens,
-// plain letters typeahead-jump, and n/N/d/r run the same New file/
-// New folder/Delete/Rename verbs the right-click menu offers — one
-// vocabulary, third door (context menu, ≡ menu, now keys).
+// then arrows walk the rows, →/← expand and collapse, Enter opens, and
+// typing finds (treefilter.go: a pattern that lights every row in the
+// current folder whose name contains it, jumping to the first, with
+// Tab / Shift-Tab cycling the matches).
 //
-// Space, * and A are the multi-selection's keyboard half
-// (treemarks.go): tick this row, tick or clear every visible row, and
-// open the verb list for whatever is ticked. They are the keyboard
-// twins of a click in a row's mark gutter and of the ≡ File row — the
-// same mouse-first-with-key-accelerators shape as the rest of this file.
+// LETTERS ARE NOT COMMANDS HERE. The tree used to bind n/N/d/r (New
+// file, New folder, Delete, Rename) and A (the marks' verb list) as bare
+// keys. Once typing became a search that was a trap: the first letter
+// of "readme" opened a Rename prompt, and a search could never begin
+// with any of five letters. Every one of those verbs already lives in
+// the right-click menu and the ≡ File group (and so in the palette),
+// which is where the house rule puts a file action first — so the keys
+// went, and every letter now starts a search.
+//
+// Space and * survive as the multi-selection's keyboard half
+// (treemarks.go): tick this row, and tick or clear every visible row.
+// Neither is a letter a name search starts with, and both extend a
+// pattern that is already running like any other rune.
 //
 // Focus discipline mirrors the terminal and chat panels: the branch in
 // handleKey sits AFTER the Esc/leader/menu blocks, so every global
@@ -28,18 +36,11 @@
 // the buffer as an edit. Clicking anywhere outside the sidebar (or
 // opening a file) hands focus back to the editor, the same
 // click-where-you-want-to-type model the other panels follow.
-//
-// The n/N/d/r verbs shadow typeahead for those letters — the
-// deliberate cost of having verbs at all. Every shadowed name is still
-// reachable: one arrow key, or the finder, which is better at names
-// anyway. ('N' costs nothing extra: typeahead lowercases, so the names
-// it would have reached were already claimed by 'n'.)
 
 package app
 
 import (
 	"path/filepath"
-	"strings"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -152,8 +153,16 @@ func (a *App) handleTreeNavKey(ev *tcell.EventKey) {
 		a.openFile(sel.Path)
 		a.treeFocus = false
 		return
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		// Trims the type-to-find prefix (treefilter.go); with no prefix
+		// there is nothing for Backspace to mean in a tree.
+		a.treeFilterBackspace()
+	case tcell.KeyTab:
+		a.treeFilterStep(1)
+	case tcell.KeyBacktab:
+		a.treeFilterStep(-1)
 	case tcell.KeyRune:
-		a.treeNavRune(ev.Rune(), sel)
+		a.treeNavRune(ev.Rune())
 	}
 	a.ensureTreeSelectionVisible()
 }
@@ -171,91 +180,27 @@ func (a *App) treeSelection() *filetree.Node {
 	return a.tree.Selected
 }
 
-// treeNavRune handles the letter layer: the three file-management verbs
-// first, any other rune as typeahead.
-func (a *App) treeNavRune(r rune, sel *filetree.Node) {
-	switch r {
-	case 'n':
-		// New file — in the selected folder, or the selected file's
-		// folder, or the root when nothing is selected: the same target
-		// resolution the ≡ menu's New File uses via activeFolder.
-		target := a.tree.Root
-		switch {
-		case sel != nil && sel.IsDir:
-			target = sel
-		case sel != nil:
-			if p := a.tree.ParentOf(sel); p != nil {
-				target = p
-			}
-		}
-		a.setActiveFolder(target.Path)
-		ctxNewFile(a, target)
-	case 'N':
-		// New folder — the shifted twin of 'n', resolving its target the
-		// same way. Safe here where esc-N is not: this is a bare rune the
-		// focused tree claims, not an ESC pair the terminal can swallow.
-		// It costs typeahead nothing that 'n' hadn't already cost.
-		target := a.tree.Root
-		switch {
-		case sel != nil && sel.IsDir:
-			target = sel
-		case sel != nil:
-			if p := a.tree.ParentOf(sel); p != nil {
-				target = p
-			}
-		}
-		a.setActiveFolder(target.Path)
-		ctxNewFolder(a, target)
-	case 'd':
-		if sel != nil {
-			ctxDelete(a, sel)
-		}
-	case 'r':
-		if sel != nil {
-			ctxRename(a, sel)
-		}
-	case ' ':
-		// Space ticks the cursor's row — the multi-selection's keyboard
-		// twin of a click in the mark gutter (treemarks.go). It is the
-		// gesture every file manager and mail client teaches, and it
-		// costs typeahead nothing: no filename starts with a space.
-		//
-		// It arrives as KeyRune ' ' rather than as a key of its own, so
-		// it belongs in this table rather than in the switch above.
-		a.treeToggleMarkSelected()
-	case '*':
-		// Mark every visible row, or clear the set when one exists —
-		// one key for both directions, because undoing an over-eager
-		// select has to be as cheap as making it.
-		a.treeMarkAllToggle()
-	case 'A':
-		// The verb surface for whatever is marked. Shifted, so it costs
-		// typeahead nothing (typeahead lowercases, so 'a' already
-		// claimed the names 'A' would have reached) — the same argument
-		// that put New folder on 'N'.
-		a.openTreeMarkActions()
-	default:
-		a.treeTypeahead(r)
-	}
-}
-
-// treeTypeahead jumps the cursor to the next visible row whose name
-// starts with r, wrapping past the end — press again to cycle through
-// same-letter siblings. Single-rune matching on purpose: a stateful
-// multi-rune buffer needs a timeout, a timeout needs a visible state,
-// and the finder already answers "jump to a name I can spell".
-func (a *App) treeTypeahead(r rune) {
-	rows := a.tree.VisibleNodes()
-	if len(rows) == 0 {
-		return
-	}
-	prefix := strings.ToLower(string(r))
-	start := a.tree.SelectedIndex(rows) + 1
-	for i := 0; i < len(rows); i++ {
-		n := rows[(start+i)%len(rows)]
-		if strings.HasPrefix(strings.ToLower(n.Name), prefix) {
-			a.tree.Selected = n
+// treeNavRune handles the letter layer: Space and * are the mark keys
+// when no search is running, and every other rune — or any rune once a
+// pattern is being typed — extends the type-to-find pattern
+// (treefilter.go).
+func (a *App) treeNavRune(r rune) {
+	if a.tree.Filter == "" {
+		switch r {
+		case ' ':
+			// Space ticks the cursor's row — the multi-selection's
+			// keyboard twin of a click in the mark gutter (treemarks.go).
+			// It arrives as KeyRune ' ' rather than as a key of its own,
+			// so it belongs here rather than in handleTreeNavKey's switch.
+			a.treeToggleMarkSelected()
+			return
+		case '*':
+			// Mark every visible row, or clear the set when one exists —
+			// one key for both directions, because undoing an over-eager
+			// select has to be as cheap as making it.
+			a.treeMarkAllToggle()
 			return
 		}
 	}
+	a.treeFilterType(r)
 }

@@ -182,6 +182,8 @@ internal/format/              format.json load, trust store, builtin goimports /
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render,
                               the mark set (paths, pruned by Refresh, one borrowed cell)
 internal/app/treemarks.go     Tree multi-selection: the gestures, the Actions picker, the verbs
+internal/filetree/filter.go   Type-to-find: pattern + scope, visible-row substring match, the lit span
+internal/app/treefilter.go    Type-to-find keys: build/trim/cycle/clear, scope pick, first-match jump
 internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, locked by a drag
 internal/app/overflow.go      The ▴/▾ overflow markers (editor, both git panels, tree),
                               what is off-screen each way, and the hover popup
@@ -3489,6 +3491,47 @@ share the grip helpers. House rules:
   untouched: a row is a much easier target than a column, and both
   neighbours there are content rather than margin.
 
+### Tree type-to-find (filetree/filter.go + app/treefilter.go)
+Typing in the focused tree builds a PATTERN; every visible row in scope
+whose name CONTAINS it (anywhere, but contiguous — a substring, not a
+fuzzy subsequence) has the matched letters lit, and the cursor jumps to
+the first match in display order (scrolling to it). It replaced a
+one-rune typeahead that cycled on repeated letters. Matching folds case
+PER RUNE (`foldRunes`, find.go's rule) so the lit span's rune column
+can't drift off the letters. House rules:
+
+- **No timeout — the highlight IS the visible state.** The old design
+  refused a multi-rune buffer because a timeout needs something on
+  screen; the lit letters are that. It clears on Backspace-to-empty, Esc
+  (a SIDE EFFECT in the Esc block, never consuming it, so `Esc s` still
+  saves) and focus loss (synced in draw beside `tree.Focused`, not at
+  every place `treeFocus` flips).
+- **NO LETTER IS A COMMAND IN THE FOCUSED TREE.** It used to bind
+  n/N/d/r (New file/folder, Delete, Rename) and `A` (marks picker) as
+  bare keys; once typing became a search, "readme" opened a Rename
+  prompt at its first keystroke and a search could never start with
+  five letters. All of those verbs live in the right-click menu and ≡
+  File (hence the palette), so the keys were removed — don't add bare
+  letter verbs back. Only Space and `*` (the mark keys) survive, and only
+  on an EMPTY pattern; mid-search they extend it like any rune. Repeated
+  letters EXTEND, so the cycle is Tab / Shift-Tab (inert with no
+  pattern).
+- **Scope is the tree's active folder when it is expanded and visible,
+  else the project**, captured on the first rune (so Enter on a matched
+  folder doesn't re-scope mid-typing), held as a PATH (the Marked rule),
+  tested with a trailing separator (`app` must not claim `apps/`). The
+  scope folder itself isn't a match.
+- **Visible rows only.** A deep match would be a directory walk per
+  keystroke in a lazy tree, and a highlight inside a folded folder is one
+  nobody can see. The finder is for names nobody expanded towards.
+- **The paint borrows `FindMatch` + bold**, applied after the row like
+  `paintMark`, so `nodeRowSegments` / ContentWidth / auto-fit never see
+  it. Same question as the find bar ("where is what I typed"), already
+  tuned against every theme's bg and Selection — the cursor row sits on
+  Selection, so a new accent key there would read as "selected".
+- A miss leaves the cursor where it was and flashes; a hit flashes
+  `n/total` plus the Tab/Esc hint — the feature's discovery surface.
+
 ### Tree multi-selection (filetree's marks + app/treemarks.go)
 Tick several rows in the file tree, then run one verb over all of them.
 The tree could only ever act on ONE thing — the row you right-clicked or
@@ -3543,15 +3586,16 @@ files" six confirmations and "zip this handful" impossible. House rules:
   extension that unmarked what it swept over would destroy the set the
   first one built — and the anchor stays at the range's fixed end.
 - **Four surfaces, and each earns its place.** The gutter click is
-  primary (mouse-first); `Space` / `*` / `A` are its keyboard twins in
-  the focused tree; the right-click **Select** row is the DISCOVERY
+  primary (mouse-first); `Space` / `*` are its keyboard twins in the
+  focused tree; the right-click **Select** row is the DISCOVERY
   surface, because a one-cell tick is close to invisible as an
   affordance and without a named row a mouse user could never learn the
   gutter is clickable; the ≡ **File** row is the path that survives a
   terminal which swallows right-click, and its label carries the count
   because the header's is invisible while the sidebar is hidden. No
-  leader key — the flat table is out of mnemonic letters, and `A` inside
-  the focused tree is the accelerator.
+  leader key — the flat table is out of mnemonic letters. (`A` in the
+  focused tree was the accelerator until letters there became a name
+  search; see type-to-find.)
 - **The verbs REUSE the single-file paths, widened.** Nothing here owns
   an implementation: `doDeletePaths` is deletePath plus one collected
   report (a loop over `doDeletePath` would spend a workspace re-sync per

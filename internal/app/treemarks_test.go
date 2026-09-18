@@ -149,32 +149,27 @@ func TestTreeMarkPress_ShiftExtendsRange(t *testing.T) {
 	}
 }
 
-// TestTreeMarkKeys_SpaceStarAndActions pins the keyboard half: Space
-// ticks the cursor's row, '*' marks every visible row and clears again,
-// and 'A' opens the verb picker.
-func TestTreeMarkKeys_SpaceStarAndActions(t *testing.T) {
+// TestTreeMarkKeys_SpaceAndStar pins the keyboard half: Space ticks the
+// cursor's row, and '*' marks every visible row and clears again.
+func TestTreeMarkKeys_SpaceAndStar(t *testing.T) {
 	a, idx := markApp(t)
 	a.focusTree()
 	a.tree.Selected = idx["b.txt"]
 
-	a.treeNavRune(' ', a.tree.Selected)
+	a.treeNavRune(' ')
 	if !a.tree.IsMarked(idx["b.txt"]) {
 		t.Fatal("Space should tick the cursor's row")
 	}
 
-	a.treeNavRune('*', a.tree.Selected)
+	a.treeNavRune('*')
 	if a.tree.MarkCount() != 0 {
 		t.Fatalf("'*' with a live set should clear it, count=%d", a.tree.MarkCount())
 	}
-	a.treeNavRune('*', a.tree.Selected)
+	a.treeNavRune('*')
 	if got, want := a.tree.MarkCount(), len(a.tree.VisibleNodes()); got != want {
 		t.Fatalf("'*' on an empty set marked %d rows, want %d", got, want)
 	}
 
-	a.treeNavRune('A', a.tree.Selected)
-	if paletteOf(a) == nil {
-		t.Fatal("'A' should open the actions picker")
-	}
 }
 
 // TestTreeMarkKeys_SpaceDoesNotTypeahead pins that the multi-selection
@@ -184,7 +179,7 @@ func TestTreeMarkKeys_SpaceDoesNotTypeahead(t *testing.T) {
 	a, idx := markApp(t)
 	a.focusTree()
 	a.tree.Selected = idx["b.txt"]
-	a.treeNavRune(' ', a.tree.Selected)
+	a.treeNavRune(' ')
 	if a.tree.Selected != idx["b.txt"] {
 		t.Fatalf("Space moved the cursor to %s", a.tree.Selected.Name)
 	}

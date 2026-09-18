@@ -75,9 +75,14 @@ The goals, in order:
   press `Space` with the tree focused) to tick it, then act on the whole
   set at once: open, copy the paths, copy for paste, zip into one
   archive, delete, or stage/unstage in git. The verb list is
-  ≡ **File ▸ Selected items…**, `A` in the focused tree, or the tree's
+  ≡ **File ▸ Selected items…** or the tree's
   right-click menu; `*` ticks or clears every visible row, and
   shift-click extends a run where your terminal reports it.
+- **Type to find in the file tree** — with the tree focused, type any
+  part of a name: every row in the current folder (and the folders
+  expanded below it) containing it lights up, and the cursor jumps to the
+  first one, scrolling if needed. `Tab` / `Shift-Tab` cycle the matches,
+  `Backspace` trims, `Esc` clears.
 - **Clipboard over SSH** — OSC 52, including a `tmux` passthrough so
   copy works from inside a tmux session on a remote host.
 - **Format on save** — opt-in per-project via `.ced/format.json`

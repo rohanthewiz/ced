@@ -2512,6 +2512,9 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// marks survive: they record what was read, not the mode that
 		// recorded it, and the header button resumes from there.
 		a.stopGitPanelWalk()
+		// …and for the file tree's type-to-find pattern (treefilter.go),
+		// which has no timeout: Esc is how a user says "done looking".
+		a.clearTreeFilter()
 		// A real Esc always re-opens the full leader table — chain mode
 		// (repeatable-only) is an artifact of the previous action. Note
 		// whether the window was chain-armed before clearing: a chained
@@ -2766,8 +2769,8 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		return
 	}
 
-	// The focused file tree claims the rest — arrows, Enter, typeahead,
-	// the n/d/r verbs (treenav.go). Same placement contract as the two
+	// The focused file tree claims the rest — arrows, Enter, type-to-find
+	// and the mark keys (treenav.go). Same placement contract as the two
 	// panels above: global gestures already had their chance, and a
 	// keystroke aimed at the tree must never leak into the buffer.
 	if a.treeFocus && a.sidebarShown {
@@ -4563,6 +4566,14 @@ func (a *App) draw() {
 		// only consumer, and pushing it here beats chasing every place
 		// treeFocus flips.
 		a.tree.Focused = a.treeFocus
+		// The type-to-find pattern belongs to a FOCUSED tree: once the
+		// keyboard is elsewhere (a file opened, a click outside) nothing
+		// can extend or clear it, so a lingering highlight would be a
+		// state with no way out. Cleared here for the same reason
+		// Focused is synced here — one place, not every focus flip.
+		if !a.treeFocus && a.tree.Filter != "" {
+			a.tree.ClearFilter()
+		}
 		// The tree drops its own EXPLORER row when the dock is drawing a
 		// header above it — stacking "EXPLORER" under "Project" would
 		// spend a third row of a ten-row panel saying it twice. Pushed

@@ -194,6 +194,13 @@ func leaderBindings() []leaderBinding {
 		// still the ≡ menu's pinned headline row, so it keeps three ways
 		// in without that alias.
 		{key: 'k', action: (*App).openPalette, label: "Command palette"},
+		// '?' shows this very table in the which-key band (whichkey.go) —
+		// the key every pager, vim and which-key user reaches for. It
+		// replaced summoning the band on a hesitation after ANY lone Esc,
+		// which threw it over the code every time Esc was used to dismiss
+		// something. Not a CSI/OSC introducer, so a terminal can't eat it
+		// the way it eats Esc [ or Esc ].
+		{key: '?', action: (*App).menuWhichKey, label: "Key bindings"},
 		// 'a' for AI — a PREFIX, not an action. Everything the chat agent
 		// touches lives one rune deeper: the panel itself, context, the
 		// model and backend pickers, skills, and MCP tools.

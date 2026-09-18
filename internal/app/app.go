@@ -2565,10 +2565,12 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 			a.lastEscape = time.Time{}
 			return
 		}
+		// No which-key hesitation timer here any more: a lone Esc is the
+		// editor's "drop that" gesture far more often than it is a
+		// leader someone is stuck on, and the band it summoned competed
+		// with ordinary editing. The top-level table is Esc ? now
+		// (whichkey.go explains the split).
 		a.lastEscape = now
-		// The hesitation timer: if this armed leader is still waiting in
-		// ~350ms, the which-key overlay documents it (whichkey.go).
-		a.armWhichKey()
 		return
 	}
 	// Alt+Enter never reaches tcell as itself on a legacy terminal (tmux

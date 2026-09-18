@@ -2871,6 +2871,19 @@ each folder's tabs and cursors coming back when you return. House rules:
   newTestApp pins both at temp dirs so no test can rewrite the
   developer's real recent-folders list or their restore preference.
 
+### The which-key band (app/whichkey.go)
+The bottom band listing the leader table is summoned by **`Esc ?`**, not
+by pausing after a lone Esc. A lone Esc is the editor's "drop that"
+gesture (ghost text, carets, the tree search…), so the old hesitation
+trigger threw a half-screen band over the code whenever Esc was used to
+dismiss something. Don't bring the lone-Esc timer back. The hesitation
+survives for NAMESPACE CHORDS only (`Esc a` / `x` / `C`): two deliberate
+keys whose only purpose is reaching a sub-table, so a pause there really
+means "which letter?". `handleWhichKeyTick` therefore opens only while
+`leaderChord` is set, which is also what stops "Esc a, Esc" turning the
+chord's pending tick into a top-level band. A visible band holds the
+leader live by itself, so `menuWhichKey` needs no re-arm.
+
 ### Menu shortcut hints
 `menuItemDef.shortcut` is a display-only accelerator column rendered
 right-aligned and muted in the ≡ menu ("esc s", "alt+←"). Dispatch

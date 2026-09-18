@@ -3,16 +3,32 @@
 // Author: Rohan Allison
 // =============================================================================
 
-// The which-key overlay: the Esc-leader table, drawn when you hesitate.
+// The which-key overlay: the Esc-leader table, drawn on request.
 //
 // The leader is ced's entire command layer, and until now it was
 // documented only in the ≡ menu's shortcut column — which you can't see
 // while you're mid-gesture wondering what the second key was. This file
-// makes the leader self-documenting: press Esc, pause ~350ms, and a
-// bottom-anchored band lists every `key → label` pair; arm a namespace
-// (Esc-a, Esc-x) and the band re-renders with that namespace's table.
-// Fast hands never see it — the delay is longer than any practiced
-// Esc-s — so the overlay costs an expert nothing.
+// makes the leader self-documenting: press Esc ? and a bottom-anchored
+// band lists every `key → label` pair; arm a namespace (Esc-a, Esc-x)
+// and the band re-renders with that namespace's table.
+//
+// HOW IT IS SUMMONED is the one thing that changed, and why is worth
+// keeping. It used to appear on HESITATION: any lone Esc followed by a
+// ~350ms pause. But a lone Esc is also the editor's universal "drop
+// that" — it clears the ghost text, the carets, the chat highlight, the
+// tree's search — and every one of those presses that wasn't followed
+// by a quick second key threw a half-screen band over the code. The
+// cheat sheet was competing with ordinary editing. So the top-level
+// table is now a deliberate gesture, `Esc ?` — '?' being the key every
+// pager, vim and which-key user already reaches for — and a stray Esc
+// is silent again.
+//
+// A NAMESPACE CHORD KEEPS THE HESITATION. `Esc a` (or x, C) is two
+// deliberate keys whose only purpose is to reach a sub-table; pausing
+// there really does mean "which letter was it?", and nothing else a
+// user does ever arms a chord, so the overlay can't compete with
+// anything. armWhichKey is therefore called from fireLeader's prefix
+// branch only, and handleWhichKeyTick opens only for a live chord.
 //
 // Three deliberate properties:
 //
@@ -31,6 +47,8 @@
 //     key, a click elsewhere) — and the double-Esc menu gesture is
 //     checked first, so Esc-Esc means what it always meant.
 //
+// whichKeyDelay (below) now only times the namespace-chord hesitation.
+//
 // Redraw mechanics: ced's loop is event-driven, so the pause is a
 // one-shot time.AfterFunc that posts a whichKeyEvent (the events-only
 // rule — the goroutine never touches App state). A generation counter
@@ -46,8 +64,9 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
-// whichKeyDelay is the hesitation that summons the overlay. Longer than
-// a practiced leader gesture, shorter than "I've forgotten the key".
+// whichKeyDelay is the hesitation after a namespace chord (Esc a, …)
+// that summons its sub-table. Longer than a practiced chord, shorter
+// than "I've forgotten the key".
 // Well under doubleEscMs matters too: the overlay must appear while the
 // leader window is still live, or it would document a dead state.
 const whichKeyDelay = 350 * time.Millisecond
@@ -87,8 +106,8 @@ type whichKeyState struct {
 	band struct{ x, y, w, h int }
 }
 
-// armWhichKey schedules the overlay to appear after whichKeyDelay if the
-// leader (or a chord) is still armed when the tick lands.
+// armWhichKey schedules the overlay to appear after whichKeyDelay if a
+// namespace chord is still pending when the tick lands.
 func (a *App) armWhichKey() {
 	if a.screen == nil {
 		return
@@ -103,7 +122,13 @@ func (a *App) armWhichKey() {
 }
 
 // handleWhichKeyTick opens the overlay when the tick that scheduled it
-// is still current and something is still armed to document.
+// is still current and a namespace chord is still pending. Only a chord
+// counts: a bare armed leader (lastEscape set) is exactly the stray-Esc
+// state the overlay no longer interrupts — Esc ? is how you ask for the
+// top-level table (menuWhichKey). Checking the chord rather than the
+// seq alone also covers "Esc a, Esc": that second Esc drops the chord
+// and re-arms the leader, and must not turn the pending tick into a
+// top-level band.
 func (a *App) handleWhichKeyTick(e *whichKeyEvent) {
 	if e.seq != a.whichKey.seq || a.whichKey.open {
 		return
@@ -111,8 +136,19 @@ func (a *App) handleWhichKeyTick(e *whichKeyEvent) {
 	if a.modal != nil || a.menuOpen {
 		return
 	}
-	armed := !a.lastEscape.IsZero() || a.leaderChord != nil
-	if !armed {
+	if a.leaderChord == nil {
+		return
+	}
+	a.whichKey.open = true
+}
+
+// menuWhichKey is the Esc ? leader: show the top-level table NOW, with
+// no hesitation. fireLeader has already disarmed the leader window by
+// the time this runs, and that is fine — a visible overlay holds the
+// table live by itself (handleKey's `|| a.whichKey.open`), so the next
+// key still fires its binding however long the user spends reading.
+func (a *App) menuWhichKey() {
+	if a.modal != nil || a.menuOpen {
 		return
 	}
 	a.whichKey.open = true
@@ -179,7 +215,7 @@ func (a *App) whichKeyEntries() (string, []whichKeyEntry) {
 			fire: func(app *App) { app.fireLeader(&b) },
 		})
 	}
-	return "esc leader — type a key or click · esc esc opens the menu", entries
+	return "esc leader (esc ?) — type a key or click · esc dismisses · esc esc opens the menu", entries
 }
 
 // drawWhichKey paints the bottom-anchored band and stamps the row rects

@@ -435,6 +435,7 @@ within half a second tap one of the letters below.
 | Combo       | Action               |
 | ----------- | -------------------- |
 | `Esc Esc`   | Open ≡ menu          |
+| `Esc ?`     | Show every leader key |
 | `Esc s`     | Save                 |
 | `Esc u`     | Undo                 |
 | `Esc r`     | Redo                 |
@@ -456,6 +457,11 @@ within half a second tap one of the letters below.
 A lone `Esc` is harmless — if you don't follow it with a bound key
 within the window, your next keystroke goes to the editor as normal,
 so accidental `Esc` taps never swallow a real character.
+
+Forgot a key? **`Esc ?`** pulls up a band at the bottom listing every
+leader binding. Type the key, or click the row, and the band goes away.
+Pause after a prefix (`Esc a`, `Esc x`, `Esc C`) and the band shows that
+prefix's keys on its own.
 
 **`Esc a` is the AI prefix** — everything the chat agent touches lives one
 key deeper. Tap `Esc a` and the status bar lists your options; you have two

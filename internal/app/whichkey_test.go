@@ -3,7 +3,8 @@
 // Author: Rohan Allison
 // =============================================================================
 
-// Tests for the which-key overlay: the hesitation tick, the
+// Tests for the which-key overlay: Esc ? and the chord-only hesitation
+// tick, the
 // hold-the-window-open contract, dismissal paths, clickable rows, chord
 // re-rendering, and the every-binding-is-labeled invariant the overlay
 // depends on.
@@ -34,26 +35,66 @@ func tickWhichKey(a *App) {
 	a.handleWhichKeyTick(&whichKeyEvent{when: time.Now(), seq: a.whichKey.seq})
 }
 
-func TestWhichKeyOpensOnHesitation(t *testing.T) {
-	a := newTestApp(t, t.TempDir())
+// summonWhichKey opens the top-level table the way a user now does:
+// Esc then '?', through the real router.
+func summonWhichKey(a *App) {
 	pressEsc(a)
-	if a.whichKey.open {
-		t.Fatal("overlay must not open on the Esc itself")
-	}
-	tickWhichKey(a)
+	pressRune(a, '?')
+}
+
+// TestWhichKeyEscQuestionOpensAtOnce pins the summoning gesture: Esc ?
+// shows the band immediately, no hesitation tick required.
+func TestWhichKeyEscQuestionOpensAtOnce(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	summonWhichKey(a)
 	if !a.whichKey.open {
-		t.Fatal("overlay should open when the tick finds the leader still armed")
+		t.Fatal("Esc ? should open the overlay immediately")
 	}
 }
 
+// TestWhichKeyLoneEscNeverOpens pins the reason for the change: a lone
+// Esc — the editor's "drop that" gesture — followed by a pause must not
+// throw the band over the code any more.
+func TestWhichKeyLoneEscNeverOpens(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	pressEsc(a)
+	tickWhichKey(a)
+	if a.whichKey.open {
+		t.Fatal("a lone Esc plus a pause must not open the overlay")
+	}
+}
+
+// TestWhichKeyChordStillOpensOnHesitation pins the half that kept the
+// timer: Esc a is a deliberate step into a namespace, so pausing there
+// still shows the namespace's table.
+func TestWhichKeyChordStillOpensOnHesitation(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	pressEsc(a)
+	pressRune(a, 'a')
+	if a.whichKey.open {
+		t.Fatal("the chord itself must not open the overlay")
+	}
+	tickWhichKey(a)
+	if !a.whichKey.open {
+		t.Fatal("hesitating inside a chord should open its table")
+	}
+	if title, _ := a.whichKeyEntries(); title[:2] != "AI" {
+		t.Fatalf("expected the AI table, got %q", title)
+	}
+}
+
+// TestWhichKeyStaleTickIsDropped pins that a chord abandoned before its
+// tick lands opens nothing — including "Esc a, Esc", where the second
+// Esc re-arms the TOP-level leader and must not inherit the chord's
+// pending band.
 func TestWhichKeyStaleTickIsDropped(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	pressEsc(a)
-	staleSeq := a.whichKey.seq
-	pressRune(a, 'Q') // unbound: disarms the leader, bumps the generation
-	a.handleWhichKeyTick(&whichKeyEvent{when: time.Now(), seq: staleSeq})
+	pressRune(a, 'a')
+	pressEsc(a) // drops the chord, re-arms the leader
+	tickWhichKey(a)
 	if a.whichKey.open {
-		t.Fatal("a tick from a disarmed Esc must not open the overlay")
+		t.Fatal("a tick from an abandoned chord must not open the overlay")
 	}
 }
 
@@ -63,8 +104,7 @@ func TestWhichKeyHoldsLeaderWindowOpen(t *testing.T) {
 	a := newTestApp(t, root)
 	a.openFile(p)
 
-	pressEsc(a)
-	tickWhichKey(a)
+	summonWhichKey(a)
 	// Simulate reading past the 500ms window.
 	a.lastEscape = time.Now().Add(-2 * time.Second)
 	pressRune(a, 'j') // Go to line
@@ -78,8 +118,7 @@ func TestWhichKeyHoldsLeaderWindowOpen(t *testing.T) {
 
 func TestWhichKeyEscDismissesAndDoubleEscStillMenus(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	pressEsc(a)
-	tickWhichKey(a)
+	summonWhichKey(a)
 
 	// Slow second Esc (outside doubleEscMs): dismiss, no menu.
 	a.lastEscape = time.Now().Add(-time.Second)
@@ -106,8 +145,7 @@ func TestWhichKeyTypingFallsThrough(t *testing.T) {
 	a.openFile(p)
 	tab := a.activeTabPtr()
 
-	pressEsc(a)
-	tickWhichKey(a)
+	summonWhichKey(a)
 	pressRune(a, '1') // unbound rune: dismiss AND type
 	if a.whichKey.open {
 		t.Fatal("an unbound key should dismiss the overlay")
@@ -123,8 +161,7 @@ func TestWhichKeyRowsClickable(t *testing.T) {
 	a := newTestApp(t, root)
 	a.openFile(p)
 
-	pressEsc(a)
-	tickWhichKey(a)
+	summonWhichKey(a)
 	a.drawWhichKey()
 	if len(a.whichKey.rows) == 0 {
 		t.Fatal("draw should stamp clickable rows")
@@ -159,8 +196,7 @@ func TestWhichKeyRowsClickable(t *testing.T) {
 
 func TestWhichKeyClickOutsideDismissesAndFallsThrough(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	pressEsc(a)
-	tickWhichKey(a)
+	summonWhichKey(a)
 	a.drawWhichKey()
 
 	if a.whichKeyClick(2, 0) { // top row of the window — well above the band
@@ -176,8 +212,7 @@ func TestWhichKeyClickOutsideDismissesAndFallsThrough(t *testing.T) {
 
 func TestWhichKeyChordRerenders(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	pressEsc(a)
-	tickWhichKey(a)
+	summonWhichKey(a)
 
 	title, _ := a.whichKeyEntries()
 	if title == "" || a.leaderChord != nil {
@@ -231,8 +266,7 @@ func TestWhichKeyEveryLeaderBindingLabeled(t *testing.T) {
 func TestWhichKeyGeometryStaysOnScreen(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.width = 40 // narrow: forces multiple rows and the clamp
-	pressEsc(a)
-	tickWhichKey(a)
+	summonWhichKey(a)
 	a.drawWhichKey()
 
 	for _, r := range a.whichKey.rows {

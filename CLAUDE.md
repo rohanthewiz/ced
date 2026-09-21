@@ -4094,10 +4094,33 @@ UI behavior, build and run it against a real directory.
 
 ## Releases (don't break this)
 
-Releases are cut deliberately: push to the **`release` branch** (cut it
-from main) and `.github/workflows/release.yml` runs. Ordinary pushes to
-`main` no longer ship anything; `workflow_dispatch` is the manual escape
-hatch.
+**A release is a hand bump and a tag on `main`** — that is the whole
+flow as of 0.3.3 (2026-09-21). The cats plugin installs from source, so
+a tag is all it needs; the GitHub Release pipeline below is PARKED on the
+owner's call (next-list N-001, Roadmap), not broken. To cut one:
+
+1. Bump `internal/version/version.go` AND `cats-plugin.toml`'s top-level
+   `version =` line to the same `x.y.z` —
+   `TestVersion_MatchesCatsManifest` fails until they agree.
+2. `make test`, then commit (`Release ced x.y.z`) on `main`.
+3. `git tag -a vx.y.z -m "ced x.y.z"` and
+   `git push origin main vx.y.z`.
+
+Pick a number past the LATEST TAG, not past `version.go` alone — tags
+have been pushed that `main` never recorded (v0.3.2 was one). Don't
+touch the `release` branch or dispatch `release.yml` as part of this:
+that is the parked pipeline, and it would publish a GitHub Release.
+
+What the hand flow does NOT update: `install.sh` and the GitHub Releases
+page, which still serve 0.2.0 — tags from v0.3.0 on carry no archives.
+That gap is exactly what N-001 parks.
+
+### The parked pipeline (release branch + goreleaser)
+
+Kept working in case it is revived. When it was the release path:
+push to the **`release` branch** (cut it from main) and
+`.github/workflows/release.yml` runs. Ordinary pushes to `main` ship
+nothing; `workflow_dispatch` is the manual escape hatch.
 
 > **⚠️ This repo is a FORK, so pushing does NOT trigger anything.**
 > `rohanthewiz/ced` is a fork of `cloudmanic/spice-edit`, and GitHub

@@ -479,3 +479,44 @@ func TestMetaLineMotionDoesNotShadowNavHistory(t *testing.T) {
 			"not a line motion", got)
 	}
 }
+
+// ⌘[ / ⌘] walk the navigation history. The pair earns its place on this
+// layer more than any other row: Esc-[ and Esc-] can never be bound at
+// all (CSI and OSC introducers — the terminal eats them), so these
+// keycaps are reachable ONLY here, while the verbs themselves keep
+// Esc-o/O and the ≡ rows as their guaranteed paths.
+func TestMetaAccelNavigatesHistory(t *testing.T) {
+	armMetaHost(t)
+	dir := t.TempDir()
+	paths := seedNavFiles(t, dir, 2)
+	a := newTestApp(t, dir)
+	a.openFile(paths[0])
+	a.openFile(paths[1])
+
+	a.handleKey(metaKeyEv('[', false))
+	if got := a.activeTabPtr().Path; got != paths[0] {
+		t.Fatalf("Cmd+[ landed on %s, want %s (go back)", got, paths[0])
+	}
+
+	a.handleKey(metaKeyEv(']', false))
+	if got := a.activeTabPtr().Path; got != paths[1] {
+		t.Fatalf("Cmd+] landed on %s, want %s (go forward)", got, paths[1])
+	}
+}
+
+// The same chord on an untrusted host must do nothing — a terminal that
+// folds Option into Meta would otherwise turn Option+[ into a file jump.
+func TestMetaAccelNavIsGated(t *testing.T) {
+	disarmMetaHost(t)
+	dir := t.TempDir()
+	paths := seedNavFiles(t, dir, 2)
+	a := newTestApp(t, dir)
+	a.openFile(paths[0])
+	a.openFile(paths[1])
+
+	a.handleKey(metaKeyEv('[', false))
+
+	if got := a.activeTabPtr().Path; got != paths[1] {
+		t.Fatalf("Cmd+[ navigated on an untrusted host (now on %s)", got)
+	}
+}

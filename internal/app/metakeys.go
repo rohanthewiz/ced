@@ -176,6 +176,24 @@ func metaAccels() []metaAccel {
 		// keeps the chord for its own select-all until cats adds it — the
 		// road ⌘E took.
 		{key: 'a', action: (*App).menuSelectAll, label: "Select all"},
+		// ⌘[ / ⌘] walk the file-navigation history (nav.go) — the
+		// GoLand/VS Code "navigate back / forward" spelling, and the one
+		// pair on this table whose keycaps the Esc leader structurally
+		// CANNOT offer: `\x1b[` is the CSI introducer and `\x1b]` is OSC,
+		// so the terminal eats an Esc-[ / Esc-] pair before tcell sees it
+		// (the tab-strip section of CLAUDE.md records that trap). Their
+		// Esc twins are therefore the letters — Esc-o / Esc-O — and the
+		// ≡ Navigation rows; this layer only adds the keycaps the rest of
+		// the ecosystem trained the user's hands on.
+		//
+		// The HOST decides whether these arrive, as with every row here.
+		// cats binds ⌘[ / ⌘] to its OWN cross-pane navigation, so inside
+		// a cats pane the chord reaches ced only once cats' CMD_TO_PANE
+		// allowlist forwards it — the road ⌘E took. Until then the chord
+		// is armed and dark, which costs nothing: Alt+←/→ and Esc-o/O
+		// are the paths that always work.
+		{key: '[', action: (*App).menuNavBack, label: "Go back"},
+		{key: ']', action: (*App).menuNavForward, label: "Go forward"},
 		// Deliberately NOT bound:
 		//   ⌘C / ⌘V / ⌘Z — handled directly in handleKey, and older than
 		//     this table. They stay there because they are context-

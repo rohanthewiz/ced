@@ -905,6 +905,14 @@ func TestPosConversionRoundTrip(t *testing.T) {
 	}
 }
 
+// useRealLSPBinaries undoes newTestApp's lspLookPath pin for a test that
+// deliberately wants a real server. Call it AFTER newTestApp; the
+// harness's own cleanup still restores the package var afterwards.
+func useRealLSPBinaries(t *testing.T) {
+	t.Helper()
+	lspLookPath = exec.LookPath
+}
+
 // TestLSPEndToEndWithRealGopls drives the app-level flow against a
 // real server: openFile triggers the async spawn + handshake, the
 // ready event announces the document, and a publishDiagnostics for a
@@ -925,6 +933,7 @@ func TestLSPEndToEndWithRealGopls(t *testing.T) {
 
 	a := newTestApp(t, dir)
 	a.lsp.dead = false // re-enable what newTestApp disabled — this test wants the real thing
+	useRealLSPBinaries(t)
 	t.Cleanup(a.lspShutdown)
 
 	a.openFile(src)

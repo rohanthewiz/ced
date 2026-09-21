@@ -139,6 +139,16 @@ func newTestApp(t *testing.T, root string) *App {
 	prevChatLook := chatLookPath
 	chatLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	t.Cleanup(func() { chatLookPath = prevChatLook })
+	// The same belt and braces for language servers. lsp.dead (set where
+	// the LSP is neutered) is the first line, but newLSPTestApp and a
+	// dozen tests clear it to inject a fake — and from then on opening
+	// ANY handled file whose slot has no fake (a .py, a .rs) would spawn
+	// whatever server the machine carries. The Restart row clears a
+	// slot's dead verdict by design, which is the chat agent's argument
+	// exactly. The two real-gopls tests opt back in with useRealLSPBinaries.
+	prevLSPLook := lspLookPath
+	lspLookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	t.Cleanup(func() { lspLookPath = prevLSPLook })
 	// Match the shipped default (config "chatwrite" is on): the App is
 	// built by hand here, so the zero value would silently put every
 	// test in read-only chat mode. Read-only tests flip it back off.

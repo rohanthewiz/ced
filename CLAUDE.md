@@ -1097,8 +1097,8 @@ framework dependency. House rules it must keep obeying:
   ready/exit events carry the generation they spawned under and the
   handlers drop mismatches (the chat `connSeq` rule). `lspDropServer` is
   the teardown a crash and a restart share. The row never clears
-  `lspState.dead`. Its tests pin `lspLookPath` at "not found", since the
-  happy path ends in a real spawn.
+  `lspState.dead`. Its tests lean on newTestApp's `lspLookPath` pin, since
+  the happy path ends in a real spawn.
 - **Events only**: the read loop, start handshake, debounce timers,
   and definition/hover requests all run off-loop and post
   `lsp*Event`s; only the main loop touches `App.lsp`.
@@ -1150,8 +1150,11 @@ framework dependency. House rules it must keep obeying:
   absolutizes tab paths. A relative root produces a malformed rootUri
   and gopls then publishes diagnostics keyed by absolute paths that
   never match the tabs — the "gopls installed but no squiggles" bug.
-- Tests kill the integration (`a.lsp.dead = true` in newTestApp) so
-  openFile can't spawn a real server; LSP tests inject `fakeLSPConn`
+- Tests kill the integration (`a.lsp.dead = true` in newTestApp) AND pin
+  `lspLookPath` at "never found" — many tests clear `dead` to inject a
+  fake, after which any other handled extension would spawn the machine's
+  own server. The two real-gopls tests opt back in with
+  `useRealLSPBinaries`. So openFile can't spawn a real server; LSP tests inject `fakeLSPConn`
   through `a.lspInstall(lspGoServerID, fake)`.
 
 ### Diagnostic messages (app/diagtip.go)

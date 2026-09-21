@@ -113,12 +113,6 @@ plus the LSP work done in the seeding session itself
   the least certain part — typescript-language-server may want them via
   `workspace/didChangeConfiguration` instead.
 
-- **N-015** · raised `2026-0921-0906-lsp-experience` · value low
-  `lspLookPath` is not pinned in `newTestApp` although its doc comment
-  implies it (tests rely on `a.lsp.dead = true` instead). A test that sets
-  `dead = false` and opens a non-Go file would spawn whatever server the
-  machine has. Pin it, with the real-gopls tests restoring it.
-
 - **N-016** · raised `2026-0921-0906-lsp-experience` · value low
   Inlay hints for servers that take their hint settings through
   `workspace/configuration` rather than `initializationOptions` (pyright).
@@ -168,6 +162,9 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-21 — **N-015** `lspLookPath` pinned at "never found" in
+  `newTestApp`; the two real-gopls tests opt back in with
+  `useRealLSPBinaries` (confirmed they still RUN, not skip).
 - closed 2026-09-21 — **N-011** gutter click opens the diagnostic tooltip
   (`diagGutterPress`, diagtip.go). Diagnosed lines only; a second click
   closes it; no caret move, no drag. Like N-010, only exercised on the

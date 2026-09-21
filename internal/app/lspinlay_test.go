@@ -182,6 +182,7 @@ func TestInlay_EndToEndWithRealGopls(t *testing.T) {
 
 	a := newTestApp(t, dir)
 	a.lsp.dead = false
+	useRealLSPBinaries(t)
 	a.inlayEnabled = true
 	t.Cleanup(a.lspShutdown)
 	a.openFile(src)

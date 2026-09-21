@@ -316,7 +316,7 @@ func TestWriteFileAtomic_FallsBackInAReadOnlyDirectory(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(dir, 0o755) })
 
-	if err := writeFileAtomic(path, []byte("after\n")); err != nil {
+	if err := WriteFileAtomic(path, []byte("after\n")); err != nil {
 		t.Fatalf("should have fallen back to an in-place write: %v", err)
 	}
 	out, _ := os.ReadFile(path)

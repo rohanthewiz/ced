@@ -788,7 +788,23 @@ func (a *App) editorGoToPress(x, y int) bool {
 func (a *App) menuHoverInfo() {
 	a.closeMenu()
 	t := a.activeTabPtr()
-	if t == nil || !a.hasLSPActions() {
+	if t == nil {
+		return
+	}
+	// No server for this file does NOT mean nothing to say. ced's own
+	// validator and the plugin layer both produce diagnostics for files
+	// no language server handles — a .json file is the whole point —
+	// and this key is the only keyboard path to their message short of
+	// opening the Problems panel. Answering with the diagnostics alone
+	// is the same fallback handleLSPHover already makes when a server
+	// has no hover text for the spot; the only thing that changes here
+	// is that there may be no server to ask in the first place.
+	if !a.hasLSPActions() {
+		if dl := a.diagLinesAtCaret(); len(dl) > 0 {
+			a.openModal(&hoverModal{lines: dl})
+		}
+		// Still silent when there is nothing at all to report, which is
+		// what this branch did before diagnostics had other producers.
 		return
 	}
 	client := a.lspClientFor(t.Path)
@@ -956,7 +972,10 @@ func (a *App) diagCounts() (errs, warns, infos int) {
 	if t == nil {
 		return 0, 0, 0
 	}
-	for _, d := range a.lsp.diags[t.Path] {
+	// Every producer (diagmerge.go): the counts in the status bar and the
+	// gutter marks beside them must describe the same set, or the bar
+	// reads as undercounting what is visibly on screen.
+	for _, d := range a.diagsFor(t.Path) {
 		switch d.Severity {
 		case lsp.SeverityWarning:
 			warns++

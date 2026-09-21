@@ -184,6 +184,12 @@ func codeActionRange(t *editor.Tab) lsp.Range {
 // diagnostic that merely CONTAINS it, or asking for a fix while standing on
 // the error would find nothing.
 func (a *App) diagsForRange(path string, rng lsp.Range) []lsp.Diagnostic {
+	// a.lsp.diags, NOT a.diagsFor — the one consumer that deliberately
+	// does not use the merge seam. These objects go back on the WIRE, and
+	// a diagnostic ced synthesised from a plugin's output or its own
+	// parser has no Raw, means nothing to the server, and could only
+	// confuse the matching a quick fix depends on. See diagmerge.go;
+	// TestDiagsForRange_StaysOnLSPOnly pins it.
 	all := a.lsp.diags[path]
 	if len(all) == 0 {
 		return nil

@@ -347,7 +347,7 @@ func (t *Tab) Save() error {
 	}
 	// Atomic (temp + rename) rather than a truncating in-place write, and
 	// re-encoded into the byte form the file arrived in. See fileio.go.
-	if err := writeFileAtomic(t.Path, t.encode()); err != nil {
+	if err := WriteFileAtomic(t.Path, t.encode()); err != nil {
 		return err
 	}
 	t.Dirty = false

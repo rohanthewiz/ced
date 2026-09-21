@@ -700,7 +700,7 @@ func waitForFormatEvent(t *testing.T, a *App) *formatDoneEvent {
 func stubBuiltinFormatter(t *testing.T, argv []string) *int {
 	t.Helper()
 	calls := 0
-	builtinCommandsFor = func(path string) [][]string {
+	builtinCommandsFor = func(_, path string) [][]string {
 		calls++
 		if filepath.Ext(path) != ".go" {
 			return nil
@@ -855,5 +855,126 @@ func TestHandleFormatDone_QuietStillReloads(t *testing.T) {
 	}
 	if a.statusMsg != "" {
 		t.Fatalf("quiet success flashed %q, want silence", a.statusMsg)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// The in-process rung — ced's own formatter, the floor of the ladder.
+// -----------------------------------------------------------------------------
+
+// TestRunFormatOnSave_InProcessFormatsJSON pins the rung that makes
+// this feature real on a bare machine. No project config, no tool on
+// PATH, no Node toolchain — and the file still comes back formatted.
+func TestRunFormatOnSave_InProcessFormatsJSON(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "data.json")
+	if err := os.WriteFile(target, []byte(`{"a":1,"b":[2,3]}`), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+
+	a.runFormatOnSave(0, false)
+
+	if confirmOf(a) != nil {
+		t.Fatal("in-process formatting must not open a trust prompt — the code is ours")
+	}
+	if ev := waitForFormatEvent(t, a); ev.err != nil {
+		t.Fatalf("in-process run err: %v", ev.err)
+	}
+	got, _ := os.ReadFile(target)
+	want := "{\n  \"a\": 1,\n  \"b\": [\n    2,\n    3\n  ]\n}\n"
+	if string(got) != want {
+		t.Fatalf("file contents:\ngot  %q\nwant %q", string(got), want)
+	}
+}
+
+// TestRunFormatOnSave_InProcessRefusesBrokenJSON pins the rule that
+// keeps a formatter from destroying work: a file that does not parse is
+// LEFT EXACTLY AS IT WAS. The validator has already underlined why.
+func TestRunFormatOnSave_InProcessRefusesBrokenJSON(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "data.json")
+	const broken = "{\n  \"a\": 1,\n}\n"
+	if err := os.WriteFile(target, []byte(broken), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+
+	a.runFormatOnSave(0, false)
+
+	ev := waitForFormatEvent(t, a)
+	if ev.err == nil {
+		t.Fatal("err = nil for unparseable JSON, want the parse error reported")
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != broken {
+		t.Fatalf("broken file was rewritten:\ngot  %q\nwant %q", string(got), broken)
+	}
+}
+
+// TestRunFormatOnSave_InProcessSkipsAnUnchangedWrite pins that a save
+// of an already-formatted file touches nothing. A rewrite bumps the
+// mtime, which every other layer reads as "somebody changed this file"
+// — so an idempotent save has to be indistinguishable from no save.
+func TestRunFormatOnSave_InProcessSkipsAnUnchangedWrite(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "data.json")
+	if err := os.WriteFile(target, []byte("{\n  \"a\": 1\n}\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+	before, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	a.runFormatOnSave(0, false)
+	if ev := waitForFormatEvent(t, a); ev.err != nil {
+		t.Fatalf("run err: %v", ev.err)
+	}
+
+	after, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("an already-formatted file was rewritten; the mtime moved")
+	}
+}
+
+// TestRunFormatOnSave_ExternalToolOutranksInProcess pins the ladder's
+// order. A repo that has chosen prettier must keep it: ced formatting
+// the file its own way would be the editor arguing with the project.
+func TestRunFormatOnSave_ExternalToolOutranksInProcess(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "data.json")
+	if err := os.WriteFile(target, []byte(`{"a":1}`), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+	// Stand in for an installed prettier. Its output is deliberately NOT
+	// what ced's own pass would produce, so the test can tell which rung
+	// actually ran.
+	builtinCommandsFor = func(_, path string) [][]string {
+		return [][]string{{"sh", "-c", "echo external > " + path}}
+	}
+	t.Cleanup(func() { builtinCommandsFor = format.BuiltinCommandsFor })
+
+	a.runFormatOnSave(0, false)
+	if ev := waitForFormatEvent(t, a); ev.err != nil {
+		t.Fatalf("run err: %v", ev.err)
+	}
+
+	got, _ := os.ReadFile(target)
+	if string(got) != "external\n" {
+		t.Fatalf("got %q — the in-process rung ran over an installed tool", string(got))
 	}
 }

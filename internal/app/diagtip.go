@@ -236,7 +236,10 @@ func (a *App) diagsAtCell(x, y int) []lsp.Diagnostic {
 	if t == nil || t.IsImage() || t.Path == "" || t.IsMarkdownView() {
 		return nil
 	}
-	all := a.lsp.diags[t.Path]
+	// diagsFor, not a.lsp.diags: a plugin's finding and one of ced's own
+	// are underlined in this pane exactly like a server's, so hovering
+	// one must answer. See diagmerge.go.
+	all := a.diagsFor(t.Path)
 	if len(all) == 0 {
 		return nil
 	}
@@ -365,7 +368,7 @@ func (a *App) diagLinesAtCaret() []string {
 	if t == nil || t.Path == "" {
 		return nil
 	}
-	all := a.lsp.diags[t.Path]
+	all := a.diagsFor(t.Path)
 	if len(all) == 0 {
 		return nil
 	}

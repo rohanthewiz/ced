@@ -958,3 +958,47 @@ func TestLSPEndToEndWithRealGopls(t *testing.T) {
 		t.Error("definition/hover should be enabled once the server is up")
 	}
 }
+
+// TestMenuHoverInfo_AnswersWithDiagnosticsWithoutAServer pins the
+// keyboard door to a diagnostic on a file no language server handles.
+//
+// Esc-i used to return silently whenever hasLSPActions was false, which
+// was correct while the LSP was the only producer of diagnostics. It no
+// longer is: ced's own validator reports on .json, which no server ced
+// ships a mapping for touches — so without this fallback the message
+// would be reachable by mouse and from the Problems panel, but by no
+// key at all.
+func TestMenuHoverInfo_AnswersWithDiagnosticsWithoutAServer(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	tab := openScratch(t, a, "conf.json", "{\n  \"a\": 1,\n}\n")
+	if a.hasLSPActions() {
+		t.Fatal("test harness unexpectedly has a live language server")
+	}
+	tab.MoveCursorTo(editor.Position{Line: 2, Col: 0}, false)
+
+	a.menuHoverInfo()
+
+	hm, ok := a.modal.(*hoverModal)
+	if !ok {
+		t.Fatalf("modal = %T, want *hoverModal carrying the diagnostic", a.modal)
+	}
+	joined := strings.Join(hm.lines, "\n")
+	if !strings.Contains(joined, "invalid character") {
+		t.Errorf("tooltip = %q, want the parser's own wording", joined)
+	}
+}
+
+// TestMenuHoverInfo_StaysSilentWithNothingToSay pins that the fallback
+// did not turn Esc-i into a key that pops something on every file. With
+// no server AND no diagnostic at the caret, it does exactly what it did
+// before: nothing.
+func TestMenuHoverInfo_StaysSilentWithNothingToSay(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	openScratch(t, a, "conf.json", "{\n  \"a\": 1\n}\n")
+
+	a.menuHoverInfo()
+
+	if a.modal != nil {
+		t.Errorf("modal = %T on a clean file with no server, want none", a.modal)
+	}
+}

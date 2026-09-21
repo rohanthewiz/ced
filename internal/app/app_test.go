@@ -200,7 +200,7 @@ func newTestApp(t *testing.T, root string) *App {
 	// machine running the tests has on PATH. Tests that exercise the
 	// builtin path swap in their own stub; the cleanup restores the
 	// real resolver either way.
-	builtinCommandsFor = func(string) [][]string { return nil }
+	builtinCommandsFor = func(string, string) [][]string { return nil }
 	t.Cleanup(func() { builtinCommandsFor = format.BuiltinCommandsFor })
 	// Stub the terminal's grsh session for the same reason as the two
 	// above: opening the panel in a test must never create a session

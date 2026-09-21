@@ -169,6 +169,8 @@ internal/editor/ghost.go      GhostText display form + the render-row splice ove
 internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → autoSaveEvent)
 internal/app/zipops.go        Zip file/folder — stdlib archive/zip, async zipDoneEvent
 internal/app/format.go        Format-on-save bridge: project config, builtin Go, prompts
+internal/app/validate.go      ced's own syntax check: the debounce, the revision gate, its source
+internal/app/diagmerge.go     diagsFor — every producer's diagnostics, one question
 internal/app/metakeys.go      The ⌘ accelerator layer: the rune table, its host gate,
                               and ⌘←/⌘→ (line start/end) beside it
 internal/app/nav.go           Back/forward file-navigation history (Esc-o/O, Alt+←/→)
@@ -189,7 +191,9 @@ internal/app/gitlogactions.go Git log verbs: cherry-pick, revert, reset, branch/
 internal/app/gitstatusreport.go git's own `git status` report, on demand, in the info modal
 internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PTY)
 internal/app/runexec.go       Run an executable: dir picker → staged line in the terminal
-internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt
+internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt,
+                              kinds.go (what IS this file), inprocess.go (ced's own JSON pass),
+                              validate.go (the syntax check and its Problem)
 internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render,
                               the mark set (paths, pruned by Refresh, one borrowed cell)
 internal/app/treemarks.go     Tree multi-selection: the gestures, the Actions picker, the verbs
@@ -3144,15 +3148,184 @@ handleKey calls before everything else. House rules:
   (the flat table gets that from the ≡ hint column), so a test asserts
   every sub-binding appears in it.
 
-### Format-on-save precedence + builtin Go pass (app/format.go)
+### Data formats: formatting and validation
+### (internal/format/kinds.go, inprocess.go, validate.go, app/validate.go)
+JSON is formatted on save and syntax-checked as you type, with no
+language server, no linter binary and no project config. It is the
+first data format on this path; YAML and TOML slot into the same seam.
+House rules:
+
+- **ONE TABLE DECIDES WHAT A FILE IS** (`format.kindFor`), and all three
+  verbs route through it: the external-tool list, the in-process
+  formatter and the validator. They must never disagree — a file the
+  validator calls JSON but the formatter does not would be flagged as
+  broken and then left alone, which reads as the editor refusing to fix
+  what it just complained about, and the inverse is worse: rewriting a
+  file nobody vetted the syntax of. `TestKindFor_AgreesWithTheThreeVerbs`
+  is what fails when a fourth verb forgets to ask.
+- **JSONC IS CARVED OUT BY NAME, not by parsing.** `tsconfig.json`,
+  `jsconfig.json`, `.eslintrc.json` and everything under `.vscode/` are
+  JSON WITH COMMENTS, and `encoding/json` rejects `//` — correctly.
+  Treating them as strict JSON would underline the first comment of a
+  file doing exactly what its ecosystem intends. So they are `kindNone`:
+  ced has nothing to say about them. The `.vscode` rule is per-FOLDER
+  because the convention is — naming settings.json and launch.json
+  individually would leave the next one ced has not heard of getting
+  underlined on sight. A project that really does want prettier on its
+  tsconfig says so in `.ced/format.json`, which overrides all of this.
+- **THE BUILTIN PATH IS A LADDER, and the order is the design.** An
+  installed external tool goes FIRST, repo-local (`node_modules/.bin`)
+  before global, because a prettier the repo pinned is a statement by
+  THAT REPO about how it formats while one on `$PATH` is a statement
+  about the developer's laptop. ced's own pass is the floor underneath.
+  Without the floor this would be a feature that is inert on the
+  majority of machines it ships to — Go got builtin formatting free
+  because gofmt comes with the toolchain, and JSON has no equivalent —
+  which is the decoration-format trap: a capability nobody can observe
+  is indistinguishable from one that was never built.
+- **EVERY EXTERNAL COMMAND MUST REWRITE IN PLACE.** `execFormatterChain`
+  runs an explicit argv with no shell, which is exactly why a malicious
+  format.json cannot chain commands — so a stdout-only formatter has
+  nowhere to put its output. That disqualifies the tool most users would
+  name first: `jq` has no in-place flag, and `jq . f > f` truncates `f`
+  before jq reads it. Suggested additions must pass the same test.
+  Unlike the Go pipeline, the JSON tools never CHAIN — each formats
+  completely, so running two would just mean the second reformatting
+  the first to a different house style.
+- **`json.Indent`, NEVER a Marshal round trip.** Marshalling through a
+  map reorders every object (Go randomises map iteration, so two saves
+  could differ), pushes every number through a float64 — `1e3` becomes
+  `1000`, big integers lose precision — and re-escapes strings to its
+  own taste. Indent is a pure whitespace pass: key order, number
+  spelling, escapes and unicode all survive. The only thing that changes
+  is layout, which is the only thing a formatter was asked to change.
+  It is fed TRIMMED bytes, or it indents the document one level deeper
+  every save; a formatter that is not idempotent fights the file.
+- **A FILE THAT DOES NOT PARSE IS NOT REWRITTEN.** The formatter returns
+  the error and writes nothing — the validator has already underlined
+  the reason, and rewriting unparseable text is how a formatter destroys
+  work. An UNCHANGED file is not rewritten either: a write bumps the
+  mtime, which every other layer reads as "somebody changed this", so a
+  save of an already-formatted file must be indistinguishable from a
+  save with no formatter at all.
+- **AN EMPTY FILE IS MID-THOUGHT, NOT BROKEN.** `encoding/json` calls it
+  "unexpected end of JSON input"; a file someone just created is not an
+  error to flash at them. The formatter and the validator make the same
+  call, so the two halves can never disagree about it.
+- **The in-process pass goes through `formatDoneEvent` like the external
+  one.** One adoption path (`handleFormatDone` → `ReloadAsEdit`, one
+  structural undo step on top of the user's history), bracketed by
+  `formatRunBegin`/`End` so the reconcile tick cannot mistake ced's own
+  write for somebody else's. It re-reads from DISK, not from the buffer,
+  so both rungs start from the same bytes. The write is
+  `editor.WriteFileAtomic` — exported for this, rather than copied, so
+  the symlink resolution and the mode copy cannot be forgotten by the
+  second writer (the `wireTab` rule).
+- **VALIDATION READS THE BUFFER; FORMATTING READS THE DISK.** Marks
+  follow what is on screen, unsaved edits included — a checker reading
+  the disk copy would underline text the user had already fixed, and
+  would say nothing at all about a file never yet saved.
+- **THE FINDINGS DIE WITH THE REVISION** (symbolhl's rule). A Problem's
+  column is a coordinate into the text that was parsed; one keystroke
+  later it may point at a perfectly good character, and a stale
+  underline on the wrong rune is indistinguishable from a correct
+  answer. `liveProblems` is the SINGLE read path so no future consumer
+  can skip the check.
+- **THE DEBOUNCE IS NOT ABOUT COST.** The LSP debounces to spare a round
+  trip and the plugin layer to spare a process; this parse is
+  microseconds. It waits (400ms) because JSON is transiently broken on
+  almost every keystroke — the instant after you type `{` it does not
+  parse — and a mark flashing red through every edit is noise the eye
+  learns to ignore. Armed only while the ACTIVE tab is a validated kind,
+  or an editor full of Go would wake itself every 400ms forever (the
+  caret-blink constraint). `wireTab` parses ONCE at open, because the
+  timer only ever fires after an EDIT and a file that is already
+  malformed when you open it is the case the feature exists for.
+- **Only ONE problem is reported.** `encoding/json` stops at the first
+  syntax error and cannot meaningfully resume — everything after a
+  missing brace is unparseable in a way that says nothing about the
+  text. One honest position beats an invented cascade pointing at
+  correct code.
+- **Columns are RUNES, and the offset is `Offset-1`.** `encoding/json`
+  counts BYTES and reports the byte just AFTER the offending one
+  (verified across every error shape it produces, the unterminated
+  document included). Both corrections are load-bearing and each is
+  pinned by its own test: without the rune count any non-ASCII above the
+  error pushes the underline right one cell per extra byte, and without
+  the `-1` every underline sits one column past the character it blames.
+- **Go is deliberately absent from the validator.** gopls reports parse
+  errors with far better messages than a bare `go/parser` pass, and two
+  producers underlining one broken line would only argue with each other
+  in the single gutter cell. Nor is there an in-process Go FORMATTER —
+  gofmt is the answer and it ships with the toolchain.
+- Glyph is `◇`, deliberately not the LSP's `●` or the plugin layer's
+  `◆`; precedence in the one gutter cell is **git < validate < plugin <
+  LSP** (a syntax error outranks the ambient change bar, and loses to
+  two more specific producers). No config key and no toggle: the
+  overflow markers' rule — there is nothing a preference could usefully
+  say no to about "this file does not parse".
+
+### Every diagnostic producer, one question (app/diagmerge.go)
+`a.diagsFor(path)` is the single answer to "what is wrong with this
+file?", merging the LSP's diagnostics, the plugin layer's and ced's own.
+House rules:
+
+- **IT EXISTS BECAUSE THE SPLIT WAS REAL.** Three producers arrived at
+  three different times and each wired itself to whatever surface its
+  author needed. An LSP diagnostic reached the gutter, the tooltip, the
+  Problems panel, next/previous-problem and the status counts; a PLUGIN
+  diagnostic reached the gutter and NOTHING ELSE — a user could see a
+  mark, hover it, and be told nothing, because those surfaces read
+  `a.lsp.diags` directly and were typed to `[]lsp.Diagnostic`. That was
+  a bad bargain for any producer and fatal for the validator: a syntax
+  error whose MESSAGE cannot be read is half an answer.
+- **`lsp.Diagnostic` IS THE CURRENCY**, so adopting it changed the
+  consumers' types not at all. Its own doc comment anticipated this —
+  "Raw is nil for a diagnostic this client built itself" — and `Source`
+  names which producer spoke, which is what lets the tooltip print
+  `(ced)` after a message.
+- **`diagsForRange` (lspcodeaction.go) MUST NOT ASK HERE**, and that is
+  pinned by `TestDiagsForRange_StaysOnLSPOnly`. A code-action request
+  echoes diagnostics back to the server VERBATIM, because their
+  server-private `data` and `code` fields are how a quick fix finds the
+  problem it fixes. A synthetic diagnostic has no `Raw`, means nothing
+  to gopls, and could only confuse that matching.
+- **SYNTHETIC COLUMNS ARE RE-ENCODED TO UTF-16** (`lspPosFor`). Every
+  consumer runs `editorPosFor` on the way back out, which decodes
+  `Character` as UTF-16 code units — so a fabricated diagnostic carrying
+  a raw rune column is silently shifted on any line holding an
+  astral-plane rune (an emoji, which a JSON string may perfectly well
+  contain). A confident wrong answer, not a missing one.
+- **ORDER IS STABLE: LSP, then plugins, then ced's own.** The Problems
+  panel lists these and next/previous walks them, so an order varying
+  between two identical frames would make a row jump under the cursor.
+  Plugin findings live in a map keyed by provider, so its keys are
+  SORTED before the walk — Go randomises map iteration, which is exactly
+  how that would happen. `diagPathsWithFindings` sorts for the same
+  reason.
+- **The plugin kill switch is honoured HERE too**, not just at load: a
+  mark that left the gutter must leave the tooltip and the panel with
+  it.
+- **`Esc-i` answers with diagnostics alone when there is no server.** It
+  used to return silently whenever `hasLSPActions` was false, which was
+  right while the LSP was the only producer. It no longer is — .json has
+  no server ced ships a mapping for — so without the fallback the
+  validator's message would be reachable by mouse and from the Problems
+  panel but by no key at all.
+
+### Format-on-save precedence + the builtin ladder (app/format.go)
 `runFormatOnSave(idx, quiet)` routes: project `format.json` entry
-(trust-gated) → builtin Go pass (`format.BuiltinCommandsFor`, NO trust
-prompt — the argvs are hardcoded, not repo-supplied) → global-defaults
+(trust-gated) → an installed external tool (`format.BuiltinCommandsFor`,
+NO trust prompt — the argvs are hardcoded, not repo-supplied) → ced's
+own in-process pass (`format.InProcessFormat`) → global-defaults
 install offer. The builtin pass is a command PIPELINE: goimports alone
 if installed, else `gopls imports -w` chained with `gofmt -w` (a
 machine with gopls but no goimports must not lose auto-imports), else
-gofmt alone. `quiet=true` (auto-save) never opens a modal and never
-flashes; an untrusted config is silently skipped until the next
+gofmt alone. `BuiltinCommandsFor` takes the project ROOT as well as the
+path, so a tool the repo pinned in its own `node_modules/.bin` outranks
+one that merely happens to be on the developer's `$PATH` — see the JSON
+section below for the rest of that ladder. `quiet=true` (auto-save)
+never opens a modal and never flashes; an untrusted config is silently skipped until the next
 explicit Save. Tests stub the app-level `builtinCommandsFor` var
 (newTestApp sets it nil) so saves never exec the dev machine's Go
 tools — keep that in place.

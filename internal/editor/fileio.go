@@ -155,9 +155,15 @@ func (t *Tab) encode() []byte {
 	return append(append([]byte(nil), utf8BOM...), text...)
 }
 
-// writeFileAtomic writes data to path via a temp file in the same
+// WriteFileAtomic writes data to path via a temp file in the same
 // directory plus a rename, so a crash or a full disk can never leave a
 // half-written file where the user's work used to be.
+//
+// Exported because Tab.Save is no longer the only writer that owes the
+// user these guarantees: the in-process formatter (app/format.go)
+// rewrites a file ced has just saved, and a second implementation of
+// this would be the one that quietly forgot the symlink resolution or
+// the mode copy. One writer, several callers — the wireTab rule.
 //
 // Three details that are load-bearing:
 //
@@ -178,7 +184,7 @@ func (t *Tab) encode() []byte {
 // Not preserved: hard links (rename breaks them) and ownership when
 // running as root. Both are the standard trade for atomicity, and both
 // are what vim does by default.
-func writeFileAtomic(path string, data []byte) error {
+func WriteFileAtomic(path string, data []byte) error {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		path = resolved
 	}

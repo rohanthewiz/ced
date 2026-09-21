@@ -175,7 +175,10 @@ func (a *App) problemsToggleLabel() string {
 // predicate runs on every frame the menu is drawn, and rebuilding the
 // row list there would sort the whole project's problems to answer a
 // yes/no question.
-func (a *App) hasAnyDiagnostics() bool { return len(a.lsp.diags) > 0 }
+func (a *App) hasAnyDiagnostics() bool {
+	return len(a.lsp.diags) > 0 || len(a.validate.probs) > 0 ||
+		(a.plugins.enabled && len(a.plugins.decos) > 0)
+}
 
 // refreshProblems rebuilds the row list from the diagnostics map and
 // re-derives the view, keeping the selection on the same underlying
@@ -225,8 +228,12 @@ func problemKey(r problemRow) string {
 // one document (see problemsSeek).
 func (a *App) buildProblemRows() []problemRow {
 	rows := make([]problemRow, 0, 16)
-	for path, diags := range a.lsp.diags {
-		for _, d := range diags {
+	// Every producer, not just the language server — a file whose only
+	// finding came from a plugin or from ced's own parser still belongs
+	// in this list. diagPathsWithFindings is sorted, so the walk is
+	// deterministic before the sort below ever runs (diagmerge.go).
+	for _, path := range a.diagPathsWithFindings() {
+		for _, d := range a.diagsFor(path) {
 			rows = append(rows, problemRow{
 				path:  path,
 				label: fmt.Sprintf("%s:%d", a.problemRelPath(path), d.Range.Start.Line+1),

@@ -32,6 +32,7 @@ package app
 // dispatch.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -41,6 +42,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/format"
 )
 
@@ -117,12 +119,23 @@ func (a *App) runFormatOnSave(idx int, quiet bool) {
 		return
 	}
 
-	// Built-in Go formatting sits between the project config (which
-	// overrides it) and the install offer (which it makes redundant
-	// for Go — offering to install a gofmt default when the builtin
-	// already runs one would be a nag with no upside).
-	if builtin := builtinCommandsFor(tab.Path); len(builtin) > 0 {
+	// Built-in formatting sits between the project config (which
+	// overrides it) and the install offer (which it makes redundant for
+	// the kinds ced handles — offering to install a gofmt default when
+	// the builtin already runs one would be a nag with no upside).
+	//
+	// It is a two-rung ladder and the order is the design. The EXTERNAL
+	// rung goes first so an installed tool — especially one the repo
+	// pinned in its own node_modules — keeps its say: ced formatting
+	// JSON its own way in a repo that has already chosen prettier would
+	// be the editor arguing with the project. The IN-PROCESS rung is the
+	// floor underneath, and it is what stops this being a feature that
+	// only works on machines that happen to have a Node toolchain.
+	if builtin := builtinCommandsFor(a.rootDir, tab.Path); len(builtin) > 0 {
 		a.execFormatterChain(tab.Path, builtin, quiet)
+		return
+	}
+	if a.execInProcessFormat(tab.Path, quiet) {
 		return
 	}
 
@@ -449,6 +462,90 @@ func (a *App) execFormatterChain(tabPath string, cmds [][]string, quiet bool) {
 			quiet:   quiet,
 		})
 	}()
+}
+
+// execInProcessFormat runs ced's own formatter over a file it has just
+// saved, reporting whether it took the job. False means "not my kind"
+// — the caller falls through to the install offer, exactly as it did
+// before this rung existed.
+//
+// Three things make this share the external path's machinery rather
+// than shortcut it:
+//
+//   - It goes through formatDoneEvent, so there is exactly ONE place
+//     that adopts a formatter's write (handleFormatDone → ReloadAsEdit,
+//     one structural undo step on top of the user's history). A
+//     synchronous in-line reload here would be a second adoption path,
+//     and the one that quietly forgot the dirty-buffer case.
+//   - It is bracketed by formatRunBegin/End, so the reconcile tick
+//     cannot mistake ced's own write for somebody else's and cost the
+//     user their undo history.
+//   - It runs on a goroutine even though the work is fast. The read,
+//     the parse and the write are all IO on a file of unknown size, and
+//     the house rule is that the main loop does not block on IO.
+//
+// The file is re-read from DISK rather than encoded from the buffer:
+// the external rung operates on the saved file, and the two rungs must
+// produce the same result from the same starting point. Save has
+// already written the buffer out, so the disk copy is the buffer.
+func (a *App) execInProcessFormat(tabPath string, quiet bool) bool {
+	if tabPath == "" || !format.FormatsInProcess(tabPath) {
+		return false
+	}
+	// "json formatter", not "json" or "format json": this label is
+	// substituted into four different sentences ("…", "Formatted with
+	// %s", "%s: already formatted", "%s failed: %v"), and it has to read
+	// as the NAME OF A TOOL in all of them — which is exactly what the
+	// external rung's label already is ("goimports", "prettier").
+	label := format.InProcessName(tabPath) + " formatter"
+	if !quiet {
+		a.flash(label + "…")
+	}
+	scr := a.screen
+	// Recorded BEFORE the goroutine starts, for the same reason as the
+	// external chain — see formatRunBegin.
+	a.formatRunBegin(tabPath)
+	go func() {
+		err := formatFileInPlace(tabPath)
+		_ = scr.PostEvent(&formatDoneEvent{
+			when:    time.Now(),
+			tabPath: tabPath,
+			label:   label,
+			err:     err,
+			quiet:   quiet,
+		})
+	}()
+	return true
+}
+
+// formatFileInPlace reads path, formats it, and writes it back only if
+// the bytes actually changed.
+//
+// Skipping an unchanged write is not just an optimisation: a rewrite
+// bumps the mtime, which every other layer reads as "this file moved".
+// A save of an already-formatted file should be indistinguishable from
+// a save with no formatter at all.
+//
+// A parse failure returns the error WITHOUT writing anything. The
+// validator has already underlined the offending character; rewriting
+// text nobody could parse is how a formatter destroys work.
+func formatFileInPlace(path string) error {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	out, ok, err := format.InProcessFormat(path, src)
+	if err != nil || !ok {
+		// !ok here would mean FormatsInProcess and InProcessFormat
+		// disagreed, which their shared kind table makes impossible —
+		// but treating it as "nothing to do" beats writing nil over the
+		// user's file if that ever stops being true.
+		return err
+	}
+	if bytes.Equal(out, src) {
+		return nil
+	}
+	return editor.WriteFileAtomic(path, out)
 }
 
 // indexNewline returns the index of the first newline in s, or -1.

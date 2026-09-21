@@ -1440,6 +1440,13 @@ type App struct {
 	// plugincmd.go and plugindeco.go for the two execution paths.
 	plugins pluginState
 
+	// validate holds ced's own syntax findings for the data formats it
+	// parses in-process (JSON today). Unlike every other diagnostic
+	// producer in this editor it needs no server, no binary and no
+	// project config, so it is the one that works on a bare machine —
+	// see validate.go for the house rules.
+	validate validateState
+
 	// customActions is the list of user-configured shell-out actions
 	// loaded from ~/.config/ced/actions.json at startup. When
 	// non-empty they prepend a new group to the action menu — see
@@ -1790,6 +1797,11 @@ func (a *App) Close() {
 	a.stopAutoSave()
 	a.stopSyntaxSettle()
 	a.stopCaretBlink()
+	// A folder switch rebuilds the App, so a validate tick armed under
+	// the old one must not be honoured by the new: stop the timer and
+	// bump the generation the handler checks (validate.go).
+	a.stopValidateTimer()
+	a.validate.seq++
 	a.lspShutdown()
 	a.copilotShutdown()
 	a.chatShutdown()
@@ -1891,6 +1903,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handlePluginDeco(e)
 	case *pluginEditEvent:
 		a.handlePluginEditTick(e)
+	case *validateEvent:
+		a.handleValidateTick(e)
 	case *zipDoneEvent:
 		a.handleZipDone(e)
 	case *gonotesDoneEvent:
@@ -2052,6 +2066,11 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// with no edit-triggered plugins never wakes on a timer. See
 	// plugindeco.go.
 	a.pluginsAfterEvent()
+	// And ced's own syntax check: an edit re-arms the debounce that
+	// re-parses the active file. Returns immediately unless that file is
+	// a kind ced validates, so an editor full of Go never wakes on it.
+	// See validate.go.
+	a.validateAfterEvent()
 	// And the secondary carets' blink: armed while they exist, disarmed
 	// the moment they don't, so an idle single-caret editor never wakes
 	// on a timer. See multicaret.go.
@@ -3895,15 +3914,25 @@ func (a *App) wireTab(t *editor.Tab) {
 	// plugin's mark outranks the ambient git change bar because the
 	// user installed it deliberately, and loses to gopls because a
 	// compile error is the more urgent thing to say. See plugindeco.go.
+	// ced's own syntax check slots between git and plugin: a file that
+	// does not parse is a fact about the code rather than an ambient
+	// note about which lines you touched, but both of the sources above
+	// it are more specific. See validate.go.
 	// The blame source rides with them: it paints no spans and claims no
 	// mark cell, so its position in the precedence order is irrelevant —
 	// what it owns is the annotation column, which nothing else asks for.
 	t.DecoSources = append(t.DecoSources,
 		gitDiffSource{app: a}, gitBlameSource{app: a},
+		validateSource{app: a},
 		pluginDecoSource{app: a}, lspDiagSource{app: a})
 	// The matching-word highlight is a built-in source gated by a per-tab
 	// flag, so the preference has to ride along at open time (wordhl.go).
 	t.WordHighlight = a.wordHLEnabled
+	// Parse it once now so a file that is already broken opens with its
+	// mark showing. The debounce only ever fires after an EDIT, so
+	// without this a user could open a malformed config, read it, and
+	// never be told — the one case the feature exists for.
+	a.validateTab(t)
 	a.requestFileDiff(t.Path)
 	// Blame the newly opened file too, but only while the layer is on —
 	// this is a fork per file, unlike the diff, and nobody has asked to
@@ -4058,6 +4087,10 @@ func (a *App) closeTab(idx int) {
 	// so no other tab can still be showing it. Same for the LSP
 	// bookkeeping, which also tells the server the document is gone.
 	delete(a.fileDiffs, a.tabs[idx].Path)
+	// Same for ced's own syntax findings: keyed by path, they would
+	// otherwise be painted straight back onto a reopened file from a
+	// cache whose revision happens to line up again (validate.go).
+	a.validateForget(a.tabs[idx].Path)
 	a.lspCloseDoc(a.tabs[idx].Path)
 	a.copilotCloseDoc(a.tabs[idx].Path)
 	// Closing the tab is the gesture that means "I'm done with this

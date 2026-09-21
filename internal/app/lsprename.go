@@ -133,11 +133,11 @@ func (a *App) startRename(path string, pos editor.Position, askRev int, oldName,
 		a.flash("Rename: the file changed — put the cursor on the symbol again")
 		return
 	}
-	if !a.lspReady() || a.screen == nil {
+	client, scr := a.lspClientFor(path), a.screen
+	if client == nil || scr == nil {
 		a.flash("Rename: no language server")
 		return
 	}
-	client, scr := a.lsp.client, a.screen
 
 	// Flush FIRST, then capture: the contract has to describe the text the
 	// server is about to answer from, and the flush is what makes those the

@@ -119,7 +119,7 @@ func (a *App) menuFindReferences() {
 		a.flash("Find references: put the cursor on a symbol first")
 		return
 	}
-	client, scr := a.lsp.client, a.screen
+	client, scr := a.lspClientFor(t.Path), a.screen
 	if scr == nil {
 		return
 	}

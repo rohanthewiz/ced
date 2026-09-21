@@ -192,7 +192,7 @@ func (a *App) handleHoverDwellTick(e *hoverDwellEvent) {
 		return
 	}
 
-	client := a.lsp.client
+	client := a.lspClientFor(t.Path)
 	scr := a.screen
 	path := t.Path
 	lpos := lspPosFor(t, pos)

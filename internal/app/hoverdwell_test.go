@@ -51,7 +51,7 @@ func newDwellApp(t *testing.T) (*App, *fakeLSPConn, string) {
 	a := newTestApp(t, dir)
 	fake := &fakeLSPConn{hoverRes: hoverAnswer("func alpha() int")}
 	a.lsp.dead = false
-	a.lsp.client = fake
+	a.lspInstall(lspGoServerID, fake)
 	a.openFile(path)
 	caretTo(a, 0, 0)
 	dwellTier1(a)

@@ -136,7 +136,7 @@ func (a *App) menuCodeActions() {
 	if t == nil || !a.hasLSPActions() {
 		return
 	}
-	client, scr := a.lsp.client, a.screen
+	client, scr := a.lspClientFor(t.Path), a.screen
 	if client == nil || scr == nil {
 		return
 	}
@@ -288,7 +288,7 @@ func (a *App) runCodeAction(act lsp.CodeAction, req wsRequest) {
 	if act.Command == nil {
 		return
 	}
-	a.runServerCommand(act.Command)
+	a.runServerCommand(req.path, act.Command)
 }
 
 // runServerCommand executes one of the server's own commands off-loop.
@@ -298,12 +298,17 @@ func (a *App) runCodeAction(act lsp.CodeAction, req wsRequest) {
 // here for minutes without anything being wrong, and why the client gives
 // this call its own long budget (lsp.executeCommandTimeout). The response
 // itself is server-private and discarded.
-func (a *App) runServerCommand(cmd *lsp.Command) {
-	if !a.lspReady() || a.screen == nil {
+//
+// path is the document the action was offered for. A command is the
+// SERVER's own vocabulary, so it has to go back to the server that
+// offered it — and with several servers running, the path is what names
+// that one.
+func (a *App) runServerCommand(path string, cmd *lsp.Command) {
+	client, scr := a.lspClientFor(path), a.screen
+	if client == nil || scr == nil {
 		a.flash("Code action: no language server")
 		return
 	}
-	client, scr := a.lsp.client, a.screen
 	title := cmd.Title
 	if title == "" {
 		title = cmd.Command

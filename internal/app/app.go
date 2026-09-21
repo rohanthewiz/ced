@@ -1906,7 +1906,7 @@ func (a *App) handleEvent(ev tcell.Event) {
 	case *lspReadyEvent:
 		a.handleLSPReady(e)
 	case *lspExitEvent:
-		a.handleLSPExit()
+		a.handleLSPExit(e)
 	case *lspDiagsEvent:
 		a.handleLSPDiags(e)
 	case *lspSyncEvent:

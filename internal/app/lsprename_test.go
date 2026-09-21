@@ -26,7 +26,7 @@ func renameTestApp(t *testing.T) (*App, *fakeLSPConn, string, *editor.Tab) {
 	a := newTestApp(t, t.TempDir())
 	fake := &fakeLSPConn{}
 	a.lsp.dead = false
-	a.lsp.client = fake
+	a.lspInstall(lspGoServerID, fake)
 	path := wsTestFile(t, a, "main.go", "package main\n\nvar foo int\n")
 	tab := wsOpenTab(t, a, path)
 	tab.MoveCursorTo(editor.Position{Line: 2, Col: 5}, false) // inside "foo"

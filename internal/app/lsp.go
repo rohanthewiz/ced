@@ -38,8 +38,6 @@ package app
 import (
 	"encoding/json"
 	"fmt"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -54,11 +52,6 @@ import (
 // Long enough to coalesce a typing burst into one sync, short enough
 // that diagnostics feel live when the user pauses.
 const lspSyncDebounce = 300 * time.Millisecond
-
-// lspServerBinary is the language server the editor knows how to run.
-// Go-only for now — the lspHandles/languageID seams are where a second
-// language would plug in.
-const lspServerBinary = "gopls"
 
 // lspConn is the slice of the lsp.Client surface the app layer uses.
 // An interface so tests can substitute a recording fake without
@@ -92,9 +85,15 @@ type lspConn interface {
 // and mutated only on the main loop. Maps are lazily created so tests
 // that assemble an App by hand need no extra setup.
 type lspState struct {
-	client   lspConn
-	starting bool // async spawn+initialize in flight
-	dead     bool // unavailable: no binary, crashed, or failed to start
+	// servers holds one connection slot per language server, keyed by
+	// lspServerDef.id and created on first need. See lspservers.go.
+	servers map[string]*lspServer
+
+	// dead switches the WHOLE integration off: editor shutdown, and the
+	// test harness, which must never spawn a real server. A server that
+	// is missing or crashed is dead in its own slot instead, so one bad
+	// install costs one language.
+	dead bool
 
 	versions  map[string]int // per-path didChange version counter
 	syncedRev map[string]int // per-path Tab.EditRev last sent to the server
@@ -133,6 +132,7 @@ type lspState struct {
 // completes successfully; it carries the live connection.
 type lspReadyEvent struct {
 	when   time.Time
+	server string // lspServerDef.id the handshake was for
 	client lspConn
 }
 
@@ -141,7 +141,8 @@ func (e *lspReadyEvent) When() time.Time { return e.when }
 
 // lspExitEvent is posted when the server dies or fails to start.
 type lspExitEvent struct {
-	when time.Time
+	when   time.Time
+	server string // lspServerDef.id that went away
 }
 
 // When satisfies the tcell.Event interface.
@@ -212,35 +213,28 @@ func (e *lspHoverEvent) When() time.Time { return e.when }
 // Lifecycle
 // -----------------------------------------------------------------------------
 
-// lspHandles reports whether the LSP layer covers this file. Go-only
-// today; a future second server extends this and languageIDFor.
-func lspHandles(path string) bool {
-	return strings.EqualFold(filepath.Ext(path), ".go")
-}
-
-// languageIDFor returns the LSP languageId for a handled path.
-func languageIDFor(string) string { return "go" }
-
-// lspReady reports whether the connection is up and usable.
-func (a *App) lspReady() bool {
-	return a.lsp.client != nil && !a.lsp.dead
-}
-
-// lspEnsureStarted kicks off the async server start the first time a
-// handled file opens. Missing binary marks the integration dead
-// without a word to the user — same silent-degradation contract as
-// missing formatters. Idempotent; later calls are no-ops.
-func (a *App) lspEnsureStarted() {
-	if a.lsp.client != nil || a.lsp.starting || a.lsp.dead || a.screen == nil {
+// lspEnsureStarted kicks off one server's async start the first time a
+// file it handles opens. A missing binary marks THAT server dead without
+// a word to the user — same silent-degradation contract as missing
+// formatters — and leaves every other server alone. Idempotent; later
+// calls are no-ops.
+func (a *App) lspEnsureStarted(def *lspServerDef) {
+	if def == nil || a.lsp.dead || a.screen == nil {
 		return
 	}
-	if _, err := exec.LookPath(lspServerBinary); err != nil {
-		a.lsp.dead = true
+	sv := a.lsp.server(def.id)
+	if sv.client != nil || sv.starting || sv.dead {
 		return
 	}
-	a.lsp.starting = true
+	bin, args, ok := def.resolveCommand()
+	if !ok {
+		sv.dead = true
+		return
+	}
+	sv.starting = true
 	scr := a.screen
 	root := a.rootDir
+	id := def.id
 	go func() {
 		// onNotify runs on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
@@ -274,11 +268,11 @@ func (a *App) lspEnsureStarted() {
 			return lspServeApplyEdit(scr, params)
 		}
 		onExit := func(error) {
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now()})
+			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id})
 		}
-		client, err := lsp.StartWithRequests(root, lspServerBinary, nil, onNotify, onRequest, onExit)
+		client, err := lsp.StartWithRequests(root, bin, args, onNotify, onRequest, onExit)
 		if err != nil {
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now()})
+			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id})
 			return
 		}
 		if err := client.Initialize(root); err != nil {
@@ -286,10 +280,10 @@ func (a *App) lspEnsureStarted() {
 			// The failed handshake already fires onExit via the read
 			// loop in most cases, but a timeout leaves the process
 			// running — post explicitly so the state machine settles.
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now()})
+			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id})
 			return
 		}
-		_ = scr.PostEvent(&lspReadyEvent{when: time.Now(), client: client})
+		_ = scr.PostEvent(&lspReadyEvent{when: time.Now(), server: id, client: client})
 	}()
 }
 
@@ -297,33 +291,61 @@ func (a *App) lspEnsureStarted() {
 // already-open handled document — the tabs the user opened while the
 // handshake was still in flight.
 func (a *App) handleLSPReady(e *lspReadyEvent) {
-	if a.lsp.dead {
+	sv := a.lsp.server(e.server)
+	if a.lsp.dead || sv.dead {
 		// Server died between the ready post and now (or the editor
 		// shut the integration down). Don't resurrect.
 		e.client.Close()
 		return
 	}
-	a.lsp.client = e.client
-	a.lsp.starting = false
+	a.lspInstall(e.server, e.client)
+	// lspOpenDoc skips every tab this server doesn't speak for (their own
+	// server isn't the one that just came up, or is already announced).
 	for _, t := range a.tabs {
-		a.lspOpenDoc(t)
+		if def := lspServerFor(t.Path); def != nil && def.id == e.server {
+			a.lspOpenDoc(t)
+		}
 	}
 }
 
-// handleLSPExit marks the integration dead and clears every
-// diagnostic — stale squiggles from a crashed server would otherwise
-// linger forever with nothing left to retract them. Deliberately no
+// handleLSPExit marks ONE server dead and clears every diagnostic it
+// published — stale squiggles from a crashed server would otherwise
+// linger forever with nothing left to retract them. The other servers'
+// state is untouched: degradation is per server. Deliberately no
 // auto-restart: a crashing server would flap, and the user can
-// restart the editor when they've fixed their gopls install.
-func (a *App) handleLSPExit() {
-	if a.lsp.client != nil {
-		a.lsp.client.Close()
+// restart the editor when they've fixed their install.
+func (a *App) handleLSPExit(e *lspExitEvent) {
+	sv := a.lsp.server(e.server)
+	if sv.client != nil {
+		sv.client.Close()
 	}
-	a.lsp.client = nil
-	a.lsp.starting = false
-	a.lsp.dead = true
-	a.lsp.diags = nil
-	a.lspStopTimers()
+	sv.client = nil
+	sv.starting = false
+	sv.dead = true
+	// Everything per-document is keyed by path, and a path names its
+	// server, so "this server's share" is a filter rather than a second
+	// set of maps.
+	mine := func(path string) bool {
+		def := lspServerFor(path)
+		return def != nil && def.id == e.server
+	}
+	for path := range a.lsp.diags {
+		if mine(path) {
+			delete(a.lsp.diags, path)
+		}
+	}
+	for path, tm := range a.lsp.timers {
+		if mine(path) {
+			tm.Stop()
+			delete(a.lsp.timers, path)
+		}
+	}
+	for path := range a.lsp.versions {
+		if mine(path) {
+			delete(a.lsp.versions, path)
+			delete(a.lsp.syncedRev, path)
+		}
+	}
 	// Same contract as a publish: the panel's cached rows describe a map
 	// that no longer exists, and an open panel must not go on offering
 	// jumps into a list the server has taken back.
@@ -335,9 +357,11 @@ func (a *App) handleLSPExit() {
 // lspShutdown tears the connection down on editor exit.
 func (a *App) lspShutdown() {
 	a.lspStopTimers()
-	if a.lsp.client != nil {
-		a.lsp.client.Close()
-		a.lsp.client = nil
+	for _, sv := range a.lsp.servers {
+		if sv.client != nil {
+			sv.client.Close()
+			sv.client = nil
+		}
 	}
 	a.lsp.dead = true
 }
@@ -361,8 +385,9 @@ func (a *App) lspOpenDoc(t *editor.Tab) {
 	if t == nil || t.Path == "" || t.IsImage() || !lspHandles(t.Path) {
 		return
 	}
-	a.lspEnsureStarted()
-	if !a.lspReady() {
+	a.lspEnsureStarted(lspServerFor(t.Path))
+	client := a.lspClientFor(t.Path)
+	if client == nil {
 		return // queued implicitly: handleLSPReady re-announces open tabs
 	}
 	if a.lsp.versions == nil {
@@ -373,7 +398,7 @@ func (a *App) lspOpenDoc(t *editor.Tab) {
 	}
 	a.lsp.versions[t.Path] = 1
 	a.lsp.syncedRev[t.Path] = t.EditRev
-	_ = a.lsp.client.DidOpen(t.Path, languageIDFor(t.Path), 1, t.Buffer.String())
+	_ = client.DidOpen(t.Path, languageIDFor(t.Path), 1, t.Buffer.String())
 }
 
 // lspCloseDoc announces a closed tab and drops its bookkeeping. The
@@ -390,8 +415,8 @@ func (a *App) lspCloseDoc(path string) {
 	delete(a.lsp.versions, path)
 	delete(a.lsp.syncedRev, path)
 	delete(a.lsp.diags, path)
-	if a.lspReady() {
-		_ = a.lsp.client.DidClose(path)
+	if client := a.lspClientFor(path); client != nil {
+		_ = client.DidClose(path)
 	}
 }
 
@@ -400,11 +425,15 @@ func (a *App) lspCloseDoc(path string) {
 // otherwise see didSave for text it hasn't been given yet and
 // diagnose a phantom version of the file.
 func (a *App) lspDidSave(t *editor.Tab) {
-	if t == nil || !a.lspReady() || !lspHandles(t.Path) {
+	if t == nil {
+		return
+	}
+	client := a.lspClientFor(t.Path)
+	if client == nil {
 		return
 	}
 	a.lspFlushChange(t)
-	_ = a.lsp.client.DidSave(t.Path)
+	_ = client.DidSave(t.Path)
 }
 
 // lspAfterEvent runs after every event dispatch and (re-)arms the
@@ -413,11 +442,11 @@ func (a *App) lspDidSave(t *editor.Tab) {
 // it unconditionally keeps the trigger logic in one place instead of
 // sprinkled through every mutation path.
 func (a *App) lspAfterEvent() {
-	if !a.lspReady() || a.screen == nil {
+	if !a.lspAnyReady() || a.screen == nil {
 		return
 	}
 	for _, t := range a.tabs {
-		if t.Path == "" || t.IsImage() || !lspHandles(t.Path) {
+		if t.Path == "" || t.IsImage() || !a.lspReadyFor(t.Path) {
 			continue
 		}
 		if _, open := a.lsp.versions[t.Path]; !open {
@@ -463,7 +492,11 @@ func (a *App) handleLSPSync(e *lspSyncEvent) {
 // lspFlushChange sends one full-text didChange if the buffer is ahead
 // of what the server has seen. No-op when already in sync.
 func (a *App) lspFlushChange(t *editor.Tab) {
-	if t == nil || !a.lspReady() {
+	if t == nil {
+		return
+	}
+	client := a.lspClientFor(t.Path)
+	if client == nil {
 		return
 	}
 	if _, open := a.lsp.versions[t.Path]; !open {
@@ -474,7 +507,7 @@ func (a *App) lspFlushChange(t *editor.Tab) {
 	}
 	a.lsp.versions[t.Path]++
 	a.lsp.syncedRev[t.Path] = t.EditRev
-	_ = a.lsp.client.DidChange(t.Path, a.lsp.versions[t.Path], t.Buffer.String())
+	_ = client.DidChange(t.Path, a.lsp.versions[t.Path], t.Buffer.String())
 }
 
 // tabByPath returns the open tab backing path, or nil. Events resolve
@@ -539,7 +572,7 @@ func editorPosFor(t *editor.Tab, p lsp.Position) editor.Position {
 // server is up and the active tab is a document it understands.
 func (a *App) hasLSPActions() bool {
 	t := a.activeTabPtr()
-	return t != nil && t.Path != "" && !t.IsImage() && lspHandles(t.Path) && a.lspReady()
+	return t != nil && t.Path != "" && !t.IsImage() && a.lspReadyFor(t.Path)
 }
 
 // menuGoToDefinition fires an async definition request for the symbol
@@ -550,7 +583,7 @@ func (a *App) menuGoToDefinition() {
 	if t == nil || !a.hasLSPActions() {
 		return
 	}
-	client := a.lsp.client
+	client := a.lspClientFor(t.Path)
 	scr := a.screen
 	path, from := t.Path, t.Cursor
 	pos := lspPosFor(t, from)
@@ -696,7 +729,7 @@ func (a *App) menuHoverInfo() {
 	if t == nil || !a.hasLSPActions() {
 		return
 	}
-	client := a.lsp.client
+	client := a.lspClientFor(t.Path)
 	scr := a.screen
 	path := t.Path
 	pos := lspPosFor(t, t.Cursor)

@@ -66,7 +66,7 @@ func (a *App) menuSignatureHelp() {
 	if t == nil || !a.hasLSPActions() {
 		return
 	}
-	client, scr := a.lsp.client, a.screen
+	client, scr := a.lspClientFor(t.Path), a.screen
 	if scr == nil {
 		return
 	}

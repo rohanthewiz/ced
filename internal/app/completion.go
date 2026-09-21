@@ -251,9 +251,11 @@ func (a *App) completionAvailable() bool {
 // entries (C++'s `::`) are kept whole — the match is on the text ending
 // at the caret, not on a single rune.
 func (a *App) completionTriggerChars() []string {
-	if a.lspReady() {
-		if chars := a.lsp.client.CompletionTriggerChars(); len(chars) > 0 {
-			return chars
+	if t := a.activeTabPtr(); t != nil {
+		if client := a.lspClientFor(t.Path); client != nil {
+			if chars := client.CompletionTriggerChars(); len(chars) > 0 {
+				return chars
+			}
 		}
 	}
 	return completionFallbackTriggers
@@ -384,7 +386,7 @@ func (a *App) completionRequest(t *editor.Tab, ctx lsp.CompletionContext, manual
 	a.lspFlushChange(t)
 	a.completion.seq++
 	seq := a.completion.seq
-	client, scr := a.lsp.client, a.screen
+	client, scr := a.lspClientFor(t.Path), a.screen
 	path, rev, pos := t.Path, t.EditRev, t.Cursor
 	lspPos := lspPosFor(t, pos)
 	go func() {
@@ -677,7 +679,8 @@ func (a *App) completionScrollToSelected() {
 // Failures are swallowed — a detail pane that stays empty is the same
 // outcome as a server with nothing to add.
 func (a *App) completionResolveSelected() {
-	if !a.completion.open || !a.lspReady() {
+	client := a.lspClientFor(a.completion.path)
+	if !a.completion.open || client == nil {
 		return
 	}
 	if a.completion.selected < 0 || a.completion.selected >= len(a.completion.matches) {
@@ -693,11 +696,10 @@ func (a *App) completionResolveSelected() {
 	if item.Doc != "" {
 		return
 	}
-	if !a.lsp.client.CompletionResolves() {
+	if !client.CompletionResolves() {
 		return
 	}
 	a.completion.asked[idx] = true
-	client := a.lsp.client
 	seq, raw, scr := a.completion.seq, item.Raw, a.screen
 	go func() {
 		enriched, err := client.ResolveCompletion(raw)

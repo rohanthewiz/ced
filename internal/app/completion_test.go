@@ -54,7 +54,7 @@ func newCompletionApp(t *testing.T, lines ...string) (*App, *fakeLSPConn, string
 	a := newTestApp(t, dir)
 	fake := &fakeLSPConn{}
 	a.lsp.dead = false
-	a.lsp.client = fake
+	a.lspInstall(lspGoServerID, fake)
 	a.openFile(path)
 	return a, fake, path
 }

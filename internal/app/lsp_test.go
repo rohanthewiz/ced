@@ -224,18 +224,20 @@ func newLSPTestApp(t *testing.T) (*App, *fakeLSPConn, string) {
 	a := newTestApp(t, dir)
 	fake := &fakeLSPConn{}
 	a.lsp.dead = false
-	a.lsp.client = fake
+	a.lspInstall(lspGoServerID, fake)
 	return a, fake, goPath
 }
 
-// TestLSPHandles pins the file filter: .go in (case-insensitively),
-// everything else out.
+// TestLSPHandles pins the file filter: registered extensions in
+// (case-insensitively), everything else out.
 func TestLSPHandles(t *testing.T) {
 	for path, want := range map[string]bool{
 		"/a/b/main.go": true,
 		"/a/B/MAIN.GO": true,
 		"/a/notes.txt": false,
 		"/a/go":        false, // extensionless file named "go"
+		"/a/app.tsx":   true,  // the registry, not a Go-only filter
+		"/a/lib.rs":    true,
 		"":             false,
 	} {
 		if got := lspHandles(path); got != want {
@@ -272,18 +274,18 @@ func TestLSPOpenDocAnnounces(t *testing.T) {
 func TestHandleLSPReadyAnnouncesOpenTabs(t *testing.T) {
 	a, _, goPath := newLSPTestApp(t)
 	// Rewind to "still starting": docs opened now can't be announced.
-	a.lsp.client = nil
-	a.lsp.starting = true
+	a.lspInstall(lspGoServerID, nil)
+	a.lsp.server(lspGoServerID).starting = true
 	a.openFile(goPath)
 
 	fake := &fakeLSPConn{}
-	a.handleLSPReady(&lspReadyEvent{when: time.Now(), client: fake})
+	a.handleLSPReady(&lspReadyEvent{when: time.Now(), server: lspGoServerID, client: fake})
 
 	calls := fake.callLog()
 	if len(calls) != 1 || calls[0] != "didOpen:main.go:1" {
 		t.Errorf("calls after ready = %v, want the queued didOpen", calls)
 	}
-	if a.lsp.starting {
+	if a.lsp.server(lspGoServerID).starting {
 		t.Error("starting flag should clear on ready")
 	}
 }
@@ -293,12 +295,12 @@ func TestHandleLSPReadyAnnouncesOpenTabs(t *testing.T) {
 // connection instead of resurrecting a zombie.
 func TestHandleLSPReadyAfterDeath(t *testing.T) {
 	a, _, _ := newLSPTestApp(t)
-	a.lsp.client = nil
+	a.lspInstall(lspGoServerID, nil)
 	a.lsp.dead = true
 
 	fake := &fakeLSPConn{}
-	a.handleLSPReady(&lspReadyEvent{when: time.Now(), client: fake})
-	if a.lsp.client != nil {
+	a.handleLSPReady(&lspReadyEvent{when: time.Now(), server: lspGoServerID, client: fake})
+	if a.lsp.server(lspGoServerID).client != nil {
 		t.Error("dead integration must not adopt a late client")
 	}
 	if !fake.closed {
@@ -399,15 +401,15 @@ func TestHandleLSPExitClearsState(t *testing.T) {
 	a, fake, goPath := newLSPTestApp(t)
 	a.lsp.diags = map[string][]lsp.Diagnostic{goPath: {{Message: "x"}}}
 
-	a.handleLSPExit()
+	a.handleLSPExit(&lspExitEvent{server: lspGoServerID})
 
-	if !a.lsp.dead || a.lsp.client != nil {
+	if sv := a.lsp.server(lspGoServerID); !sv.dead || sv.client != nil {
 		t.Error("exit should mark dead and drop the client")
 	}
 	if !fake.closed {
 		t.Error("exit should close the connection")
 	}
-	if a.lsp.diags != nil {
+	if len(a.lsp.diags) != 0 {
 		t.Error("exit should clear diagnostics")
 	}
 }
@@ -850,7 +852,7 @@ func TestPosConversionRoundTrip(t *testing.T) {
 // deliberate type error lands in App.lsp.diags. Skipped when gopls
 // isn't installed — same convention as the git end-to-end tests.
 func TestLSPEndToEndWithRealGopls(t *testing.T) {
-	if _, err := exec.LookPath(lspServerBinary); err != nil {
+	if _, err := exec.LookPath(lspGoServerID); err != nil {
 		t.Skip("gopls not installed")
 	}
 	dir := t.TempDir()

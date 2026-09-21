@@ -59,7 +59,7 @@ func (a *App) menuGoToSymbol() {
 	if t == nil || !a.hasLSPActions() {
 		return
 	}
-	client := a.lsp.client
+	client := a.lspClientFor(t.Path)
 	scr := a.screen
 	path := t.Path
 	// The outline must describe what is on screen, not what the server

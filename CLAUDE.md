@@ -121,7 +121,8 @@ internal/app/findall.go       Find-all peek list: compacted rows, preview, Esc-r
 internal/lsp/client.go        Minimal JSON-RPC-over-stdio LSP client (stdlib only)
 internal/lsp/workspaceedit.go WorkspaceEdit's two wire shapes → one normal form
 internal/lsp/codeaction.go    Code actions: the response union + applyEdit's params
-internal/app/lsp.go           gopls lifecycle, doc sync, diagnostics, definition, hover
+internal/app/lsp.go           Server lifecycle, doc sync, diagnostics, definition, hover
+internal/app/lspservers.go    The language-server registry: ext → server, per-server state
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
 internal/app/lspreferences.go References → the Find-all panel's project mode
 internal/app/lspsignature.go  Signature help → the hover tooltip, active param lit
@@ -998,6 +999,18 @@ framework dependency. House rules it must keep obeying:
 
 - **Silent degradation**: no gopls on PATH / crash / timeout → the
   editor works normally, no nagging. Same contract as formatters.
+- **Several servers, ONE PER FILE, chosen by extension**
+  (lspservers.go: gopls, typescript-language-server, rust-analyzer,
+  pyright/basedpyright/pylsp, clangd, zls). Installing the binary is the
+  opt-in — no config key — and nothing spawns until a file it handles is
+  opened. Every per-document map stays keyed by PATH because a path names
+  exactly one server (`TestLSPServers_ExtensionsAreDisjoint`). Every verb
+  gets its connection from `a.lspClientFor(path)` — never a stored
+  "the client" — and degradation is PER SERVER: a missing or crashed
+  rust-analyzer kills its own slot and clears its own diagnostics, not
+  gopls'. `lspState.dead` is the integration-wide switch (shutdown, the
+  test harness); a server's own verdict lives in its slot. The languageId
+  is Copilot's table, deliberately not a second one.
 - **Events only**: the read loop, start handshake, debounce timers,
   and definition/hover requests all run off-loop and post
   `lsp*Event`s; only the main loop touches `App.lsp`.
@@ -1050,7 +1063,8 @@ framework dependency. House rules it must keep obeying:
   and gopls then publishes diagnostics keyed by absolute paths that
   never match the tabs — the "gopls installed but no squiggles" bug.
 - Tests kill the integration (`a.lsp.dead = true` in newTestApp) so
-  openFile can't spawn a real gopls; LSP tests inject `fakeLSPConn`.
+  openFile can't spawn a real server; LSP tests inject `fakeLSPConn`
+  through `a.lspInstall(lspGoServerID, fake)`.
 
 ### Diagnostic messages (app/diagtip.go)
 The gutter dot and underline say THAT a line is broken; this says WHAT.

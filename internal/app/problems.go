@@ -742,9 +742,11 @@ func (a *App) hasProblemsSelection() bool { return a.problemRow(a.problems.selec
 // hasProblemsQuickFix additionally wants a live server — the fix comes
 // from it. The predicate deliberately does NOT ask hasLSPActions: that
 // one tests the ACTIVE tab, and the whole point of the row is that the
-// problem is somewhere else.
+// problem is somewhere else — so it asks about the ROW's file, which is
+// also what picks the right server when several are running.
 func (a *App) hasProblemsQuickFix() bool {
-	return a.hasProblemsSelection() && a.lspReady()
+	r := a.problemRow(a.problems.selected)
+	return r != nil && a.lspReadyFor(r.path)
 }
 
 // problemsGoToSelected is the menu twin of the row click.
@@ -968,10 +970,10 @@ func (a *App) problemsEmptyText() string {
 	case len(a.problems.rows) > 0:
 		return fmt.Sprintf("%d problems hidden by the filters — click a chip to bring them back",
 			len(a.problems.rows))
-	case a.lsp.dead:
-		return "No language server — nothing is reporting problems"
-	case !a.lspReady():
+	case a.lspAnyStarting():
 		return "Language server starting…"
+	case !a.lspAnyReady():
+		return "No language server — nothing is reporting problems"
 	default:
 		return "No problems"
 	}

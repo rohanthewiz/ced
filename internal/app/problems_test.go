@@ -511,7 +511,7 @@ func TestProblemsEmptyText(t *testing.T) {
 	if got := a.problemsEmptyText(); got != "No problems" {
 		t.Errorf("clean text = %q, want No problems", got)
 	}
-	a.lsp.client = nil
+	a.lspInstall(lspGoServerID, nil)
 	a.lsp.dead = true
 	if got := a.problemsEmptyText(); !strings.Contains(got, "No language server") {
 		t.Errorf("dead-server text = %q", got)

@@ -12,6 +12,8 @@
 package version
 
 import (
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -63,5 +65,26 @@ func TestVersion_PreOneZero(t *testing.T) {
 	}
 	if major != 0 {
 		t.Fatalf("Version %q major is %d, expected 0 (pre-1.0). Update this test deliberately when shipping 1.0.", Version, major)
+	}
+}
+
+// TestVersion_MatchesCatsManifest pins cats-plugin.toml's hand-readable
+// version to the constant. The manifest is ced's official install, so a
+// number there that trails the binary it builds misreports every install.
+// Release CI rewrites both in one commit; this is what catches a manual
+// major/minor bump that remembered only version.go.
+func TestVersion_MatchesCatsManifest(t *testing.T) {
+	raw, err := os.ReadFile("../../cats-plugin.toml")
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	// Line-anchored: the manifest's only TOP-LEVEL `version =` key, the
+	// same line release.yml's sed rewrites.
+	m := regexp.MustCompile(`(?m)^version = "([^"]+)"`).FindSubmatch(raw)
+	if m == nil {
+		t.Fatal("cats-plugin.toml has no top-level version line for release CI to rewrite")
+	}
+	if got := string(m[1]); got != Version {
+		t.Errorf("cats-plugin.toml version = %q, internal/version = %q — bump both", got, Version)
 	}
 }

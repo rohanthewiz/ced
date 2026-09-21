@@ -57,13 +57,6 @@ plus the LSP work done in the seeding session itself
   feature lands without its README paragraph. (Value lowered from medium
   with the backlog cleared.)
 
-- **N-004** · raised `2026-0913-1919-cats-plugin` · value low
-  `cats-plugin.toml`'s `version` is hand-maintained. It currently matches
-  (`0.3.2`) and the host does not compare it, but release CI will not bump
-  it, so it drifts on the next auto-bumped patch. Teach `release.yml` to
-  rewrite it, or accept it as informational. (Premise corrected at seed:
-  the item said "pinned at 0.3.0".)
-
 - **N-005** · raised `2026-0913-1919-cats-plugin` · value low
   cats-side decision: should two ced launch paths share ONE sidebar group
   (map the shell-launched fallback id to the configured plugin id)? Rare in
@@ -162,6 +155,10 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-21 — **N-004** `release.yml`'s auto-bump now rewrites
+  `cats-plugin.toml`'s version in the same commit, and
+  `TestVersion_MatchesCatsManifest` catches a manual bump that forgot it.
+  The workflow edit is UNRUN — first exercised by N-001's release.
 - closed 2026-09-21 — **N-002** `toolLayoutSummary()` has a reader: the
   ≡ "Reset tool window layout" flash now carries it, since most of what
   a reset changes is off screen. Kept rather than deleted.

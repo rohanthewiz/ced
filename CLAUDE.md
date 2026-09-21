@@ -4126,6 +4126,9 @@ Once a run does start (pushed or dispatched), the workflow:
 2. **If that file was edited in the pushed commit**, the version is used
    as-is (manual major/minor bump). **Otherwise** the patch is
    auto-bumped, committed back to `release` with `[skip ci]`, and pushed.
+   The auto-bump rewrites `cats-plugin.toml`'s `version` in the same
+   commit; a MANUAL bump must edit both files, and
+   `TestVersion_MatchesCatsManifest` fails until they agree.
 3. Tags `v<x.y.z>`.
 4. GoReleaser cross-compiles and attaches the archives and
    `checksums.txt` to a GitHub Release. **Nothing else** — the Homebrew

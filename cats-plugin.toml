@@ -30,7 +30,9 @@
 id = "rohanthewiz.ced"
 name = "ced"
 # Informational only — the host does not compare it. internal/version is the
-# release source of truth, and release CI bumps that file, not this one.
+# release source of truth; release CI rewrites this line in the same commit
+# as its auto-bump, and TestVersion_MatchesCatsManifest fails when the two
+# disagree — so a HAND-pinned version must be edited in both places.
 version = "0.3.2"
 description = "A mouse-first terminal code editor: file tree, tabs, syntax highlighting, LSP, git panels and an agent chat panel — cats-native, so paths clicked anywhere in cats open in it."
 # grsh (the embedded terminal panel) is POSIX-only, the same reason

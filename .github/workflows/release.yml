@@ -112,8 +112,15 @@ jobs:
           NEW="${{ steps.version.outputs.version }}"
 
           sed -i -E "s/(const Version = )\"[0-9]+\.[0-9]+\.[0-9]+\"/\1\"$NEW\"/" internal/version/version.go
+          # The cats plugin manifest carries the same number. The host does
+          # not compare it, but a manifest advertising an older version than
+          # the binary it builds is a lie with nothing on screen to explain
+          # it, and TestVersion_MatchesCatsManifest fails the tree until the
+          # two agree. Anchored at line start: it is the manifest's only
+          # top-level `version =` key.
+          sed -i -E "s/^version = \"[0-9]+\.[0-9]+\.[0-9]+\"/version = \"$NEW\"/" cats-plugin.toml
 
-          git add internal/version/version.go
+          git add internal/version/version.go cats-plugin.toml
           git commit -m "Release v$NEW [skip ci]"
           git push origin HEAD:release
 

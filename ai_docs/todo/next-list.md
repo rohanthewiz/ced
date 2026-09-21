@@ -51,15 +51,16 @@ plus the LSP work done in the seeding session itself
   Verified still true 2026-09-21. Either give it one (a status-bar or ≡
   label saying where everything is) or delete it.
 
-- **N-003** · raised `2026-0910-2016-tool-windows` · value medium
+- **N-003** · raised `2026-0910-2016-tool-windows` · value low
   **The README goes stale and no test catches it.** Known spots for
   tool-window changes: `### Tool windows`, the Features list, the chat
-  section, the hotkey table. As of 2026-09-21 it is also silent on
-  everything LSP added since: Select all, the multi-server registry (it
-  still says only "gopls"), go to implementation / type definition,
-  symbol-in-project, incoming calls, symbol highlight, inlay hints, the
-  `"inlayhints"` key, the diagnostic tooltip, and the ≡ Code "Restart
-  language server" row.
+  section, the hotkey table. Caught up on 2026-09-21: it had NO language
+  server coverage at all, and now has a `## Code intelligence` section
+  (the server table, every ≡ Code verb, inlay hints, the restart row,
+  the gutter click), a Features bullet, the LSP hotkey rows and Select
+  all. What stays open is the standing problem — nothing fails when a
+  feature lands without its README paragraph. (Value lowered from medium
+  with the backlog cleared.)
 
 - **N-004** · raised `2026-0913-1919-cats-plugin` · value low
   `cats-plugin.toml`'s `version` is hand-maintained. It currently matches
@@ -105,13 +106,15 @@ plus the LSP work done in the seeding session itself
   2026-09-21 is the shape it would take.
 
 - **N-013** · raised `2026-0921-0906-lsp-experience` · value medium
-  **No non-Go language server has been run.** typescript-language-server,
-  rust-analyzer, pyright/basedpyright/pylsp, clangd and zls are registered
-  from their documentation only (lspservers.go). Open a real project in
-  each that is installed and confirm diagnostics, definition and
-  completion. The TypeScript inlay-hint `preferences` in `initOptions` are
-  the least certain part — typescript-language-server may want them via
-  `workspace/didChangeConfiguration` instead.
+  **Most non-Go language servers have never been run.** clangd WAS, on
+  2026-09-21 through the real binary (`run-ced`, a three-file C project):
+  diagnostics, go to definition (into the header), hover, completion and
+  inlay notes (`» n: 3 · by: 4`, on by default) all work. Still
+  registered from documentation only: typescript-language-server,
+  rust-analyzer, pyright/basedpyright/pylsp and zls — none is installed
+  on the dev machine. The TypeScript inlay-hint `preferences` in
+  `initOptions` are the least certain part — typescript-language-server
+  may want them via `workspace/didChangeConfiguration` instead.
 
 - **N-016** · raised `2026-0921-0906-lsp-experience` · value low
   Inlay hints for servers that take their hint settings through

@@ -58,6 +58,11 @@ The goals, in order:
   scroll wheel scrolls, double-click selects a word, drag past the edge
   to auto-scroll a selection.
 - **Syntax highlighting** for dozens of languages via Chroma.
+- **Code intelligence from the language servers you already have** —
+  diagnostics, go to definition, references, rename, code actions,
+  completions, inlay hints and more, for Go, TypeScript/JavaScript, Rust,
+  Python, C/C++ and Zig. Installing the server's binary is the whole
+  opt-in. See [Code intelligence](#code-intelligence-language-servers).
 - **Soft wrap, per file** — right-click a file in the tree (or in the
   editor) and pick **Soft Wrap** to read long lines folded at the pane's
   edge. See [Soft wrap](#soft-wrap).
@@ -453,6 +458,16 @@ within half a second tap one of the letters below.
 | `Esc M`     | Add caret above      |
 | `Esc *`     | Add next occurrence  |
 | `Esc &`     | Select all occurrences |
+| `Esc d`     | Go to definition (or its usages) |
+| `Esc D`     | Go to symbol in file |
+| `Esc R`     | Find references      |
+| `Esc E`     | Rename symbol        |
+| `Esc c`     | Code actions         |
+| `Esc i`     | Hover info + diagnostics at the caret |
+| `Esc I`     | Signature help       |
+| `Esc Space` | Completions          |
+| `Esc !`     | Problems panel       |
+| `Esc %`     | Go to matching bracket |
 
 A lone `Esc` is harmless — if you don't follow it with a bound key
 within the window, your next keystroke goes to the editor as normal,
@@ -493,6 +508,9 @@ half-typed chord.
 
 Everything reachable by hotkey is also reachable from the `≡` menu —
 the hotkeys are just a faster path for the actions you reach for most.
+The reverse is not true: some verbs have no key at all — **Select all**
+is ≡ **Edit ▸ Select all**, for instance — and the command palette
+(`Esc k`) finds any of them by name.
 
 **Command-key accelerators.** If your terminal forwards the `Cmd` key —
 kitty, Ghostty, WezTerm, or a cats pane — ced also answers the chords
@@ -648,6 +666,64 @@ fuzzy file finder over every non-ignored file in the project:
   as the file tree, plus immediately after any create/rename/delete
   inside the editor.
 - Only files are listed — no directories, no symlinked duplicates.
+
+## Code intelligence (language servers)
+
+ced speaks the Language Server Protocol to whichever of these servers is
+on your `PATH`. **Installing the binary is the whole opt-in** — there is
+no config key — and nothing is started until you open a file that server
+handles. A server that is missing, or that crashes, costs you that
+language's features and nothing else; the editor never nags about it.
+
+| Language | Server (first one found wins) | Files |
+| -------- | ----------------------------- | ----- |
+| Go | `gopls` | `.go` |
+| TypeScript / JavaScript | `typescript-language-server` | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` `.mts` `.cts` |
+| Rust | `rust-analyzer` | `.rs` |
+| Python | `pyright-langserver`, `basedpyright-langserver`, `pylsp` | `.py` `.pyi` |
+| C / C++ | `clangd` | `.c` `.h` `.cc` `.cpp` `.cxx` `.hpp` `.hh` `.hxx` |
+| Zig | `zls` | `.zig` |
+
+Everything below lives in the ≡ **Code** group, and so in the command
+palette:
+
+- **Diagnostics** — a dot in the gutter and an underline on the span,
+  with counts in the status bar. To read the message, **click the
+  gutter** of the marked line, rest the pointer on the dot or the
+  underline, or press `Esc i` with the caret on it. `Esc !` opens the
+  **Problems** panel for the whole project; *Next / Previous problem*
+  step through it and say what they landed on.
+- **Go to definition** (`Esc d`, or `⌘`+click inside cats). Already
+  standing on the definition? It lists the usages instead. *Go to
+  implementation* and *Go to type definition* sit beside it: one answer
+  jumps, several are listed.
+- **Find references** (`Esc R`) and **Find incoming calls** — every use,
+  or only the call sites, listed under the editor with the line each one
+  is on. Click a row to go there.
+- **Go to symbol in file** (`Esc D`) is the file's outline as a fuzzy
+  picker; **Go to symbol in project** asks for a name and searches every
+  running server.
+- **Rename symbol** (`Esc E`) and **Code actions** (`Esc c`) — quick
+  fixes, organize imports, extract. Over a selection, code actions cover
+  the selection. Edits can span files you never opened; nothing is
+  opened on your behalf, the result is listed so you can see what
+  changed, and one undo takes the whole thing back.
+- **Hover info** (`Esc i`) and **Signature help** (`Esc I`) — the second
+  shows the call you are inside with the current parameter lit.
+- **Completions** (`Esc Space`).
+- **Highlight symbol uses** — the server's exact answer to "where else is
+  *this* variable", with writes underlined. `Esc` clears it.
+- **Inlay hints** — inferred types and parameter names, shown as a muted
+  note at the **end** of the line (`» total: float64 · by: 1.5`) rather
+  than spliced into it, so your columns never move. Toggle under
+  ≡ **View**, or set `"inlayhints": "off"` in `~/.config/ced/config.json`.
+- **Restart language server** — for a server that crashed, or one you
+  installed after ced started. If it still can't be found, the message
+  names the binaries it looked for.
+
+While a server is still loading a project the status bar says so
+(`gopls: Loading packages…`), and a lookup that comes back empty in the
+meantime tells you that is why.
 
 ## Custom actions (open remote files on your laptop)
 

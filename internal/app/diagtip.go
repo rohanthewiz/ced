@@ -13,6 +13,11 @@
 //
 //   - REST THE POINTER on the gutter of a diagnosed line, or on the
 //     underlined span itself, and a tooltip lists the messages.
+//   - CLICK the gutter of a diagnosed line and the same tooltip opens at
+//     once; click it again and it closes. This is the mouse path for a
+//     terminal that reports presses but no MOTION (macOS Terminal.app),
+//     where the dwell above can never fire. Gutter only: a click in the
+//     code is the caret's, and always will be.
 //   - Esc-i (hover info) leads with the diagnostics under the CARET, and
 //     still answers when the server has no hover text for that spot —
 //     the keyboard path, for a terminal that reports no motion.
@@ -84,6 +89,12 @@ type diagTipState struct {
 	lines  []string
 	ax, ay int // the anchor cell the tooltip describes
 	box    struct{ x, y, w, h int }
+	// pressClosed records that the press being dispatched RIGHT NOW just
+	// dismissed a tip anchored on the very cell it landed on. The gutter
+	// click reads it to make a second click a close rather than a
+	// close-and-reopen; noteDiagPointer rewrites it on every press, so it
+	// never outlives the event that set it.
+	pressClosed bool
 }
 
 // noteDiagPointer is handleMouse's per-event hook, beside notePointer
@@ -94,6 +105,7 @@ func (a *App) noteDiagPointer(x, y int, btn tcell.ButtonMask) bool {
 		hit := a.diagTip.open &&
 			btn&(tcell.Button1|tcell.Button2|tcell.Button3) != 0 &&
 			a.diagTipContains(x, y)
+		a.diagTip.pressClosed = a.diagTip.open && x == a.diagTip.ax && y == a.diagTip.ay
 		a.closeDiagTip()
 		return hit
 	}
@@ -147,17 +159,66 @@ func (a *App) handleDiagTipTick(e *diagTipEvent) {
 	if a.completion.open || a.whichKey.open || a.dragMode != "" {
 		return
 	}
-	diags := a.diagsAtCell(a.diagTip.x, a.diagTip.y)
+	a.openDiagTipAt(a.diagTip.x, a.diagTip.y)
+}
+
+// openDiagTipAt shows the tooltip for a screen cell, reporting whether
+// the cell had anything to say. The one opener the dwell tick and the
+// gutter click share, so the two doors cannot show different text.
+func (a *App) openDiagTipAt(x, y int) bool {
+	diags := a.diagsAtCell(x, y)
 	if len(diags) == 0 {
-		return
+		return false
 	}
 	a.diagTip.open = true
 	a.diagTip.lines = diagTipLines(diags)
-	a.diagTip.ax, a.diagTip.ay = a.diagTip.x, a.diagTip.y
+	a.diagTip.ax, a.diagTip.ay = x, y
 	// The LSP dwell tooltip may be about to answer the same cell with the
 	// symbol's docs; two boxes stacked over one identifier is noise, and
 	// "this is broken" is the more urgent of the two things to say.
 	a.closeHoverDwell()
+	return true
+}
+
+// diagGutterPress is the click door: a press in the gutter of a diagnosed
+// line opens the tooltip immediately instead of parking the caret at
+// column 0. It reports whether the press was claimed; a claimed press
+// moves no caret and starts no drag (the blame column's rule — the
+// gesture was aimed at the margin, and a wiggle afterwards must not
+// select the code beside it). A clean line's gutter is NOT claimed, so
+// clicking a line number still places the caret there as it always has.
+//
+// It runs after noteDiagPointer, which has already dismissed any open
+// tip on this same press — hence pressClosed, the toggle's memory.
+func (a *App) diagGutterPress(x, y int) bool {
+	if !a.diagCellInGutter(x, y) || len(a.diagsAtCell(x, y)) == 0 {
+		return false
+	}
+	if a.diagTip.pressClosed {
+		return true // second click on the same dot: it closed, leave it closed
+	}
+	// Stamp the pointer cell too: the button RELEASE arrives next as a
+	// motion report on this cell, and noteDiagPointer treats a report on
+	// the remembered cell as a repeat rather than as travel that should
+	// close the tip it just opened.
+	a.diagTip.x, a.diagTip.y = x, y
+	return a.openDiagTipAt(x, y)
+}
+
+// diagCellInGutter reports whether a screen cell is in the active tab's
+// gutter band — line numbers, annotation column and mark cell — using
+// the same boundary diagsAtCell answers "by line" inside of.
+func (a *App) diagCellInGutter(x, y int) bool {
+	t := a.activeTabPtr()
+	if t == nil || t.IsImage() || t.IsMarkdownView() {
+		return false
+	}
+	ex, ey, ew, eh := a.editorRect()
+	if x < ex || x >= ex+ew || y < ey || y >= ey+eh {
+		return false
+	}
+	_, annEnd := t.AnnotationCols()
+	return x-ex < annEnd+1
 }
 
 // diagsAtCell resolves a screen cell to the diagnostics it stands for:

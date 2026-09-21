@@ -161,6 +161,49 @@ func TestDiagTip_Lifecycle(t *testing.T) {
 	}
 }
 
+// TestDiagGutterPress pins the click door: a press on a diagnosed line's
+// gutter opens the tip without moving the caret, survives the release
+// that follows, and a second click closes it; a clean line's gutter and
+// the code itself are left to the caret.
+func TestDiagGutterPress(t *testing.T) {
+	a, gutterX, codeX, rowY := diagTipTestApp(t)
+	tab := a.activeTabPtr()
+	start := tab.Cursor
+
+	press := func(x, y int) bool {
+		a.noteDiagPointer(x, y, tcell.Button1) // the router's order
+		return a.diagGutterPress(x, y)
+	}
+
+	if press(gutterX, rowY-1) {
+		t.Error("a clean line's gutter was claimed")
+	}
+	if press(codeX, rowY) {
+		t.Error("a press in the code was claimed — that click is the caret's")
+	}
+
+	if !press(gutterX, rowY) || !a.diagTip.open {
+		t.Fatalf("gutter press left the tip %+v", a.diagTip)
+	}
+	if tab.Cursor != start {
+		t.Errorf("cursor moved to %+v", tab.Cursor)
+	}
+	a.noteDiagPointer(gutterX, rowY, tcell.ButtonNone) // the release
+	if !a.diagTip.open {
+		t.Error("the button release closed the tip it opened")
+	}
+
+	if !press(gutterX, rowY) {
+		t.Error("the closing click should still be claimed")
+	}
+	if a.diagTip.open {
+		t.Error("a second click on the dot should close the tip")
+	}
+	if !press(gutterX, rowY) || !a.diagTip.open {
+		t.Error("a third click should open it again")
+	}
+}
+
 // TestHoverInfo_LeadsWithDiagnostics pins the keyboard door: Esc-i on a
 // red line shows the message even when the server has no hover text,
 // puts it ABOVE the hover text when there is some, and still flashes

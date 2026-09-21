@@ -98,11 +98,6 @@ plus the LSP work done in the seeding session itself
   Only exercised on the simulation screen so far. `run-ced` cannot send
   mouse motion; this needs a person or a capture-tool extension.
 
-- **N-011** · raised `2026-0921-0801-lsp-diagnostic-messages` · value medium
-  A click on the gutter diagnostic dot opens the tooltip immediately (today
-  it moves the caret to column 0). The mouse path for terminals with no
-  motion reporting — macOS Terminal.app is one.
-
 - **N-012** · raised `2026-0921-0801-lsp-diagnostic-messages` · value low
   Echo the caret line's diagnostic in the status bar as the caret moves
   (vim/ALE style). Not done because the bar is width-budgeted; Esc-i
@@ -173,6 +168,10 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-21 — **N-011** gutter click opens the diagnostic tooltip
+  (`diagGutterPress`, diagtip.go). Diagnosed lines only; a second click
+  closes it; no caret move, no drag. Like N-010, only exercised on the
+  simulation screen — `run-ced` cannot send mouse events.
 - closed 2026-09-21 — **N-014** "Restart language server" ≡ Code row.
   `internal/app/lsprestart.go`; acts on the active file's server, never
   dimmed, names the missing binaries. Needed a slot generation

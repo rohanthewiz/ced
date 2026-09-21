@@ -1156,7 +1156,8 @@ framework dependency. House rules it must keep obeying:
 
 ### Diagnostic messages (app/diagtip.go)
 The gutter dot and underline say THAT a line is broken; this says WHAT.
-Three doors, one text (`diagTipLines`): rest the pointer on a diagnosed
+Four doors, one text (`diagTipLines`): click a diagnosed line's gutter;
+rest the pointer on a diagnosed
 line's gutter or on the underline itself → a passive tooltip; Esc-i
 leads with the diagnostics at the caret (and answers alone when the
 server has no hover text); next/previous problem flash the message they
@@ -1167,6 +1168,17 @@ land on. House rules:
   when the cell really carries a diagnostic. When it is open the Tier-1
   dwell tooltip stands down — two boxes over one identifier is noise and
   "this is broken" is the more urgent answer.
+- **A CLICK on a diagnosed line's gutter opens it at once, and a second
+  click closes it** (`diagGutterPress`) — the mouse door for a terminal
+  that reports presses but no motion (macOS Terminal.app), where the
+  dwell can never fire. Gutter only, and only a DIAGNOSED line: a clean
+  line's gutter still places the caret, and a click in the code is
+  always the caret's. Claimed presses move no caret and start no drag
+  (the blame column's rule), and it runs AFTER `blameColumnPress`.
+  `noteDiagPointer` has already dismissed the tip on that same press, so
+  `diagTip.pressClosed` is the toggle's memory; the press also stamps the
+  pointer cell, or the button RELEASE reads as travel and closes it.
+  `openDiagTipAt` is the one opener both doors share.
 - **Gutter answers by line, code answers by rune.** The dot marks a
   diagnostic's FIRST line, so the gutter lists what starts there; a code
   cell must be ON an underlined rune (the PosScreenCell round trip,

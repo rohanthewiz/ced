@@ -3366,6 +3366,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			if a.blameColumnPress(x, y) {
 				return
 			}
+			// A press on a diagnosed line's gutter opens its message at
+			// once — the mouse door for terminals that report no motion,
+			// where the dwell tooltip can never fire (diagtip.go). After
+			// the blame press: that column is inside the gutter band and
+			// its verb is the more specific one.
+			if a.diagGutterPress(x, y) {
+				return
+			}
 			a.editorPress(x, y)
 			a.dragMode = "editor"
 		}

@@ -437,6 +437,9 @@ func builtinMenuGroups() []menuGroup {
 			// Definition's two siblings (lspgoto.go). One answer jumps,
 			// several land in the same list references uses. No leader
 			// keys: the flat table is out of mnemonic letters.
+			// References minus everything that isn't a CALL — the
+			// declaration, a callback passed by value (lspgoto.go).
+			{label: "Find incoming calls…", action: (*App).menuIncomingCalls, enabled: (*App).hasLSPActions},
 			{label: "Go to implementation", action: (*App).menuGoToImplementation, enabled: (*App).hasLSPActions},
 			{label: "Go to type definition", action: (*App).menuGoToTypeDefinition, enabled: (*App).hasLSPActions},
 			{label: "Hover info", shortcut: "esc i", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},

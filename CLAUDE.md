@@ -123,7 +123,8 @@ internal/lsp/workspaceedit.go WorkspaceEdit's two wire shapes → one normal for
 internal/lsp/codeaction.go    Code actions: the response union + applyEdit's params
 internal/app/lsp.go           Server lifecycle, doc sync, diagnostics, definition, hover
 internal/app/lspservers.go    The language-server registry: ext → server, per-server state
-internal/app/lspgoto.go       Go to implementation / type definition: one jumps, several list
+internal/app/lspgoto.go       Implementation / type definition / incoming calls: jump or list
+internal/lsp/callhierarchy.go prepareCallHierarchy + incomingCalls → call-site Locations
 internal/app/lspprogress.go   $/progress + showMessage → the status bar's server segment
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
 internal/app/lspworkspacesymbols.go  workspace/symbol → prompt, then the project-wide symbol picker
@@ -1187,6 +1188,17 @@ request's origin, the open suppressed) and the list is
 mode, heading the only thing changed). They share references' generation
 (`lsp.refSeq`), since any of them can open that one panel. `linkSupport`
 is deliberately undeclared so servers answer with plain Locations.
+
+**Find incoming calls** is the third verb on the same request-and-fork
+(`lspLocFetch` is the seam: anything that turns a position into
+locations). It is references minus everything that isn't a CALL — the
+declaration, a callback passed by value, a doc link. Two round trips
+(`lsp.Client.IncomingCalls`), and the prepared item is echoed back
+VERBATIM because its server-private `data` is what identifies the symbol
+(the Diagnostic / CompletionItem rule). It **always lists**, even one
+site: a who-question answered by a silent jump hides that the answer was
+"only one". A caller the server gives no ranges for still gets a row at
+its own name.
 
 ### Find references (lsp/client.go + app/lspreferences.go)
 Every use of the symbol under the cursor, listed in the Find-all panel's
@@ -3382,8 +3394,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 142 group actions + 15 headers (159), height 165,
-dividers `[2, 5, 162]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 143 group actions + 15 headers (160), height 166,
+dividers `[2, 5, 163]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

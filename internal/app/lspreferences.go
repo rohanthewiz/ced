@@ -90,6 +90,7 @@ type refLoc struct {
 type lspReferencesEvent struct {
 	when      time.Time
 	seq       int
+	path      string // the document the question was asked from
 	query     string
 	locs      []refLoc
 	truncated bool
@@ -137,7 +138,7 @@ func (a *App) menuFindReferences() {
 		locs, err := client.References(path, pos, true)
 		refs, truncated := collectRefLines(locs)
 		_ = scr.PostEvent(&lspReferencesEvent{
-			when: time.Now(), seq: seq, query: word,
+			when: time.Now(), seq: seq, path: path, query: word,
 			locs: refs, truncated: truncated, err: err,
 		})
 	}()
@@ -264,7 +265,7 @@ func (a *App) handleLSPReferences(e *lspReferencesEvent) {
 		return
 	}
 	if len(e.locs) == 0 {
-		a.flash(fmt.Sprintf("No references to %q", e.query))
+		a.flash(fmt.Sprintf("No references to %q", e.query) + a.lspLoadingNote(e.path))
 		return
 	}
 	if a.modal != nil || a.menuOpen {

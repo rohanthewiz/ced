@@ -65,6 +65,9 @@ type lspConn interface {
 	// Locations is definition's shape under another method name —
 	// implementation and typeDefinition (lspgoto.go).
 	Locations(method, path string, pos lsp.Position) ([]lsp.Location, error)
+	// IncomingCalls is the call hierarchy's two requests behind one
+	// call: every call site of the function at pos.
+	IncomingCalls(path string, pos lsp.Position) ([]lsp.Location, error)
 	References(path string, pos lsp.Position, includeDecl bool) ([]lsp.Location, error)
 	Rename(path string, pos lsp.Position, newName string) (*lsp.WorkspaceEdit, error)
 	CodeActions(path string, rng lsp.Range, diags []lsp.Diagnostic) ([]lsp.CodeAction, error)

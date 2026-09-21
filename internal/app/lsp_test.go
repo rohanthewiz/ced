@@ -39,11 +39,14 @@ type fakeLSPConn struct {
 	locLocs   []lsp.Location
 	locErr    error
 	locMethod string
-	defErr    error
-	refLocs   []lsp.Location
-	refErr    error
-	hoverRes  *lsp.Hover
-	hoverErr  error
+	// callLocs answers IncomingCalls.
+	callLocs []lsp.Location
+	callErr  error
+	defErr   error
+	refLocs  []lsp.Location
+	refErr   error
+	hoverRes *lsp.Hover
+	hoverErr error
 	// hoverPos records the position the last hover was asked about, and
 	// hoverCalls counts the requests. The dwell tooltip (hoverdwell.go)
 	// makes its whole claim about WHICH position reaches the wire — the
@@ -137,6 +140,11 @@ func (f *fakeLSPConn) Locations(method, path string, _ lsp.Position) ([]lsp.Loca
 	f.mu.Unlock()
 	f.record("locations:" + method + ":" + filepath.Base(path))
 	return f.locLocs, f.locErr
+}
+
+func (f *fakeLSPConn) IncomingCalls(path string, _ lsp.Position) ([]lsp.Location, error) {
+	f.record("incomingCalls:" + filepath.Base(path))
+	return f.callLocs, f.callErr
 }
 
 func (f *fakeLSPConn) References(path string, _ lsp.Position, includeDecl bool) ([]lsp.Location, error) {

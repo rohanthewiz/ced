@@ -551,6 +551,7 @@ func (c *Client) Initialize(rootDir string) error {
 				// so both answer with plain Locations rather than the
 				// LocationLink shape Locations() does not decode.
 				"implementation": map[string]any{},
+				"callHierarchy":  map[string]any{},
 				"typeDefinition": map[string]any{},
 				"references":     map[string]any{},
 				// Rename is declared bare, without prepareSupport. That

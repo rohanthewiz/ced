@@ -31,8 +31,16 @@
 // lists the interfaces it satisfies — the one relationship in the
 // language that is written down nowhere in the source.
 //
-// No leader keys: the flat table is out of mnemonic letters, and both
-// rows get the command palette for free.
+// "Find incoming calls" is the third verb on the same request-and-fork.
+// Its fetch is two round trips instead of one (lsp/callhierarchy.go) and
+// it ALWAYS lists, because its question is references' — "who?" — and a
+// who-question answered by silently teleporting to the only caller would
+// hide the fact that there is only one. It differs from references in
+// what it leaves out: the declaration, a callback passed by value, a doc
+// link — everything that mentions the function without calling it.
+//
+// No leader keys: the flat table is out of mnemonic letters, and all
+// three rows get the command palette for free.
 
 package app
 
@@ -60,6 +68,8 @@ type lspLocationsEvent struct {
 	// heading titles the panel ("Implementations of"), query is the word
 	// under the cursor.
 	noun, heading, query string
+	// alwaysList keeps a single answer in the panel instead of jumping.
+	alwaysList bool
 
 	locs      []lsp.Location
 	refs      []refLoc
@@ -73,21 +83,41 @@ func (e *lspLocationsEvent) When() time.Time { return e.when }
 // menuGoToImplementation is the ≡ Code row: who implements this
 // interface (or which interfaces this type satisfies).
 func (a *App) menuGoToImplementation() {
-	a.lspGoTo(lsp.MethodImplementation, "implementation", "Implementations of")
+	a.lspGoTo(locationsFetch(lsp.MethodImplementation), "implementation", "Implementations of", false)
+}
+
+// menuIncomingCalls is the ≡ Code row: every place the function under
+// the cursor is CALLED.
+func (a *App) menuIncomingCalls() {
+	fetch := func(c lspConn, path string, pos lsp.Position) ([]lsp.Location, error) {
+		return c.IncomingCalls(path, pos)
+	}
+	a.lspGoTo(fetch, "incoming call", "Calls to", true)
+}
+
+// lspLocFetch is the request half of a go-to verb: anything that turns
+// a position into locations.
+type lspLocFetch func(c lspConn, path string, pos lsp.Position) ([]lsp.Location, error)
+
+// locationsFetch adapts one of definition's same-shaped methods.
+func locationsFetch(method string) lspLocFetch {
+	return func(c lspConn, path string, pos lsp.Position) ([]lsp.Location, error) {
+		return c.Locations(method, path, pos)
+	}
 }
 
 // menuGoToTypeDefinition is the ≡ Code row: jump to the declaration of
 // the TYPE of the symbol under the cursor — from a variable straight to
 // its struct, skipping the line that merely declares the variable.
 func (a *App) menuGoToTypeDefinition() {
-	a.lspGoTo(lsp.MethodTypeDefinition, "type definition", "Type definitions of")
+	a.lspGoTo(locationsFetch(lsp.MethodTypeDefinition), "type definition", "Type definitions of", false)
 }
 
 // lspGoTo fires one position → locations request. Same contracts as the
 // verbs beside it: refuse a cursor on nothing before spending a round
 // trip, flush so the server answers from the text on screen, and stamp
 // the generation because the answer may open a panel.
-func (a *App) lspGoTo(method, noun, heading string) {
+func (a *App) lspGoTo(fetch lspLocFetch, noun, heading string, alwaysList bool) {
 	a.closeMenu()
 	t := a.activeTabPtr()
 	if t == nil || !a.hasLSPActions() {
@@ -95,7 +125,7 @@ func (a *App) lspGoTo(method, noun, heading string) {
 	}
 	word := cursorWord(t)
 	if word == "" {
-		a.flash("Go to " + noun + ": put the cursor on a symbol first")
+		a.flash(capitalize(noun) + ": put the cursor on a symbol first")
 		return
 	}
 	client, scr := a.lspClientFor(t.Path), a.screen
@@ -109,17 +139,17 @@ func (a *App) lspGoTo(method, noun, heading string) {
 	a.lsp.refSeq++
 	seq := a.lsp.refSeq
 	go func() {
-		locs, err := client.Locations(method, path, pos)
+		locs, err := fetch(client, path, pos)
 		// Context lines are only needed for a list, and reading them is
 		// file IO, so it happens here — but only when there is a list.
 		var refs []refLoc
 		var truncated bool
-		if len(locs) > 1 {
+		if len(locs) > 1 || (alwaysList && len(locs) == 1) {
 			refs, truncated = collectRefLines(locs)
 		}
 		_ = scr.PostEvent(&lspLocationsEvent{
 			when: time.Now(), seq: seq, fromPath: path, fromPos: from,
-			noun: noun, heading: heading, query: word,
+			noun: noun, heading: heading, query: word, alwaysList: alwaysList,
 			locs: locs, refs: refs, truncated: truncated, err: err,
 		})
 	}()
@@ -134,14 +164,14 @@ func (a *App) handleLSPLocations(e *lspLocationsEvent) {
 		return
 	}
 	if e.err != nil {
-		a.flash("Go to " + e.noun + ": " + e.err.Error())
+		a.flash(capitalize(e.noun) + ": " + e.err.Error())
 		return
 	}
 	if len(e.locs) == 0 {
 		a.flash(fmt.Sprintf("No %s for %q", e.noun, e.query) + a.lspLoadingNote(e.fromPath))
 		return
 	}
-	if len(e.locs) == 1 {
+	if len(e.locs) == 1 && !e.alwaysList {
 		target := lsp.URIToPath(e.locs[0].URI)
 		if target == "" {
 			a.flash("The " + e.noun + " is not in a plain file")
@@ -157,8 +187,17 @@ func (a *App) handleLSPLocations(e *lspLocationsEvent) {
 		return
 	}
 	if a.modal != nil || a.menuOpen {
-		a.flash(fmt.Sprintf("Go to %s: %d for %q — run it again", e.noun, len(e.refs), e.query))
+		a.flash(fmt.Sprintf("%s: %d for %q — run it again", capitalize(e.noun), len(e.refs), e.query))
 		return
 	}
 	a.openLocationsPanel(e.heading, e.query, e.refs, e.truncated)
+}
+
+// capitalize upper-cases a noun's first letter for the head of a flash.
+// ASCII only — every noun here is one this file wrote.
+func capitalize(s string) string {
+	if s == "" || s[0] < 'a' || s[0] > 'z' {
+		return s
+	}
+	return string(s[0]-'a'+'A') + s[1:]
 }

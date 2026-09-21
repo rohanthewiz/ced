@@ -117,3 +117,29 @@ func TestHandleLSPLocations_DropsStaleGeneration(t *testing.T) {
 		t.Error("a stale answer must not jump")
 	}
 }
+
+// TestIncomingCalls_AlwaysLists pins the third verb's one difference: a
+// single call site still opens the list. "Who calls this?" answered by a
+// silent jump would hide that the answer was "only one place".
+func TestIncomingCalls_AlwaysLists(t *testing.T) {
+	a, fake, goPath, other := newGoToTestApp(t)
+	fake.callLocs = []lsp.Location{refLocAt(other, 4, 12, 16)}
+
+	a.menuIncomingCalls()
+	pumpAppEvents(t, a, func() bool { return a.modal != nil })
+
+	m, ok := a.modal.(*findAllModal)
+	if !ok || m.heading != "Calls to" || len(m.rows) != 1 {
+		t.Fatalf("modal = %T %+v, want a one-row Calls-to list", a.modal, m)
+	}
+	if a.activeTabPtr().Path != goPath {
+		t.Error("the list must not move the editor")
+	}
+}
+
+// TestIncomingCalls_NothingCallable pins the empty answer's wording.
+func TestIncomingCalls_NothingCallable(t *testing.T) {
+	a, _, _, _ := newGoToTestApp(t)
+	a.menuIncomingCalls()
+	pumpAppEvents(t, a, func() bool { return strings.HasPrefix(a.statusMsg, "No incoming call") })
+}

@@ -1535,3 +1535,73 @@ func TestCursorLineVisible_BandEdges(t *testing.T) {
 		t.Error("a zero-height view can't be showing anything")
 	}
 }
+
+// TestTab_ScrollH_StopsAtTheLongestVisibleLine pins the right-hand clamp:
+// once the widest line on screen has its tail at the pane's right edge,
+// further right-wheeling moves nothing. Unclamped, a flick slid the whole
+// file off to the left and left the pane blank with no scrollbar to say
+// how far out the user had gone.
+func TestTab_ScrollH_StopsAtTheLongestVisibleLine(t *testing.T) {
+	scr := newSimScreen(t, 20, 5)
+	defer scr.Fini()
+
+	tab, _ := NewTab("")
+	// Content width is 20 - gutterWidth - 1 = 13, so a 30-column line
+	// leaves exactly 17 columns to scroll through.
+	tab.Buffer = NewBuffer(strings.Repeat("x", 30))
+	tab.Render(scr, theme.Default(), 0, 0, 20, 5)
+
+	if got := tab.MaxScrollX(); got != 17 {
+		t.Fatalf("MaxScrollX = %d, want 17", got)
+	}
+	for i := 0; i < 20; i++ {
+		tab.ScrollH(6)
+	}
+	if tab.ScrollX != 17 {
+		t.Fatalf("ScrollX = %d after wheeling past the end, want 17", tab.ScrollX)
+	}
+	// And the way back is still open.
+	tab.ScrollH(-6)
+	if tab.ScrollX != 11 {
+		t.Fatalf("ScrollX = %d after one wheel left, want 11", tab.ScrollX)
+	}
+}
+
+// TestTab_ScrollH_RefusesWithoutOverflow confirms the "if there is an
+// overflow" half of the contract: every visible line fits, so a
+// horizontal wheel has nothing to reveal and must not slide the text.
+func TestTab_ScrollH_RefusesWithoutOverflow(t *testing.T) {
+	scr := newSimScreen(t, 20, 5)
+	defer scr.Fini()
+
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer("short")
+	tab.Render(scr, theme.Default(), 0, 0, 20, 5)
+
+	tab.ScrollH(6)
+	if tab.ScrollX != 0 {
+		t.Fatalf("ScrollX = %d on a file with nothing off-screen, want 0", tab.ScrollX)
+	}
+}
+
+// TestTab_ScrollH_CeilingIsWindowScoped pins the deliberate trade: the
+// ceiling is derived from the lines actually on screen, so a long line
+// scrolled out of view above no longer grants room to the right.
+func TestTab_ScrollH_CeilingIsWindowScoped(t *testing.T) {
+	scr := newSimScreen(t, 20, 5)
+	defer scr.Fini()
+
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer(strings.Repeat("x", 80) + "\n" + strings.Repeat("s\n", 20))
+	tab.Render(scr, theme.Default(), 0, 0, 20, 5)
+	if tab.MaxScrollX() == 0 {
+		t.Fatalf("the long line is on screen; expected room to scroll")
+	}
+
+	// Scroll past the long line and re-render so the cached window moves.
+	tab.ScrollY = 10
+	tab.Render(scr, theme.Default(), 0, 0, 20, 5)
+	if got := tab.MaxScrollX(); got != 0 {
+		t.Fatalf("MaxScrollX = %d with only short lines visible, want 0", got)
+	}
+}

@@ -148,6 +148,16 @@ type Tab struct {
 	softWrap bool
 	wrapW    int
 
+	// lastContentW / lastViewH are the content width and viewport height
+	// the LAST RENDER drew with, cached for the annCols reason: ScrollH
+	// runs outside the draw and has to clamp against the frame the user
+	// is looking at. Zero means "never rendered", and every reader must
+	// treat that as "no opinion" rather than as a width of zero — a
+	// clamp derived from it would pin ScrollX at 0 on a tab that has not
+	// been painted yet (which is every tab in a unit test).
+	lastContentW int
+	lastViewH    int
+
 	mdRows        []MDRow
 	mdRev         int
 	mdWidth       int
@@ -1094,6 +1104,8 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	if contentW < 1 {
 		contentW = 1
 	}
+	// Cached for ScrollH's clamp, which runs off the draw. See the field.
+	t.lastContentW, t.lastViewH = contentW, h
 
 	// The walk is by LINE, and each line paints one or more screen rows:
 	// exactly one unwrapped, as many as wrapStarts laid out under soft
@@ -1399,11 +1411,19 @@ func (t *Tab) Scroll(deltaLines int) {
 }
 
 // ScrollH moves the viewport horizontally by delta rune-columns (negative
-// = left). Clamped at zero; the right side is naturally bounded by
-// Render's contentW window — scrolling past the longest visible line just
-// shows blank space, which is fine. Lives next to Scroll so the app's
-// mouse-wheel dispatcher can treat horizontal and vertical wheels
-// symmetrically.
+// = left), clamped at both ends: zero on the left, and on the right the
+// point at which the longest line on screen has its tail in view. Lives
+// next to Scroll so the app's mouse-wheel dispatcher can treat horizontal
+// and vertical wheels symmetrically.
+//
+// The right-hand clamp is what makes the horizontal wheel usable rather
+// than merely present. Unclamped, a flick past the end of the longest
+// line slid the whole file off to the left and left the pane blank — and
+// with nothing out there to scroll BACK towards, the only way home was to
+// wheel left exactly as far as you had wheeled right. There is no
+// horizontal scrollbar to show how far out you have gone, so the editor
+// has to refuse the move rather than let the user get lost in empty
+// space.
 func (t *Tab) ScrollH(deltaCols int) {
 	// Wrapped, every line already fits the pane; a horizontal wheel that
 	// shifted it would only slide text off the left edge with nothing to
@@ -1413,9 +1433,74 @@ func (t *Tab) ScrollH(deltaCols int) {
 		return
 	}
 	t.ScrollX += deltaCols
+	// The ceiling is only meaningful once a frame has been drawn — see
+	// MaxScrollX. Before that the move stands unclamped, which is what
+	// the screen still shows.
+	if max, known := t.scrollXCeiling(); known && t.ScrollX > max {
+		t.ScrollX = max
+	}
 	if t.ScrollX < 0 {
 		t.ScrollX = 0
 	}
+}
+
+// MaxScrollX reports the largest ScrollX that still shows text: the rune
+// column at which the widest line ON SCREEN ends at the pane's right
+// edge. Zero when nothing visible overflows — which is the "if there is
+// an overflow" half of the horizontal wheel's contract.
+//
+// WINDOW-SCOPED, the word highlighter's rule: the answer changes with
+// every vertical scroll, so there is nothing to cache, and bounding the
+// walk by the viewport keeps a wheel event proportional to the screen
+// instead of to the file. The stated trade is that scrolling down onto
+// shorter lines lowers the ceiling — but only a horizontal wheel ever
+// applies it, so a vertical scroll never yanks the view sideways; the
+// user simply finds they cannot go further right than the text they can
+// see.
+//
+// It answers 0 before the first render, since the width it measures
+// against is the one the last frame drew with. ScrollH tells that apart
+// from a genuine "nothing overflows" through scrollXCeiling, because the
+// two want opposite things from an unrendered tab: clamp, or stand
+// aside.
+func (t *Tab) MaxScrollX() int {
+	max, _ := t.scrollXCeiling()
+	return max
+}
+
+// scrollXCeiling is MaxScrollX plus the one bit the clamp needs and a
+// reader does not: whether a frame has been drawn yet, so the answer is
+// about the screen rather than about a zero value.
+func (t *Tab) scrollXCeiling() (max int, known bool) {
+	if t.softWrap {
+		return 0, true
+	}
+	if t.lastContentW <= 0 || t.lastViewH <= 0 {
+		return 0, false
+	}
+	// The widest line in the window, measured in VISUAL cells (tabs
+	// expand), and kept alongside its runes: ScrollX is a rune index, so
+	// the visual ceiling has to be converted back on that same line.
+	var widest []rune
+	widestVisual := 0
+	last := t.ScrollY + t.lastViewH - 1
+	for line := t.ScrollY; line <= last && line < t.Buffer.LineCount(); line++ {
+		if line < 0 {
+			continue
+		}
+		runes := t.Buffer.LineRunes(line)
+		if v := LineVisualCol(runes, len(runes)); v > widestVisual {
+			widest, widestVisual = runes, v
+		}
+	}
+	if widestVisual <= t.lastContentW {
+		return 0, true
+	}
+	// RuneColAtVisual snaps back to the rune STARTING at or before the
+	// target column, so a tab straddling the edge is scrolled to its own
+	// start rather than half past it — the same courtesy hit-testing
+	// gives a click inside a tab.
+	return RuneColAtVisual(widest, widestVisual-t.lastContentW), true
 }
 
 // MaxScroll reports the largest ScrollY that clampScroll will allow for a

@@ -76,6 +76,7 @@ type lspConn interface {
 	SignatureHelpAt(path string, pos lsp.Position) (*lsp.Signature, error)
 	DocumentSymbols(path string) ([]lsp.Symbol, error)
 	DocumentHighlights(path string, pos lsp.Position) ([]lsp.DocumentHighlight, error)
+	InlayHints(path string, rng lsp.Range) ([]lsp.InlayHint, error)
 	WorkspaceSymbols(query string) ([]lsp.WorkspaceSymbol, error)
 	// The completion quartet (completion.go). Two of the four ask the
 	// SERVER'S OPINION rather than sending a request, which is new to
@@ -112,6 +113,10 @@ type lspState struct {
 	// definition and hover — which are content with a path check — it
 	// needs to know which request it belongs to.
 	refSeq int
+
+	// inlayAsked records, per path, the EditRev (+1) inlay hints were
+	// last requested at — one ask per revision. See lspinlay.go.
+	inlayAsked map[string]int
 
 	// symSeq generations the workspace-symbol queries
 	// (lspworkspacesymbols.go) — the answer opens a picker.
@@ -247,6 +252,7 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 	scr := a.screen
 	root := a.rootDir
 	id := def.id
+	initOptions := def.initOptions
 	go func() {
 		// onNotify runs on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
@@ -290,7 +296,7 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id})
 			return
 		}
-		if err := client.Initialize(root); err != nil {
+		if err := client.InitializeWithOptions(root, initOptionsOrNil(initOptions)); err != nil {
 			client.Close()
 			// The failed handshake already fires onExit via the read
 			// loop in most cases, but a timeout leaves the process
@@ -957,4 +963,14 @@ func (a *App) diagStatusSuffix() string {
 		fmt.Fprintf(&b, " ℹ %d", infos)
 	}
 	return b.String()
+}
+
+// initOptionsOrNil keeps a nil map from becoming a typed non-nil `any`,
+// which would put `"initializationOptions": null` on the wire for every
+// server that has none.
+func initOptionsOrNil(m map[string]any) any {
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }

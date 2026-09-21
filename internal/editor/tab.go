@@ -224,6 +224,11 @@ type Tab struct {
 	symbolUses    []SymbolUse
 	symbolUsesRev int
 
+	// lineNotes are end-of-line remarks keyed by line (inlay hints), and
+	// lineNotesRev the EditRev they describe. See linenote.go.
+	lineNotes    map[int]string
+	lineNotesRev int
+
 	// undoSuppress is set while a multi-caret fan-out is in flight so
 	// the per-caret primitives don't each file their own undo entry —
 	// applyAtCarets pushes one snapshot for the whole burst. Nothing
@@ -1094,6 +1099,7 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	// exactly one unwrapped, as many as wrapStarts laid out under soft
 	// wrap. `row` is the screen row the next painted row lands on, so the
 	// loop ends at whichever runs out first — the viewport or the buffer.
+	liveNotes := t.LiveLineNotes()
 	row := 0
 	for lineIdx := t.ScrollY; row < h && lineIdx < t.Buffer.LineCount(); lineIdx++ {
 		isCursorLine := lineIdx == t.Cursor.Line
@@ -1278,6 +1284,16 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 				}
 				if visualCol-scrollVisual > contentW {
 					scr.SetContent(contentX+contentW-1, cy, '›', nil, overflowStyle)
+				}
+			}
+
+			// End-of-line note (an inlay hint), in the cells the line left
+			// empty on its last row. Skipped when an unwrapped line runs
+			// past the pane: there is no empty room, and the `›` above
+			// already owns the last cell. See linenote.go.
+			if lastRow && liveNotes != nil {
+				if used := visualCol - scrollVisual; used >= 0 && used <= contentW {
+					paintLineNote(scr, th, liveNotes[lineIdx], cy, contentX, contentW, used, lineBg)
 				}
 			}
 

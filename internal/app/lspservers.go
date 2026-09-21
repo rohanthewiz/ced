@@ -66,6 +66,11 @@ type lspServerDef struct {
 	// exts are the lower-cased extensions (with the dot) this server
 	// handles.
 	exts []string
+	// initOptions is the server-private initializationOptions blob, for
+	// settings a server reads only at startup and ships switched off.
+	// Today that is inlay hints (lspinlay.go): enabling them here costs
+	// nothing until a hint is requested.
+	initOptions map[string]any
 }
 
 // lspServers is the registry. Order is irrelevant to lookup (extensions
@@ -81,6 +86,16 @@ var lspServers = []lspServerDef{
 		id:       "gopls",
 		commands: [][]string{{"gopls"}},
 		exts:     []string{".go"},
+		// gopls ships with EVERY hint off. The two left out are the
+		// noisy ones: composite-literal types repeat what the line
+		// already says, and constant values annotate every iota.
+		initOptions: map[string]any{"hints": map[string]any{
+			"assignVariableTypes":    true,
+			"rangeVariableTypes":     true,
+			"parameterNames":         true,
+			"functionTypeParameters": true,
+			"compositeLiteralFields": true,
+		}},
 	},
 	{
 		id: "python",
@@ -100,6 +115,13 @@ var lspServers = []lspServerDef{
 		id:       "typescript-language-server",
 		commands: [][]string{{"typescript-language-server", "--stdio"}},
 		exts:     []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"},
+		// Off by default here too. "literals" names only arguments whose
+		// text says nothing (`true`, `3`), not every identifier.
+		initOptions: map[string]any{"preferences": map[string]any{
+			"includeInlayParameterNameHints":          "literals",
+			"includeInlayVariableTypeHints":           true,
+			"includeInlayFunctionLikeReturnTypeHints": true,
+		}},
 	},
 	{
 		id:       "zls",
@@ -124,6 +146,9 @@ type lspServer struct {
 	client   lspConn
 	starting bool // async spawn+initialize in flight
 	dead     bool // unavailable: no binary, crashed, or failed to start
+	// noInlay is set once the server answers an inlay-hint request with
+	// an error — it does not speak the method, so stop asking.
+	noInlay bool
 
 	// progress is the server's in-flight work keyed by progress token,
 	// and progressLast the token most recently heard from — the one the

@@ -109,6 +109,9 @@ func (a *App) handleLSPServerNote(e *lspServerNoteEvent) {
 	switch p.Kind {
 	case lsp.ProgressEnd:
 		delete(sv.progress, p.Token)
+		// A server that was loading gave its hint requests an empty
+		// answer that was not its real one; ask again now it is done.
+		a.inlayReask()
 		if sv.progressLast == p.Token {
 			sv.progressLast = ""
 		}

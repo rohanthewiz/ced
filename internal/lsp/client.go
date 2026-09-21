@@ -539,6 +539,14 @@ func readMessage(r *bufio.Reader) (*message, error) {
 // honest one: full-text sync, plaintext-preferred hover, and the
 // publishDiagnostics / definition defaults.
 func (c *Client) Initialize(rootDir string) error {
+	return c.InitializeWithOptions(rootDir, nil)
+}
+
+// InitializeWithOptions is Initialize plus the server-private
+// `initializationOptions` blob. It exists for settings a server only
+// reads at startup and ships switched OFF — gopls' inlay hints are the
+// case in point. nil sends no options at all.
+func (c *Client) InitializeWithOptions(rootDir string, options any) error {
 	params := map[string]any{
 		"processId": os.Getpid(),
 		"rootUri":   PathToURI(rootDir),
@@ -553,6 +561,7 @@ func (c *Client) Initialize(rootDir string) error {
 				"implementation":    map[string]any{},
 				"callHierarchy":     map[string]any{},
 				"documentHighlight": map[string]any{},
+				"inlayHint":         map[string]any{},
 				"typeDefinition":    map[string]any{},
 				"references":        map[string]any{},
 				// Rename is declared bare, without prepareSupport. That
@@ -693,6 +702,9 @@ func (c *Client) Initialize(rootDir string) error {
 	// serverCapabilities). A response that fails to decode is not fatal —
 	// the handshake succeeded, and an empty capability set degrades to
 	// the caller's fallback trigger characters.
+	if options != nil {
+		params["initializationOptions"] = options
+	}
 	var res initializeResult
 	if err := c.Call("initialize", params, &res); err != nil {
 		return err

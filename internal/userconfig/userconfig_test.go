@@ -1532,3 +1532,45 @@ func TestLoadRetiredTermDockKey(t *testing.T) {
 		t.Errorf("Icons = %q, want %q — the rest of the file must still parse", cfg.Icons, IconsOn)
 	}
 }
+
+// TestInlayHintsKey pins the inlayhints key end to end: on by default,
+// both values recognised, a typo REPORTED rather than ignored, and a
+// save that round-trips without dropping keys it does not model.
+func TestInlayHintsKey(t *testing.T) {
+	if !Defaults().InlayHints {
+		t.Fatal("Defaults().InlayHints = false, want true")
+	}
+	for body, want := range map[string]bool{
+		`{"inlayhints":"on"}`:  true,
+		`{"inlayhints":"off"}`: false,
+		`{}`:                   true,
+	} {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil || cfg.InlayHints != want {
+			t.Errorf("Load(%s) = %v, %v; want %v", body, cfg.InlayHints, err, want)
+		}
+	}
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"inlayhints":"maybe"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Error("a bad value should be reported")
+	}
+
+	if err := os.WriteFile(p, []byte("{\n  \"future-key\": 42\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveInlayHints(p, false); err != nil {
+		t.Fatalf("SaveInlayHints: %v", err)
+	}
+	cfg, err := Load(p)
+	data, _ := os.ReadFile(p)
+	if err != nil || cfg.InlayHints || !strings.Contains(string(data), "future-key") {
+		t.Errorf("round trip: cfg=%v err=%v file=%s", cfg.InlayHints, err, data)
+	}
+}

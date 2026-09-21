@@ -237,6 +237,13 @@ type Config struct {
 	// Persisted by the ≡ view toggle, same as ExecMarks.
 	WordHL bool
 
+	// InlayHints controls whether the editor shows a language server's
+	// inlay hints (inferred types, parameter names) as muted end-of-line
+	// notes. Defaults to on: they occupy cells no code uses and cost
+	// nothing without a server. Off is here for the WordHL reason — it is
+	// ambient text nobody typed. Persisted by the ≡ View toggle.
+	InlayHints bool
+
 	// Copilot controls whether the editor runs the GitHub Copilot
 	// sidecar (copilot-language-server). Defaults to on because the
 	// binary is only ever spawned when the user has installed it —
@@ -347,7 +354,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, TreeAutoFit: true, WordHL: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
+	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -369,6 +376,7 @@ type fileFormat struct {
 	ExecMarks     string `json:"execmarks,omitempty"`
 	TreeAutoFit   string `json:"treeautofit,omitempty"`
 	WordHL        string `json:"wordhl,omitempty"`
+	InlayHints    string `json:"inlayhints,omitempty"`
 	Copilot       string `json:"copilot,omitempty"`
 	Suggestions   string `json:"suggestions,omitempty"`
 	ChatModel     string `json:"chatmodel,omitempty"`
@@ -653,6 +661,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(ff.InlayHints)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.InlayHints = true
+	case "off":
+		cfg.InlayHints = false
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: inlayhints must be \"on\" or \"off\" (got %q)",
+			path, ff.InlayHints,
+		)
+	}
+
 	switch strings.ToLower(strings.TrimSpace(ff.Copilot)) {
 	case "":
 		// field omitted — keep default
@@ -841,6 +863,16 @@ func SaveWordHL(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "wordhl", val)
+}
+
+// SaveInlayHints persists the inlay-hints preference into the config
+// file at path. See saveKey for the round-trip guarantees.
+func SaveInlayHints(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "inlayhints", val)
 }
 
 // SaveCopilot persists the Copilot-sidecar preference into the config

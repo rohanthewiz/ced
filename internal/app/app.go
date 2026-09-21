@@ -275,6 +275,13 @@ func builtinMenuGroups() []menuGroup {
 			// swallows right-click. Dims with no text tab in front.
 			{action: (*App).menuToggleSoftWrap,
 				enabled: (*App).hasSoftWrapTarget, labelFor: (*App).softWrapToggleLabel},
+			// Inferred types and parameter names as end-of-line notes
+			// (lspinlay.go): ambient text about the code, with an off switch
+			// for the people who find that noisy. Down here rather than
+			// beside the word-highlight toggle because every row above the
+			// terminal rows spends the above-the-fold budget
+			// TestMenuLayout_TerminalRowsAboveTheFold pins.
+			{action: (*App).menuToggleInlayHints, enabled: alwaysTrue, labelFor: (*App).inlayHintsToggleLabel},
 			// The Find-all list's edge. Here rather than in Search
 			// because it's a layout preference like the terminal dock
 			// above it — and because it's the only keyboard path to the
@@ -969,6 +976,10 @@ type App struct {
 	// read, kept in step by applyWordHighlight. See wordhl.go.
 	wordHLEnabled bool
 
+	// inlayEnabled mirrors the persisted "inlayhints" preference;
+	// setInlayHints is its single write path. See lspinlay.go.
+	inlayEnabled bool
+
 	// toolLayoutState is the TOOL WINDOW layout: which edge each panel
 	// is docked to and how big it is there. It is the thing remembered
 	// per project (state.json — see toollayout.go), and it is what
@@ -1654,6 +1665,7 @@ func (a *App) loadUserConfig() {
 	a.autoSaveEnabled = cfg.AutoSave
 	a.autoSaveDelay = cfg.AutoSaveDelay
 	a.wordHLEnabled = cfg.WordHL
+	a.inlayEnabled = cfg.InlayHints
 	a.applyWordHighlight() // no-op at startup; matters when the config is re-read
 	a.findAllDockRight = cfg.FindAllDock == userconfig.FindAllDockRight
 	a.copilot.enabled = cfg.Copilot
@@ -1935,6 +1947,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPSymbols(e)
 	case *lspWorkspaceSymbolsEvent:
 		a.handleLSPWorkspaceSymbols(e)
+	case *lspInlayEvent:
+		a.handleLSPInlay(e)
 	case *lspHighlightEvent:
 		a.handleLSPHighlight(e)
 	case *lspServerNoteEvent:
@@ -2005,6 +2019,7 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// edits arrive through many paths (keys, paste, modals, reloads on
 	// the refresh tick) and this is a few integer compares when idle.
 	a.lspAfterEvent()
+	a.inlayAfterEvent()
 	// And the completion popup: keep an open list honest against the
 	// buffer that just moved (re-filter, or close if the caret left the
 	// token), then decide whether the edit that just happened typed a

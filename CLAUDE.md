@@ -114,6 +114,7 @@ internal/editor/decoration.go Span/GutterMark overlay system merged in Tab.Rende
 internal/editor/multicaret.go Secondary carets + the bottom-up edit fan-out
 internal/editor/wordhl.go     Word scanner, occurrence matcher, word-highlight source
 internal/editor/symbolhl.go   Server-resolved symbol uses: the set, its revision pin, the paint
+internal/editor/linenote.go   End-of-line notes: the revision-pinned set and its paint
 internal/editor/bracket.go    Brace matcher: budgeted scan, string/comment skip, pair source
 internal/app/multicaret.go    Multi-caret UI: ≡ rows, Esc-m/M/*, Alt+click, status
 internal/app/wordhl.go        Word-highlight ≡ toggle + per-tab flag plumbing
@@ -128,6 +129,7 @@ internal/app/lspgoto.go       Implementation / type definition / incoming calls:
 internal/lsp/callhierarchy.go prepareCallHierarchy + incomingCalls → call-site Locations
 internal/app/lspprogress.go   $/progress + showMessage → the status bar's server segment
 internal/app/lsphighlight.go  documentHighlight → Tab.SetSymbolUses (reads + underlined writes)
+internal/app/lspinlay.go      Inlay hints → end-of-line notes: refresh policy, anchor restating
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
 internal/app/lspworkspacesymbols.go  workspace/symbol → prompt, then the project-wide symbol picker
 internal/app/lspreferences.go References → the Find-all panel's project mode
@@ -196,7 +198,7 @@ internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, loc
 internal/app/overflow.go      The ▴/▾ overflow markers (editor, both git panels, tree),
                               what is off-screen each way, and the hover popup
 internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
+internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, inlayhints, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
 internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
 internal/theme/theme.go       Theme struct (tcell colors) + Default() fallback
 internal/theme/palette.go     Canonical color keys + the 8-core derivation table
@@ -568,6 +570,50 @@ House rules:
   Brace matching (below) is the other caret-driven ambient source, and
   runs immediately after this one — see it for why its box is the louder
   of the two.
+
+### Inlay hints as end-of-line notes (editor/linenote.go + app/lspinlay.go)
+Inferred types and parameter names, shown as a muted `» x: int · level: 3`
+AFTER the line's last character. ≡ View toggle, `"inlayhints"` (default
+on), no leader. House rules:
+
+- **END OF LINE, NEVER INSIDE IT, and that is the whole design.** An IDE
+  splices `f(‹level:› 3)` into the line. Here that would add cells the
+  buffer doesn't own to EVERY visible row, and ghost.go already says what
+  one such splice costs — tolerable there only because it sits at the
+  caret on one row. Mid-line hints would put a column mapping between
+  buffer and screen that HitTest, PosScreenCell, the wrap layout,
+  secondary carets, ScrollX and every cell-round-tripping tooltip would
+  each have to learn, with "a click lands one word off" as the failure
+  mode. Cells past a line's end belong to no rune, so NOTHING about
+  geometry changes (`TestLineNote_CostsNoGeometry`). Don't "upgrade" this
+  to in-place hints without paying that whole bill.
+- **A hint loses its anchor when it moves, so the note RESTATES it**
+  (`inlayNote`, a pure function of the line): a type hint is prefixed
+  with the word it followed, a parameter hint suffixed with the argument
+  it preceded (nesting counted, capped). Servers disagree about who
+  supplies the colon — gopls sends a bare `float64`, rust-analyzer
+  `: i32` — so `inlayTypePart` normalises it. `_`'s type is dropped.
+- **A note is DROPPED, never squeezed**: drawn only in room the line left
+  over, cut with `…`, and always one cell short of the pane — the last
+  column is the overflow markers'.
+- **The set dies with the revision** (symbolhl's rule). Because notes
+  occupy no layout, their vanishing while you type moves nothing.
+- **No timer of its own.** `inlayAfterEvent` (dispatch tail) asks the
+  first time the ACTIVE tab is in sync (`lsp.syncedRev`) at a revision
+  nobody asked about — so the LSP debounce is this feature's debounce.
+  **One ask per (path, rev), recorded BEFORE the answer and kept whatever
+  it was**, or an empty answer re-requests on every event forever. An
+  ERROR marks the server `noInlay`; a server finishing a load
+  (`$/progress` end) clears the record, since a cold server's empty
+  answer wasn't its real one. Whole document (a window-scoped ask would
+  re-ask per scroll), capped at `inlayMaxLines`.
+- **Hints must be switched ON in some servers** — gopls ships with all of
+  them off — which is what `lspServerDef.initOptions` →
+  `InitializeWithOptions` is for. `TestInlay_EndToEndWithRealGopls` is the
+  only thing that catches a typo in those option names; it already caught
+  the colon disagreement.
+- The ≡ row sits BELOW the terminal rows in View (the above-the-fold
+  pin). Tests build `App` directly, so hints are OFF there by default.
 
 ### Semantic symbol highlight (editor/symbolhl.go + app/lsphighlight.go)
 "Highlight symbol uses" (≡ Code, no leader): the server's exact answer
@@ -3421,8 +3467,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 144 group actions + 15 headers (161), height 167,
-dividers `[2, 5, 164]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 145 group actions + 15 headers (162), height 168,
+dividers `[2, 5, 165]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

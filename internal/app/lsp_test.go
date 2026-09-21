@@ -39,6 +39,10 @@ type fakeLSPConn struct {
 	locLocs   []lsp.Location
 	locErr    error
 	locMethod string
+	// inlay answers InlayHints; inlayCalls counts the requests.
+	inlay      []lsp.InlayHint
+	inlayErr   error
+	inlayCalls int
 	// hlUses answers DocumentHighlights.
 	hlUses []lsp.DocumentHighlight
 	hlErr  error
@@ -148,6 +152,20 @@ func (f *fakeLSPConn) Locations(method, path string, _ lsp.Position) ([]lsp.Loca
 func (f *fakeLSPConn) DocumentHighlights(path string, _ lsp.Position) ([]lsp.DocumentHighlight, error) {
 	f.record("documentHighlight:" + filepath.Base(path))
 	return f.hlUses, f.hlErr
+}
+
+func (f *fakeLSPConn) InlayHints(string, lsp.Range) ([]lsp.InlayHint, error) {
+	f.mu.Lock()
+	f.inlayCalls++
+	f.mu.Unlock()
+	return f.inlay, f.inlayErr
+}
+
+// inlayAsked reports how many hint requests reached the fake.
+func (f *fakeLSPConn) inlayAsked() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inlayCalls
 }
 
 func (f *fakeLSPConn) IncomingCalls(path string, _ lsp.Position) ([]lsp.Location, error) {

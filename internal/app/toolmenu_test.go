@@ -151,6 +151,23 @@ func TestToolWindowsLabel_CountsWhatIsShowing(t *testing.T) {
 	}
 }
 
+// TestMenuResetToolLayout_FlashNamesTheLayout pins the summary's one
+// production reader: most of what a reset changes is off screen, so the
+// flash has to say where everything went rather than only that it moved.
+func TestMenuResetToolLayout_FlashNamesTheLayout(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.moveTool(toolTerminal, dockRight)
+
+	a.menuResetToolLayout()
+
+	if !strings.Contains(a.statusMsg, a.toolLayoutSummary()) {
+		t.Errorf("flash = %q, want it to carry %q", a.statusMsg, a.toolLayoutSummary())
+	}
+	if a.toolDock(toolTerminal) != dockBottom {
+		t.Errorf("terminal dock = %v after reset, want the bottom", a.toolDock(toolTerminal))
+	}
+}
+
 // TestToolLayoutSummary_SortedByEdge pins the reporting helper's
 // stability: edges in the dockSides order, tools in registry order, so
 // two runs of one arrangement produce the same string.

@@ -1005,8 +1005,8 @@ func (a *App) shrinkDock(side dockSide, step int) { a.growDock(side, -step) }
 // -----------------------------------------------------------------------------
 
 // toolLayoutSummary is a stable one-line description of where everything
-// sits, for the ≡ menu's label and for tests that want to assert on a
-// whole layout without reaching into two maps. Sorted by edge (the
+// sits, for the reset verb's flash (toolmenu.go) and for tests that want
+// to assert on a whole layout without reaching into two maps. Sorted by edge (the
 // dockSides order) then by registry order, so it can be compared.
 func (a *App) toolLayoutSummary() string {
 	out := ""

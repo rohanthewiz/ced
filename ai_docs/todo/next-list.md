@@ -46,11 +46,6 @@ plus the LSP work done in the seeding session itself
   and the release-branch note from `2026-0914-1114-homebrew-removed` is
   folded in here.)
 
-- **N-002** · raised `2026-0910-2016-tool-windows` · value low
-  `toolLayoutSummary()` (toolwindow.go) has no reader outside tests.
-  Verified still true 2026-09-21. Either give it one (a status-bar or ≡
-  label saying where everything is) or delete it.
-
 - **N-003** · raised `2026-0910-2016-tool-windows` · value low
   **The README goes stale and no test catches it.** Known spots for
   tool-window changes: `### Tool windows`, the Features list, the chat
@@ -117,7 +112,7 @@ plus the LSP work done in the seeding session itself
   those servers never switch hints on. Contingent on N-013 showing it
   matters.
 
-- **N-026** · raised `2026-0921-1100-next-list-run` · value low
+- **N-026** · raised `(this session — stamp the stem at /sess-save)` · value low
   cats-side: add `"KeyA"` to `CMD_TO_PANE` (`cmd/catway/web/js/20-keys.js`)
   so ⌘A reaches a ced pane in browser-cats. ced binds it as of N-007 and
   it is live in kitty / Ghostty / WezTerm; in browser-cats the browser
@@ -167,6 +162,9 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-21 — **N-002** `toolLayoutSummary()` has a reader: the
+  ≡ "Reset tool window layout" flash now carries it, since most of what
+  a reset changes is off screen. Kept rather than deleted.
 - closed 2026-09-21 — **N-007** ⌘A selects all (`metaAccels`, pinned by
   `TestMetaAccelSelectsAll`; the never-the-only-path test passes via the
   ≡ Edit row). Not live in browser-cats until N-026.

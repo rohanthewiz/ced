@@ -131,7 +131,11 @@ func (a *App) openToolDockPicker(id toolID) {
 func (a *App) menuResetToolLayout() {
 	a.closeMenu()
 	a.resetToolLayout()
-	a.flash("Tool window layout reset")
+	// The flash carries the arrangement the reset produced. Most of what
+	// a reset changes is OFF screen — tools that were moved and are now
+	// closed again — so "reset" alone leaves the user to open each one
+	// to learn where it went. A "*" marks what is showing.
+	a.flash("Tool window layout reset — " + a.toolLayoutSummary())
 	a.saveToolLayout()
 }
 

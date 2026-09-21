@@ -187,11 +187,16 @@ func metaAccels() []metaAccel {
 		// the ecosystem trained the user's hands on.
 		//
 		// The HOST decides whether these arrive, as with every row here.
-		// cats binds ⌘[ / ⌘] to its OWN cross-pane navigation, so inside
-		// a cats pane the chord reaches ced only once cats' CMD_TO_PANE
-		// allowlist forwards it — the road ⌘E took. Until then the chord
-		// is armed and dark, which costs nothing: Alt+←/→ and Esc-o/O
-		// are the paths that always work.
+		// cats binds ⌘[ / ⌘] to its OWN cross-pane focus history, and as
+		// of cats' bracket branch (20-keys.js) it YIELDS them to a pane
+		// that asked for the kitty protocol — which is ced — forwarding
+		// the chord as super on both its spellings (⌘[ on a Mac, Ctrl+Alt+[
+		// elsewhere) so one binding answers both. cats keeps the mouse's
+		// back/forward buttons unconditionally, so its own history stays
+		// one gesture away while ced holds the keyboard. Those buttons
+		// could not be handed down anyway: cats' wire encodes no button
+		// above 2, and tcell's SGR decoder folds X11 button 8 into a
+		// plain left click.
 		{key: '[', action: (*App).menuNavBack, label: "Go back"},
 		{key: ']', action: (*App).menuNavForward, label: "Go forward"},
 		// Deliberately NOT bound:

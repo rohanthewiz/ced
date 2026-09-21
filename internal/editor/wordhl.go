@@ -132,6 +132,12 @@ func (wordHighlightSource) Decorations(t *Tab, th theme.Theme, firstLine, lastLi
 	if t.HasCarets() {
 		return nil, nil
 	}
+	// A live semantic set (symbolhl.go) is the same question answered by
+	// something that knows which occurrences are the same binding. Two
+	// washes over one set of cells would hide which the server vouched for.
+	if len(t.LiveSymbolUses()) > 0 {
+		return nil, nil
+	}
 	text, wholeWord, ok := t.caretQuery()
 	if !ok {
 		return nil, nil

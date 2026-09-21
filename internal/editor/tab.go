@@ -218,6 +218,12 @@ type Tab struct {
 	// per-tab and have no route back to the App.
 	WordHighlight bool
 
+	// symbolUses is a server-resolved highlight set and symbolUsesRev the
+	// EditRev it was measured against; it is live only while the two
+	// still agree. See symbolhl.go.
+	symbolUses    []SymbolUse
+	symbolUsesRev int
+
 	// undoSuppress is set while a multi-caret fan-out is in flight so
 	// the per-caret primitives don't each file their own undo entry —
 	// applyAtCarets pushes one snapshot for the whole burst. Nothing

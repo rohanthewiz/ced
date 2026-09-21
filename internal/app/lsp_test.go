@@ -39,6 +39,9 @@ type fakeLSPConn struct {
 	locLocs   []lsp.Location
 	locErr    error
 	locMethod string
+	// hlUses answers DocumentHighlights.
+	hlUses []lsp.DocumentHighlight
+	hlErr  error
 	// callLocs answers IncomingCalls.
 	callLocs []lsp.Location
 	callErr  error
@@ -140,6 +143,11 @@ func (f *fakeLSPConn) Locations(method, path string, _ lsp.Position) ([]lsp.Loca
 	f.mu.Unlock()
 	f.record("locations:" + method + ":" + filepath.Base(path))
 	return f.locLocs, f.locErr
+}
+
+func (f *fakeLSPConn) DocumentHighlights(path string, _ lsp.Position) ([]lsp.DocumentHighlight, error) {
+	f.record("documentHighlight:" + filepath.Base(path))
+	return f.hlUses, f.hlErr
 }
 
 func (f *fakeLSPConn) IncomingCalls(path string, _ lsp.Position) ([]lsp.Location, error) {

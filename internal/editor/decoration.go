@@ -176,7 +176,7 @@ type DecorationSource interface {
 func (t *Tab) collectDecorations(th theme.Theme, firstLine, lastLine int) ([]Span, []GutterMark) {
 	var spans []Span
 	var marks []GutterMark
-	sources := make([]DecorationSource, 0, len(t.DecoSources)+4)
+	sources := make([]DecorationSource, 0, len(t.DecoSources)+5)
 	sources = append(sources, t.DecoSources...)
 	// The word highlight and the bracket pair are ambient — they answer
 	// questions the user didn't ask — so they run ahead of both
@@ -185,7 +185,7 @@ func (t *Tab) collectDecorations(th theme.Theme, firstLine, lastLine int) ([]Spa
 	// points at, where the wash marks everything that merely shares a
 	// name. (They cannot actually collide — a bracket is not a word
 	// rune — but the order should say what we would want if they could.)
-	sources = append(sources, wordHighlightSource{}, bracketSource{}, selectionSource{}, findSource{})
+	sources = append(sources, wordHighlightSource{}, symbolUseSource{}, bracketSource{}, selectionSource{}, findSource{})
 	for _, src := range sources {
 		s, m := src.Decorations(t, th, firstLine, lastLine)
 		spans = append(spans, s...)

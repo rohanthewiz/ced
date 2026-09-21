@@ -550,10 +550,11 @@ func (c *Client) Initialize(rootDir string) error {
 				// Bare, like definition: linkSupport is deliberately absent,
 				// so both answer with plain Locations rather than the
 				// LocationLink shape Locations() does not decode.
-				"implementation": map[string]any{},
-				"callHierarchy":  map[string]any{},
-				"typeDefinition": map[string]any{},
-				"references":     map[string]any{},
+				"implementation":    map[string]any{},
+				"callHierarchy":     map[string]any{},
+				"documentHighlight": map[string]any{},
+				"typeDefinition":    map[string]any{},
+				"references":        map[string]any{},
 				// Rename is declared bare, without prepareSupport. That
 				// option asks the server to validate a position and hand
 				// back a placeholder BEFORE the user types a new name, and

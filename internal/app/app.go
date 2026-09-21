@@ -437,6 +437,10 @@ func builtinMenuGroups() []menuGroup {
 			// Definition's two siblings (lspgoto.go). One answer jumps,
 			// several land in the same list references uses. No leader
 			// keys: the flat table is out of mnemonic letters.
+			// The server's exact answer to the question the ambient word
+			// highlight guesses at: the same BINDING, writes underlined
+			// (lsphighlight.go). A verb because it costs a round trip.
+			{label: "Highlight symbol uses", action: (*App).menuHighlightSymbol, enabled: (*App).hasLSPActions},
 			// References minus everything that isn't a CALL — the
 			// declaration, a callback passed by value (lspgoto.go).
 			{label: "Find incoming calls…", action: (*App).menuIncomingCalls, enabled: (*App).hasLSPActions},
@@ -1931,6 +1935,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPSymbols(e)
 	case *lspWorkspaceSymbolsEvent:
 		a.handleLSPWorkspaceSymbols(e)
+	case *lspHighlightEvent:
+		a.handleLSPHighlight(e)
 	case *lspServerNoteEvent:
 		a.handleLSPServerNote(e)
 	case *lspLocationsEvent:
@@ -2540,6 +2546,9 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// marks survive: they record what was read, not the mode that
 		// recorded it, and the header button resumes from there.
 		a.stopGitPanelWalk()
+		// …and for a semantic symbol highlight (lsphighlight.go), which
+		// otherwise lasts until the next edit.
+		a.clearSymbolUses()
 		// …and for the file tree's type-to-find pattern (treefilter.go),
 		// which has no timeout: Esc is how a user says "done looking".
 		a.clearTreeFilter()

@@ -113,6 +113,7 @@ internal/app/projectsearch.go Find in project: search → the find-all panel
 internal/editor/decoration.go Span/GutterMark overlay system merged in Tab.Render
 internal/editor/multicaret.go Secondary carets + the bottom-up edit fan-out
 internal/editor/wordhl.go     Word scanner, occurrence matcher, word-highlight source
+internal/editor/symbolhl.go   Server-resolved symbol uses: the set, its revision pin, the paint
 internal/editor/bracket.go    Brace matcher: budgeted scan, string/comment skip, pair source
 internal/app/multicaret.go    Multi-caret UI: ≡ rows, Esc-m/M/*, Alt+click, status
 internal/app/wordhl.go        Word-highlight ≡ toggle + per-tab flag plumbing
@@ -126,6 +127,7 @@ internal/app/lspservers.go    The language-server registry: ext → server, per-
 internal/app/lspgoto.go       Implementation / type definition / incoming calls: jump or list
 internal/lsp/callhierarchy.go prepareCallHierarchy + incomingCalls → call-site Locations
 internal/app/lspprogress.go   $/progress + showMessage → the status bar's server segment
+internal/app/lsphighlight.go  documentHighlight → Tab.SetSymbolUses (reads + underlined writes)
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
 internal/app/lspworkspacesymbols.go  workspace/symbol → prompt, then the project-wide symbol picker
 internal/app/lspreferences.go References → the Find-all panel's project mode
@@ -566,6 +568,31 @@ House rules:
   Brace matching (below) is the other caret-driven ambient source, and
   runs immediately after this one — see it for why its box is the louder
   of the two.
+
+### Semantic symbol highlight (editor/symbolhl.go + app/lsphighlight.go)
+"Highlight symbol uses" (≡ Code, no leader): the server's exact answer
+to the question the word highlight guesses at — the same BINDING, not the
+same spelling, with writes marked. House rules:
+
+- **A VERB, NOT AMBIENT**, which is the word highlighter's own rule
+  applied honestly: that source re-runs per caret move because it is a
+  free window-scoped scan; this is a round trip, and cursor travel never
+  spends a request (the ghost-text rule). The ambient layer stays the
+  free guess; this is the deliberate answer for two `err`s in one
+  function.
+- **It REPLACES the word highlight while live** — `wordHighlightSource`
+  stands down (the multi-caret stand-down rule). Two washes over one set
+  of cells, one a superset of the other, would hide which cells the
+  server vouched for. It is a BUILT-IN source for that reason: built-ins
+  are where that ordering is decided.
+- **The set dies with the revision** (`LiveSymbolUses` compares
+  `EditRev`). The ranges are coordinates into text the server saw; no
+  patching through edits — a stale box on the wrong word is the one
+  thing this must never show. Esc clears it as a side effect.
+- Same fill as the word highlight, **writes UNDERLINED** — a difference
+  in kind, not hue (the bracket matcher's rule).
+- The answer installs on the tab found BY PATH, not the active one: it is
+  a property of that document. Pinned to (path, EditRev) like ghost text.
 
 ### Brace matching (editor/bracket.go + app/bracket.go)
 The bracket under the caret and its partner, boxed; `Esc %` jumps
@@ -3394,8 +3421,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 143 group actions + 15 headers (160), height 166,
-dividers `[2, 5, 163]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 144 group actions + 15 headers (161), height 167,
+dividers `[2, 5, 164]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

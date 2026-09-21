@@ -75,6 +75,7 @@ type lspConn interface {
 	HoverAt(path string, pos lsp.Position) (*lsp.Hover, error)
 	SignatureHelpAt(path string, pos lsp.Position) (*lsp.Signature, error)
 	DocumentSymbols(path string) ([]lsp.Symbol, error)
+	DocumentHighlights(path string, pos lsp.Position) ([]lsp.DocumentHighlight, error)
 	WorkspaceSymbols(query string) ([]lsp.WorkspaceSymbol, error)
 	// The completion quartet (completion.go). Two of the four ask the
 	// SERVER'S OPINION rather than sending a request, which is new to

@@ -124,6 +124,7 @@ internal/lsp/codeaction.go    Code actions: the response union + applyEdit's par
 internal/app/lsp.go           Server lifecycle, doc sync, diagnostics, definition, hover
 internal/app/lspservers.go    The language-server registry: ext → server, per-server state
 internal/app/lspgoto.go       Go to implementation / type definition: one jumps, several list
+internal/app/lspprogress.go   $/progress + showMessage → the status bar's server segment
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
 internal/app/lspworkspacesymbols.go  workspace/symbol → prompt, then the project-wide symbol picker
 internal/app/lspreferences.go References → the Find-all panel's project mode
@@ -1128,6 +1129,31 @@ Enter (Esc-D, ≡ Code). House rules:
   verb, wider scope — 'd' goes to the definition of what's under the
   cursor, 'D' lists every definition in the file. The f/F, p/P, h/H
   convention.
+
+### Server progress and messages (lsp/progress.go + app/lspprogress.go)
+What a server says about ITSELF. A cold gopls (or a minute of
+rust-analyzer indexing) answers every verb with "nothing", which reads as
+the verb being broken; the server was explaining why all along and ced
+dropped the notification. House rules:
+
+- **A status-bar SEGMENT, not a flash** — progress arrives in bursts of
+  dozens of reports and would bury every other message. It trails the
+  bar (first thing clipped, never Ln/Col), shows the ACTIVE file's server
+  only, and leaves by itself. `starting…` during the handshake is the
+  same segment's earliest state.
+- **Tokens are a SET**: a server runs several pieces of work at once, so
+  one `end` must not blank the others. A report carries only what
+  changed — the title comes once, on begin.
+- **Empty answers gain `lspLoadingNote`** ("— gopls is still loading")
+  while the server is busy. Use it on any new verb's "nothing found"
+  flash.
+- **Only errors and warnings from `window/showMessage` flash.** Info is
+  the server narrating, and the segment going away already says it.
+- `ParseProgress` refuses a value with no `kind`: the same notification
+  carries partial RESULTS for requests that asked for them.
+- The handshake declares `window.workDoneProgress`; the token-creation
+  request is the auto-responder's (null is the spec's "yes"). A server's
+  exit clears its progress — nothing would ever send the `end`.
 
 ### Go to symbol in project (lsp/workspacesymbol.go + app/lspworkspacesymbols.go)
 The p/P widening of the file outline: a declaration by NAME, in any

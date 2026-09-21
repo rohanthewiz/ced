@@ -138,7 +138,7 @@ func (a *App) handleLSPLocations(e *lspLocationsEvent) {
 		return
 	}
 	if len(e.locs) == 0 {
-		a.flash(fmt.Sprintf("No %s for %q", e.noun, e.query))
+		a.flash(fmt.Sprintf("No %s for %q", e.noun, e.query) + a.lspLoadingNote(e.fromPath))
 		return
 	}
 	if len(e.locs) == 1 {

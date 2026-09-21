@@ -658,6 +658,12 @@ func (c *Client) Initialize(rootDir string) error {
 			// conforming server then declines a package rename ITSELF, with
 			// its own reason, before anything has been applied. That is a
 			// far better message than one ced could synthesise afterwards.
+			// workDoneProgress tells the server it may report what it is busy
+			// with ($/progress). The token-creation request that precedes a
+			// report is answered by the auto-responder (a null result is the
+			// spec's "yes"); the reports themselves are notifications the
+			// app layer reads.
+			"window": map[string]any{"workDoneProgress": true},
 			"workspace": map[string]any{
 				"workspaceEdit": map[string]any{
 					"documentChanges":    true,

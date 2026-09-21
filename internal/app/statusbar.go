@@ -112,6 +112,12 @@ func (a *App) statusLeftSegments() []statusSegment {
 		segs = append(segs, statusSegment{text: s,
 			onClick: (*App).menuToggleProblems})
 	}
+	// What the language server is busy with (lspprogress.go). It trails
+	// the diagnostics it explains the absence of: a cold server reports
+	// no problems because it has not looked yet.
+	if s := a.lspProgressSuffix(); s != "" {
+		segs = append(segs, statusSegment{text: s})
+	}
 	if s := a.syntaxStatusSuffix(); s != "" {
 		segs = append(segs, statusSegment{text: s})
 	}

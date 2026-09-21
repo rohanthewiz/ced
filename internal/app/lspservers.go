@@ -124,6 +124,12 @@ type lspServer struct {
 	client   lspConn
 	starting bool // async spawn+initialize in flight
 	dead     bool // unavailable: no binary, crashed, or failed to start
+
+	// progress is the server's in-flight work keyed by progress token,
+	// and progressLast the token most recently heard from — the one the
+	// status bar shows. See lspprogress.go.
+	progress     map[string]*lspProgressItem
+	progressLast string
 }
 
 // lspServerFor returns the definition that handles path, or nil when no

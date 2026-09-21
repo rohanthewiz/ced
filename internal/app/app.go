@@ -1928,6 +1928,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPSymbols(e)
 	case *lspWorkspaceSymbolsEvent:
 		a.handleLSPWorkspaceSymbols(e)
+	case *lspServerNoteEvent:
+		a.handleLSPServerNote(e)
 	case *lspLocationsEvent:
 		a.handleLSPLocations(e)
 	case *lspReferencesEvent:

@@ -246,6 +246,9 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 	go func() {
 		// onNotify runs on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
+			if lspPostServerNote(scr, id, method, params) {
+				return
+			}
 			if method != "textDocument/publishDiagnostics" {
 				return
 			}
@@ -330,6 +333,7 @@ func (a *App) handleLSPExit(e *lspExitEvent) {
 	sv.client = nil
 	sv.starting = false
 	sv.dead = true
+	sv.progress, sv.progressLast = nil, ""
 	// Everything per-document is keyed by path, and a path names its
 	// server, so "this server's share" is a filter rather than a second
 	// set of maps.
@@ -626,7 +630,7 @@ func (a *App) menuGoToDefinition() {
 // a question nobody is looking at.
 func (a *App) handleLSPDefinition(e *lspDefinitionEvent) {
 	if e.err != nil || len(e.locs) == 0 {
-		a.flash("No definition found")
+		a.flash("No definition found" + a.lspLoadingNote(e.fromPath))
 		return
 	}
 	target := lsp.URIToPath(e.locs[0].URI)

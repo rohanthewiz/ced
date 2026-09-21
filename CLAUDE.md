@@ -123,6 +123,7 @@ internal/lsp/workspaceedit.go WorkspaceEdit's two wire shapes → one normal for
 internal/lsp/codeaction.go    Code actions: the response union + applyEdit's params
 internal/app/lsp.go           Server lifecycle, doc sync, diagnostics, definition, hover
 internal/app/lspservers.go    The language-server registry: ext → server, per-server state
+internal/app/lspgoto.go       Go to implementation / type definition: one jumps, several list
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
 internal/app/lspreferences.go References → the Find-all panel's project mode
 internal/app/lspsignature.go  Signature help → the hover tooltip, active param lit
@@ -1126,6 +1127,19 @@ Enter (Esc-D, ≡ Code). House rules:
   verb, wider scope — 'd' goes to the definition of what's under the
   cursor, 'D' lists every definition in the file. The f/F, p/P, h/H
   convention.
+
+### Go to implementation / type definition (app/lspgoto.go)
+Definition's two siblings, ≡ Code rows with no leader key. They share
+definition's wire shape exactly (`lsp.Client.Locations(method, …)` — the
+method string is the only difference, so the conn interface grew ONE
+member, not one per synonym) and differ in that the answer is often
+plural. **One location jumps, several list**: the jump is
+`lspJumpTo` (extracted from definition's landing — nav recorded from the
+request's origin, the open suppressed) and the list is
+`openLocationsPanel` (extracted from references — the Find-all project
+mode, heading the only thing changed). They share references' generation
+(`lsp.refSeq`), since any of them can open that one panel. `linkSupport`
+is deliberately undeclared so servers answer with plain Locations.
 
 ### Find references (lsp/client.go + app/lspreferences.go)
 Every use of the symbol under the cursor, listed in the Find-all panel's
@@ -3321,8 +3335,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 139 group actions + 15 headers (156), height 162,
-dividers `[2, 5, 159]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 141 group actions + 15 headers (158), height 164,
+dividers `[2, 5, 161]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

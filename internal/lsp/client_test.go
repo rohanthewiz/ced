@@ -960,3 +960,25 @@ func TestRequestHookFallthrough(t *testing.T) {
 		t.Errorf("hook saw %v, want first refusal on both methods", seen)
 	}
 }
+
+// TestLocations_SendsTheNamedMethod pins the generic go-to request: the
+// method string is the ONLY thing separating implementation and type
+// definition from definition, so it has to be what reaches the wire.
+func TestLocations_SendsTheNamedMethod(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	ch := make(chan []Location, 1)
+	go func() {
+		locs, _ := c.Locations(MethodImplementation, "/x.go", Position{Line: 1, Character: 2})
+		ch <- locs
+	}()
+	m := srv.read(t)
+	if m.Method != MethodImplementation {
+		t.Errorf("method = %q, want %q", m.Method, MethodImplementation)
+	}
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":[{"uri":"file:///a.go","range":{"start":{"line":1,"character":2},"end":{"line":1,"character":5}}},{"uri":"file:///b.go","range":{"start":{"line":0,"character":0},"end":{"line":0,"character":1}}}]}`, *m.ID))
+	if locs := <-ch; len(locs) != 2 {
+		t.Errorf("got %d locations, want 2", len(locs))
+	}
+}

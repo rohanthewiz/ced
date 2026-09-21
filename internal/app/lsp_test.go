@@ -33,12 +33,17 @@ type fakeLSPConn struct {
 	calls  []string // "didOpen:path:v", "didChange:path:v", "didSave:path", "didClose:path"
 	closed bool
 
-	defLocs  []lsp.Location
-	defErr   error
-	refLocs  []lsp.Location
-	refErr   error
-	hoverRes *lsp.Hover
-	hoverErr error
+	defLocs []lsp.Location
+	// locLocs answers Locations (implementation / typeDefinition), and
+	// locMethod records which of them reached the wire.
+	locLocs   []lsp.Location
+	locErr    error
+	locMethod string
+	defErr    error
+	refLocs   []lsp.Location
+	refErr    error
+	hoverRes  *lsp.Hover
+	hoverErr  error
 	// hoverPos records the position the last hover was asked about, and
 	// hoverCalls counts the requests. The dwell tooltip (hoverdwell.go)
 	// makes its whole claim about WHICH position reaches the wire — the
@@ -120,6 +125,14 @@ func (f *fakeLSPConn) DidClose(path string) error {
 
 func (f *fakeLSPConn) Definition(string, lsp.Position) ([]lsp.Location, error) {
 	return f.defLocs, f.defErr
+}
+
+func (f *fakeLSPConn) Locations(method, path string, _ lsp.Position) ([]lsp.Location, error) {
+	f.mu.Lock()
+	f.locMethod = method
+	f.mu.Unlock()
+	f.record("locations:" + method + ":" + filepath.Base(path))
+	return f.locLocs, f.locErr
 }
 
 func (f *fakeLSPConn) References(path string, _ lsp.Position, includeDecl bool) ([]lsp.Location, error) {

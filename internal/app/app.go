@@ -434,6 +434,11 @@ func builtinMenuGroups() []menuGroup {
 			// three cross-file lists read as one instrument
 			// (lspreferences.go).
 			{label: "Find references…", shortcut: "esc R", action: (*App).menuFindReferences, enabled: (*App).hasLSPActions},
+			// Definition's two siblings (lspgoto.go). One answer jumps,
+			// several land in the same list references uses. No leader
+			// keys: the flat table is out of mnemonic letters.
+			{label: "Go to implementation", action: (*App).menuGoToImplementation, enabled: (*App).hasLSPActions},
+			{label: "Go to type definition", action: (*App).menuGoToTypeDefinition, enabled: (*App).hasLSPActions},
 			{label: "Hover info", shortcut: "esc i", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},
 			// The same tooltip asked a different question: 'i' says what
 			// the symbol under the cursor IS, 'I' says where you are in
@@ -1917,6 +1922,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPHover(e)
 	case *lspSymbolsEvent:
 		a.handleLSPSymbols(e)
+	case *lspLocationsEvent:
+		a.handleLSPLocations(e)
 	case *lspReferencesEvent:
 		a.handleLSPReferences(e)
 	case *lspRenameEvent:

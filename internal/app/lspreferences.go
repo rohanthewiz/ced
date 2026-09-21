@@ -271,19 +271,27 @@ func (a *App) handleLSPReferences(e *lspReferencesEvent) {
 		a.flash(fmt.Sprintf("Find references: %d for %q — run it again", len(e.locs), e.query))
 		return
 	}
+	a.openLocationsPanel("References to", e.query, e.locs, e.truncated)
+}
+
+// openLocationsPanel lists server-named locations in the Find-all panel's
+// project mode. It is the one place a location list becomes a panel, so
+// references, implementations and call hierarchy differ by exactly the
+// thing a non-search producer is allowed to change: the heading.
+func (a *App) openLocationsPanel(heading, query string, locs []refLoc, truncated bool) {
 	m := &findAllModal{
-		query:     e.query,
+		query:     query,
 		tabIdx:    -1, // no single tab behind this list
 		project:   true,
-		heading:   "References to",
-		truncated: e.truncated,
-		rows:      a.projectSearchRows(a.referenceHits(e.locs)),
+		heading:   heading,
+		truncated: truncated,
+		rows:      a.projectSearchRows(a.referenceHits(locs)),
 		// The symbol IS text every row contains, so the panel's filter box
 		// seeds with it like the two search lists do (findall.go's seed
 		// rule) — narrowing a long reference list to the calls in one
 		// package is then a few keystrokes rather than a second question.
-		filter: newTextField(e.query),
-		seed:   e.query,
+		filter: newTextField(query),
+		seed:   query,
 	}
 	// The display order is derived, not implied by rows: without this the
 	// panel opens with an empty view and says every row was dismissed.

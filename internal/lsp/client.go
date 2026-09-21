@@ -547,7 +547,12 @@ func (c *Client) Initialize(rootDir string) error {
 				"synchronization":    map[string]any{"didSave": true},
 				"publishDiagnostics": map[string]any{},
 				"definition":         map[string]any{},
-				"references":         map[string]any{},
+				// Bare, like definition: linkSupport is deliberately absent,
+				// so both answer with plain Locations rather than the
+				// LocationLink shape Locations() does not decode.
+				"implementation": map[string]any{},
+				"typeDefinition": map[string]any{},
+				"references":     map[string]any{},
 				// Rename is declared bare, without prepareSupport. That
 				// option asks the server to validate a position and hand
 				// back a placeholder BEFORE the user types a new name, and
@@ -726,12 +731,34 @@ func (c *Client) DidClose(path string) error {
 // answer with a single Location, an array, or null; all normalise to a
 // (possibly empty) slice here so callers only handle one shape.
 func (c *Client) Definition(path string, pos Position) ([]Location, error) {
+	return c.Locations("textDocument/definition", path, pos)
+}
+
+// The two "go to" requests that share definition's exact wire shape —
+// same params, same Location | Location[] | null answer. They are named
+// constants rather than methods of their own because the only thing that
+// differs between the three is the method string, and the app layer's
+// connection interface should not grow a member per synonym.
+const (
+	MethodImplementation = "textDocument/implementation"
+	MethodTypeDefinition = "textDocument/typeDefinition"
+)
+
+// Locations runs any position → locations request (definition,
+// implementation, typeDefinition) and normalises the three legal answer
+// shapes to one slice.
+//
+// The budget is references' 30s rather than the 5s default: definition
+// answers from the file's own package, but "who implements this
+// interface" is a project-wide question with the same cold-server cost
+// as "who uses this symbol".
+func (c *Client) Locations(method, path string, pos Position) ([]Location, error) {
 	params := TextDocumentPositionParams{
 		TextDocument: TextDocumentIdentifier{URI: PathToURI(path)},
 		Position:     pos,
 	}
 	var raw json.RawMessage
-	if err := c.Call("textDocument/definition", params, &raw); err != nil {
+	if err := c.CallWithTimeout(method, params, &raw, referencesTimeout); err != nil {
 		return nil, err
 	}
 	if len(raw) == 0 || string(raw) == "null" {

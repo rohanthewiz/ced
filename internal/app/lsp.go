@@ -62,6 +62,9 @@ type lspConn interface {
 	DidSave(path string) error
 	DidClose(path string) error
 	Definition(path string, pos lsp.Position) ([]lsp.Location, error)
+	// Locations is definition's shape under another method name —
+	// implementation and typeDefinition (lspgoto.go).
+	Locations(method, path string, pos lsp.Position) ([]lsp.Location, error)
 	References(path string, pos lsp.Position, includeDecl bool) ([]lsp.Location, error)
 	Rename(path string, pos lsp.Position, newName string) (*lsp.WorkspaceEdit, error)
 	CodeActions(path string, rng lsp.Range, diags []lsp.Diagnostic) ([]lsp.CodeAction, error)
@@ -635,15 +638,26 @@ func (a *App) handleLSPDefinition(e *lspDefinitionEvent) {
 		a.menuFindReferences()
 		return
 	}
+	a.lspJumpTo(e.fromPath, e.fromPos, target, e.locs[0].Range.Start)
+}
+
+// lspJumpTo is the landing every "go to" verb shares: open the target
+// with nav recording suppressed, then record the REQUEST's origin
+// explicitly — a same-file jump moves only the cursor, which openFile's
+// path-change recording would miss — and place the caret. Reports
+// whether the jump landed; a false means openFile refused and has
+// already flashed why.
+func (a *App) lspJumpTo(fromPath string, fromPos editor.Position, target string, at lsp.Position) bool {
 	a.nav.suppress = true
 	a.openFile(target)
 	a.nav.suppress = false
 	t := a.activeTabPtr()
 	if t == nil || t.Path != target {
-		return // openFile failed and flashed its own error
+		return false
 	}
-	a.recordNav(navLoc{path: e.fromPath, pos: e.fromPos})
-	t.MoveCursorTo(editorPosFor(t, e.locs[0].Range.Start), false)
+	a.recordNav(navLoc{path: fromPath, pos: fromPos})
+	t.MoveCursorTo(editorPosFor(t, at), false)
+	return true
 }
 
 // definitionIsHere reports whether the definition the server named is

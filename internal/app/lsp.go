@@ -727,8 +727,25 @@ func (a *App) handleLSPHover(e *lspHoverEvent) {
 	if t == nil || t.Path != e.path {
 		return
 	}
-	lines := hoverLines(e.text)
-	if e.err != nil || len(lines) == 0 {
+	var lines []string
+	if e.err == nil {
+		lines = hoverLines(e.text)
+	}
+	// Diagnostics under the caret lead the tooltip: on a red line, "what
+	// is wrong here" is the question the key was most likely pressed to
+	// answer, and it is the only keyboard path to the message short of
+	// opening the Problems panel. They also answer ALONE when the server
+	// has no hover text for the spot (a caret on punctuation, a column-0
+	// landing after a Problems jump). See diagtip.go.
+	if dl := a.diagLinesAtCaret(); len(dl) > 0 {
+		if len(lines) > 0 {
+			dl = append(dl, "")
+		}
+		// Both halves are already capped (diagTipMaxLines, hoverLines'
+		// own limit), so the sum needs no cap of its own.
+		lines = append(dl, lines...)
+	}
+	if len(lines) == 0 {
 		a.flash("No hover info")
 		return
 	}

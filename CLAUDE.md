@@ -128,6 +128,7 @@ internal/app/lspsignature.go  Signature help → the hover tooltip, active param
 internal/app/lsprename.go     Rename symbol: prompt → server edit → the primitive
 internal/app/lspcodeaction.go Code actions: picker, executeCommand, server applyEdit
 internal/app/hovermodal.go    Caret-anchored tooltip (hover + signature help)
+internal/app/diagtip.go       Diagnostic messages: pointer tooltip, Esc-i lead, step flash
 internal/app/workspaceedit.go Cross-file apply: validate, write, one-gesture undo
 internal/app/termdiag.go      Terminal output → clickable path:line:col jumps
 internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
@@ -1050,6 +1051,29 @@ framework dependency. House rules it must keep obeying:
   never match the tabs — the "gopls installed but no squiggles" bug.
 - Tests kill the integration (`a.lsp.dead = true` in newTestApp) so
   openFile can't spawn a real gopls; LSP tests inject `fakeLSPConn`.
+
+### Diagnostic messages (app/diagtip.go)
+The gutter dot and underline say THAT a line is broken; this says WHAT.
+Three doors, one text (`diagTipLines`): rest the pointer on a diagnosed
+line's gutter or on the underline itself → a passive tooltip; Esc-i
+leads with the diagnostics at the caret (and answers alone when the
+server has no hover text); next/previous problem flash the message they
+land on. House rules:
+
+- **The tooltip is the overflow popup's shape, not the LSP dwell's.** It
+  reads `lsp.diags`, a cache, so it runs on EVERY host, and it arms only
+  when the cell really carries a diagnostic. When it is open the Tier-1
+  dwell tooltip stands down — two boxes over one identifier is noise and
+  "this is broken" is the more urgent answer.
+- **Gutter answers by line, code answers by rune.** The dot marks a
+  diagnostic's FIRST line, so the gutter lists what starts there; a code
+  cell must be ON an underlined rune (the PosScreenCell round trip,
+  hoverdwell's rule — HitTest's nearest-column answer past EOL would
+  describe an underline twenty cells away). Zero-width ranges get the
+  underline's one-cell stretch.
+- **Messages are wrapped, never ellipsised** — the tooltip exists for the
+  text the gutter couldn't show. Capped, with the cut pointing at the
+  Problems panel.
 
 ### Go to symbol in file (lsp/types.go + app/lspsymbols.go)
 The active document's declarations, listed in the palette, jump on

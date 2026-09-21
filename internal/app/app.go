@@ -998,6 +998,12 @@ type App struct {
 	// overflow.go.
 	overflowTip overflowTipState
 
+	// diagTip is the tooltip that shows a diagnostic's message when the
+	// pointer rests on its gutter dot or its underline. Passive, armed on
+	// every host (it reads the diagnostics cache, no round trip). See
+	// diagtip.go.
+	diagTip diagTipState
+
 	// overflowClick is the last press that landed on a ▴/▾ marker: one
 	// click pages that way, a second at the same cell runs to the end.
 	// It is kept beside lastClick rather than folded into it because the
@@ -1801,6 +1807,7 @@ func (a *App) handleEvent(ev tcell.Event) {
 		// resize moved what is in that cell — so it is now a claim about
 		// the wrong symbol. Dismiss rather than reposition.
 		a.closeHoverDwell()
+		a.closeDiagTip()
 	case *tcell.EventKey:
 		a.handleKey(e)
 	case *tcell.EventPaste:
@@ -1832,6 +1839,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleHoverDwellTick(e)
 	case *overflowTipEvent:
 		a.handleOverflowTipTick(e)
+	case *diagTipEvent:
+		a.handleDiagTipTick(e)
 	case *gitDiffEvent:
 		a.handleGitDiff(e)
 	case *gitBlameEvent:
@@ -2435,6 +2444,7 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// identifier is the exact behaviour that makes people turn hover off.
 	// Non-consuming — the key then does what it always did.
 	a.closeHoverDwell()
+	a.closeDiagTip()
 	// The commit receipt goes the same way and for the same reason: it
 	// is chrome nobody asked for, so the first thing the user does next
 	// takes it down — and, like the ghost text, it must never cost them
@@ -2952,6 +2962,13 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// press inside the drawn box, which covers content the user cannot
 	// see. See overflow.go for why it is not folded into hoverdwell.
 	if a.noteOverflowPointer(x, y, btn) {
+		return
+	}
+
+	// The diagnostic tooltip likewise: pure motion arms it over a
+	// diagnosed gutter cell or underline, any press dismisses it, and a
+	// press inside its box is swallowed. See diagtip.go.
+	if a.noteDiagPointer(x, y, btn) {
 		return
 	}
 
@@ -4668,6 +4685,10 @@ func (a *App) draw() {
 	// given the chance to draw, because that call is also what clears the
 	// stamped rect when it is NOT visible.
 	a.drawOverflowTip()
+
+	// The diagnostic tooltip is the same kind of passive chrome, anchored
+	// into the editor body. Always called so a hidden tip clears its rect.
+	a.drawDiagTip()
 
 	// The commit receipt shares that passive layer: above the panels
 	// (it is a report about what just happened, so nothing may cover

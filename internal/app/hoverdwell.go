@@ -181,6 +181,11 @@ func (a *App) handleHoverDwellTick(e *hoverDwellEvent) {
 	if e.seq != a.hoverDwell.seq || !a.hoverDwellEligible() {
 		return
 	}
+	// A diagnostic tooltip already answering this spot outranks the
+	// symbol's docs (diagtip.go); a second box over it would be noise.
+	if a.diagTip.open {
+		return
+	}
 	t := a.activeTabPtr()
 	pos, ok := a.hoverDwellPos(t, a.hoverDwell.x, a.hoverDwell.y)
 	if !ok {

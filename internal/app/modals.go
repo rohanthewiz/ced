@@ -60,6 +60,7 @@ func (a *App) closeAllModals() {
 	// opened during the round trip can't be painted over by an answer
 	// that arrives after it.
 	a.closeHoverDwell()
+	a.closeDiagTip()
 }
 
 // anyModalOpen reports whether any overlay surface is on screen. Used by

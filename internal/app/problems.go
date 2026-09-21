@@ -834,6 +834,11 @@ func (a *App) stepProblem(delta int) {
 		return
 	}
 	a.problemsSelectRow(idx, true)
+	// Say what was landed on: the caret is now on a red dot, and the
+	// message is the thing the user will want next. See diagtip.go.
+	if r := a.problemRow(idx); r != nil {
+		a.flash(diagFlashText(*r))
+	}
 }
 
 // problemsSeek finds the view index of the problem after (delta > 0) or

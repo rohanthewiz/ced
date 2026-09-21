@@ -126,6 +126,7 @@ internal/lsp/codeaction.go    Code actions: the response union + applyEdit's par
 internal/app/lsp.go           Server lifecycle, doc sync, diagnostics, definition, hover
 internal/app/lspservers.go    The language-server registry: ext → server, per-server state
 internal/app/lspgoto.go       Implementation / type definition / incoming calls: jump or list
+internal/app/lsprestart.go    ≡ Restart language server: the retry gesture, and the slot generation
 internal/lsp/callhierarchy.go prepareCallHierarchy + incomingCalls → call-site Locations
 internal/app/lspprogress.go   $/progress + showMessage → the status bar's server segment
 internal/app/lsphighlight.go  documentHighlight → Tab.SetSymbolUses (reads + underlined writes)
@@ -1088,6 +1089,16 @@ framework dependency. House rules it must keep obeying:
   gopls'. `lspState.dead` is the integration-wide switch (shutdown, the
   test harness); a server's own verdict lives in its slot. The languageId
   is Copilot's table, deliberately not a second one.
+- **No auto-restart; ≡ Code → "Restart language server" is the retry**
+  (lsprestart.go), acting on the ACTIVE file's server. Never dimmed — it
+  is wanted most on a dead or not-installed server, and the flash names
+  the binaries looked for. **`lspServer.gen` is load-bearing**: closing
+  the old client fires its onExit AFTER the slot is re-armed, so
+  ready/exit events carry the generation they spawned under and the
+  handlers drop mismatches (the chat `connSeq` rule). `lspDropServer` is
+  the teardown a crash and a restart share. The row never clears
+  `lspState.dead`. Its tests pin `lspLookPath` at "not found", since the
+  happy path ends in a real spawn.
 - **Events only**: the read loop, start handshake, debounce timers,
   and definition/hover requests all run off-loop and post
   `lsp*Event`s; only the main loop touches `App.lsp`.
@@ -3467,8 +3478,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 145 group actions + 15 headers (162), height 168,
-dividers `[2, 5, 165]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 146 group actions + 15 headers (163), height 169,
+dividers `[2, 5, 166]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

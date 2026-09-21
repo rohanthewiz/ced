@@ -151,6 +151,10 @@ type lspReadyEvent struct {
 	when   time.Time
 	server string // lspServerDef.id the handshake was for
 	client lspConn
+	// gen is the slot generation the spawn ran under (lspServer.gen). A
+	// restart bumps it, so a handshake the user has since superseded is
+	// closed instead of installed.
+	gen int
 }
 
 // When satisfies the tcell.Event interface.
@@ -160,6 +164,10 @@ func (e *lspReadyEvent) When() time.Time { return e.when }
 type lspExitEvent struct {
 	when   time.Time
 	server string // lspServerDef.id that went away
+	// gen is the slot generation of the process that exited. Closing the
+	// old client during a restart fires its onExit; without this stamp
+	// that late event would mark the freshly started server dead.
+	gen int
 }
 
 // When satisfies the tcell.Event interface.
@@ -252,6 +260,7 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 	scr := a.screen
 	root := a.rootDir
 	id := def.id
+	gen := sv.gen
 	initOptions := def.initOptions
 	go func() {
 		// onNotify runs on the client's read loop — post, don't touch.
@@ -289,11 +298,11 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 			return lspServeApplyEdit(scr, params)
 		}
 		onExit := func(error) {
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id})
+			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen})
 		}
 		client, err := lsp.StartWithRequests(root, bin, args, onNotify, onRequest, onExit)
 		if err != nil {
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id})
+			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen})
 			return
 		}
 		if err := client.InitializeWithOptions(root, initOptionsOrNil(initOptions)); err != nil {
@@ -301,10 +310,10 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 			// The failed handshake already fires onExit via the read
 			// loop in most cases, but a timeout leaves the process
 			// running — post explicitly so the state machine settles.
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id})
+			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen})
 			return
 		}
-		_ = scr.PostEvent(&lspReadyEvent{when: time.Now(), server: id, client: client})
+		_ = scr.PostEvent(&lspReadyEvent{when: time.Now(), server: id, client: client, gen: gen})
 	}()
 }
 
@@ -313,9 +322,10 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 // handshake was still in flight.
 func (a *App) handleLSPReady(e *lspReadyEvent) {
 	sv := a.lsp.server(e.server)
-	if a.lsp.dead || sv.dead {
+	if a.lsp.dead || sv.dead || e.gen != sv.gen {
 		// Server died between the ready post and now (or the editor
-		// shut the integration down). Don't resurrect.
+		// shut the integration down), or a restart superseded this
+		// handshake (lsprestart.go). Don't resurrect.
 		e.client.Close()
 		return
 	}
@@ -334,22 +344,38 @@ func (a *App) handleLSPReady(e *lspReadyEvent) {
 // linger forever with nothing left to retract them. The other servers'
 // state is untouched: degradation is per server. Deliberately no
 // auto-restart: a crashing server would flap, and the user can
-// restart the editor when they've fixed their install.
+// restart the editor when they've fixed their install — or, without
+// leaving it, use the ≡ Code "Restart language server" row
+// (lsprestart.go), which is the deliberate retry gesture.
 func (a *App) handleLSPExit(e *lspExitEvent) {
 	sv := a.lsp.server(e.server)
+	if e.gen != sv.gen {
+		// The process a restart replaced, reporting its own death late.
+		// The slot now belongs to its successor.
+		return
+	}
+	a.lspDropServer(e.server)
+	sv.dead = true
+}
+
+// lspDropServer empties one server's slot and everything per-document
+// that belonged to it, WITHOUT passing a verdict: the caller decides
+// whether the slot is now dead (a crash) or about to be refilled (a
+// restart). Shared so the two teardowns cannot drift.
+func (a *App) lspDropServer(id string) {
+	sv := a.lsp.server(id)
 	if sv.client != nil {
 		sv.client.Close()
 	}
 	sv.client = nil
 	sv.starting = false
-	sv.dead = true
 	sv.progress, sv.progressLast = nil, ""
 	// Everything per-document is keyed by path, and a path names its
 	// server, so "this server's share" is a filter rather than a second
 	// set of maps.
 	mine := func(path string) bool {
 		def := lspServerFor(path)
-		return def != nil && def.id == e.server
+		return def != nil && def.id == id
 	}
 	for path := range a.lsp.diags {
 		if mine(path) {

@@ -149,6 +149,12 @@ type lspServer struct {
 	// noInlay is set once the server answers an inlay-hint request with
 	// an error — it does not speak the method, so stop asking.
 	noInlay bool
+	// gen counts restarts of this slot (lsprestart.go). Every spawn
+	// stamps its ready/exit events with the value it started under, and
+	// the handlers drop mismatches — the chat layer's connSeq rule. Zero
+	// for a slot that has never been restarted, which is what hand-built
+	// test events carry.
+	gen int
 
 	// progress is the server's in-flight work keyed by progress token,
 	// and progressLast the token most recently heard from — the one the

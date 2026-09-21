@@ -58,7 +58,8 @@ plus the LSP work done in the seeding session itself
   everything LSP added since: Select all, the multi-server registry (it
   still says only "gopls"), go to implementation / type definition,
   symbol-in-project, incoming calls, symbol highlight, inlay hints, the
-  `"inlayhints"` key, and the diagnostic tooltip.
+  `"inlayhints"` key, the diagnostic tooltip, and the ≡ Code "Restart
+  language server" row.
 
 - **N-004** · raised `2026-0913-1919-cats-plugin` · value low
   `cats-plugin.toml`'s `version` is hand-maintained. It currently matches
@@ -117,13 +118,6 @@ plus the LSP work done in the seeding session itself
   the least certain part — typescript-language-server may want them via
   `workspace/didChangeConfiguration` instead.
 
-- **N-014** · raised `2026-0921-0906-lsp-experience` · value medium
-  **A "Restart language server" ≡ Code row.** A crashed or
-  installed-since-launch server stays dead until the editor restarts;
-  Copilot and the chat panel both have a deliberate retry gesture and the
-  LSP does not. With per-server slots it is now small: clear the active
-  file's `lspServer.dead`, call `lspEnsureStarted`.
-
 - **N-015** · raised `2026-0921-0906-lsp-experience` · value low
   `lspLookPath` is not pinned in `newTestApp` although its doc comment
   implies it (tests rely on `a.lsp.dead = true` instead). A test that sets
@@ -179,6 +173,12 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-21 — **N-014** "Restart language server" ≡ Code row.
+  `internal/app/lsprestart.go`; acts on the active file's server, never
+  dimmed, names the missing binaries. Needed a slot generation
+  (`lspServer.gen`) so the replaced process's late exit event cannot kill
+  its successor. The spawn path itself is untested (it would start a real
+  server); try it once by hand: `kill` gopls, then use the row.
 - closed 2026-09-21 — **"a `bin` entry in ced's manifest" (was a Non-goal
   in `2026-0913-1919-cats-plugin`) — OVERTURNED, not done.** The reason
   was that it would shadow the Homebrew `ced`; the Homebrew removal

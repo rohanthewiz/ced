@@ -515,6 +515,12 @@ func builtinMenuGroups() []menuGroup {
 			// may not be on screen. No leader key: the flat table is out of
 			// mnemonic letters and plain undo covers the common case.
 			{labelFor: (*App).wsEditUndoLabel, action: (*App).menuUndoWorkspaceEdit, enabled: (*App).wsUndoAvailable},
+			// The LSP's deliberate retry gesture (lsprestart.go), the twin
+			// of re-picking the chat agent. Never dimmed: the file it is
+			// most wanted on is one whose server is dead or missing, and
+			// the flash names the binary a dimmed row could not. Last in
+			// the group — maintenance, not a code verb. No leader key.
+			{labelFor: (*App).lspRestartLabel, action: (*App).menuRestartLSP, enabled: alwaysTrue},
 		}},
 		// GitHub Copilot (copilot-language-server sidecar). Rows stay
 		// clickable even when the sidecar is unavailable — the action

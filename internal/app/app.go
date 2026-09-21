@@ -3450,35 +3450,62 @@ func (a *App) scrollAt(x, y, delta int) {
 		a.findAllPin.scrollList(a, delta)
 		return
 	}
-	if y > 0 && y < a.height-1 {
-		if t := a.activeTabPtr(); t != nil {
-			// A preview scrolls by DISPLAY ROWS, which are not buffer
-			// lines — hence its own counter and its own clamp.
-			if t.IsMarkdownView() {
-				a.markdownScroll(t, delta)
-				return
-			}
-			t.Scroll(delta)
+	// The fall-through is the EDITOR RECT, not a bare "below the tab bar,
+	// above the status bar" row test. The chain of panel tests above
+	// happens to cover every tool window today, so the row test was
+	// correct only by their exhaustiveness — and each one is a line a new
+	// panel has to remember to add, with "the wheel scrolls the file
+	// behind me" as the failure. The rect knows which rows AND columns
+	// the docks took, so it is right by construction: it is what
+	// `editorRect` is for, and what every other call site inside the
+	// editor band already asks. See scrollAtH, which had the bug this
+	// avoids.
+	ex, ey, ew, eh := a.editorRect()
+	if ew <= 0 || eh <= 0 || x < ex || x >= ex+ew || y < ey || y >= ey+eh {
+		return
+	}
+	if t := a.activeTabPtr(); t != nil {
+		// A preview scrolls by DISPLAY ROWS, which are not buffer
+		// lines — hence its own counter and its own clamp.
+		if t.IsMarkdownView() {
+			a.markdownScroll(t, delta)
+			return
 		}
+		t.Scroll(delta)
 	}
 }
 
 // scrollAtH scrolls the panel under (x, y) horizontally by delta cells.
-// The file tree has no useful horizontal axis (each row is a single label)
-// and neither does the terminal strip, so we only honor horizontal wheel
-// events when they fall inside the editor pane.
+// Only the editor has a horizontal axis worth moving — a tree row is a
+// single label, a transcript and a terminal strip are wrapped, and both
+// git panels ellipsise rather than run off the edge — so this is the one
+// surface that answers, and everywhere else the wheel is simply ignored.
+//
+// It is the EDITOR RECT that decides, not a bare "between the tab bar and
+// the status bar" row test: every tool window sits inside that span, and
+// the rect is the only thing that knows which columns and rows they took.
+// Answering by row alone scrolled the FILE BEHIND whichever panel the
+// pointer was over — a chat transcript, a git diff — which reads as the
+// wheel doing nothing at all while the document quietly slid sideways
+// underneath it. That is the "no call site may assume the editor starts
+// at row 1 or runs to the right edge of its band" rule; this one did.
 func (a *App) scrollAtH(x, y, delta int) {
-	if a.sidebarContains(x, y) {
+	ex, ey, ew, eh := a.editorRect()
+	if ew <= 0 || eh <= 0 || x < ex || x >= ex+ew || y < ey || y >= ey+eh {
 		return
 	}
-	if a.term.open && a.termPanelContains(x, y) {
+	t := a.activeTabPtr()
+	if t == nil {
 		return
 	}
-	if y > 0 && y < a.height-1 {
-		if t := a.activeTabPtr(); t != nil {
-			t.ScrollH(delta)
-		}
+	// A markdown preview is a wrapped document: its rows are built to the
+	// pane's width, so there is never anything off to either side. Same
+	// refusal soft wrap makes one floor down, made here because MDScroll
+	// is the app's counter and ScrollH knows nothing about it.
+	if t.IsMarkdownView() {
+		return
 	}
+	t.ScrollH(delta)
 }
 
 // tryTreeContextClick opens the right-click context menu when (x, y) lands

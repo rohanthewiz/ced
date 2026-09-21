@@ -2988,3 +2988,79 @@ func TestDrawMenu_ScrollIndicators(t *testing.T) {
 		t.Fatalf("Quit row should be visible after scrolling:\n%s", content)
 	}
 }
+
+// TestHandleMouse_WheelHorizontalSkipsPanels pins the routing rule: the
+// horizontal wheel belongs to the EDITOR RECT, so a wheel over a tool
+// window is ignored rather than sliding the file behind it — which read
+// as the wheel doing nothing while the document quietly moved underneath
+// a panel the user was looking at.
+func TestHandleMouse_WheelHorizontalSkipsPanels(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "long.txt")
+	if err := os.WriteFile(target, []byte(strings.Repeat("x", 200)+"\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	tab := a.activeTabPtr()
+	if tab == nil {
+		t.Fatal("no active tab after openFile")
+	}
+	a.showTool(toolProblems)
+	px, py, pw, ph := a.toolRect(toolProblems)
+	if pw <= 0 || ph <= 0 {
+		t.Fatal("problems panel did not open")
+	}
+
+	a.handleMouse(tcell.NewEventMouse(px+pw/2, py+ph/2, tcell.WheelRight, tcell.ModNone))
+	if tab.ScrollX != 0 {
+		t.Fatalf("a wheel over the problems panel moved the file to %d", tab.ScrollX)
+	}
+
+	// The same wheel inside the editor still answers.
+	ex, ey, ew, eh := a.editorRect()
+	if ew <= 0 || eh <= 0 {
+		t.Fatal("no editor rect left")
+	}
+	a.handleMouse(tcell.NewEventMouse(ex+ew/2, ey+eh/2, tcell.WheelRight, tcell.ModNone))
+	if tab.ScrollX == 0 {
+		t.Fatalf("a wheel inside the editor should scroll horizontally")
+	}
+}
+
+// TestHandleMouse_WheelVerticalSkipsPanels is the vertical twin of the
+// horizontal routing test: scrollAt's fall-through is the editor rect, so
+// a panel that forgot to add its own contains-check to the chain above it
+// still cannot have the wheel scroll the file behind it.
+func TestHandleMouse_WheelVerticalSkipsPanels(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "tall.txt")
+	if err := os.WriteFile(target, []byte(strings.Repeat("line\n", 500)), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	tab := a.activeTabPtr()
+	if tab == nil {
+		t.Fatal("no active tab after openFile")
+	}
+	a.showTool(toolProblems)
+	px, py, pw, ph := a.toolRect(toolProblems)
+	if pw <= 0 || ph <= 0 {
+		t.Fatal("problems panel did not open")
+	}
+
+	a.handleMouse(tcell.NewEventMouse(px+pw/2, py+ph/2, tcell.WheelDown, tcell.ModNone))
+	if tab.ScrollY != 0 {
+		t.Fatalf("a wheel over the problems panel scrolled the file to %d", tab.ScrollY)
+	}
+
+	ex, ey, ew, eh := a.editorRect()
+	if ew <= 0 || eh <= 0 {
+		t.Fatal("no editor rect left")
+	}
+	a.handleMouse(tcell.NewEventMouse(ex+ew/2, ey+eh/2, tcell.WheelDown, tcell.ModNone))
+	if tab.ScrollY == 0 {
+		t.Fatalf("a wheel inside the editor should scroll vertically")
+	}
+}

@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-026**
+**Next ID: N-027**
 
 ## Open
 
@@ -78,12 +78,6 @@ plus the LSP work done in the seeding session itself
   cats-side decision: should a BLOCKED editor count toward the AGENTS
   attention tally? Currently it does not.
 
-- **N-007** · raised `2026-0913-2142-select-all` · value low
-  **⌘A as a Cmd accelerator for Select all.** Legitimate under the
-  metakeys.go rule now the verb has a ≡ Edit row to be a second door onto.
-  Needs the rune table, `metaReserved()` and a pin test. Verified not done
-  2026-09-21.
-
 - **N-008** · raised `2026-0913-2142-select-all` · value low
   Optional: a "Select all" row in ≡ **File** too, if "File | Edit" meant
   both groups. Today it is in Edit only. One line plus the menu pins.
@@ -122,6 +116,14 @@ plus the LSP work done in the seeding session itself
   The auto-responder answers every configuration request with `{}`, so
   those servers never switch hints on. Contingent on N-013 showing it
   matters.
+
+- **N-026** · raised `2026-0921-1100-next-list-run` · value low
+  cats-side: add `"KeyA"` to `CMD_TO_PANE` (`cmd/catway/web/js/20-keys.js`)
+  so ⌘A reaches a ced pane in browser-cats. ced binds it as of N-007 and
+  it is live in kitty / Ghostty / WezTerm; in browser-cats the browser
+  still keeps the chord for its own select-all. The road ⌘E took
+  (`ed4962c`). Worth checking first that forwarding it does not cost
+  other panes (a shell) a select-all they relied on.
 
 ## Roadmap
 
@@ -165,6 +167,9 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-21 — **N-007** ⌘A selects all (`metaAccels`, pinned by
+  `TestMetaAccelSelectsAll`; the never-the-only-path test passes via the
+  ≡ Edit row). Not live in browser-cats until N-026.
 - closed 2026-09-21 — **N-015** `lspLookPath` pinned at "never found" in
   `newTestApp`; the two real-gopls tests opt back in with
   `useRealLSPBinaries` (confirmed they still RUN, not skip).

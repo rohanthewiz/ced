@@ -84,6 +84,27 @@ func TestMetaAccelSaves(t *testing.T) {
 	}
 }
 
+// ⌘A selects the whole buffer: anchor at the origin, caret at the end of
+// the last line. Pinned because it is the chord a user presses without
+// thinking, so a regression here reads as the ⌘ layer being broken.
+func TestMetaAccelSelectsAll(t *testing.T) {
+	armMetaHost(t)
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte("one\ntwo\nthree"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+
+	a.handleKey(metaKeyEv('a', false))
+
+	tab := a.activeTabPtr()
+	if got := tab.SelectionText(); got != "one\ntwo\nthree" {
+		t.Fatalf("Cmd+A selected %q, want the whole buffer", got)
+	}
+}
+
 // ⌘E is the newest row and the only one with a picker built for it: the
 // chord must open the recent-files list holding the file visited before
 // this one, which is the gesture (⌘E, Enter) the row exists for. The ring

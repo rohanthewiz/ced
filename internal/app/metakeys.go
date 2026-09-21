@@ -166,6 +166,16 @@ func metaAccels() []metaAccel {
 		// this table is: kitty, Ghostty, WezTerm, and browser-cats over a
 		// pane that asked for the kitty protocol.
 		{key: 'e', action: (*App).menuRecentFiles, label: "Recent files"},
+		// ⌘A selects the whole file — the one chord on this list every
+		// program on the machine spells the same way. It waited until
+		// Select all had a ≡ Edit row to be a second door onto (the
+		// never-the-only-path rule); the verb has no Esc key and will not
+		// get one. Live in kitty, Ghostty and WezTerm today. Browser-cats
+		// forwards ⌘ chords from an allowlist (CMD_TO_PANE in cats'
+		// 20-keys.js) that does not hold KeyA yet, so there the browser
+		// keeps the chord for its own select-all until cats adds it — the
+		// road ⌘E took.
+		{key: 'a', action: (*App).menuSelectAll, label: "Select all"},
 		// Deliberately NOT bound:
 		//   ⌘C / ⌘V / ⌘Z — handled directly in handleKey, and older than
 		//     this table. They stay there because they are context-

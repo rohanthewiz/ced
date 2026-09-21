@@ -125,6 +125,7 @@ internal/app/lsp.go           Server lifecycle, doc sync, diagnostics, definitio
 internal/app/lspservers.go    The language-server registry: ext → server, per-server state
 internal/app/lspgoto.go       Go to implementation / type definition: one jumps, several list
 internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
+internal/app/lspworkspacesymbols.go  workspace/symbol → prompt, then the project-wide symbol picker
 internal/app/lspreferences.go References → the Find-all panel's project mode
 internal/app/lspsignature.go  Signature help → the hover tooltip, active param lit
 internal/app/lsprename.go     Rename symbol: prompt → server edit → the primitive
@@ -1127,6 +1128,26 @@ Enter (Esc-D, ≡ Code). House rules:
   verb, wider scope — 'd' goes to the definition of what's under the
   cursor, 'D' lists every definition in the file. The f/F, p/P, h/H
   convention.
+
+### Go to symbol in project (lsp/workspacesymbol.go + app/lspworkspacesymbols.go)
+The p/P widening of the file outline: a declaration by NAME, in any
+file. ≡ Code row, no leader key. House rules:
+
+- **It PROMPTS first, unlike the file outline**, because
+  `workspace/symbol` is query-driven — a server answers `""` with nothing
+  or an arbitrary slice, so there is no whole list to fetch and filter
+  locally. The question is asked ONCE (seeded with the cursor word) and
+  the picker narrows the ANSWER; a picker that re-queried per keystroke
+  would need a hook the palette lacks and would reorder under the
+  user's fingers.
+- **Every READY server is asked and the answers merged** — the question
+  is about the project, not the active file, so the row is gated on
+  `lspAnyReady`, not `hasLSPActions`. It never SPAWNS a server. One
+  server's ranking is kept as it came; a merge has no shared ranking and
+  falls back to name order. One server failing costs its own hits only.
+- Generation-checked (`lsp.symSeq`, it opens a modal), capped with the
+  cap in the title, name FIRST in the row for the scorer, and the jump
+  is `lspJumpTo`.
 
 ### Go to implementation / type definition (app/lspgoto.go)
 Definition's two siblings, ≡ Code rows with no leader key. They share
@@ -3335,8 +3356,8 @@ away. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 141 group actions + 15 headers (158), height 164,
-dividers `[2, 5, 161]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 142 group actions + 15 headers (159), height 165,
+dividers `[2, 5, 162]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`).
 

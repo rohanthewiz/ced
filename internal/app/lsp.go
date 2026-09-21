@@ -72,6 +72,7 @@ type lspConn interface {
 	HoverAt(path string, pos lsp.Position) (*lsp.Hover, error)
 	SignatureHelpAt(path string, pos lsp.Position) (*lsp.Signature, error)
 	DocumentSymbols(path string) ([]lsp.Symbol, error)
+	WorkspaceSymbols(query string) ([]lsp.WorkspaceSymbol, error)
 	// The completion quartet (completion.go). Two of the four ask the
 	// SERVER'S OPINION rather than sending a request, which is new to
 	// this interface: which characters open the popup, and whether
@@ -107,6 +108,10 @@ type lspState struct {
 	// definition and hover — which are content with a path check — it
 	// needs to know which request it belongs to.
 	refSeq int
+
+	// symSeq generations the workspace-symbol queries
+	// (lspworkspacesymbols.go) — the answer opens a picker.
+	symSeq int
 
 	// renameSeq generations the rename requests (lsprename.go), for a
 	// harder version of refSeq's reason: that answer opens a panel, this
@@ -655,7 +660,10 @@ func (a *App) lspJumpTo(fromPath string, fromPos editor.Position, target string,
 	if t == nil || t.Path != target {
 		return false
 	}
-	a.recordNav(navLoc{path: fromPath, pos: fromPos})
+	// An untitled origin has no path to come back to (currentNavLoc's rule).
+	if fromPath != "" {
+		a.recordNav(navLoc{path: fromPath, pos: fromPos})
+	}
 	t.MoveCursorTo(editorPosFor(t, at), false)
 	return true
 }

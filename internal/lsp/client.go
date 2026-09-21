@@ -670,6 +670,9 @@ func (c *Client) Initialize(rootDir string) error {
 				// Without it a conforming server has no route to apply what
 				// it just computed, and those actions become rows that
 				// quietly do nothing.
+				// workspace/symbol, declared bare: no resolveSupport, so every
+				// hit arrives with its range (see ParseWorkspaceSymbols).
+				"symbol":    map[string]any{},
 				"applyEdit": true,
 				// executeCommand needs no options; declaring it is how the
 				// server learns those commands are runnable at all.

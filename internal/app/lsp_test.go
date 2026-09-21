@@ -54,7 +54,11 @@ type fakeLSPConn struct {
 	sigRes     *lsp.Signature
 	sigErr     error
 	symbols    []lsp.Symbol
-	symErr     error
+	// wsSymbols answers workspace/symbol; wsQuery records the query.
+	wsSymbols []lsp.WorkspaceSymbol
+	wsErr     error
+	wsQuery   string
+	symErr    error
 	// renameEdit is what textDocument/rename answers with. renameName
 	// records the last name asked for, so a test can prove the value that
 	// reached the wire is the one the prompt collected.
@@ -191,6 +195,14 @@ func (f *fakeLSPConn) SignatureHelpAt(path string, _ lsp.Position) (*lsp.Signatu
 func (f *fakeLSPConn) DocumentSymbols(path string) ([]lsp.Symbol, error) {
 	f.record("documentSymbol:" + filepath.Base(path))
 	return f.symbols, f.symErr
+}
+
+func (f *fakeLSPConn) WorkspaceSymbols(query string) ([]lsp.WorkspaceSymbol, error) {
+	f.mu.Lock()
+	f.wsQuery = query
+	f.mu.Unlock()
+	f.record("workspaceSymbol:" + query)
+	return f.wsSymbols, f.wsErr
 }
 
 // Completion answers textDocument/completion and records the context it

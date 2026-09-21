@@ -451,6 +451,10 @@ func builtinMenuGroups() []menuGroup {
 			// what's under the cursor, 'D' lists every definition in the
 			// file — the f/F and p/P convention again.
 			{label: "Go to symbol in file…", shortcut: "esc D", action: (*App).menuGoToSymbol, enabled: (*App).hasLSPActions},
+			// The same question at project scope (lspworkspacesymbols.go).
+			// Gated on ANY server being up, not on the active tab: a
+			// project-wide lookup has to work from a README.
+			{label: "Go to symbol in project…", action: (*App).menuGoToWorkspaceSymbol, enabled: (*App).hasWorkspaceSymbols},
 			// Brace matching (bracket.go) — the second row in this group
 			// that needs no language server, sitting beside the other
 			// one for that reason. It is gated only on there being a
@@ -1922,6 +1926,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleLSPHover(e)
 	case *lspSymbolsEvent:
 		a.handleLSPSymbols(e)
+	case *lspWorkspaceSymbolsEvent:
+		a.handleLSPWorkspaceSymbols(e)
 	case *lspLocationsEvent:
 		a.handleLSPLocations(e)
 	case *lspReferencesEvent:

@@ -30,9 +30,11 @@
 // editor band (editorBandRows / editorRect) rather than floating over
 // it, so the shortened editor scrolls the previewed line into what's
 // left. It takes them off the TOP — list first, then the code it's
-// pointing at. Height is fixed, so unlike the resizable bottom panels it
-// needs no clamp negotiation with them; it just displaces, the way the
-// find bar does at the other end.
+// pointing at — and its own bottom border is the handle that re-states
+// how many (the seam section below). Unlike the resizable bottom panels
+// it still needs no clamp negotiation with them: it is the only thing on
+// its edge, so the trade is with the editor alone. It just displaces,
+// the way the find bar does at the other end.
 //
 // It still lives in App.modal: the single slot is what makes it mutually
 // exclusive with every other overlay and gets it keyboard/mouse routing
@@ -740,7 +742,7 @@ func (m *findAllModal) height(a *App) int {
 		}
 		return band
 	}
-	h := findAllVisibleRows + findAllChromeRows
+	h := m.desiredRows(a) + findAllChromeRows
 	if max := band - findAllMinEditorRows; h > max {
 		h = max
 	}
@@ -754,6 +756,106 @@ func (m *findAllModal) height(a *App) int {
 		h = 0
 	}
 	return h
+}
+
+// -----------------------------------------------------------------------------
+// The bottom seam (top dock only)
+// -----------------------------------------------------------------------------
+//
+// The strip's own bottom border IS the resize handle, the git panels'
+// header-rule arrangement turned upside down — the rule those panels put
+// at the TOP because they hang off the bottom of the window, this one
+// puts at the BOTTOM because it hangs off the top. Both sit on the edge
+// the panel shares with the editor, which is the edge being traded.
+//
+// It costs NO ROWS, which is the whole reason the border is the handle
+// rather than a rule drawn beside it: the strip already paints that row,
+// and a seam that added one would take it from the code the list exists
+// to point at. Same trade the overflow markers make for their column.
+//
+// A row is a much easier target than a column, so there is no borrowed
+// second line here — splitter.go's two-column grab zone answers a
+// problem the horizontal seams don't have, and the row above this one
+// carries a result the user clicks to preview.
+//
+// TOP DOCK ONLY. Docked right the strip is full height by design — a
+// tall column is the point of that mode — and its bottom edge is the
+// band's own, which nothing may drag.
+
+// findAllResizeGrip is how many cells of the bottom rule carry the
+// heavier glyph, the horizontal twin of splitter.go's grip segment.
+const findAllResizeGrip = 3
+
+// findAllDragMode is the App.dragMode string this gesture runs under.
+// Named rather than spelled twice, because the two routes that move it
+// (the modal's own handler and the router's drag chain) must agree.
+const findAllDragMode = "findall"
+
+// findAllGripGlyph is the bottom rule's handle: a heavy horizontal, the
+// rotation of splitter.go's ┃. Single-width per the marker rule.
+const findAllGripGlyph = '━'
+
+// desiredRows is how many result rows the strip wants: what the user
+// dragged it to, or the shipped default. The clamping against the band
+// is height's, not this — a stored number the window is briefly too
+// short for must come back when the window grows (the tool layer's
+// clamp-on-read rule).
+func (m *findAllModal) desiredRows(a *App) int {
+	if a.findAllRows > 0 {
+		return a.findAllRows
+	}
+	return findAllVisibleRows
+}
+
+// findAllSplitterY is the screen row of the resize handle — the strip's
+// bottom border — or -1 when there is nothing to drag (no strip up, or
+// it is docked right). The -1 is splitterX's own "no seam" convention,
+// so a hidden panel can never claim a press.
+func (a *App) findAllSplitterY() int {
+	m := a.findAllVisible()
+	if m == nil || a.findAllDockRight {
+		return -1
+	}
+	_, my, _, mh := m.rect(a)
+	if mh < findAllMinHeight {
+		return -1 // too short to draw at all — see draw's early return
+	}
+	return my + mh - 1
+}
+
+// findAllSplitterHit reports whether a press at row y grabs that handle.
+func (a *App) findAllSplitterHit(y int) bool {
+	sy := a.findAllSplitterY()
+	return sy >= 0 && y == sy
+}
+
+// dragFindAllTo re-states the strip's height from the pointer's row: the
+// handle IS the last row, so the row under the mouse is the height the
+// user is asking for, less the chrome.
+//
+// Both ends are clamped HERE as well as in height, deliberately. height
+// clamps what is DRAWN; without clamping what is STORED, a drag that
+// swept far below the editor's reserve would bank a number the user then
+// has to drag back up through before the strip moves at all — dead space
+// under the pointer that reads as the seam having come unstuck.
+func (a *App) dragFindAllTo(y int) {
+	m := a.findAllVisible()
+	if m == nil || a.findAllDockRight {
+		return
+	}
+	_, my, _, _ := m.rect(a)
+	rows := (y - my + 1) - findAllChromeRows
+	if max := a.editorBandRows() - findAllMinEditorRows - findAllChromeRows; rows > max {
+		rows = max
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	a.findAllRows = rows
+	// The selected row may have fallen off the shorter window, and the
+	// scroll may now be past a taller one's end.
+	m.clampScroll(a)
+	m.ensureRowVisible(a)
 }
 
 // width is the popup's cell width: the editor's full column band in the
@@ -1121,6 +1223,20 @@ func (m *findAllModal) handleFieldKey(a *App, ev *tcell.EventKey) {
 // The double-click record is the editor's own lastClick, reused so the
 // two gestures share one window — the same trick the git panel plays.
 func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
+	// A live resize is continued and released HERE, not in the router's
+	// drag chain, because unpinned this panel owns the modal slot: the
+	// single-slot dispatch absorbs every mouse event before that chain
+	// is reached, so a drag handled only there would freeze the moment
+	// it started. Pinned, the router's own branch answers first and this
+	// one never sees the event — one gesture, two routes, one mover.
+	if a.dragMode == findAllDragMode {
+		if btn&tcell.Button1 != 0 {
+			a.dragFindAllTo(y)
+		} else {
+			a.dragMode = ""
+		}
+		return
+	}
 	if btn&tcell.WheelUp != 0 {
 		m.scrollList(a, -wheelLines)
 		return
@@ -1143,6 +1259,13 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 			return
 		}
 		m.accept(a)
+		return
+	}
+	// The bottom rule is the resize handle (see the seam section). It
+	// carries only the footer hint, so it is claimed before anything
+	// else inside the frame and nothing is carved out of it.
+	if a.findAllSplitterHit(y) {
+		a.dragMode = findAllDragMode
 		return
 	}
 	// Buttons are checked before the rows and return without touching
@@ -1314,12 +1437,22 @@ func (m *findAllModal) draw(a *App) {
 	// Footer hint, widest form that fits — the right-docked column has
 	// less than half the room the top strip does, and a hint clipped
 	// mid-word reads worse than a shorter one.
+	hintW := 0
 	for _, hint := range m.footerHints() {
 		if mw > runeLen(hint)+6 {
 			drawAt(a.screen, mx+2, my+mh-1, hint, c.muted)
+			hintW = runeLen(hint)
 			break
 		}
 	}
+
+	// The grip that says the bottom rule can be seized. Drawn after the
+	// hint and skipped when the two would collide: the hint is the row's
+	// meaning and the grip only its affordance, so on a column too narrow
+	// for both the rule stays a plain border rather than eating a word.
+	// The whole rule lights Accent while the drag is live — splitter.go's
+	// state, where the grip has nothing left to say.
+	m.drawResizeGrip(a, c, hintW)
 
 	// The overflow markers, last: they share a cell of the first and
 	// last result rows, keeping whatever background those rows painted.
@@ -1330,6 +1463,48 @@ func (m *findAllModal) draw(a *App) {
 	// call finds nothing to do and the body pass has already done it.
 	// See overflow.go.
 	a.drawOverflowMarkersOverlay()
+}
+
+// drawResizeGrip marks the bottom rule as a handle: a heavier glyph a
+// step up in color across its middle cells, weight rather than hue
+// alone, for splitter.go's reason — a border and a handle have to be
+// tellable apart on a terminal whose contrast ced cannot vouch for.
+//
+// hintW is the footer hint's width (0 when none fitted), so the grip can
+// stand down instead of overwriting it. Nothing is drawn in the right
+// dock, where the bottom edge is the band's own and drags nothing.
+func (m *findAllModal) drawResizeGrip(a *App, c modalChrome, hintW int) {
+	sy := a.findAllSplitterY()
+	if sy < 0 {
+		return
+	}
+	mx, _, mw, _ := m.rect(a)
+	active := a.dragMode == findAllDragMode
+	if active {
+		// Live, the whole rule is the handle — corners excluded, they
+		// belong to the frame either way.
+		for cx := mx + 1; cx < mx+mw-1; cx++ {
+			a.screen.SetContent(cx, sy, findAllGripGlyph, nil, c.title)
+		}
+		return
+	}
+	// Centred in the rule's FREE span rather than in the rule, because
+	// the hint owns the left end of it and is the wider of the two on
+	// every strip narrower than about 120 columns — a grip centred on
+	// the whole rule would be the half that never gets drawn, which is
+	// the affordance going missing on the common window rather than on
+	// the rare one. On a column too narrow for even that, the rule stays
+	// a plain border: the hint is the row's meaning, the grip only its
+	// affordance, and the seam is still there to be found by a press.
+	start := mx + 2 + hintW + 1
+	end := mx + mw - 1
+	gx := start + (end-start-findAllResizeGrip)/2
+	if gx < start || gx+findAllResizeGrip > end {
+		return
+	}
+	for i := 0; i < findAllResizeGrip; i++ {
+		a.screen.SetContent(gx+i, sy, findAllGripGlyph, nil, c.muted)
+	}
 }
 
 // drawFields paints the filter/replace row over the divider drawFrame

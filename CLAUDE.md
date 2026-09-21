@@ -936,10 +936,29 @@ Search group, or ↓ from the find bar. House rules:
   undoes, and a two-column row, at which point it isn't the palette.
 - **It takes rows OUT of the editor band, never floats over it**
   (`editorBandRows` → `editorRect` → `findAllPanelHeight`). A popup that
-  covered the line it was previewing would defeat the feature. Height is
-  FIXED, so unlike the resizable bottom panels it needs no clamp
-  negotiation with them — it just displaces, and `findAllMinEditorRows`
-  is the floor it never eats through. `editorBandRows` exists because
+  covered the line it was previewing would defeat the feature. It still
+  needs no clamp negotiation with the bottom panels — it is alone on its
+  edge, so the trade is with the editor alone, and `findAllMinEditorRows`
+  is the floor it never eats through.
+- **The strip's own bottom border IS its resize handle** — the git
+  panels' header rule turned upside down (same edge: the one shared with
+  the editor), so the seam **costs no rows**, the overflow markers'
+  shared-cell trade. `App.findAllRows` states the size in RESULT ROWS
+  (0 = auto), and `dragFindAllTo` clamps what is STORED as well as what
+  is drawn: a banked overshoot is dead space the user must drag back up
+  through before the seam appears to move. It lives on App beside the
+  dock because the popup is transient and the size isn't — but unlike
+  the dock it is **not persisted**: the dock says which shape of answer
+  you want, while a height is a moment-to-moment trade against the code
+  underneath. **The drag is continued in TWO places on purpose**
+  (`findAllDragMode`): unpinned, the list owns the modal slot and the
+  single-slot absorb answers before the router's drag chain is ever
+  reached, so a gesture handled only there would freeze on the first
+  motion; pinned, the router's branch gets there first. One mover, two
+  routes. No handle in the RIGHT dock — full height is the point of that
+  mode, and its bottom edge is the band's own. The grip is centred in
+  the rule's FREE span rather than in the rule, because the footer hint
+  owns the left end and is the wider of the two on any ordinary window. `editorBandRows` exists because
   the popup (like every panel) must ask "what would the editor have
   left?" — a question `editorRect` can't answer, since it already
   subtracts them.

@@ -1138,3 +1138,133 @@ func TestFindAllRowClick_MarkerIsNotADismiss(t *testing.T) {
 		t.Errorf("the ✕ stopped dismissing: %d rows, want %d", len(m.view), before-1)
 	}
 }
+
+// TestFindAllResize_BottomRuleDragsTheHeight pins the seam's whole
+// gesture in the shape a user makes it: press the strip's bottom border,
+// move down, release. The height has to follow the pointer (the handle IS
+// the last row, so the row under the mouse is the height being asked
+// for), the editor below has to give up exactly those rows, and the drag
+// has to end on the release rather than latching.
+func TestFindAllResize_BottomRuleDragsTheHeight(t *testing.T) {
+	a, _ := seedFindAllLongApp(t)
+	m := openFindAllT(t, a, "count")
+
+	mx, _, _, before := m.rect(a)
+	_, _, _, editorBefore := a.editorRect()
+	sy := a.findAllSplitterY()
+	if sy != before { // rect starts at y=1, so the last row IS the height
+		t.Fatalf("splitter row = %d, want %d (the strip's bottom border)", sy, before)
+	}
+
+	// Press the rule, then drag it three rows further down.
+	m.handleMouse(a, mx+10, sy, tcell.Button1)
+	if a.dragMode != findAllDragMode {
+		t.Fatalf("press on the rule started drag %q, want %q", a.dragMode, findAllDragMode)
+	}
+	m.handleMouse(a, mx+10, sy+3, tcell.Button1)
+
+	_, _, _, after := m.rect(a)
+	if after != before+3 {
+		t.Fatalf("height = %d after dragging down 3, want %d", after, before+3)
+	}
+	if _, _, _, eh := a.editorRect(); eh != editorBefore-3 {
+		t.Errorf("editor height = %d, want %d — the strip must take its rows FROM the editor", eh, editorBefore-3)
+	}
+	if got := a.findAllSplitterY(); got != after {
+		t.Errorf("handle row = %d after the drag, want %d (it follows the bottom edge)", got, after)
+	}
+
+	// Release ends the gesture — a latched drag would resize on every
+	// later motion over the panel.
+	m.handleMouse(a, mx+10, sy+3, tcell.ButtonNone)
+	if a.dragMode != "" {
+		t.Errorf("drag mode = %q after release, want cleared", a.dragMode)
+	}
+}
+
+// TestFindAllResize_SurvivesReopening pins that the dragged size is a
+// property of the STRIP, not of one popup: the peek is transient, the
+// height the user chose for it is not.
+func TestFindAllResize_SurvivesReopening(t *testing.T) {
+	a, _ := seedFindAllLongApp(t)
+	m := openFindAllT(t, a, "count")
+	mx, _, _, before := m.rect(a)
+
+	sy := a.findAllSplitterY()
+	m.handleMouse(a, mx+10, sy, tcell.Button1)
+	m.handleMouse(a, mx+10, sy+4, tcell.Button1)
+	m.handleMouse(a, mx+10, sy+4, tcell.ButtonNone)
+	m.accept(a)
+
+	m2 := openFindAllT(t, a, "count")
+	if _, _, _, h := m2.rect(a); h != before+4 {
+		t.Errorf("reopened at height %d, want the dragged %d", h, before+4)
+	}
+}
+
+// TestFindAllResize_ClampsBothEnds pins the two refusals. A drag past the
+// editor's reserve must STORE the clamped size, not the pointer's — a
+// banked overshoot is dead space the user has to drag back up through
+// before the seam appears to move again — and the strip may never be
+// squeezed below a single result row.
+func TestFindAllResize_ClampsBothEnds(t *testing.T) {
+	a, _ := seedFindAllLongApp(t)
+	m := openFindAllT(t, a, "count")
+
+	a.dragFindAllTo(a.height * 2) // far below the window
+	if _, _, _, eh := a.editorRect(); eh < findAllMinEditorRows {
+		t.Errorf("editor left with %d rows, want at least %d", eh, findAllMinEditorRows)
+	}
+	maxRows := a.editorBandRows() - findAllMinEditorRows - findAllChromeRows
+	if a.findAllRows != maxRows {
+		t.Errorf("stored rows = %d after an overshoot, want the clamped %d", a.findAllRows, maxRows)
+	}
+
+	a.dragFindAllTo(0) // above the strip's own top
+	if a.findAllRows != 1 {
+		t.Errorf("stored rows = %d after dragging up past the floor, want 1", a.findAllRows)
+	}
+	if _, _, _, h := m.rect(a); h < findAllMinHeight {
+		t.Errorf("height = %d, want at least the floor %d", h, findAllMinHeight)
+	}
+}
+
+// TestFindAllResize_RightDockHasNoHandle pins the one place the seam
+// does not exist: docked right the strip is full height by design, and
+// its bottom edge is the band's own — draggable by nobody.
+func TestFindAllResize_RightDockHasNoHandle(t *testing.T) {
+	a, _ := seedFindAllLongApp(t)
+	m := openFindAllT(t, a, "count")
+	a.findAllDockRight = true
+
+	if got := a.findAllSplitterY(); got != -1 {
+		t.Errorf("right-docked handle row = %d, want -1 (no seam)", got)
+	}
+	_, _, _, before := m.rect(a)
+	a.dragFindAllTo(5)
+	if _, _, _, after := m.rect(a); after != before {
+		t.Errorf("a right-docked column resized to %d from %d", after, before)
+	}
+}
+
+// TestFindAllResize_GripMarksTheRule pins the affordance: without a
+// visible grip the bottom border is just a border, and a seam nobody can
+// see is one nobody finds. Weight, not hue alone — the glyph differs
+// from the rule's own.
+func TestFindAllResize_GripMarksTheRule(t *testing.T) {
+	a, _ := seedFindAllLongApp(t)
+	m := openFindAllT(t, a, "count")
+	m.draw(a)
+
+	mx, _, mw, _ := m.rect(a)
+	sy := a.findAllSplitterY()
+	found := 0
+	for x := mx; x < mx+mw; x++ {
+		if ch, _, _, _ := a.screen.GetContent(x, sy); ch == findAllGripGlyph {
+			found++
+		}
+	}
+	if found != findAllResizeGrip {
+		t.Errorf("grip cells on the bottom rule = %d, want %d", found, findAllResizeGrip)
+	}
+}

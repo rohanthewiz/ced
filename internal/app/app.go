@@ -1009,6 +1009,22 @@ type App struct {
 	// ◨ button, its `d` key, and the ≡ View toggle. See findall.go.
 	findAllDockRight bool
 
+	// findAllRows is how many RESULT rows the top-docked Find-all strip
+	// was dragged to, or 0 for "auto" (findAllVisibleRows). It lives on
+	// App beside the dock for the dock's reason — the popup is transient
+	// and the size the user chose isn't — and it is stated in rows
+	// rather than in cells so the stored number keeps meaning the same
+	// thing if the chrome ever gains or loses a row. Zero means auto,
+	// the tool layer's convention: a strip nobody has dragged re-derives
+	// instead of restoring a number chosen for another window.
+	//
+	// Unlike the dock, it is NOT persisted. The dock says which SHAPE of
+	// answer the user wants and is worth carrying between sessions; a
+	// height is a moment-to-moment trade against the code underneath,
+	// re-made every time the strip is opened over a different file. See
+	// findall.go's resize section.
+	findAllRows int
+
 	// sidebarWidth is the live width of the file-explorer block (file tree
 	// + 1-cell splitter on its right edge), in screen cells. The user can
 	// drag the splitter to change it within [minSidebarWidth, width-minEditorAfterDrag].
@@ -3243,6 +3259,15 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// Problems panel resize drag — same gesture, same strip.
 	if leftDown && a.dragMode == "problems" {
 		a.dragProblemsPanelTo(y)
+		return
+	}
+
+	// Find-all strip resize drag: the bottom rule follows the mouse row.
+	// This branch serves the PINNED panel only — unpinned, the list owns
+	// the modal slot and the absorb above has already answered, which is
+	// why findAllModal.handleMouse carries the same two lines.
+	if leftDown && a.dragMode == findAllDragMode {
+		a.dragFindAllTo(y)
 		return
 	}
 

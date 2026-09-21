@@ -105,7 +105,7 @@ plus the LSP work done in the seeding session itself
   those servers never switch hints on. Contingent on N-013 showing it
   matters.
 
-- **N-026** · raised `(this session — stamp the stem at /sess-save)` · value low
+- **N-026** · raised `2026-0921-0932-next-list-run` · value low
   cats-side: add `"KeyA"` to `CMD_TO_PANE` (`cmd/catway/web/js/20-keys.js`)
   so ⌘A reaches a ced pane in browser-cats. ced binds it as of N-007 and
   it is live in kitty / Ghostty / WezTerm; in browser-cats the browser
@@ -155,24 +155,24 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-09-21 — **N-004** `release.yml`'s auto-bump now rewrites
+- closed 2026-09-21, `2026-0921-0932-next-list-run` — **N-004** `release.yml`'s auto-bump now rewrites
   `cats-plugin.toml`'s version in the same commit, and
   `TestVersion_MatchesCatsManifest` catches a manual bump that forgot it.
   The workflow edit is UNRUN — first exercised by N-001's release.
-- closed 2026-09-21 — **N-002** `toolLayoutSummary()` has a reader: the
+- closed 2026-09-21, `2026-0921-0932-next-list-run` — **N-002** `toolLayoutSummary()` has a reader: the
   ≡ "Reset tool window layout" flash now carries it, since most of what
   a reset changes is off screen. Kept rather than deleted.
-- closed 2026-09-21 — **N-007** ⌘A selects all (`metaAccels`, pinned by
+- closed 2026-09-21, `2026-0921-0932-next-list-run` — **N-007** ⌘A selects all (`metaAccels`, pinned by
   `TestMetaAccelSelectsAll`; the never-the-only-path test passes via the
   ≡ Edit row). Not live in browser-cats until N-026.
-- closed 2026-09-21 — **N-015** `lspLookPath` pinned at "never found" in
+- closed 2026-09-21, `2026-0921-0932-next-list-run` — **N-015** `lspLookPath` pinned at "never found" in
   `newTestApp`; the two real-gopls tests opt back in with
   `useRealLSPBinaries` (confirmed they still RUN, not skip).
-- closed 2026-09-21 — **N-011** gutter click opens the diagnostic tooltip
+- closed 2026-09-21, `2026-0921-0932-next-list-run` — **N-011** gutter click opens the diagnostic tooltip
   (`diagGutterPress`, diagtip.go). Diagnosed lines only; a second click
   closes it; no caret move, no drag. Like N-010, only exercised on the
   simulation screen — `run-ced` cannot send mouse events.
-- closed 2026-09-21 — **N-014** "Restart language server" ≡ Code row.
+- closed 2026-09-21, `2026-0921-0932-next-list-run` — **N-014** "Restart language server" ≡ Code row.
   `internal/app/lsprestart.go`; acts on the active file's server, never
   dimmed, names the missing binaries. Needed a slot generation
   (`lspServer.gen`) so the replaced process's late exit event cannot kill

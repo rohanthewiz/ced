@@ -35,17 +35,6 @@ plus the LSP work done in the seeding session itself
 
 ## Open
 
-- **N-001** · raised `2026-0910-2016-tool-windows` · value medium
-  **Releases stop at v0.2.0.** Tags `v0.3.0` and `v0.3.2` exist but neither
-  has a GitHub Release or artifacts, so `install.sh` still installs 0.2.0.
-  `origin/release` is at `0409317 Release ced 0.2.0`, 184 commits behind
-  `main`. The fork suppresses push triggers: fast-forward `release`, then
-  `gh workflow run release.yml --repo rohanthewiz/ced --ref release`. It
-  will be the first run without the `brews:` step. (Originally "v0.3.0 has
-  no artifacts"; the `Formula/ced.rb` half died with the Homebrew removal,
-  and the release-branch note from `2026-0914-1114-homebrew-removed` is
-  folded in here.)
-
 - **N-003** · raised `2026-0910-2016-tool-windows` · value low
   **The README goes stale and no test catches it.** Known spots for
   tool-window changes: `### Tool windows`, the Features list, the chat
@@ -73,7 +62,7 @@ plus the LSP work done in the seeding session itself
 - **N-009** · raised `2026-0914-1114-homebrew-removed` · value low
   `.claude/commands/summary-of-downloads.md` says download counts include
   Homebrew installs. True up to v0.3.0, false for anything released after
-  the tap was removed; tweak when N-001 ships a release.
+  the tap was removed; tweak if N-001 (now Roadmap) ever ships a release.
 
 - **N-010** · raised `2026-0921-0801-lsp-diagnostic-messages` · value medium
   Try the diagnostic pointer tooltip in a REAL terminal (plain tmux, cats,
@@ -116,6 +105,18 @@ plus the LSP work done in the seeding session itself
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.
+
+- **N-001** · raised `2026-0910-2016-tool-windows` · value low
+  **The GitHub Release pipeline is parked.** Moved from Open on
+  2026-09-21: the owner does not need the CI/CD flow for now; releases
+  are a hand bump of `version.go` + `cats-plugin.toml` and a pushed tag,
+  which is all the cats plugin needs. What stays unshipped: `origin/release`
+  is still at `0409317 Release ced 0.2.0`, so `install.sh` and the GitHub
+  Releases page still say 0.2.0, and tags `v0.3.0`–`v0.3.3` have no
+  artifacts. If revived: the fork suppresses push triggers, so fast-forward
+  `release` and `gh workflow run release.yml --repo rohanthewiz/ced --ref
+  release`; bump past the latest tag first. The `cats-plugin.toml` sed in
+  `release.yml` (N-004) is still unrun.
 
 - **N-017** · raised `2026-0909-1845-tree-multi-select` · value low
   Tree marks: a cross-folder "select all matching" (tick every

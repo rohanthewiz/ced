@@ -1298,6 +1298,11 @@ type App struct {
 	// zero value, so App literals in tests are unchanged.
 	menuFoldDefault bool
 
+	// lastFrameAt is when Run last painted (draw + Show). deferFrame
+	// reads it to cap how long a wheel/motion burst may leave the screen
+	// unpainted (inputburst.go). Zero until Run's first frame.
+	lastFrameAt time.Time
+
 	// modal is the active secondary overlay (prompt, confirm,
 	// dirty-close, form, tree context menu, file finder) or nil when
 	// none is up. Exactly one can be open at a time — openModal
@@ -1931,6 +1936,7 @@ func (a *App) Run() error {
 	a.width, a.height = a.screen.Size()
 	a.draw()
 	a.screen.Show()
+	a.lastFrameAt = time.Now()
 
 	for !a.quit {
 		ev := a.screen.PollEvent()
@@ -1938,8 +1944,14 @@ func (a *App) Run() error {
 			break
 		}
 		a.handleEvent(ev)
+		// A wheel/motion flood is painted once per burst, not once per
+		// event — see inputburst.go for why and for what keeps it safe.
+		if a.deferFrame(ev, time.Now()) {
+			continue
+		}
 		a.draw()
 		a.screen.Show()
+		a.lastFrameAt = time.Now()
 	}
 	return nil
 }

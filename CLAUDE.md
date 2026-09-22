@@ -86,6 +86,7 @@ internal/app/toolheader.go    A dock's header rule, title and ✕, for a panel w
 internal/app/toollayout.go    The per-project layout: encode, restore, save (state.json)
 internal/app/toolmenu.go      ≡ Tool windows: the tool picker, the edge picker, reset
 internal/app/app.go           Event loop, layout, menu modal, splitter, all rendering
+internal/app/inputburst.go    One frame per wheel/motion BURST, not per event
 internal/editor/buffer.go     Position + Buffer ([]string lines), edit primitives
 internal/editor/tab.go        Tab: path, buffer, cursor, anchor, scroll, dirty state
 internal/editor/undo.go       Snapshot stack: coalescing, the byte budget, revert
@@ -457,6 +458,18 @@ one. Two halves, one question. House rules:
 `tab.clampScroll(viewH)` allows the last line to scroll roughly to the
 middle (`overscroll = max(viewH/2, 3)`). This is intentional — without
 it, you can't comfortably read the bottom of a file.
+
+### One frame per input burst (app/inputburst.go)
+Run paints after every event, and a frame costs ~1ms. A free-spinning
+wheel (MX Master) sends notches far faster than that and keeps sending
+them after the view clamps at end of file, so a few thousand queued
+seconds of painting — the editor froze at the bottom of CLAUDE.md and
+thawed by itself. After a WHEEL or BUTTONLESS-MOTION event, `deferFrame`
+skips the frame while more input is already queued, capped at
+`burstFrameMax` (~30fps) so a sustained spin still scrolls visibly. It
+defers ONLY with an event pending, so Run never blocks over an unpainted
+screen; keys, presses, drags and timers still paint one by one. Don't put
+the unconditional per-event draw back.
 
 ### Custom tcell events for goroutine → main-loop messaging
 Background work (auto-scroll during drag, 10s tree refresh) posts custom

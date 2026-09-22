@@ -18,10 +18,9 @@
 # (internal/cats/hooks.go): that label is how cats' pane.open_file finds the
 # editor pane and how a blocked question reaches a phone. cats lists a pane
 # whose agent label is one of its configured editors (`editor.agents`,
-# ["ced"] by default) under the AGENTS section's plugin rows, beside
-# cats-todo, rather than among the coding agents taking turns. This manifest
-# is what gives that row its plugin identity (CATS_PLUGIN_ID) and puts
-# "ced" in the ⌘K palette.
+# ["ced"] by default) in the PLUGINS section, beside cats-todo, not among
+# the coding agents taking turns in AGENTS. This manifest is what gives that
+# row its plugin identity (CATS_PLUGIN_ID) and puts "ced" in the ⌘K palette.
 #
 # Being a plugin and being a cats-native client stay orthogonal (the gonotes
 # manifest's point): everything in internal/cats works identically whether
@@ -38,6 +37,11 @@ description = "A mouse-first terminal code editor: file tree, tabs, syntax highl
 # grsh (the embedded terminal panel) is POSIX-only, the same reason
 # .goreleaser.yml ships linux/darwin alone.
 platforms = ["linux", "macos"]
+# What kind of tool this is. cats already treats ced as an editor through
+# `editor.agents`; declaring it here means an editor label the user never
+# listed still keeps ced out of AGENTS and out of cats-todo's drop targets.
+# A cats older than the key ignores it.
+type = "editor"
 
 # Expose the built binary on PATH, as cats-todo and gonotes do. The host
 # symlinks it into the cats bin dir (~/.cats/bin/ced -> <plugins-root>/<id>/

@@ -109,13 +109,32 @@ func (a *App) hostIdentAfterEvent() {
 	title := ""
 	switch {
 	case hasTab:
-		title = hostIdentTitle(a.activeTabPtr().DisplayName(), dirty)
+		title = hostIdentTitle(hostIdentTabName(a.activeTabPtr().Path), dirty)
 	default:
 		// No tab open: name the workspace, so a freshly launched ced on
 		// a folder still labels its pane usefully.
 		title = hostIdentTitle(filepath.Base(a.rootDir), false)
 	}
 	_ = a.hostIdentWrite(osc2TitleSeq(title))
+}
+
+// hostIdentFilePrefix marks a title that names a FILE. The same OSC 2
+// slot also carries the workspace folder's name when no tab is open, and
+// a host labelling panes from it (cats' tab bar, tmux's pane title)
+// cannot otherwise tell "main.go" the file from a directory that happens
+// to share the spelling — or tell ced's file titles apart from the bare
+// names other programs write there.
+const hostIdentFilePrefix = "file:"
+
+// hostIdentTabName is the name part of a tab's title. A tab backed by a
+// file gets hostIdentFilePrefix on its base name; an untitled buffer has
+// no filename to vouch for, so it keeps the plain "untitled" rather than
+// claiming to be a file called that.
+func hostIdentTabName(path string) string {
+	if path == "" {
+		return "untitled"
+	}
+	return hostIdentFilePrefix + filepath.Base(path)
 }
 
 // hostIdentTitle builds the window title: the ced dirty dot, the name,

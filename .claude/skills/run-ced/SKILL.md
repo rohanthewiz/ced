@@ -76,7 +76,7 @@ the repo.
 Steps are `;`-separated; each is `[delayMs]@[payload]` (default 500ms),
 where the delay is how long to wait **before** sending. Payload is
 literal text plus `{esc} {enter} {tab} {up} {down} {left} {right} {home}
-{end} {pgup} {pgdn} {bs} {space} {lf}`, with `{down x12}` to repeat.
+{end} {pgup} {pgdn} {bs} {space} {lf} {semi}`, with `{down x12}` to repeat.
 
 `{lf}` is a bare line feed where `{enter}` is a carriage return — two
 different bytes, and terminals disagree about which one a pasted newline
@@ -85,6 +85,20 @@ becomes. That's what lets a script drive a real bracketed paste:
 ```sh
 -script '1800@;300@{esc}p;500@notes;700@{enter};700@{esc}[200~one{lf}two{esc}[201~;900@SNAP;400@{esc}q'
 ```
+
+`{semi}` is a literal `;` — a bare one always ends the step. It exists
+for the mouse: ced reads SGR mouse reports, which are full of semicolons.
+Coordinates are 1-based (column, row); `M` is a press, `m` the release;
+button `0` is left, `2` right, `64`/`65` wheel up/down:
+
+```sh
+# click at column 60, row 9, then wheel down twice over column 80, row 30
+C='{esc}[<0{semi}60{semi}9'; W='{esc}[<65{semi}80{semi}30M'
+-script "1800@;…;400@${C}M;50@${C}m;400@$W;300@$W;600@SNAP;400@{esc}q"
+```
+
+Only the LAST `SNAP` in a script is written out — to compare a before
+and an after, run the script twice with the `SNAP` moved.
 
 The default script opens `main.go` through the fuzzy finder and scrolls
 into it — tree, tab bar, line numbers, syntax colors, and status bar all

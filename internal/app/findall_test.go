@@ -344,6 +344,40 @@ func TestFindAll_WheelScrollsListWithoutMovingCursor(t *testing.T) {
 	}
 }
 
+// TestFindAll_WheelOverEditorScrollsTheCode is the regression for "scroll
+// breaks once a selection is made": picking a row previews it in the code
+// under the strip, and wheeling over that code to read around the hit
+// must scroll the CODE. The unpinned list owns the modal slot, so it used
+// to swallow the wheel everywhere and move itself instead.
+func TestFindAll_WheelOverEditorScrollsTheCode(t *testing.T) {
+	a, tab := seedFindAllLongApp(t)
+	m := openFindAllT(t, a, "count")
+	a.draw()
+	mx, my, _, _ := m.rect(a)
+	m.handleMouse(a, mx+10, my+6, tcell.Button1) // pick a row
+	a.draw()
+	scroll, list := tab.ScrollY, m.scroll
+
+	ex, ey, ew, eh := a.editorRect()
+	a.handleMouse(tcell.NewEventMouse(ex+ew/2, ey+eh/2, tcell.WheelDown, tcell.ModNone))
+
+	if tab.ScrollY == scroll {
+		t.Fatal("a wheel over the editor must scroll the code")
+	}
+	if m.scroll != list {
+		t.Fatalf("a wheel over the editor moved the list from %d to %d", list, m.scroll)
+	}
+	if a.modal != m {
+		t.Fatalf("the wheel must not dismiss the list, modal = %T", a.modal)
+	}
+
+	// Over the list itself the wheel still belongs to the list.
+	a.handleMouse(tcell.NewEventMouse(mx+10, my+6, tcell.WheelDown, tcell.ModNone))
+	if m.scroll == list {
+		t.Fatal("a wheel over the list must still scroll the list")
+	}
+}
+
 // TestFindAll_ScrollFollowsSelection covers the other direction: moving
 // the highlight past the visible window pulls the window along.
 func TestFindAll_ScrollFollowsSelection(t *testing.T) {

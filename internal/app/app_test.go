@@ -3064,3 +3064,30 @@ func TestHandleMouse_WheelVerticalSkipsPanels(t *testing.T) {
 		t.Fatalf("a wheel inside the editor should scroll vertically")
 	}
 }
+
+// TestWheelOutsideModal_ShiftRotatesToHorizontal pins that a wheel a modal
+// hands back keeps the router's Shift+wheel convention: the modal's own
+// handler never sees the modifiers, so the helper reads lastShiftAt, which
+// handleMouse stamps before modal dispatch.
+func TestWheelOutsideModal_ShiftRotatesToHorizontal(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "long.txt")
+	if err := os.WriteFile(target, []byte(strings.Repeat("x", 200)+"\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	tab := a.activeTabPtr()
+	ex, ey, ew, eh := a.editorRect()
+	x, y := ex+ew/2, ey+eh/2
+
+	a.wheelOutsideModal(x, y, tcell.WheelDown)
+	if tab.ScrollX != 0 {
+		t.Fatalf("a plain wheel must not scroll sideways, ScrollX = %d", tab.ScrollX)
+	}
+	a.lastShiftAt = time.Now()
+	a.wheelOutsideModal(x, y, tcell.WheelDown)
+	if tab.ScrollX == 0 {
+		t.Fatal("Shift+wheel must scroll the editor horizontally")
+	}
+}

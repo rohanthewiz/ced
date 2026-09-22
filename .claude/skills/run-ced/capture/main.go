@@ -155,7 +155,7 @@ An empty payload is a pure wait. A payload is literal text to type,
 except for these tokens:
 
     SNAP            capture the screen at this point (see below)
-    {esc} {enter} {tab} {bs} {space} {lf}
+    {esc} {enter} {tab} {bs} {space} {lf} {semi}
     {up} {down} {left} {right} {home} {end} {pgup} {pgdn}
     {esc}x          ced's leader form — e.g. {esc}p is "find file",
                     {esc}q quit, {esc}t sidebar, {esc}` + "`" + ` terminal,
@@ -167,6 +167,12 @@ two are different bytes on the wire and terminals disagree about which
 one a pasted newline becomes, so a bracketed paste is scripted as
   {esc}[200~line one{lf}line two{esc}[201~
 and swapping {lf} for {enter} photographs the other host's flavor.
+
+{semi} is a literal ";". A bare ";" always ends the step, and the mouse
+reports ced reads are SGR sequences full of them, so a click at column
+60, row 9 (1-based) is scripted as a press and a release:
+  {esc}[<0{semi}60{semi}9M;50@{esc}[<0{semi}60{semi}9m
+and a wheel-down there as {esc}[<65{semi}60{semi}9M (64 is wheel-up).
 
 SNAP is the one you cannot skip. Quitting restores and clears the
 terminal, so a capture taken after {esc}q is a blank screen. Put SNAP on
@@ -237,7 +243,7 @@ func parseScript(s string) ([]step, error) {
 
 // namedKeys maps the {token} names to the bytes a terminal sends.
 var namedKeys = map[string]string{
-	"esc": "\x1b", "enter": "\r", "tab": "\t", "bs": "\x7f", "space": " ", "lf": "\n",
+	"esc": "\x1b", "enter": "\r", "tab": "\t", "bs": "\x7f", "space": " ", "lf": "\n", "semi": ";",
 	"up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D",
 	"home": "\x1b[H", "end": "\x1b[F", "pgup": "\x1b[5~", "pgdn": "\x1b[6~",
 }

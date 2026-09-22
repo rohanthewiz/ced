@@ -1237,18 +1237,31 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		}
 		return
 	}
-	if btn&tcell.WheelUp != 0 {
-		m.scrollList(a, -wheelLines)
-		return
-	}
-	if btn&tcell.WheelDown != 0 {
-		m.scrollList(a, wheelLines)
+	mx, my, mw, mh := m.rect(a)
+	// The wheel scrolls whatever is UNDER THE POINTER, not always the
+	// list. Unpinned, this panel owns the modal slot and so receives
+	// every wheel event in the window; answering all of them with the
+	// list meant that once a row was picked — the preview having just
+	// moved the code into view under the strip — wheeling over that code
+	// to read around the hit scrolled the list instead, and the code
+	// never moved. Outside the frame the event goes to the router's own
+	// wheel targets, which is exactly what a PINNED list already gets.
+	if btn&(tcell.WheelUp|tcell.WheelDown|tcell.WheelLeft|tcell.WheelRight) != 0 {
+		if x >= mx && x < mx+mw && y >= my && y < my+mh {
+			switch {
+			case btn&tcell.WheelUp != 0:
+				m.scrollList(a, -wheelLines)
+			case btn&tcell.WheelDown != 0:
+				m.scrollList(a, wheelLines)
+			}
+			return
+		}
+		a.wheelOutsideModal(x, y, btn)
 		return
 	}
 	if btn&tcell.Button1 == 0 {
 		return
 	}
-	mx, my, mw, mh := m.rect(a)
 	if x < mx || x >= mx+mw || y < my || y >= my+mh {
 		// Pinned, the panel is furniture: an outside click belongs to
 		// whatever it landed on (the router only sends the panel its

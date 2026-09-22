@@ -3457,6 +3457,26 @@ func (a *App) handleMenuMouse(x, y int, btn tcell.ButtonMask) {
 	}
 }
 
+// wheelOutsideModal routes a wheel event a modal chose not to keep to the
+// same targets handleMouse's own wheel branch uses, for a modal whose
+// panel shares the screen with live content (the Find-all strip). The
+// modal's handler is not handed the event's modifiers, so Shift is read
+// from lastShiftAt — which handleMouse stamps before modal dispatch, so
+// it covers this event as well as Zellij's split modifier report.
+func (a *App) wheelOutsideModal(x, y int, btn tcell.ButtonMask) {
+	shift := !a.lastShiftAt.IsZero() && time.Since(a.lastShiftAt) < modifierStickyWindow
+	switch {
+	case btn&tcell.WheelUp != 0 && shift, btn&tcell.WheelLeft != 0:
+		a.scrollAtH(x, y, -wheelCols)
+	case btn&tcell.WheelDown != 0 && shift, btn&tcell.WheelRight != 0:
+		a.scrollAtH(x, y, wheelCols)
+	case btn&tcell.WheelUp != 0:
+		a.scrollAt(x, y, -wheelLines)
+	case btn&tcell.WheelDown != 0:
+		a.scrollAt(x, y, wheelLines)
+	}
+}
+
 // scrollAt scrolls whichever panel the (x, y) cursor is over.
 func (a *App) scrollAt(x, y, delta int) {
 	// A rect test, not a column one: the file tree is a tool window now

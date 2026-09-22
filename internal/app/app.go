@@ -902,11 +902,15 @@ func (a *App) menuLayout() (items []menuItemDef, dividers []int, modalHeight int
 	return items, dividers, modalHeight
 }
 
-// sectionCollapsed reports whether the named menu section is folded.
-// Reads a nil map safely, so the default (every section expanded) needs
-// no initialization.
+// sectionCollapsed reports whether the named menu section is folded. A
+// section with no entry of its own takes menuFoldDefault, so one that
+// appears after the last bulk fold matches its siblings. Reads a nil map
+// safely.
 func (a *App) sectionCollapsed(title string) bool {
-	return a.menuCollapsed[title]
+	if v, ok := a.menuCollapsed[title]; ok {
+		return v
+	}
+	return a.menuFoldDefault
 }
 
 // toggleMenuSection folds or unfolds the named section in place — the
@@ -916,7 +920,10 @@ func (a *App) toggleMenuSection(title string) {
 	if a.menuCollapsed == nil {
 		a.menuCollapsed = map[string]bool{}
 	}
-	a.menuCollapsed[title] = !a.menuCollapsed[title]
+	// Toggle from the EFFECTIVE state: reading the map alone would take
+	// an unseen section's missing entry as "expanded" and fold it again
+	// on its first click, when it is already drawn folded.
+	a.menuCollapsed[title] = !a.sectionCollapsed(title)
 }
 
 // menuSectionParent returns the parent section a section folds inside,
@@ -969,6 +976,8 @@ func (a *App) setAllMenuSections(collapsed bool) {
 	for _, title := range a.menuSectionTitles() {
 		a.menuCollapsed[title] = collapsed
 	}
+	// Sections that show up later follow the same bulk choice.
+	a.menuFoldDefault = collapsed
 }
 
 // menuToggleAllSections is the "Expand all / Collapse all" button. Like a
@@ -1278,6 +1287,16 @@ type App struct {
 	// session. nil until the first fold — sectionCollapsed reads it
 	// nil-safely, so every section starts expanded.
 	menuCollapsed map[string]bool
+	// menuFoldDefault is the fold state of a section menuCollapsed has
+	// no entry for — one that did not exist when the last bulk fold
+	// (the startup default, Expand/Collapse all) ran. Sections are not
+	// all known at startup: the Cats group is spliced in only after the
+	// async cats probe lands, and plugin commands after a reload. With
+	// no default those came up EXPANDED under a menu that had just been
+	// folded, which also flipped the toggle to "Collapse all" on a menu
+	// that looked fully collapsed. false (every section expanded) is the
+	// zero value, so App literals in tests are unchanged.
+	menuFoldDefault bool
 
 	// modal is the active secondary overlay (prompt, confirm,
 	// dirty-close, form, tree context menu, file finder) or nil when

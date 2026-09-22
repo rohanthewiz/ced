@@ -3706,7 +3706,11 @@ list. On first run `New` calls `seedMenuFoldDefault`, which contracts
 every section (via `setAllMenuSections`) UNLESS `menuCollapsed` is
 already populated — so the menu opens as a compact index of headers, not
 a long scroll, and the palette/expand-all zone keeps everything one click
-away. Tests build the App struct directly (not through `New`), so they
+away. A section that appears AFTER that (Cats, spliced
+in once the async cats probe lands; plugin commands after a reload) has
+no map entry, so `sectionCollapsed` answers `menuFoldDefault` — the last
+bulk choice — and it matches its siblings instead of arriving expanded.
+`toggleMenuSection` flips the EFFECTIVE state for the same reason. Tests build the App struct directly (not through `New`), so they
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects

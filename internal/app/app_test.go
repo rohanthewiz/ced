@@ -2201,6 +2201,46 @@ func TestSeedMenuFoldDefault_RespectsExistingState(t *testing.T) {
 	}
 }
 
+// TestSeedMenuFoldDefault_LateSectionStartsFolded pins sections that do
+// not exist yet when the startup fold runs. Inside cats the Cats group is
+// spliced in only after the async probe lands, and it used to come up
+// EXPANDED under an otherwise folded menu — flipping the toggle to
+// "Collapse all" on a menu that looked fully collapsed. Custom actions
+// added after seeding stand in for it here: same splice, same timing.
+func TestSeedMenuFoldDefault_LateSectionStartsFolded(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.customActions = nil
+	a.seedMenuFoldDefault()
+	a.customActions = []customactions.Action{{Label: "Deploy", Command: "echo d"}}
+
+	if !a.sectionCollapsed("Custom") {
+		t.Fatal("a section spliced in after the startup fold should start folded")
+	}
+	if a.anyMenuSectionExpanded() {
+		t.Fatal("the late section must not flip the toggle to Collapse all")
+	}
+	// One click opens it — toggling from the drawn state, not from the
+	// missing map entry (which would read as expanded and fold it again).
+	a.toggleMenuSection("Custom")
+	if a.sectionCollapsed("Custom") {
+		t.Fatal("the first click on a late section should expand it")
+	}
+}
+
+// TestMenuFoldDefault_FollowsBulkToggle verifies a late section follows
+// the LAST bulk choice rather than always folding: after Expand all, a
+// section that appears next should arrive open like everything else.
+func TestMenuFoldDefault_FollowsBulkToggle(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.customActions = nil
+	a.seedMenuFoldDefault()
+	a.setAllMenuSections(false) // Expand all
+	a.customActions = []customactions.Action{{Label: "Deploy", Command: "echo d"}}
+	if a.sectionCollapsed("Custom") {
+		t.Fatal("after Expand all, a new section should start expanded")
+	}
+}
+
 // TestMenuToggleAllSections walks the expand/collapse-all button: from a
 // fully-folded default one press expands everything; a second press folds
 // it all back. The label tracks what the next press will do.

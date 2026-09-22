@@ -8,7 +8,7 @@
 
 // leader.go defines the editor's Esc-leader hotkey table. Esc-Esc still opens
 // the action menu (handled in handleKey); the bindings here handle the
-// "Esc, then one rune within doubleEscMs" sequences for common
+// "Esc, then one rune within leaderWindow" sequences for common
 // actions. We deliberately avoid Ctrl-key shortcuts because they fight
 // tmux/zellij prefixes and the terminal's own bindings — Esc is the only
 // modifier we trust over SSH.

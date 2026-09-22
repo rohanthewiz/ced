@@ -52,8 +52,20 @@ const (
 	statusFlashFor      = 3 * time.Second
 	doubleClickMs       = 500 * time.Millisecond
 	doubleEscMs         = 500 * time.Millisecond
-	wheelLines          = 3
-	wheelCols           = 6 // horizontal step per WheelLeft/WheelRight event
+	// leaderWindow is how long a lone Esc stays armed waiting for its
+	// leader rune. Deliberately longer than doubleEscMs: that one times
+	// a reflexive double-TAP, while "Esc, then a letter" moves the hand
+	// — and a shifted leader (Esc P, Esc F, Esc %) moves it to Shift
+	// first. Measured in the cats mac app: Esc→p took 432ms and Esc→P
+	// 1125ms, so a 500ms window made every shifted leader type its
+	// letter into the buffer instead. The cost of the longer window is
+	// that a bound letter typed within it after a DISMISSING Esc fires
+	// the leader rather than inserting — accepted by the owner over
+	// shifted leaders being unreachable at normal speed. Chained
+	// repeats ("Esc z z z") keep doubleEscMs; see handleKey.
+	leaderWindow = 1200 * time.Millisecond
+	wheelLines   = 3
+	wheelCols    = 6 // horizontal step per WheelLeft/WheelRight event
 
 	// modifierStickyWindow is how long a previously-seen Shift modifier
 	// state is allowed to persist forward onto the next wheel event.
@@ -2681,7 +2693,7 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		(ev.Rune() == 'm' || ev.Rune() == 'j') {
 		ev = tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModAlt)
 	}
-	// Esc-leader hotkey: if Esc was pressed within doubleEscMs and this
+	// Esc-leader hotkey: if Esc was pressed within leaderWindow and this
 	// key is bound in the leader table, fire the action and consume the
 	// keystroke. Unbound keys fall through to normal handling so a stray
 	// Esc doesn't swallow the next character the user types. A repeatable
@@ -2689,10 +2701,20 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// times — without this, the extra z's would type into the buffer);
 	// chain mode admits only repeatable bindings so quick typing after a
 	// leader can't misfire an unrelated action.
-	// A visible which-key overlay holds the window open past doubleEscMs:
-	// once the editor has shown the table, "I'm reading" must not time
-	// out mid-read.
-	if (!a.lastEscape.IsZero() && time.Since(a.lastEscape) < doubleEscMs) || a.whichKey.open {
+	// A visible which-key overlay holds the window open past it: once
+	// the editor has shown the table, "I'm reading" must not time out
+	// mid-read.
+	//
+	// A CHAINED window stays at doubleEscMs. Chain mode is re-armed by
+	// the repeatable action itself, not by an Esc the user pressed, so
+	// it is a rapid-succession gesture by definition — and stretching it
+	// would turn "Esc z" followed a second later by a word starting with
+	// z into three undos.
+	window := leaderWindow
+	if a.leaderChained {
+		window = doubleEscMs
+	}
+	if (!a.lastEscape.IsZero() && time.Since(a.lastEscape) < window) || a.whichKey.open {
 		if ev.Key() == tcell.KeyRune {
 			if b := leaderBindingFor(ev.Rune()); b != nil && (!a.leaderChained || b.repeat) {
 				a.fireLeader(b)

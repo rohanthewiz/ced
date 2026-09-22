@@ -488,7 +488,7 @@ func TestHandleKey_LeaderUnboundFallsThrough(t *testing.T) {
 }
 
 // TestHandleKey_LeaderTimesOut verifies the leader window expires:
-// after doubleEscMs has passed since the last Esc, a bound letter must
+// after leaderWindow has passed since the last Esc, a bound letter must
 // reach the editor as a normal keystroke instead of firing the action.
 func TestHandleKey_LeaderTimesOut(t *testing.T) {
 	dir := t.TempDir()
@@ -502,11 +502,63 @@ func TestHandleKey_LeaderTimesOut(t *testing.T) {
 	a.handleKey(keyEv(tcell.KeyEsc, 0))
 	// Backdate the Esc timestamp past the leader window so the next 's'
 	// is treated as a plain keystroke rather than Save.
-	a.lastEscape = time.Now().Add(-2 * doubleEscMs)
+	a.lastEscape = time.Now().Add(-leaderWindow - 100*time.Millisecond)
 	a.handleKey(keyEv(tcell.KeyRune, 's'))
 
 	if got := a.activeTabPtr().Buffer.Lines[0]; got != "s" {
 		t.Fatalf("expired leader window: 's' should insert literally, got %q", got)
+	}
+}
+
+// TestHandleKey_ShiftedLeaderAfterSlowReach pins the leaderWindow split
+// from doubleEscMs: a shifted leader lands later than a lowercase one
+// because the hand has to find Shift first (measured in the cats mac app
+// at ~1.1s for Esc→P). Under the old 500ms window that 'P' typed itself
+// into the buffer instead of opening Find in project.
+func TestHandleKey_ShiftedLeaderAfterSlowReach(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte(""), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.lastEscape = time.Now().Add(-1100 * time.Millisecond)
+	a.handleKey(keyEv(tcell.KeyRune, 'P'))
+
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "" {
+		t.Fatalf("slow Esc→P should fire the leader, but typed %q", got)
+	}
+	if _, ok := a.modal.(*promptModal); !ok {
+		t.Fatalf("slow Esc→P should open the Find in project prompt, got %T", a.modal)
+	}
+}
+
+// TestHandleKey_ChainWindowStaysShort verifies the chain is NOT widened
+// with the leader window: chain mode is re-armed by the repeatable action
+// rather than by an Esc, so a 'z' typed ~0.8s after "Esc z" is a word
+// being written, not a third undo.
+func TestHandleKey_ChainWindowStaysShort(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte(""), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+
+	a.handleKey(keyEv(tcell.KeyEsc, 0))
+	a.handleKey(keyEv(tcell.KeyRune, 'z')) // undo, arms the chain
+	if !a.leaderChained {
+		t.Fatal("Esc z should arm chain mode")
+	}
+	a.lastEscape = time.Now().Add(-800 * time.Millisecond)
+	a.handleKey(keyEv(tcell.KeyRune, 'z'))
+
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "z" {
+		t.Fatalf("a z past the chain window should insert, got %q", got)
 	}
 }
 

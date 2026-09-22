@@ -67,7 +67,7 @@ import (
 // whichKeyDelay is the hesitation after a namespace chord (Esc a, …)
 // that summons its sub-table. Longer than a practiced chord, shorter
 // than "I've forgotten the key".
-// Well under doubleEscMs matters too: the overlay must appear while the
+// Well under the leader window matters too: the overlay must appear while the
 // leader window is still live, or it would document a dead state.
 const whichKeyDelay = 350 * time.Millisecond
 

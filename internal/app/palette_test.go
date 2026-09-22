@@ -252,7 +252,7 @@ func TestPalette_FoldedSectionActionsStillListed(t *testing.T) {
 		if it.label == "New file" { // a File-section action
 			sawNewFile = true
 		}
-		if it.label == "File" || it.label == "Git" || it.label == "Tab" {
+		if it.label == "File" || it.label == "Git" || it.label == "Nav" {
 			sawHeader = true // a section title leaked in as a command
 		}
 	}

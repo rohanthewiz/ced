@@ -129,7 +129,7 @@ func TestGoToMatchingBracket_LeaderKey(t *testing.T) {
 func TestGoToMatchingBracket_MenuRow(t *testing.T) {
 	a := seedBracketApp(t, bracketSrc)
 	for _, g := range a.visibleMenuGroups() {
-		if g.title != "Code" {
+		if g.title != "Nav" {
 			continue
 		}
 		for _, it := range g.items {
@@ -144,7 +144,7 @@ func TestGoToMatchingBracket_MenuRow(t *testing.T) {
 			}
 		}
 	}
-	t.Fatal("no 'Go to matching bracket' row in the Code group")
+	t.Fatal("no 'Go to matching bracket' row in the Nav group")
 }
 
 // TestGoToMatchingBracket_CentersOffScreenPartner pins the goToLine

@@ -194,6 +194,11 @@ type menuItemDef struct {
 	enabled  func(*App) bool
 	labelFor func(*App) string
 	header   bool
+	// depth is the row's nesting level, stamped by menuLayout: 0 for a
+	// top-level section's header and rows, 1 for a sub-section's. Draw
+	// indents by it so a nested section reads as belonging to the one
+	// above it.
+	depth int
 }
 
 // menuGroup is a titled block of action rows in the ≡ menu. Collapsible
@@ -204,6 +209,14 @@ type menuGroup struct {
 	title       string
 	items       []menuItemDef
 	collapsible bool
+	// parent names the top-level section this one folds inside ("" for
+	// a top-level section). One level only: a parent is always a
+	// top-level group, and the child must follow it directly in the
+	// group list. Kept as a field on a FLAT list, rather than a tree of
+	// groups, so every consumer that just wants "all the rows" — the
+	// palette, the tests that look a row up by its section — goes on
+	// walking one slice.
+	parent string
 }
 
 // builtinMenuGroups returns the editor's built-in action groups in
@@ -220,29 +233,139 @@ type menuGroup struct {
 // zero here on purpose — it gets stamped at layout time.
 func builtinMenuGroups() []menuGroup {
 	return []menuGroup{
-		{title: "Tab", collapsible: true, items: []menuItemDef{
+		// Top level reads like a desktop app's menu bar turned on its
+		// side — File, Edit, View, Find, Nav, Code, Git, AI, Tools — so a
+		// row is where a user who has never opened this menu already looks
+		// for it. A group with a parent is a SUB-section: it folds inside
+		// its parent and must follow it (and its siblings) directly in
+		// this table, which TestBuiltinMenuGroups_ChildrenFollowParent pins.
+		{title: "File", collapsible: true, items: []menuItemDef{
+			// Workspace rows first — the File>Open Folder convention every
+			// editor teaches, and the only surface for a root switch (it
+			// gets no leader key: the flat table is out of mnemonic
+			// letters and this is a once-an-hour action, not a once-a-
+			// minute one). See folder.go for why a switch is a restart.
+			{label: "Open folder…", action: (*App).menuOpenFolder, enabled: alwaysTrue},
+			{label: "Recent folders…", action: (*App).menuRecentFolders, enabled: (*App).hasRecentFolders},
+			{action: (*App).menuToggleSession, enabled: alwaysTrue, labelFor: (*App).sessionToggleLabel},
+			// Whether another pane's `ced --remote` / `ced --wait` can
+			// hand this instance a file (remote.go). A workspace row, not
+			// a View one: what it scopes is which files this ROOT accepts.
+			// The label doubles as the feature's only status surface —
+			// "unavailable" is how a user learns the socket never bound.
+			{action: (*App).menuToggleRemote, enabled: alwaysTrue, labelFor: (*App).remoteToggleLabel},
+			{shortcut: "esc n", action: (*App).menuNewFile, enabled: alwaysTrue, labelFor: (*App).newFileLabel},
+			// New folder has no shortcut: the shifted twin of esc-n is
+			// SS2, which the terminal eats before the leader table sees
+			// it (see fileops.go's menuNewFolder).
+			{action: (*App).menuNewFolder, enabled: alwaysTrue, labelFor: (*App).newFolderLabel},
+			// The active file's save/close lifecycle, after the rows that
+			// create one — the File > Save / Close / Revert block every
+			// desktop editor has. Auto-save is the preference that governs
+			// the Save row, so it sits under it.
 			{label: "Save", shortcut: "esc s", action: (*App).menuSave, enabled: (*App).hasSavableTab},
 			{label: "Save & close tab", action: (*App).menuSaveAndClose, enabled: (*App).hasSavableTab},
 			{label: "Close tab", shortcut: "esc w", action: (*App).menuClose, enabled: (*App).hasTab},
-			// Tab switching (tabbar.go). These are the ONLY keyboard path
-			// to another open file — the strip is mouse-driven, and on a
-			// narrow window or with a dozen files open the tab you want
-			// may not be drawn at all.
-			{label: "Next tab", shortcut: "esc .", action: (*App).menuNextTab, enabled: (*App).hasMultipleTabs},
-			{label: "Previous tab", shortcut: "esc ,", action: (*App).menuPrevTab, enabled: (*App).hasMultipleTabs},
-			{label: "Switch tab…", shortcut: "esc b", action: (*App).menuSwitchTab, enabled: (*App).hasMultipleTabs},
-			// Recent files sits under Switch tab because it answers the
-			// same question — "get me to another file" — over a wider set:
-			// the ones no longer open. In the Tab group rather than File
-			// for that adjacency, and because File is far enough down the
-			// menu to be below the fold (recentfiles.go).
-			{label: "Recent files…", shortcut: "esc B", action: (*App).menuRecentFiles, enabled: (*App).hasRecentFiles},
+			{label: "Revert file", action: (*App).menuRevert, enabled: (*App).hasRevert},
 			{action: (*App).menuToggleAutoSave, enabled: alwaysTrue, labelFor: (*App).autoSaveToggleLabel},
+			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
+			{label: "Delete file", action: (*App).menuDelete, enabled: (*App).hasFileTab},
+			{action: (*App).menuRenameFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).renameFolderLabel},
+			{action: (*App).menuDeleteFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).deleteFolderLabel},
+			{label: "Copy file", action: (*App).menuCopyFile, enabled: (*App).hasFileTab},
+			{action: (*App).menuCopyFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).copyFolderLabel},
+			{action: (*App).menuPasteItem, enabled: (*App).hasFileClip, labelFor: (*App).pasteItemLabel},
+			{label: "Zip file", action: (*App).menuZipFile, enabled: (*App).hasFileTab},
+			{action: (*App).menuZipFolder, enabled: alwaysTrue, labelFor: (*App).zipFolderLabel},
+			{label: "Copy relative path", action: (*App).menuCopyRelativePath, enabled: (*App).hasFileTab},
+			{label: "Copy absolute path", action: (*App).menuCopyAbsolutePath, enabled: (*App).hasFileTab},
+			// Maintaining the favorites file (favmanage.go). A File row
+			// rather than a Nav one: Nav carries "Go to
+			// favorite…", which is about USING one, while this is about
+			// the file behind them — the same split as Open folder
+			// living here and Go back living there.
+			{label: "Manage favorites…", action: (*App).menuManageFavorites, enabled: alwaysTrue},
+			// Hand the active file (or the root) to $VISUAL / $EDITOR
+			// (openineditor.go). The keyboard twin of the tree's row, and
+			// the path that survives a terminal which swallows
+			// right-click. Clickable even with nothing configured, for
+			// menuCopilotAuth's reason: the verdict is "you never
+			// exported a variable", which a dimmed row cannot say and a
+			// flash can. The label names the variable in that state.
+			{action: (*App).menuOpenInEditor, enabled: alwaysTrue, labelFor: (*App).openInEditorLabel},
+			// The file tree's multi-selection (treemarks.go). A File row
+			// because every verb behind it is a file verb, and the path
+			// that survives a terminal which swallows right-click — the
+			// project's rule that every file action lives in the main
+			// menu first. The label carries the count, so the menu is
+			// also where a user learns they still have six rows ticked
+			// from ten minutes ago; the tree's own header count is
+			// invisible while the sidebar is hidden. Always enabled: the
+			// picker falls back to the cursor's row, and its refusal
+			// names the gesture that builds a set, which a dimmed row
+			// could not.
+			{action: (*App).menuTreeMarkActions, enabled: alwaysTrue,
+				labelFor: (*App).treeMarkActionsLabel},
+			// Running the open file in the terminal panel (runexec.go).
+			// A File row rather than a View one — View holds the panel's
+			// toggles, this one is a verb about the FILE, and it belongs
+			// with the other rows that act on it. Its ≡ twin in the tree
+			// is the right-click row; this is the path that survives a
+			// terminal which eats right-click. No leader key: the flat
+			// table is out of mnemonic letters.
+			{action: (*App).menuRunExecutable, enabled: (*App).hasRunnableTab, labelFor: (*App).runExecutableLabel},
 		}},
-		// View toggles. Deliberately the second group: the menu outgrows
-		// short windows and scrolls, so anything living near the bottom
-		// is effectively hidden — and Show terminal is reached for far
-		// too often to bury. Keep these rows above the fold.
+		// Diff viewer (compare.go), a sub-section of File: every source it
+		// takes is a file or a buffer — the one in front of you, another
+		// in the tree, its own saved copy — so File is where it is looked
+		// for. Its own section rather than rows under Git, because none of
+		// it needs a repository.
+		{title: "Compare", collapsible: true, parent: "File", items: []menuItemDef{
+			{label: "Compare with file…", action: (*App).menuCompareFile, enabled: (*App).hasComparable},
+			{label: "Compare with saved copy", action: (*App).menuCompareSaved, enabled: (*App).hasSavedCopy},
+			// Inside cats this reads the HOST's clipboard and opens the panel
+			// already populated; outside it, ced's own; and with neither it
+			// becomes the row below it (catsclip.go). One row rather than two,
+			// because "compare with what I copied" is one question — a second
+			// row would make the user choose between two clipboards they have
+			// no way to look at.
+			{label: "Compare with clipboard", action: (*App).menuCatsCompareClipboard, enabled: (*App).hasComparable},
+			{label: "Compare with pasted text", action: (*App).menuComparePaste, enabled: (*App).hasComparable},
+			{action: (*App).menuToggleCompare, enabled: (*App).hasCompareResult, labelFor: (*App).compareToggleLabel},
+		}},
+		{title: "Edit", collapsible: true, items: []menuItemDef{
+			// Undo / redo head Edit, the menu-bar convention (the old History
+			// group). Revert moved to File: it reloads the FILE, which is a
+			// file lifecycle verb, not an edit.
+			{label: "Undo", shortcut: "esc u", action: (*App).menuUndo, enabled: (*App).hasUndo},
+			{label: "Redo", shortcut: "esc r", action: (*App).menuRedo, enabled: (*App).hasRedo},
+			{label: "Copy selection", shortcut: "cmd+c", action: (*App).menuCopy, enabled: (*App).hasSelection},
+			{label: "Cut selection", action: (*App).menuCut, enabled: (*App).hasSelection},
+			{label: "Paste", shortcut: "cmd+v", action: (*App).menuPaste, enabled: (*App).hasClipboard},
+			// Whole-buffer selection, beside the clipboard verbs it feeds:
+			// select all, then Copy / Cut / Compare. No leader key (the flat
+			// table is out of mnemonic letters); the row gives the command
+			// palette its entry for free.
+			{label: "Select all", action: (*App).menuSelectAll, enabled: (*App).hasSelectableTab},
+			{label: "Toggle line comment", shortcut: "esc /", action: (*App).menuToggleLineComment, enabled: (*App).hasCommentableTab},
+			{label: "Duplicate line", shortcut: "ctrl+d", action: (*App).menuDuplicateLines, enabled: (*App).hasEditableTab},
+			{label: "Move line up", shortcut: "alt+↑", action: (*App).menuMoveLinesUp, enabled: (*App).hasEditableTab},
+			{label: "Move line down", shortcut: "alt+↓", action: (*App).menuMoveLinesDown, enabled: (*App).hasEditableTab},
+			// Multi-line editing (multicaret.go). The mouse gesture is
+			// Alt+click, which has no menu row it could be — these are
+			// the keyboard paths, and the Clear row is the way back for
+			// anyone who got here by accident.
+			{label: "Add caret below", shortcut: "esc m", action: (*App).menuAddCaretBelow, enabled: (*App).hasEditableTab},
+			{label: "Add caret above", shortcut: "esc M", action: (*App).menuAddCaretAbove, enabled: (*App).hasEditableTab},
+			{label: "Add next occurrence", shortcut: "esc *", action: (*App).menuAddNextOccurrence, enabled: (*App).hasMultiCaretTarget},
+			{label: "Select all occurrences", shortcut: "esc &", action: (*App).menuSelectAllOccurrences, enabled: (*App).hasMultiCaretTarget},
+			{label: "Clear extra carets", shortcut: "esc", action: (*App).menuClearCarets, enabled: (*App).hasCarets},
+		}},
+		// View toggles. Third on the bar, as in any desktop app, and
+		// Show terminal is reached for far too often to bury: with only
+		// View unfolded (from the collapsed default) its terminal rows
+		// must fit on a 24-row window, which
+		// TestMenuLayout_TerminalRowsAboveTheFold pins.
 		{title: "View", collapsible: true, items: []menuItemDef{
 			{shortcut: "esc t", action: (*App).menuToggleSidebar, enabled: alwaysTrue, labelFor: (*App).sidebarToggleLabel},
 			// Keyboard focus for the tree (treenav.go) — sits under the
@@ -310,15 +433,10 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Customize theme…", action: (*App).menuThemeCustomize, enabled: alwaysTrue},
 			{label: "Reload themes", action: (*App).menuThemeReload, enabled: alwaysTrue},
 		}},
-		{title: "History", collapsible: true, items: []menuItemDef{
-			{label: "Undo", shortcut: "esc u", action: (*App).menuUndo, enabled: (*App).hasUndo},
-			{label: "Redo", shortcut: "esc r", action: (*App).menuRedo, enabled: (*App).hasRedo},
-			{label: "Revert file", action: (*App).menuRevert, enabled: (*App).hasRevert},
-		}},
 		// Command palette lives OUTSIDE this group — it's promoted to the
 		// pinned top zone in menuLayout so it stays the menu's headline
 		// entry even when every section is folded (the startup default).
-		{title: "Search", collapsible: true, items: []menuItemDef{
+		{title: "Find", collapsible: true, items: []menuItemDef{
 			{label: "Find in file", shortcut: "esc f", action: (*App).menuFind, enabled: (*App).hasFindable},
 			{label: "Find all in file", shortcut: "esc F", action: (*App).menuFindAll, enabled: (*App).hasFindAll},
 			// Replace opens the same bar with its second row showing —
@@ -330,7 +448,6 @@ func builtinMenuGroups() []menuGroup {
 			// all on a terminal that eats clicks (the macOS-Terminal rule).
 			{action: (*App).menuToggleFindCase, enabled: alwaysTrue, labelFor: (*App).findCaseToggleLabel},
 			{action: (*App).menuToggleFindWord, enabled: alwaysTrue, labelFor: (*App).findWordToggleLabel},
-			{label: "Go to line…", shortcut: "esc j", action: (*App).menuGoToLine, enabled: (*App).hasGoToLine},
 			{label: "Find file in project", shortcut: "esc p", action: (*App).menuFindFile, enabled: (*App).hasFinder},
 			// Text across the whole tree, listed in the same panel the
 			// in-file list uses (projectsearch.go). Sits under its
@@ -338,11 +455,26 @@ func builtinMenuGroups() []menuGroup {
 			// scopes, and the shifted leader says so.
 			{label: "Find in project", shortcut: "esc P", action: (*App).menuFindInProject, enabled: (*App).hasProjectSearch},
 		}},
-		// Navigation — browser-style back/forward through the file
-		// history (tree, tabs, finder, and definition jumps all feed it).
-		{title: "Navigation", collapsible: true, items: []menuItemDef{
+		// Nav — getting somewhere else: back/forward through the file
+		// history (tree, tabs, finder and definition jumps all feed it),
+		// other open files, and fixed places in the current one. The
+		// language-server jumps stay in Code, where they dim together
+		// when there is no server.
+		{title: "Nav", collapsible: true, items: []menuItemDef{
 			{label: "Go back", shortcut: "esc o / alt+←", action: (*App).menuNavBack, enabled: (*App).hasNavBack},
 			{label: "Go forward", shortcut: "esc O / alt+→", action: (*App).menuNavForward, enabled: (*App).hasNavForward},
+			// Tab switching (tabbar.go). These are the ONLY keyboard path
+			// to another open file — the strip is mouse-driven, and on a
+			// narrow window or with a dozen files open the tab you want
+			// may not be drawn at all.
+			{label: "Next tab", shortcut: "esc .", action: (*App).menuNextTab, enabled: (*App).hasMultipleTabs},
+			{label: "Previous tab", shortcut: "esc ,", action: (*App).menuPrevTab, enabled: (*App).hasMultipleTabs},
+			{label: "Switch tab…", shortcut: "esc b", action: (*App).menuSwitchTab, enabled: (*App).hasMultipleTabs},
+			// Recent files sits under Switch tab because it answers the
+			// same question — "get me to another file" — over a wider set:
+			// the ones no longer open (recentfiles.go).
+			{label: "Recent files…", shortcut: "esc B", action: (*App).menuRecentFiles, enabled: (*App).hasRecentFiles},
+			{label: "Go to line…", shortcut: "esc j", action: (*App).menuGoToLine, enabled: (*App).hasGoToLine},
 			// Named locations (favorites.go) — the mid-session twin of
 			// `ced fav <name>`. It belongs to this group's question
 			// exactly: the two rows above walk the trail you made, this
@@ -353,6 +485,101 @@ func builtinMenuGroups() []menuGroup {
 			// predicate is a file read, which menuLayout runs on every
 			// frame the menu is open.
 			{label: "Go to favorite…", action: (*App).menuGoToFavorite, enabled: alwaysTrue},
+			// Matching bracket and terminal locations are jumps that need no
+			// language server, so they live here rather than among the
+			// server-backed rows in Code.
+			// Brace matching (bracket.go). It is gated only on there being a
+			// text buffer, deliberately: the honest predicate is the
+			// scan itself, menuLayout runs predicates every frame the
+			// menu is open, and "put the cursor on a bracket first" is
+			// a better answer than a dimmed row that can't say it —
+			// the same trade the terminal-locations row makes below.
+			{label: "Go to matching bracket", shortcut: "esc %", action: (*App).menuGoToMatchingBracket, enabled: (*App).hasGoToLine},
+			// Clickable terminal output (termdiag.go). A jump rather than
+			// one of the terminal's View toggles: it answers "take me to
+			// the problem", with `go build` and `grep -n` as the providers
+			// instead of a language server.
+			{label: "Go to terminal output location…", shortcut: "esc ~", action: (*App).menuTermLocations, enabled: (*App).hasTermOutput},
+		}},
+		// Code intelligence (LSP-backed; rows dim when no server)
+		{title: "Code", collapsible: true, items: []menuItemDef{
+			// The completion popup (completion.go). It heads the group
+			// because it is the row a GoLand user looks for first, and
+			// because it is the only one here that also fires ITSELF —
+			// the server's trigger characters open it as you type, and
+			// this row is the deliberate invocation for everywhere else.
+			{label: "Completions", shortcut: "esc spc", action: (*App).menuCompletion, enabled: (*App).hasLSPActions},
+			{label: "Go to definition", shortcut: "esc d", action: (*App).menuGoToDefinition, enabled: (*App).hasLSPActions},
+			// The inverse question, one row down from the one it inverts:
+			// 'd' asks where a symbol comes FROM, this asks who uses it.
+			// Results land in the Find-all panel's project mode, so the
+			// three cross-file lists read as one instrument
+			// (lspreferences.go).
+			{label: "Find references…", shortcut: "esc R", action: (*App).menuFindReferences, enabled: (*App).hasLSPActions},
+			// Definition's two siblings (lspgoto.go). One answer jumps,
+			// several land in the same list references uses. No leader
+			// keys: the flat table is out of mnemonic letters.
+			// The server's exact answer to the question the ambient word
+			// highlight guesses at: the same BINDING, writes underlined
+			// (lsphighlight.go). A verb because it costs a round trip.
+			{label: "Highlight symbol uses", action: (*App).menuHighlightSymbol, enabled: (*App).hasLSPActions},
+			// References minus everything that isn't a CALL — the
+			// declaration, a callback passed by value (lspgoto.go).
+			{label: "Find incoming calls…", action: (*App).menuIncomingCalls, enabled: (*App).hasLSPActions},
+			{label: "Go to implementation", action: (*App).menuGoToImplementation, enabled: (*App).hasLSPActions},
+			{label: "Go to type definition", action: (*App).menuGoToTypeDefinition, enabled: (*App).hasLSPActions},
+			{label: "Hover info", shortcut: "esc i", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},
+			// The same tooltip asked a different question: 'i' says what
+			// the symbol under the cursor IS, 'I' says where you are in
+			// the call you're typing (lspsignature.go). Manual, not
+			// automatic — a modal owns the keyboard here.
+			{label: "Signature help", shortcut: "esc I", action: (*App).menuSignatureHelp, enabled: (*App).hasLSPActions},
+			// The file's outline as a fuzzy picker (lspsymbols.go). Sits
+			// under its lowercase twin because it answers the same
+			// question at a wider scope: 'd' jumps to the definition of
+			// what's under the cursor, 'D' lists every definition in the
+			// file — the f/F and p/P convention again.
+			{label: "Go to symbol in file…", shortcut: "esc D", action: (*App).menuGoToSymbol, enabled: (*App).hasLSPActions},
+			// The same question at project scope (lspworkspacesymbols.go).
+			// Gated on ANY server being up, not on the active tab: a
+			// project-wide lookup has to work from a README.
+			{label: "Go to symbol in project…", action: (*App).menuGoToWorkspaceSymbol, enabled: (*App).hasWorkspaceSymbols},
+			// The two rows that WRITE, placed directly above the row that
+			// undoes them: rename is the verb the workspace-edit primitive
+			// was built for, code actions are the verb that proved it, and
+			// the cross-file undo is what a user reaches for next when
+			// either went somewhere they didn't expect.
+			//
+			// Code actions comes first because it is the broader question —
+			// "what can you do here?" — and its label says which span it
+			// will ask about, since a selection changes the answer
+			// completely (lspcodeaction.go).
+			{labelFor: (*App).codeActionMenuLabel, shortcut: "esc c", action: (*App).menuCodeActions, enabled: (*App).hasCodeActions},
+			{label: "Rename symbol…", shortcut: "esc E", action: (*App).menuRenameSymbol, enabled: (*App).hasLSPActions},
+			// The Problems panel (problems.go) and its keyboard twins.
+			// They sit at the foot of the group because they are about
+			// the whole project rather than the caret, and the toggle
+			// stays enabled with no server so the panel can say WHY it
+			// is empty — a dimmed row never could.
+			{shortcut: "esc !", action: (*App).menuToggleProblems, enabled: alwaysTrue, labelFor: (*App).problemsToggleLabel},
+			{label: "Next problem", action: (*App).menuNextProblem, enabled: (*App).hasAnyDiagnostics},
+			{label: "Previous problem", action: (*App).menuPrevProblem, enabled: (*App).hasAnyDiagnostics},
+			// Undo a server-authored multi-file edit as one gesture
+			// (workspaceedit.go). Plain undo already claims the press when
+			// the cursor is in one of the touched files; this row is the
+			// path for the two cases it can't serve — the active tab isn't
+			// a participant, or every touched file went straight to disk
+			// and there is no participant tab to stand in. The label names
+			// the verb and the file count because this rewrites files that
+			// may not be on screen. No leader key: the flat table is out of
+			// mnemonic letters and plain undo covers the common case.
+			{labelFor: (*App).wsEditUndoLabel, action: (*App).menuUndoWorkspaceEdit, enabled: (*App).wsUndoAvailable},
+			// The LSP's deliberate retry gesture (lsprestart.go), the twin
+			// of re-picking the chat agent. Never dimmed: the file it is
+			// most wanted on is one whose server is dead or missing, and
+			// the flash names the binary a dimmed row could not. Last in
+			// the group — maintenance, not a code verb. No leader key.
+			{labelFor: (*App).lspRestartLabel, action: (*App).menuRestartLSP, enabled: alwaysTrue},
 		}},
 		{title: "Git", collapsible: true, items: []menuItemDef{
 			{label: "Next change", shortcut: "esc h", action: (*App).menuNextHunk, enabled: (*App).hasDiffHunks},
@@ -420,125 +647,16 @@ func builtinMenuGroups() []menuGroup {
 			// row doubles as a signal that something is parked.
 			{label: "Resolve conflicts…", action: (*App).menuGitResolveConflicts, enabled: (*App).hasGitConflict},
 		}},
-		// Diff viewer (compare.go). Its own group rather than rows under
-		// Git, because none of it needs a repository: the sources are the
-		// buffer you're editing, any file in the tree, and text you
-		// pasted, and the differ is ced's own. A user outside a repo — or
-		// with git absent entirely — gets the whole feature.
-		{title: "Compare", collapsible: true, items: []menuItemDef{
-			{label: "Compare with file…", action: (*App).menuCompareFile, enabled: (*App).hasComparable},
-			{label: "Compare with saved copy", action: (*App).menuCompareSaved, enabled: (*App).hasSavedCopy},
-			// Inside cats this reads the HOST's clipboard and opens the panel
-			// already populated; outside it, ced's own; and with neither it
-			// becomes the row below it (catsclip.go). One row rather than two,
-			// because "compare with what I copied" is one question — a second
-			// row would make the user choose between two clipboards they have
-			// no way to look at.
-			{label: "Compare with clipboard", action: (*App).menuCatsCompareClipboard, enabled: (*App).hasComparable},
-			{label: "Compare with pasted text", action: (*App).menuComparePaste, enabled: (*App).hasComparable},
-			{action: (*App).menuToggleCompare, enabled: (*App).hasCompareResult, labelFor: (*App).compareToggleLabel},
-		}},
-		// Code intelligence (LSP-backed; rows dim when no server)
-		{title: "Code", collapsible: true, items: []menuItemDef{
-			// The completion popup (completion.go). It heads the group
-			// because it is the row a GoLand user looks for first, and
-			// because it is the only one here that also fires ITSELF —
-			// the server's trigger characters open it as you type, and
-			// this row is the deliberate invocation for everywhere else.
-			{label: "Completions", shortcut: "esc spc", action: (*App).menuCompletion, enabled: (*App).hasLSPActions},
-			{label: "Go to definition", shortcut: "esc d", action: (*App).menuGoToDefinition, enabled: (*App).hasLSPActions},
-			// The inverse question, one row down from the one it inverts:
-			// 'd' asks where a symbol comes FROM, this asks who uses it.
-			// Results land in the Find-all panel's project mode, so the
-			// three cross-file lists read as one instrument
-			// (lspreferences.go).
-			{label: "Find references…", shortcut: "esc R", action: (*App).menuFindReferences, enabled: (*App).hasLSPActions},
-			// Definition's two siblings (lspgoto.go). One answer jumps,
-			// several land in the same list references uses. No leader
-			// keys: the flat table is out of mnemonic letters.
-			// The server's exact answer to the question the ambient word
-			// highlight guesses at: the same BINDING, writes underlined
-			// (lsphighlight.go). A verb because it costs a round trip.
-			{label: "Highlight symbol uses", action: (*App).menuHighlightSymbol, enabled: (*App).hasLSPActions},
-			// References minus everything that isn't a CALL — the
-			// declaration, a callback passed by value (lspgoto.go).
-			{label: "Find incoming calls…", action: (*App).menuIncomingCalls, enabled: (*App).hasLSPActions},
-			{label: "Go to implementation", action: (*App).menuGoToImplementation, enabled: (*App).hasLSPActions},
-			{label: "Go to type definition", action: (*App).menuGoToTypeDefinition, enabled: (*App).hasLSPActions},
-			{label: "Hover info", shortcut: "esc i", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},
-			// The same tooltip asked a different question: 'i' says what
-			// the symbol under the cursor IS, 'I' says where you are in
-			// the call you're typing (lspsignature.go). Manual, not
-			// automatic — a modal owns the keyboard here.
-			{label: "Signature help", shortcut: "esc I", action: (*App).menuSignatureHelp, enabled: (*App).hasLSPActions},
-			// The file's outline as a fuzzy picker (lspsymbols.go). Sits
-			// under its lowercase twin because it answers the same
-			// question at a wider scope: 'd' jumps to the definition of
-			// what's under the cursor, 'D' lists every definition in the
-			// file — the f/F and p/P convention again.
-			{label: "Go to symbol in file…", shortcut: "esc D", action: (*App).menuGoToSymbol, enabled: (*App).hasLSPActions},
-			// The same question at project scope (lspworkspacesymbols.go).
-			// Gated on ANY server being up, not on the active tab: a
-			// project-wide lookup has to work from a README.
-			{label: "Go to symbol in project…", action: (*App).menuGoToWorkspaceSymbol, enabled: (*App).hasWorkspaceSymbols},
-			// Brace matching (bracket.go) — the second row in this group
-			// that needs no language server, sitting beside the other
-			// one for that reason. It is gated only on there being a
-			// text buffer, deliberately: the honest predicate is the
-			// scan itself, menuLayout runs predicates every frame the
-			// menu is open, and "put the cursor on a bracket first" is
-			// a better answer than a dimmed row that can't say it —
-			// the same trade the terminal-locations row makes below.
-			{label: "Go to matching bracket", shortcut: "esc %", action: (*App).menuGoToMatchingBracket, enabled: (*App).hasGoToLine},
-			// Clickable terminal output (termdiag.go). It sits with the
-			// code-intelligence rows rather than the terminal's View
-			// toggles because it answers their question — "take me to the
-			// problem" — and it is the one row here that needs no
-			// language server at all: `go build` and `grep -n` are the
-			// providers.
-			{label: "Go to terminal output location…", shortcut: "esc ~", action: (*App).menuTermLocations, enabled: (*App).hasTermOutput},
-			// The two rows that WRITE, placed directly above the row that
-			// undoes them: rename is the verb the workspace-edit primitive
-			// was built for, code actions are the verb that proved it, and
-			// the cross-file undo is what a user reaches for next when
-			// either went somewhere they didn't expect.
-			//
-			// Code actions comes first because it is the broader question —
-			// "what can you do here?" — and its label says which span it
-			// will ask about, since a selection changes the answer
-			// completely (lspcodeaction.go).
-			{labelFor: (*App).codeActionMenuLabel, shortcut: "esc c", action: (*App).menuCodeActions, enabled: (*App).hasCodeActions},
-			{label: "Rename symbol…", shortcut: "esc E", action: (*App).menuRenameSymbol, enabled: (*App).hasLSPActions},
-			// The Problems panel (problems.go) and its keyboard twins.
-			// They sit at the foot of the group because they are about
-			// the whole project rather than the caret, and the toggle
-			// stays enabled with no server so the panel can say WHY it
-			// is empty — a dimmed row never could.
-			{shortcut: "esc !", action: (*App).menuToggleProblems, enabled: alwaysTrue, labelFor: (*App).problemsToggleLabel},
-			{label: "Next problem", action: (*App).menuNextProblem, enabled: (*App).hasAnyDiagnostics},
-			{label: "Previous problem", action: (*App).menuPrevProblem, enabled: (*App).hasAnyDiagnostics},
-			// Undo a server-authored multi-file edit as one gesture
-			// (workspaceedit.go). Plain undo already claims the press when
-			// the cursor is in one of the touched files; this row is the
-			// path for the two cases it can't serve — the active tab isn't
-			// a participant, or every touched file went straight to disk
-			// and there is no participant tab to stand in. The label names
-			// the verb and the file count because this rewrites files that
-			// may not be on screen. No leader key: the flat table is out of
-			// mnemonic letters and plain undo covers the common case.
-			{labelFor: (*App).wsEditUndoLabel, action: (*App).menuUndoWorkspaceEdit, enabled: (*App).wsUndoAvailable},
-			// The LSP's deliberate retry gesture (lsprestart.go), the twin
-			// of re-picking the chat agent. Never dimmed: the file it is
-			// most wanted on is one whose server is dead or missing, and
-			// the flash names the binary a dimmed row could not. Last in
-			// the group — maintenance, not a code verb. No leader key.
-			{labelFor: (*App).lspRestartLabel, action: (*App).menuRestartLSP, enabled: alwaysTrue},
-		}},
+		// The AI block: a parent with no rows of its own, so its three
+		// systems stay one fold apart. Everything under it talks to
+		// (or is handed to) a model — the chat agent, the MCP servers
+		// declared to it, and the skills attached to its prompts.
+		{title: "AI", collapsible: true},
 		// GitHub Copilot (copilot-language-server sidecar). Rows stay
 		// clickable even when the sidecar is unavailable — the action
 		// flashes WHY instead of dimming into a dead end, because Sign
 		// in is the first thing a new user reaches for. See copilot.go.
-		{title: "Copilot", collapsible: true, items: []menuItemDef{
+		{title: "Copilot", collapsible: true, parent: "AI", items: []menuItemDef{
 			{action: (*App).menuCopilotAuth, enabled: alwaysTrue, labelFor: (*App).copilotAuthLabel},
 			// The chat toggle moved here from the View group (owner
 			// preference): every Copilot surface — auth, chat, model,
@@ -594,7 +712,7 @@ func builtinMenuGroups() []menuGroup {
 		// of them. Rows stay clickable with nothing configured — the
 		// empty case opens the setup help, which is the answer to the
 		// question a user with no servers is actually asking.
-		{title: "MCP", collapsible: true, items: []menuItemDef{
+		{title: "MCP", collapsible: true, parent: "AI", items: []menuItemDef{
 			{shortcut: "esc a t", action: (*App).menuMCPServers, enabled: alwaysTrue, labelFor: (*App).mcpServersLabel},
 			{label: "Reload MCP config", action: (*App).menuMCPReload, enabled: alwaysTrue},
 			{action: (*App).menuMCPCopyResult, enabled: (*App).hasMCPResult, labelFor: (*App).mcpCopyResultLabel},
@@ -606,127 +724,40 @@ func builtinMenuGroups() []menuGroup {
 		// features of any one backend. The first row stays clickable with
 		// nothing installed — the empty case opens the setup help, which
 		// is the answer to the question a user with no skills is asking.
-		{title: "Skills", collapsible: true, items: []menuItemDef{
+		{title: "Skills", collapsible: true, parent: "AI", items: []menuItemDef{
 			{shortcut: "esc a s", action: (*App).menuUseSkill, enabled: alwaysTrue, labelFor: (*App).skillsMenuLabel},
 			{label: "Open skill…", action: (*App).menuOpenSkill, enabled: (*App).hasSkills},
 			{label: "Reload skills", action: (*App).menuReloadSkills, enabled: alwaysTrue},
 		}},
+		// Tools — the external systems and user-installed extensions ced
+		// talks to. visibleMenuGroups splices Cats, Plugin commands and
+		// Custom in as further sub-sections here, which is why this must
+		// stay the last group before Quit.
+		{title: "Tools", collapsible: true},
 		// GoNotes capture (gonotes.go) — the selected text, or the whole
 		// file, saved as a new note in the user's running GoNotes
-		// server. Its own group for the reason MCP, Skills and Plugins
-		// each have one: it is a separate system ced talks to, not a
-		// feature of any subsystem here. The row stays clickable
+		// server. A Tools sub-section: it is a separate system ced talks
+		// to, not a feature of any subsystem here. The row stays clickable
 		// whatever state that server is in — availability is discovered
 		// by trying, and a row that dimmed whenever GoNotes was
 		// restarted would be wrong exactly when the user asked.
-		{title: "Notes", collapsible: true, items: []menuItemDef{
+		{title: "Notes", collapsible: true, parent: "Tools", items: []menuItemDef{
 			{shortcut: "esc a n", action: (*App).menuSendToNotes, enabled: (*App).canSendToNotes, labelFor: (*App).sendToNotesLabel},
 		}},
 		// Declarative plugins (plugins.go) — the user's own shell
 		// commands bound to menu rows, leader keys, editor events and a
-		// decoration overlay. Its own group next to MCP and Skills for
-		// the same reason those have one: it's an inventory the user
-		// installs, not a feature of any other subsystem. The rows here
-		// are MANAGEMENT (what's loaded, reload, kill switch); the
-		// plugins' actual commands are spliced in as their own group by
+		// decoration overlay. A Tools sub-section: it's an inventory the
+		// user installs, not a feature of any other subsystem. The rows
+		// here are MANAGEMENT (what's loaded, reload, kill switch); the
+		// plugins' actual commands are spliced in as a sibling section by
 		// visibleMenuGroups, so they reach the palette too. The first
 		// row stays clickable with nothing installed — the empty case
 		// opens the setup help, which is the answer to the question a
 		// user with no plugins is actually asking.
-		{title: "Plugins", collapsible: true, items: []menuItemDef{
+		{title: "Plugins", collapsible: true, parent: "Tools", items: []menuItemDef{
 			{action: (*App).menuPluginsInfo, enabled: alwaysTrue, labelFor: (*App).pluginsMenuLabel},
 			{label: "Reload plugins", action: (*App).menuReloadPlugins, enabled: alwaysTrue},
 			{action: (*App).menuTogglePlugins, enabled: alwaysTrue, labelFor: (*App).pluginsToggleLabel},
-		}},
-		{title: "File", collapsible: true, items: []menuItemDef{
-			// Workspace rows first — the File>Open Folder convention every
-			// editor teaches, and the only surface for a root switch (it
-			// gets no leader key: the flat table is out of mnemonic
-			// letters and this is a once-an-hour action, not a once-a-
-			// minute one). See folder.go for why a switch is a restart.
-			{label: "Open folder…", action: (*App).menuOpenFolder, enabled: alwaysTrue},
-			{label: "Recent folders…", action: (*App).menuRecentFolders, enabled: (*App).hasRecentFolders},
-			{action: (*App).menuToggleSession, enabled: alwaysTrue, labelFor: (*App).sessionToggleLabel},
-			// Whether another pane's `ced --remote` / `ced --wait` can
-			// hand this instance a file (remote.go). A workspace row, not
-			// a View one: what it scopes is which files this ROOT accepts.
-			// The label doubles as the feature's only status surface —
-			// "unavailable" is how a user learns the socket never bound.
-			{action: (*App).menuToggleRemote, enabled: alwaysTrue, labelFor: (*App).remoteToggleLabel},
-			{shortcut: "esc n", action: (*App).menuNewFile, enabled: alwaysTrue, labelFor: (*App).newFileLabel},
-			// New folder has no shortcut: the shifted twin of esc-n is
-			// SS2, which the terminal eats before the leader table sees
-			// it (see fileops.go's menuNewFolder).
-			{action: (*App).menuNewFolder, enabled: alwaysTrue, labelFor: (*App).newFolderLabel},
-			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
-			{label: "Delete file", action: (*App).menuDelete, enabled: (*App).hasFileTab},
-			{action: (*App).menuRenameFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).renameFolderLabel},
-			{action: (*App).menuDeleteFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).deleteFolderLabel},
-			{label: "Copy file", action: (*App).menuCopyFile, enabled: (*App).hasFileTab},
-			{action: (*App).menuCopyFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).copyFolderLabel},
-			{action: (*App).menuPasteItem, enabled: (*App).hasFileClip, labelFor: (*App).pasteItemLabel},
-			{label: "Zip file", action: (*App).menuZipFile, enabled: (*App).hasFileTab},
-			{action: (*App).menuZipFolder, enabled: alwaysTrue, labelFor: (*App).zipFolderLabel},
-			{label: "Copy relative path", action: (*App).menuCopyRelativePath, enabled: (*App).hasFileTab},
-			{label: "Copy absolute path", action: (*App).menuCopyAbsolutePath, enabled: (*App).hasFileTab},
-			// Maintaining the favorites file (favmanage.go). A File row
-			// rather than a Navigation one: Navigation carries "Go to
-			// favorite…", which is about USING one, while this is about
-			// the file behind them — the same split as Open folder
-			// living here and Go back living there.
-			{label: "Manage favorites…", action: (*App).menuManageFavorites, enabled: alwaysTrue},
-			// Hand the active file (or the root) to $VISUAL / $EDITOR
-			// (openineditor.go). The keyboard twin of the tree's row, and
-			// the path that survives a terminal which swallows
-			// right-click. Clickable even with nothing configured, for
-			// menuCopilotAuth's reason: the verdict is "you never
-			// exported a variable", which a dimmed row cannot say and a
-			// flash can. The label names the variable in that state.
-			{action: (*App).menuOpenInEditor, enabled: alwaysTrue, labelFor: (*App).openInEditorLabel},
-			// The file tree's multi-selection (treemarks.go). A File row
-			// because every verb behind it is a file verb, and the path
-			// that survives a terminal which swallows right-click — the
-			// project's rule that every file action lives in the main
-			// menu first. The label carries the count, so the menu is
-			// also where a user learns they still have six rows ticked
-			// from ten minutes ago; the tree's own header count is
-			// invisible while the sidebar is hidden. Always enabled: the
-			// picker falls back to the cursor's row, and its refusal
-			// names the gesture that builds a set, which a dimmed row
-			// could not.
-			{action: (*App).menuTreeMarkActions, enabled: alwaysTrue,
-				labelFor: (*App).treeMarkActionsLabel},
-			// Running the open file in the terminal panel (runexec.go).
-			// A File row rather than a View one — View holds the panel's
-			// toggles, this one is a verb about the FILE, and it belongs
-			// with the other rows that act on it. Its ≡ twin in the tree
-			// is the right-click row; this is the path that survives a
-			// terminal which eats right-click. No leader key: the flat
-			// table is out of mnemonic letters.
-			{action: (*App).menuRunExecutable, enabled: (*App).hasRunnableTab, labelFor: (*App).runExecutableLabel},
-		}},
-		{title: "Edit", collapsible: true, items: []menuItemDef{
-			{label: "Copy selection", shortcut: "cmd+c", action: (*App).menuCopy, enabled: (*App).hasSelection},
-			{label: "Cut selection", action: (*App).menuCut, enabled: (*App).hasSelection},
-			{label: "Paste", shortcut: "cmd+v", action: (*App).menuPaste, enabled: (*App).hasClipboard},
-			// Whole-buffer selection, beside the clipboard verbs it feeds:
-			// select all, then Copy / Cut / Compare. No leader key (the flat
-			// table is out of mnemonic letters); the row gives the command
-			// palette its entry for free.
-			{label: "Select all", action: (*App).menuSelectAll, enabled: (*App).hasSelectableTab},
-			{label: "Toggle line comment", shortcut: "esc /", action: (*App).menuToggleLineComment, enabled: (*App).hasCommentableTab},
-			{label: "Duplicate line", shortcut: "ctrl+d", action: (*App).menuDuplicateLines, enabled: (*App).hasEditableTab},
-			{label: "Move line up", shortcut: "alt+↑", action: (*App).menuMoveLinesUp, enabled: (*App).hasEditableTab},
-			{label: "Move line down", shortcut: "alt+↓", action: (*App).menuMoveLinesDown, enabled: (*App).hasEditableTab},
-			// Multi-line editing (multicaret.go). The mouse gesture is
-			// Alt+click, which has no menu row it could be — these are
-			// the keyboard paths, and the Clear row is the way back for
-			// anyone who got here by accident.
-			{label: "Add caret below", shortcut: "esc m", action: (*App).menuAddCaretBelow, enabled: (*App).hasEditableTab},
-			{label: "Add caret above", shortcut: "esc M", action: (*App).menuAddCaretAbove, enabled: (*App).hasEditableTab},
-			{label: "Add next occurrence", shortcut: "esc *", action: (*App).menuAddNextOccurrence, enabled: (*App).hasMultiCaretTarget},
-			{label: "Select all occurrences", shortcut: "esc &", action: (*App).menuSelectAllOccurrences, enabled: (*App).hasMultiCaretTarget},
-			{label: "Clear extra carets", shortcut: "esc", action: (*App).menuClearCarets, enabled: (*App).hasCarets},
 		}},
 		{title: "Quit", collapsible: false, items: []menuItemDef{
 			{label: "Quit editor", shortcut: "esc q", action: (*App).menuQuit, enabled: alwaysTrue},
@@ -739,7 +770,7 @@ func builtinMenuGroups() []menuGroup {
 func alwaysTrue(*App) bool { return true }
 
 // visibleMenuGroups returns the built-in groups with the user's own
-// actions spliced in as their own collapsible groups right before Quit,
+// actions spliced in as sub-sections of Tools, right before Quit,
 // so they sit at the bottom of the menu where the user reaches for
 // "what do I do with this file" actions. Two sources feed it: plugin
 // commands (plugins.go) and actions.json custom actions. Recomputed on
@@ -762,11 +793,11 @@ func (a *App) visibleMenuGroups() []menuGroup {
 	// plain terminal — the whole group would be permanently grey for the
 	// overwhelming majority of ced users, which is noise, not vocabulary.
 	if cg := a.catsMenuItems(); len(cg) > 0 {
-		groups = append(groups, menuGroup{title: "Cats", collapsible: true, items: cg})
+		groups = append(groups, menuGroup{title: "Cats", collapsible: true, parent: "Tools", items: cg})
 	}
 	if pc := a.pluginMenuItems(); len(pc) > 0 {
 		groups = append(groups, menuGroup{
-			title: "Plugin commands", collapsible: true, items: pc,
+			title: "Plugin commands", collapsible: true, parent: "Tools", items: pc,
 		})
 	}
 	if len(a.customActions) == 0 {
@@ -788,7 +819,7 @@ func (a *App) visibleMenuGroups() []menuGroup {
 			enabled: alwaysTrue,
 		})
 	}
-	custom := menuGroup{title: "Custom", collapsible: true, items: ca}
+	custom := menuGroup{title: "Custom", collapsible: true, parent: "Tools", items: ca}
 	return append(groups, custom, quit)
 }
 
@@ -829,12 +860,23 @@ func (a *App) menuLayout() (items []menuItemDef, dividers []int, modalHeight int
 	y++
 
 	for _, g := range a.visibleMenuGroups() {
+		// A sub-section lives entirely inside its parent: a folded
+		// parent hides the child's header as well as its rows, so the
+		// collapsed default shows only the top-level bar.
+		depth := 0
+		if g.parent != "" {
+			if a.sectionCollapsed(g.parent) {
+				continue
+			}
+			depth = 1
+		}
 		if g.collapsible {
 			title := g.title // capture for the toggle closure
 			items = append(items, menuItemDef{
 				label:   title,
 				header:  true,
 				relY:    y,
+				depth:   depth,
 				enabled: alwaysTrue,
 				action:  func(app *App) { app.toggleMenuSection(title) },
 			})
@@ -850,6 +892,7 @@ func (a *App) menuLayout() (items []menuItemDef, dividers []int, modalHeight int
 		}
 		for _, it := range g.items {
 			it.relY = y
+			it.depth = depth
 			items = append(items, it)
 			y++
 		}
@@ -874,6 +917,17 @@ func (a *App) toggleMenuSection(title string) {
 		a.menuCollapsed = map[string]bool{}
 	}
 	a.menuCollapsed[title] = !a.menuCollapsed[title]
+}
+
+// menuSectionParent returns the parent section a section folds inside,
+// or "" for a top-level section (or an unknown title).
+func (a *App) menuSectionParent(title string) string {
+	for _, g := range a.visibleMenuGroups() {
+		if g.title == title {
+			return g.parent
+		}
+	}
+	return ""
 }
 
 // menuSectionTitles returns the titles of every collapsible menu section
@@ -5114,16 +5168,27 @@ func (a *App) drawMenu() {
 		}
 		// A header owns the fold chevron and never shows a shortcut; an
 		// item's gutter stays blank so the hierarchy reads at a glance.
+		// A sub-section shifts its chevron and rows right by two cells,
+		// so its header lines up with the parent's rows and its own rows
+		// sit one step deeper — the tree the fold state describes.
+		indent := 2 * item.depth
+		// The modal is a fixed width and drawAt does not clip, so a label
+		// is cut to the cells left before the right border, with the cut
+		// marked. The indent is what makes this necessary: a nested row
+		// has two cells fewer than it had as a top-level one, and dynamic
+		// labels (an agent's name, a plugin's command) have no fixed
+		// length to budget against.
+		label = elide(label, mx+mw-2-(mx+4+indent))
 		if item.header {
 			chev := "▾"
 			if a.sectionCollapsed(item.label) {
 				chev = "▸"
 			}
-			drawAt(a.screen, mx+2, cy, chev, chevStyle)
-			drawAt(a.screen, mx+4, cy, label, labelStyle)
+			drawAt(a.screen, mx+2+indent, cy, chev, chevStyle)
+			drawAt(a.screen, mx+4+indent, cy, label, labelStyle)
 			continue
 		}
-		drawAt(a.screen, mx+4, cy, label, labelStyle)
+		drawAt(a.screen, mx+4+indent, cy, label, labelStyle)
 		// Shortcut hint, right-aligned like a GUI menu's accelerator
 		// column. Always muted — the label carries the row's state
 		// (enabled / hovered); the hint is a whisper either way — but
@@ -5131,7 +5196,7 @@ func (a *App) drawMenu() {
 		// highlight bar. Skipped when a long label would collide.
 		if item.shortcut != "" {
 			scX := mx + mw - 2 - len([]rune(item.shortcut))
-			if scX > mx+4+len([]rune(label))+1 {
+			if scX > mx+4+indent+len([]rune(label))+1 {
 				scStyle := mutedStyle
 				if hovered {
 					scStyle = tcell.StyleDefault.Background(hoverBg).Foreground(a.theme.Muted)

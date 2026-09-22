@@ -283,6 +283,12 @@ func TestOpenMenuAtSection(t *testing.T) {
 	if a.sectionCollapsed("Copilot") {
 		t.Fatal("the named section should be unfolded")
 	}
+	// Copilot is a sub-section of AI, drawn only inside it — so the
+	// parent has to open too, or the header the hover search looks for
+	// is not in the layout at all.
+	if a.sectionCollapsed("AI") {
+		t.Fatal("a sub-section's parent should be unfolded with it")
+	}
 	items, _, _ := a.menuLayout()
 	if a.hoveredMenuRow < 0 || a.hoveredMenuRow >= len(items) {
 		t.Fatalf("hover row out of range: %d", a.hoveredMenuRow)

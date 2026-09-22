@@ -355,6 +355,13 @@ func (a *App) statusBarClick(x, y int) {
 // segment named.
 func (a *App) openMenuAtSection(title string) {
 	a.openMenu()
+	// A sub-section is only drawn inside an unfolded parent, so the
+	// parent opens first — unfolding Copilot alone would leave its
+	// header hidden under a folded AI and the search below finding
+	// nothing.
+	if p := a.menuSectionParent(title); p != "" && a.sectionCollapsed(p) {
+		a.toggleMenuSection(p)
+	}
 	if a.sectionCollapsed(title) {
 		a.toggleMenuSection(title)
 	}

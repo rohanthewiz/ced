@@ -2138,7 +2138,7 @@ func menuRowIndex(items []menuItemDef, label string) int {
 // expands it again.
 func TestMenuHeaderClickToggles(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	a.height = 64 // whole menu fits, scroll 0
+	a.height = 200 // whole menu fits, scroll 0
 	a.openMenu()
 
 	// clickGitHeader hits the current on-screen position of the Git
@@ -2191,12 +2191,12 @@ func TestSeedMenuFoldDefault_RespectsExistingState(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	// Simulate a prior user choice: expand nothing but explicitly mark the
 	// map as touched, with Git left OPEN on purpose.
-	a.toggleMenuSection("Tab") // collapses Tab, initializes the map
+	a.toggleMenuSection("File") // collapses File, initializes the map
 	a.seedMenuFoldDefault()
 	if a.sectionCollapsed("Git") {
 		t.Fatal("seeding must not fold sections once the user has a fold state")
 	}
-	if !a.sectionCollapsed("Tab") {
+	if !a.sectionCollapsed("File") {
 		t.Fatal("the user's own fold should survive seeding")
 	}
 }
@@ -2289,9 +2289,9 @@ func TestDrawMenu_HeaderChevronReflectsFold(t *testing.T) {
 
 	headerCell := func() rune {
 		items, _, _ := a.menuLayout()
-		hi := menuHeaderIndex(items, "Tab")
+		hi := menuHeaderIndex(items, "File")
 		if hi < 0 {
-			t.Fatal("Tab header missing")
+			t.Fatal("File header missing")
 		}
 		mx, my, _, _ := a.menuModalRect()
 		cy := my + items[hi].relY - a.menuScrollOffset()
@@ -2307,25 +2307,33 @@ func TestDrawMenu_HeaderChevronReflectsFold(t *testing.T) {
 	}
 
 	if got := headerCell(); got != '▾' {
-		t.Fatalf("expanded Tab header gutter = %q, want ▾", got)
+		t.Fatalf("expanded File header gutter = %q, want ▾", got)
 	}
-	a.toggleMenuSection("Tab")
+	a.toggleMenuSection("File")
 	if got := headerCell(); got != '▸' {
-		t.Fatalf("collapsed Tab header gutter = %q, want ▸", got)
+		t.Fatalf("collapsed File header gutter = %q, want ▸", got)
 	}
 }
 
-// TestMenuLayout_TerminalRowsAboveTheFold pins the View-toggles group's
-// promoted position: the menu outgrows short windows and scrolls, so the
-// terminal rows must sit high enough to be visible with zero scroll even
-// on a 24-row terminal (visible band is relY 3..mh-2). Guards against a
-// reorder quietly burying Show terminal again. The chat toggle is no
-// longer pinned here — it moved to the Copilot group (owner preference,
-// all Copilot surfaces in one block); with the collapse-by-default menu
-// its section header keeps it one click away.
+// TestMenuLayout_TerminalRowsAboveTheFold pins the short-window budget
+// under the collapsed startup default: every TOP-LEVEL header must fit on
+// a 24-row window, and unfolding View alone must bring the terminal rows
+// on screen too. Show terminal is reached for far too often to sit behind
+// a scroll, and a top-level section below the fold is one nobody learns
+// exists. Sub-sections (AI's, Tools') are excluded: they are only drawn
+// once their parent is unfolded.
 func TestMenuLayout_TerminalRowsAboveTheFold(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
+	a.seedMenuFoldDefault()
 	items, _, _ := a.menuLayout()
+	for _, it := range items {
+		if it.header && it.relY > 22 {
+			t.Errorf("top-level header %q at relY %d — hidden without scrolling on a 24-row window", it.label, it.relY)
+		}
+	}
+
+	a.toggleMenuSection("View")
+	items, _, _ = a.menuLayout()
 	for _, want := range []string{"Show terminal", "Dock terminal left"} {
 		found := false
 		for _, item := range items {
@@ -2377,6 +2385,138 @@ func menuItemByLabel(t *testing.T, a *App, label string) menuItemDef {
 	}
 	t.Fatalf("menu item %q not found", label)
 	return menuItemDef{}
+}
+
+// TestBuiltinMenuGroups_ChildrenFollowParent pins the one structural
+// rule nesting adds: a sub-section names a TOP-LEVEL parent and sits in
+// the run of groups directly after it. menuLayout folds a child by its
+// parent's state, not by position, so a child stranded further down
+// would still hide with its parent — but would reappear under the wrong
+// header whenever the parent is open. Spliced groups (custom actions
+// here) must land under Tools, the last parent before Quit.
+func TestBuiltinMenuGroups_ChildrenFollowParent(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.customActions = []customactions.Action{{Label: "Deploy", Command: "echo d"}}
+	groups := a.visibleMenuGroups()
+	top := map[string]bool{}
+	current := ""
+	for _, g := range groups {
+		if g.parent == "" {
+			top[g.title] = true
+			current = g.title
+			continue
+		}
+		if !top[g.parent] {
+			t.Errorf("%q names parent %q, which is not a top-level section", g.title, g.parent)
+		}
+		if g.parent != current {
+			t.Errorf("%q (parent %q) sits under %q — children must follow their parent", g.title, g.parent, current)
+		}
+	}
+	want := map[string]string{"Copilot": "AI", "MCP": "AI", "Skills": "AI", "Compare": "File",
+		"Notes": "Tools", "Plugins": "Tools", "Custom": "Tools"}
+	for _, g := range groups {
+		if p, ok := want[g.title]; ok && g.parent != p {
+			t.Errorf("%q parent = %q, want %q", g.title, g.parent, p)
+		}
+	}
+}
+
+// TestMenuLayout_FoldedParentHidesSubsections verifies a folded parent
+// takes its sub-sections' HEADERS with it, not just their rows — the
+// collapsed default must read as the top-level bar alone — and that
+// unfolding the parent brings the sub-headers back at depth 1.
+func TestMenuLayout_FoldedParentHidesSubsections(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.seedMenuFoldDefault()
+	items, _, _ := a.menuLayout()
+	for _, sub := range []string{"Copilot", "MCP", "Skills", "Compare"} {
+		if menuHeaderIndex(items, sub) >= 0 {
+			t.Errorf("sub-section %q drawn while its parent is folded", sub)
+		}
+	}
+	a.toggleMenuSection("AI")
+	items, _, _ = a.menuLayout()
+	for _, sub := range []string{"Copilot", "MCP", "Skills"} {
+		hi := menuHeaderIndex(items, sub)
+		if hi < 0 {
+			t.Fatalf("sub-section %q missing under an unfolded AI", sub)
+		}
+		if items[hi].depth != 1 {
+			t.Errorf("%q header depth = %d, want 1", sub, items[hi].depth)
+		}
+	}
+	if hi := menuHeaderIndex(items, "AI"); hi < 0 || items[hi].depth != 0 {
+		t.Error("AI should be a depth-0 header")
+	}
+}
+
+// TestDrawMenu_SubsectionIndented pins the visible hierarchy: a
+// sub-section's chevron sits two cells right of a top-level one's, so
+// Copilot reads as belonging to AI rather than as its sibling.
+func TestDrawMenu_SubsectionIndented(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.seedMenuFoldDefault()
+	a.toggleMenuSection("AI")
+	a.openMenu()
+	a.draw()
+	scr := a.screen.(tcell.SimulationScreen)
+	scr.Show()
+	items, _, _ := a.menuLayout()
+	mx, my, _, _ := a.menuModalRect()
+	cells, w, _ := scr.GetContents()
+	cellAt := func(x, y int) rune {
+		c := cells[y*w+x]
+		if len(c.Runes) == 0 {
+			return ' '
+		}
+		return c.Runes[0]
+	}
+	ai := items[menuHeaderIndex(items, "AI")]
+	cp := items[menuHeaderIndex(items, "Copilot")]
+	if got := cellAt(mx+2, my+ai.relY-a.menuScrollOffset()); got != '▾' {
+		t.Errorf("AI chevron at mx+2 = %q, want ▾", got)
+	}
+	if got := cellAt(mx+4, my+cp.relY-a.menuScrollOffset()); got != '▸' {
+		t.Errorf("Copilot chevron at mx+4 = %q, want ▸", got)
+	}
+}
+
+// TestDrawMenu_LongNestedLabelStopsAtBorder pins the clip: a label too
+// long for a nested row is cut with "…" instead of painting over the
+// modal's right border. Custom actions are the easy long label to
+// supply, and they nest under Tools.
+func TestDrawMenu_LongNestedLabelStopsAtBorder(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.customActions = []customactions.Action{{Label: strings.Repeat("x", 80), Command: "echo"}}
+	a.seedMenuFoldDefault()
+	a.toggleMenuSection("Tools")
+	a.toggleMenuSection("Custom")
+	a.openMenu()
+	a.draw()
+	scr := a.screen.(tcell.SimulationScreen)
+	scr.Show()
+	cells, w, _ := scr.GetContents()
+	items, _, _ := a.menuLayout()
+	mx, my, mw, _ := a.menuModalRect()
+	ri := menuRowIndex(items, strings.Repeat("x", 80))
+	if ri < 0 {
+		t.Fatal("custom action row missing")
+	}
+	cy := my + items[ri].relY - a.menuScrollOffset()
+	at := func(x int) rune {
+		c := cells[cy*w+x]
+		if len(c.Runes) == 0 {
+			return ' '
+		}
+		return c.Runes[0]
+	}
+	if got := at(mx + mw - 1); got != '│' {
+		t.Errorf("right border cell = %q, want │", got)
+	}
+	if got := at(mx + mw - 3); got != '…' {
+		t.Errorf("last label cell = %q, want the … cut marker", got)
+	}
 }
 
 // TestMenuLayout_WithCustomActions checks the splice-before-Quit

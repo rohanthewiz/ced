@@ -711,7 +711,7 @@ between them. House rules:
   position that matters is already marked by a caret the user placed.
 - Leader is **`Esc %`** — vim's own key for this, still free, the same
   muscle-memory argument that put the palette on `k` and next-occurrence
-  on `*`. The ≡ **Code** row is its twin and is gated only on there
+  on `*`. The ≡ **Nav** row is its twin and is gated only on there
   being a text buffer: the honest predicate is the scan itself,
   menuLayout runs predicates every frame the menu is open, and "put the
   cursor on a bracket first" is a better answer than a dimmed row that
@@ -923,7 +923,7 @@ owes you. House rules:
 ### Find all in file (app/findall.go)
 Every occurrence of a query listed as one compacted row each — line
 number, then the line with the hit lit — under the editor. Esc-F, the ≡
-Search group, or ↓ from the find bar. House rules:
+Find group, or ↓ from the find bar. House rules:
 
 - **It's a PEEK, which is why it isn't a palette picker.** The house
   rule is that every choose-one-from-a-list UI reuses `openPicker`, and
@@ -2095,7 +2095,7 @@ Copilot. House rules:
   one the user can now ask as a follow-up, in the panel already open in
   front of them.
 - Agent-agnostic, like the chat toggle beside it. The ≡ row is in the
-  Copilot group because that group IS the editor's AI block, and its
+  Copilot section (under ≡ AI) beside the chat rows it feeds, and its
   label names what it will cover — a selection changes the question
   completely, and that has to be visible before a click spends a turn.
   Leader is **Esc-a-z**: summariZe, the letter the word offers once 's'
@@ -2168,9 +2168,9 @@ Esc-a-n, ≡ Notes. House rules:
 - **`agentOneLine` is the shared reduction** behind `commitSubject` and
   the note title: a single-line input field is about to receive whatever
   the agent felt like writing, and a fence or a "Title:" prefix would be
-  saved verbatim. Its own ≡ group ("Notes") for the reason MCP, Skills
-  and Plugins each have one — a separate system ced talks to, not a
-  feature of any subsystem here. `gonotesCreate` is a package var;
+  saved verbatim. Its own ≡ section ("Notes", under Tools, beside
+  Plugins) — a separate system ced talks to, not a feature of any
+  subsystem here. `gonotesCreate` is a package var;
   newTestApp pins it at a refusal so no test run can write fixture text
   into a developer's real notes database.
 
@@ -2254,7 +2254,8 @@ here. House rules:
   naming the directory is what keeps its scripts and references reachable
   by an agent that has fs access.
 - **Agent-agnostic**, like MCP: whatever backend the panel is running
-  gets the skill. Not a Copilot feature, hence its own ≡ group.
+  gets the skill. Not a Copilot feature, hence its own ≡ section (a
+  sibling of Copilot and MCP under ≡ AI).
 - **Nothing is executed.** A skill is markdown ced hands to an agent,
   never a script ced runs. That's what keeps these directories on the
   right side of the no-plugin-system line — same as themes being data.
@@ -2385,7 +2386,8 @@ strip. House rules:
   here are BUFFERS, so shelling out would mean temp files, and neither
   git nor the repository it wants is guaranteed to be there. Same
   argument the project search made against ripgrep — and it's why
-  Compare is its own ≡ group rather than rows under Git: none of it
+  Compare is its own ≡ section (nested under File, since every source it
+  takes is a file or a buffer) rather than rows under Git: none of it
   needs a repo.
 - **The differ is patience, and that's a correctness choice as much as a
   performance one.** Anchoring on lines that appear exactly ONCE on each
@@ -2882,7 +2884,7 @@ jumps to it. House rules:
   state to borrow and a row answering Enter with "that isn't here" is
   worse than one never offered (the code-actions rule). Nothing is lost:
   when everything was dropped, the flash says so.
-- **The row lives in ≡ Navigation and is never dimmed.** Go back and Go
+- **The row lives in ≡ Nav and is never dimmed.** Go back and Go
   forward walk the trail you made; this jumps to the places you named in
   advance — a browser's pairing, history beside bookmarks. It stays
   clickable with no favorites.json (the "Recent chats"/MCP rule: a dimmed
@@ -3421,9 +3423,9 @@ scope by design. House rules:
   edge; the ≡ "Dock terminal left" row survives as a named PRESET over
   `moveTool`, and it still OPENS a closed terminal — moving something
   invisible reads as the row doing nothing. Keep the Show/Hide terminal
-  and dock rows in the View-toggles group near the TOP of the ≡ menu —
-  the menu scrolls on short windows and these rows must stay above the
-  fold (pinned by `TestMenuLayout_TerminalRowsAboveTheFold`).
+  and dock rows near the TOP of the ≡ View section — the menu scrolls on
+  short windows and these rows must stay above the fold once View is
+  unfolded (pinned by `TestMenuLayout_TerminalRowsAboveTheFold`).
 - **Bottom mode resizes by header-rule drag (rows); a vertical edge by
   its seam (columns).** `termPanelPress` refuses the header-rule drag on
   a vertical edge, where a height would mean nothing.
@@ -3532,10 +3534,10 @@ the panel exists. House rules:
   menuLayout runs every frame the menu is open, and the honest
   question is a scrollback walk with a stat behind it, so it's a cheap
   gate plus an honest flash.
-- The row lives in the **Code** group, not with the terminal's View
-  toggles: it answers the code-intelligence question ("take me to the
-  problem") and is the one row there needing no language server —
-  `go build` and `grep -n` are the providers.
+- The row lives in the **Nav** group, beside Go to matching bracket, not
+  with the terminal's View toggles: it is a jump ("take me to the
+  problem") that needs no language server — `go build` and `grep -n` are
+  the providers — so it does not belong among Code's server-backed rows.
 
 ### Run an executable (app/runexec.go)
 The tree's `*` marker (execmarks.go) and the terminal panel, joined: right-
@@ -3671,6 +3673,29 @@ a one-row section you could fold the exit away into reads as a bug.
 Folding re-centers the (now shorter) modal — expected, same as any
 resize.
 
+**The top level is a menu bar turned on its side**: File · Edit · View
+· Find · Nav · Code · Git · AI · Tools, then Quit — the order and the
+names a desktop app teaches, so a row is where a user who has never
+opened this menu already looks for it. Save / Close tab / Revert live in
+File, Undo / Redo head Edit, and tab switching, recent files, go to line,
+favorites, matching bracket and terminal locations are Nav (the
+language-server jumps stay in Code, where they dim together).
+
+**Sub-sections nest ONE level, through `menuGroup.parent`.** Compare
+folds inside File; Copilot, MCP and Skills inside AI; Notes, Plugins and
+the spliced Cats / Plugin commands / Custom inside Tools. It is a field
+on a FLAT list, not a tree of groups, so the palette and every test that
+finds a row by its section keep walking one slice. The rules:
+a child names a TOP-LEVEL parent and follows it directly in the table
+(`TestBuiltinMenuGroups_ChildrenFollowParent`); a folded parent hides its
+children's HEADERS too, so the collapsed default is just the bar; nested
+rows are stamped `depth` 1 and draw two cells to the right; and every
+label is `elide`d to the fixed modal width, since the indent takes two
+cells a top-level row had. `openMenuAtSection` unfolds the parent before
+the child — Copilot's status-bar door would otherwise open onto a folded
+AI. Tools must stay the LAST parent before Quit, because
+`visibleMenuGroups` appends its spliced children at the end.
+
 **Pinned top zone + collapse-by-default.** `menuLayout` prepends two
 rows OUTSIDE every group, above the first section: the **command
 palette** (the menu's headline — the fuzzy gateway to every action, so
@@ -3688,7 +3713,10 @@ the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
 2 top-zone rows + 146 group actions + 15 headers (163), height 169,
 dividers `[2, 5, 166]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
-`TestMenuModalRect_*`).
+`TestMenuModalRect_*`). `TestMenuLayout_TerminalRowsAboveTheFold` pins
+the short-window budget against that collapsed default: every top-level
+header fits on a 24-row window, and so do the terminal rows with only
+View unfolded.
 
 ### Tool windows (app/toolwindow.go + tooladapt/toollayout/toolmenu)
 Every auxiliary panel — the file tree, both git panels, the problems

@@ -160,3 +160,21 @@ func colorGap(a, b tcell.Color) float64 {
 	}
 	return d
 }
+
+// TestBuiltins_ActiveLineNumberStandsOut pins the gutter's two number
+// colors apart: a caret's line number is drawn in Text, every other one in
+// Muted, so Text must sit visibly FURTHER from the background than Muted.
+// The number used to be AccentSoft, which nothing tied to Muted — a user
+// theme resolved the two a few units apart and the lit number vanished.
+func TestBuiltins_ActiveLineNumberStandsOut(t *testing.T) {
+	for _, s := range Builtins() {
+		th, err := s.Resolve()
+		if err != nil {
+			t.Fatalf("theme %q: %v", s.Name, err)
+		}
+		lit, plain := colorGap(th.BG, th.Text), colorGap(th.BG, th.Muted)
+		if lit-plain < 0.10 {
+			t.Errorf("theme %q: active number (Text, gap %.2f) not clearly past Muted (gap %.2f)", s.Name, lit, plain)
+		}
+	}
+}

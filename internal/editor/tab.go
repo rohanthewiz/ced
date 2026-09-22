@@ -1112,6 +1112,7 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	// wrap. `row` is the screen row the next painted row lands on, so the
 	// loop ends at whichever runs out first — the viewport or the buffer.
 	liveNotes := t.LiveLineNotes()
+	caretLines := t.caretLineSet()
 	row := 0
 	for lineIdx := t.ScrollY; row < h && lineIdx < t.Buffer.LineCount(); lineIdx++ {
 		isCursorLine := lineIdx == t.Cursor.Line
@@ -1197,8 +1198,20 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 				// Gutter / line number, right-aligned with one trailing space.
 				numStr := fmt.Sprintf("%*d", gutterWidth-1, lineIdx+1)
 				gutterStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
-				if isCursorLine {
-					gutterStyle = gutterStyle.Foreground(th.AccentSoft)
+				if caretLines[lineIdx] {
+					// A caret's line number takes the BODY text color, bolded.
+					// Not AccentSoft (what this used to be): that is a hue,
+					// not a brightness, and nothing ties it to Muted — a
+					// user theme had the two within a few units of each
+					// other, so the lit number was indistinguishable from
+					// its neighbours. Muted is by construction a step from
+					// Text toward the background, so Text is always the
+					// brighter number; it is neutral, so it can't be read
+					// as a syntax color; and bold carries it on a panel
+					// whose contrast flattens even that. Secondary carets
+					// get it too — they carry no line wash, so the number is
+					// the only thing at the left edge saying "editing here".
+					gutterStyle = gutterStyle.Foreground(th.Text).Bold(true)
 				}
 				for i, r := range numStr {
 					scr.SetContent(x+i, cy, r, nil, gutterStyle)
@@ -1536,4 +1549,17 @@ func (t *Tab) clampScroll(viewH int) {
 	if max := t.MaxScroll(viewH); t.ScrollY > max {
 		t.ScrollY = max
 	}
+}
+
+// caretLineSet reports every buffer line holding a caret — the primary
+// plus any secondaries — so the gutter can light each of their numbers.
+// Read from the caret FIELDS, not CaretsHidden: the blink hides the
+// caret glyph, and a line number blinking with it would be noise.
+func (t *Tab) caretLineSet() map[int]bool {
+	lines := make(map[int]bool, len(t.Carets)+1)
+	lines[t.Cursor.Line] = true
+	for _, c := range t.Carets {
+		lines[c.Cursor.Line] = true
+	}
+	return lines
 }

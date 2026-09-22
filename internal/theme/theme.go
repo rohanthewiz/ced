@@ -52,7 +52,7 @@ type Theme struct {
 	Muted      tcell.Color // Line numbers, inactive tabs, secondary UI text.
 	Subtle     tcell.Color // Even more subtle (separators, hints).
 	Accent     tcell.Color // Active tab accent, root label, important UI.
-	AccentSoft tcell.Color // Softer accent (active line number).
+	AccentSoft tcell.Color // Softer accent (keywords; derived toward err).
 	Selection  tcell.Color // Selection background.
 	Modified   tcell.Color // Dirty indicator (unsaved changes).
 	Error      tcell.Color // Error messages.

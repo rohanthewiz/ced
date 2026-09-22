@@ -1605,3 +1605,35 @@ func TestTab_ScrollH_CeilingIsWindowScoped(t *testing.T) {
 		t.Fatalf("MaxScrollX = %d with only short lines visible, want 0", got)
 	}
 }
+
+// TestRender_CaretLineNumbersLit pins the gutter highlight: the line
+// number of every line holding a caret — primary AND secondary — is drawn
+// in the body Text color and bold, and a caret-free line's number stays plain
+// Muted. Bold is asserted separately because the hue step alone is what
+// a low-contrast terminal flattens.
+func TestRender_CaretLineNumbersLit(t *testing.T) {
+	tab := tabWith("one\ntwo\nthree\nfour")
+	tab.Cursor = Position{Line: 1, Col: 0}
+	tab.Anchor = tab.Cursor
+	tab.Carets = []Caret{{Cursor: Position{Line: 3, Col: 0}, Anchor: Position{Line: 3, Col: 0}}}
+	th := theme.Default()
+
+	scr := newSimScreen(t, 40, 6)
+	defer scr.Fini()
+	tab.Render(scr, th, 0, 0, 40, 6)
+
+	// The number is right-aligned in gutterWidth-1 cells, so a
+	// single-digit line's digit sits in the last of them.
+	digitCol := gutterWidth - 2
+	for line, want := range map[int]bool{0: false, 1: true, 2: false, 3: true} {
+		_, _, st, _ := scr.GetContent(digitCol, line)
+		fg, _, attr := st.Decompose()
+		lit := fg == th.Text && attr&tcell.AttrBold != 0
+		if lit != want {
+			t.Errorf("line %d: lit=%v want %v (fg=%v bold=%v)", line+1, lit, want, fg, attr&tcell.AttrBold != 0)
+		}
+		if !want && fg != th.Muted {
+			t.Errorf("line %d: plain number fg=%v, want Muted", line+1, fg)
+		}
+	}
+}

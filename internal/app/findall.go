@@ -610,10 +610,13 @@ func (m *findAllModal) abort(a *App) {
 // to tint the occurrences it was listing, so the tint has to leave with
 // the list — same contract as closing the find bar.
 func (m *findAllModal) restoreFind(a *App) {
-	// Project mode never borrowed anything: it has no single tab behind
-	// it to tint, and writing these fields would clobber whatever find
-	// state the active tab legitimately holds.
+	// Project mode has no single tab behind it; what it borrowed is the
+	// tint each row's jump installed in the file it opened, tracked on
+	// the App so it can be taken back file by file. Blindly writing the
+	// fields below would clobber whatever find state the active tab
+	// legitimately holds.
 	if m.project {
+		a.clearProjectFindTints()
 		return
 	}
 	tab := m.tab(a)

@@ -239,6 +239,10 @@ func (m *findAllModal) openSelected(a *App) {
 	// A pinned list is a worklist: the jump commits but the panel stays.
 	if !m.pinned {
 		a.closeModal()
+		// The list is going, so the tint it scattered over files the
+		// user merely clicked through goes with it. The accepted file
+		// is re-tinted by the jump below, and Esc clears that one.
+		a.clearProjectFindTints()
 	}
 	m.jumpToSelected(a)
 }
@@ -277,8 +281,61 @@ func (m *findAllModal) jumpToSelected(a *App) {
 		tab.CenterOnCursor(ew, eh)
 	}
 	// The hit is left selected so it is visible the instant the file
-	// opens — the same courtesy the find bar's current match gets.
-	tab.SetFindQuery(m.query)
+	// opens — the same courtesy the find bar's current match gets. The
+	// tint is recorded so the list's dismissal (or Esc) can take it back.
+	a.tintForProjectFind(tab, m.query)
+}
+
+// projFindTint is one file's entry in App.projFindTints: the query a
+// project-mode list lit, and the find query the tab held BEFORE the
+// first tint, so taking the tint back restores rather than blanks.
+type projFindTint struct {
+	query string
+	prior string
+}
+
+// tintForProjectFind installs query as tab's find tint and records it.
+// The prior query is captured only on the FIRST tint of a path — a
+// second click into the same file must not record the list's own tint
+// as the thing to restore.
+func (a *App) tintForProjectFind(tab *editor.Tab, query string) {
+	if a.projFindTints == nil {
+		a.projFindTints = map[string]projFindTint{}
+	}
+	rec, seen := a.projFindTints[tab.Path]
+	if !seen {
+		rec.prior = tab.FindQuery
+	}
+	rec.query = query
+	a.projFindTints[tab.Path] = rec
+	tab.SetFindQuery(query)
+}
+
+// clearProjectFindTints takes back every tint a project-mode list left
+// behind. A tab whose query has since changed is left alone — the user
+// (or the find bar) owns that state now, and writing over it would
+// clobber a search they started themselves. Closed tabs simply have
+// nothing left to clear.
+func (a *App) clearProjectFindTints() {
+	if len(a.projFindTints) == 0 {
+		return
+	}
+	for i := range a.tabs {
+		tab := a.tabs[i]
+		if tab == nil {
+			continue
+		}
+		rec, ok := a.projFindTints[tab.Path]
+		if !ok || tab.FindQuery != rec.query {
+			continue
+		}
+		if rec.prior != "" {
+			tab.SetFindQuery(rec.prior)
+		} else {
+			tab.ClearFind()
+		}
+	}
+	a.projFindTints = nil
 }
 
 // titleText names the list and, in project mode, admits when the result

@@ -1202,6 +1202,14 @@ type App struct {
 	// pinned; at most one of this and a modal-slot findAllModal exists.
 	findAllPin *findAllModal
 
+	// projFindTints records the find tint a PROJECT-mode list installed
+	// on each file it jumped into (projectsearch.go), keyed by path. The
+	// in-file list borrows exactly one tab's find state and hands it back
+	// on close; a cross-file list scatters its query over every file a
+	// row opened, and without this ledger nothing ever took it back — the
+	// highlights outlived the list and even Esc. nil in the common case.
+	projFindTints map[string]projFindTint
+
 	// problems is the diagnostics worklist (problems.go): a bottom-strip
 	// panel listing every problem the language server has published, and
 	// what the status bar's `✗ 2 ⚠ 5` segment opens. Its rows/selection
@@ -2705,6 +2713,10 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// …and for the file tree's type-to-find pattern (treefilter.go),
 		// which has no timeout: Esc is how a user says "done looking".
 		a.clearTreeFilter()
+		// …and for the tint a project-wide list left in the files it
+		// opened (projectsearch.go): accepting a row keeps the hit lit
+		// so it is visible on arrival, and Esc is how it goes away.
+		a.clearProjectFindTints()
 		// A real Esc always re-opens the full leader table — chain mode
 		// (repeatable-only) is an artifact of the previous action. Note
 		// whether the window was chain-armed before clearing: a chained

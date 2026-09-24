@@ -357,3 +357,75 @@ func TestStartProjectSearch_WithoutAnIndexSaysSo(t *testing.T) {
 		t.Fatalf("expected an indexing flash, got %q", a.statusMsg)
 	}
 }
+
+// TestProjectSearch_DismissTakesBackTheTintItScattered pins the bug fix:
+// every row a click opened was tinted with the query, and project mode's
+// restoreFind used to return early, so the highlights outlived the list.
+// Esc on the list must now clear them — and restore, not blank, a tab
+// that held its own query before the list lit it.
+func TestProjectSearch_DismissTakesBackTheTintItScattered(t *testing.T) {
+	a, root := projectSearchApp(t)
+	a.openFile(filepath.Join(root, "alpha.go"))
+	alpha := a.activeTabPtr()
+	alpha.SetFindQuery("alpha")
+
+	runProjectSearch(t, a, root, "needle", []string{"alpha.go", "sub/bravo.go"})
+	m := a.modal.(*findAllModal)
+	m.selectRow(a, 0)
+	m.jumpToSelected(a) // alpha.go, overwriting its own "alpha"
+	m.selectRow(a, 2)
+	m.jumpToSelected(a) // sub/bravo.go
+	bravo := a.activeTabPtr()
+	if alpha.FindQuery != "needle" || bravo.FindQuery != "needle" {
+		t.Fatalf("clicks should tint: alpha %q, bravo %q", alpha.FindQuery, bravo.FindQuery)
+	}
+
+	m.abort(a)
+
+	if bravo.FindQuery != "" || len(bravo.FindMatches) != 0 {
+		t.Fatalf("dismissal left the tint in bravo: %q (%d matches)", bravo.FindQuery, len(bravo.FindMatches))
+	}
+	if alpha.FindQuery != "alpha" {
+		t.Fatalf("dismissal should restore alpha's own query, got %q", alpha.FindQuery)
+	}
+}
+
+// TestProjectSearch_EscClearsTheAcceptedTint: accepting a row keeps the
+// hit lit on arrival (the list is gone by then), and a plain Esc in the
+// editor is how that tint leaves — before the fix nothing ever cleared it.
+func TestProjectSearch_EscClearsTheAcceptedTint(t *testing.T) {
+	a, root := projectSearchApp(t)
+	runProjectSearch(t, a, root, "needle", []string{"alpha.go", "sub/bravo.go"})
+	m := a.modal.(*findAllModal)
+	m.selectRow(a, 2)
+	m.accept(a)
+	tab := a.activeTabPtr()
+	if tab == nil || tab.FindQuery != "needle" {
+		t.Fatal("accept should leave the hit lit in the opened file")
+	}
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+
+	if tab.FindQuery != "" || len(tab.FindMatches) != 0 {
+		t.Fatalf("Esc left the project tint: %q (%d matches)", tab.FindQuery, len(tab.FindMatches))
+	}
+}
+
+// TestProjectSearch_TintClearLeavesAUsersNewSearchAlone: a tab whose
+// query changed after the list lit it belongs to the user now, and the
+// ledger must not blank a search they started themselves.
+func TestProjectSearch_TintClearLeavesAUsersNewSearchAlone(t *testing.T) {
+	a, root := projectSearchApp(t)
+	runProjectSearch(t, a, root, "needle", []string{"alpha.go"})
+	m := a.modal.(*findAllModal)
+	m.selectRow(a, 0)
+	m.accept(a)
+	tab := a.activeTabPtr()
+	tab.SetFindQuery("package")
+
+	a.clearProjectFindTints()
+
+	if tab.FindQuery != "package" {
+		t.Fatalf("a user's own query was clobbered: %q", tab.FindQuery)
+	}
+}

@@ -1086,10 +1086,15 @@ Esc contract and the mouse story. House rules:
   of `openSelected`). That is the in-file list's click contract, and it
   is safe where keyboard walking is not because a click is one deliberate
   gesture per file opened. Every project-mode producer (search,
-  references, the workspace-edit receipt) inherits it. Esc restores
-  nothing, and `restoreFind` returns early — project mode never borrowed
-  the tab's find state and writing it would clobber what the active tab
-  legitimately holds. A keyboard preview mode, if ever wanted, needs a
+  references, the workspace-edit receipt) inherits it. Esc restores no
+  VIEW, but it must take back the TINT: each jump lights the query in
+  the file it opened, and that is recorded per path in
+  `App.projFindTints` (`tintForProjectFind`). Dismissing the list, an
+  accept that closes it, and a plain Esc in the editor all go through
+  `clearProjectFindTints`, which restores each tab's prior query and
+  skips any tab whose query has changed since — the user owns that one.
+  (It used to return early, and the highlights outlived the list and
+  even Esc.) A keyboard preview mode, if ever wanted, needs a
   real preview-TAB concept (one reusable slot), not a special case here.
 - **Labels truncate from the FRONT.** The distinguishing part of a path
   is its tail; twenty rows reading `internal/app/…` say nothing. The

@@ -499,3 +499,117 @@ func TestMenuTypingIgnoresModifiedRunes(t *testing.T) {
 		t.Fatal("a modified rune must not enter search mode")
 	}
 }
+
+// spacerPicker opens a picker of two named sections split by a spacer —
+// the Recent folders shape, without the filesystem.
+func spacerPicker(a *App, before, after int) *paletteModal {
+	var items []paletteItem
+	for i := 0; i < before; i++ {
+		items = append(items, paletteItem{label: "recent" + string(rune('a'+i)), run: func(*App) {}})
+	}
+	items = append(items, paletteSpacer())
+	for i := 0; i < after; i++ {
+		items = append(items, paletteItem{label: "frequent" + string(rune('a'+i)), run: func(*App) {}})
+	}
+	return a.openPickerRows("Sections", items, 0, nil)
+}
+
+// TestPaletteSpacer_ArrowsSkipIt pins that a divider can never hold the
+// highlight: ↓ from the last row above it lands on the first row below,
+// and ↑ comes straight back.
+func TestPaletteSpacer_ArrowsSkipIt(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := spacerPicker(a, 2, 2)
+	down := tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+	up := tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
+
+	m.handleKey(a, down) // recentb
+	m.handleKey(a, down) // over the spacer
+	if got := m.matches[m.selected].item.label; got != "frequenta" {
+		t.Fatalf("after ↓↓ selected %q, want frequenta", got)
+	}
+	m.handleKey(a, up)
+	if got := m.matches[m.selected].item.label; got != "recentb" {
+		t.Fatalf("after ↑ selected %q, want recentb", got)
+	}
+}
+
+// TestPaletteSpacer_OnlyWhileUnfiltered pins that the divider belongs to
+// the sectioned view: a query ranks by score and drops it, and the
+// count tail never counts it.
+func TestPaletteSpacer_OnlyWhileUnfiltered(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := spacerPicker(a, 2, 2)
+	if len(m.matches) != 5 || m.countMatches() != 4 || countItems(m.items) != 4 {
+		t.Fatalf("unfiltered: %d matches, %d counted, %d items — want 5 / 4 / 4",
+			len(m.matches), m.countMatches(), countItems(m.items))
+	}
+	typePalette(a, "freq")
+	for _, mt := range m.matches {
+		if mt.item.spacer {
+			t.Fatal("a spacer survived filtering")
+		}
+	}
+}
+
+// TestPaletteSpacer_ClickDoesNothing pins that clicking the divider row
+// neither runs nor selects anything — it is not a choice.
+func TestPaletteSpacer_ClickDoesNothing(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := spacerPicker(a, 1, 1)
+	m.draw(a)
+	mx, my, _, _ := m.rect(a)
+	m.handleMouse(a, mx+5, my+4+1, tcell.Button1) // row 1 is the spacer
+	if paletteOf(a) == nil {
+		t.Fatal("clicking the spacer closed the picker")
+	}
+	if m.selected != 0 {
+		t.Fatalf("selected = %d, want the click ignored", m.selected)
+	}
+}
+
+// TestPalette_ScrollsToTheSelection pins that rows past the visible
+// window are reachable: ↓ past the last drawn row scrolls the list, and
+// the highlighted row is the one drawn — the palette used to leave the
+// highlight off-screen and ask for a narrower query.
+func TestPalette_ScrollsToTheSelection(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := spacerPicker(a, 5, 10) // 16 rows, 10 visible
+	down := tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+	for i := 0; i < 14; i++ {
+		m.handleKey(a, down)
+	}
+	m.draw(a)
+	a.screen.Show()
+	want := m.matches[m.selected].item.label
+	if want != "frequentj" {
+		t.Fatalf("selected %q after 14 ↓, want the last row", want)
+	}
+	if !strings.Contains(screenText(a), want) {
+		t.Fatalf("the selected row %q is not on screen", want)
+	}
+	if m.top == 0 {
+		t.Fatal("the window never scrolled")
+	}
+	// A click now maps through the scroll offset.
+	mx, my, _, _ := m.rect(a)
+	m.handleMouse(a, mx+5, my+4, 0)
+	if m.selected != m.top {
+		t.Fatalf("hover on the first drawn row selected %d, want top %d", m.selected, m.top)
+	}
+}
+
+// TestOpenPickerRows_AsksForTheHeight pins that a sized picker grows its
+// frame to the rows requested (and an ordinary one keeps the usual ten).
+func TestOpenPickerRows_AsksForTheHeight(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.width, a.height = 100, 40
+	m := a.openPickerRows("Tall", []paletteItem{{label: "x", run: func(*App) {}}}, 17, nil)
+	if _, _, _, h := m.rect(a); h != 17+6 {
+		t.Fatalf("height = %d, want 23", h)
+	}
+	a.openPicker("Short", []paletteItem{{label: "x", run: func(*App) {}}})
+	if _, _, _, h := paletteOf(a).rect(a); h != paletteResultsVisible+6 {
+		t.Fatalf("ordinary picker height = %d, want %d", h, paletteResultsVisible+6)
+	}
+}

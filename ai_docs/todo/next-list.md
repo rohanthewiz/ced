@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-027**
+**Next ID: N-030**
 
 ## Open
 
@@ -101,6 +101,22 @@ plus the LSP work done in the seeding session itself
   still keeps the chord for its own select-all. The road ⌘E took
   (`ed4962c`). Worth checking first that forwarding it does not cost
   other panes (a shell) a select-all they relied on.
+
+- **N-027** · raised `2026-0928-1408-recent-locations-per-repo-history` · value low
+  `.ced/history.bytdb` is created in ANY folder ced opened a file in, not
+  only git repositories (`ced ~` leaves `~/.ced/`). Option: persist only
+  when the root holds `.git` (or already has `.ced/`), at the cost of no
+  history elsewhere. Owner's call.
+
+- **N-028** · raised `2026-0928-1408-recent-locations-per-repo-history` · value low
+  A read-only checkout (or unwritable `.ced/`) silently loses that
+  session's folder + recent-file history — `writeHistory` is silent by
+  design. A fallback location, or one flash at startup, would say so.
+
+- **N-029** · raised `2026-0928-1408-recent-locations-per-repo-history` · value low
+  README does not mention ≡ Nav → Recent locations…, the drill-in, or that
+  recent files / locations now live in `<repo>/.ced/history.bytdb`
+  (gitignored). An instance of N-003.
 
 ## Roadmap
 

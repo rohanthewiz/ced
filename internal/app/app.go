@@ -33,6 +33,7 @@ import (
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/finder"
+	"github.com/rohanthewiz/ced/internal/history"
 	"github.com/rohanthewiz/ced/internal/icons"
 	"github.com/rohanthewiz/ced/internal/plugins"
 	"github.com/rohanthewiz/ced/internal/session"
@@ -474,6 +475,7 @@ func builtinMenuGroups() []menuGroup {
 			// same question — "get me to another file" — over a wider set:
 			// the ones no longer open (recentfiles.go).
 			{label: "Recent files…", shortcut: "esc B", action: (*App).menuRecentFiles, enabled: (*App).hasRecentFiles},
+			{label: "Recent locations…", action: (*App).menuRecentLocations, enabled: (*App).hasRecentLocations},
 			{label: "Go to line…", shortcut: "esc j", action: (*App).menuGoToLine, enabled: (*App).hasGoToLine},
 			// Named locations (favorites.go) — the mid-session twin of
 			// `ced fav <name>`. It belongs to this group's question
@@ -1579,6 +1581,12 @@ type App struct {
 	// See folder.go.
 	sessionStore *session.Store
 
+	// history is this repository's navigation history — the folders used
+	// in it and the recent-file ring — kept in <root>/.ced/history.bytdb.
+	// Loaded on first use, written on Close; read it through
+	// repoHistory(). See recentlocations.go.
+	history *history.History
+
 	// sessionEnabled is the "session" config preference: whether opening
 	// a folder reopens its tabs. Folders are recorded either way — the
 	// recent list is a separate feature reading the same file.
@@ -1902,6 +1910,10 @@ func (a *App) Close() {
 	// both exits (a plain quit and a folder switch), so recording here
 	// means neither path has to remember to. See folder.go.
 	a.recordSession()
+	// The repository's history is written on the same exit, for the same
+	// reason (recentlocations.go). Its own file, so recordSession's early
+	// return without a session store must not skip it.
+	a.writeHistory()
 	// Release any `ced --wait` client first: each one is a shell prompt
 	// in another pane that will not come back until we say so, and a
 	// folder switch runs this path too.
@@ -4056,6 +4068,11 @@ func (a *App) openFile(path string) {
 	// After the tab exists, so the ring only ever names files the editor
 	// actually got open — a NewTab that failed above returned already.
 	a.touchRecentFile(path)
+	// A NEW tab is a use of its folder (recentlocations.go). Only here,
+	// not on the switch-to-an-open-tab path above: flipping between two
+	// tabs is not working in two more places, and counting it would let
+	// tab churn outvote where files actually get opened.
+	a.noteFolderUse(filepath.Dir(path))
 	a.announceTab(t)
 	a.flash(fmt.Sprintf("Opened %s", filepath.Base(path)))
 }

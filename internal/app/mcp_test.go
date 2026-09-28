@@ -615,6 +615,12 @@ func pickerLabels(t *testing.T, a *App) []string {
 	}
 	out := make([]string, 0, len(m.matches))
 	for _, mt := range m.matches {
+		// A spacer is a divider, not a row anyone can pick — pickers
+		// with sections (Recent folders) would otherwise report a blank
+		// label between them.
+		if mt.item.spacer {
+			continue
+		}
 		out = append(out, mt.item.label)
 	}
 	return out

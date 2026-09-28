@@ -23,6 +23,10 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
+github.com/rohanthewiz/btypedb v0.8.0 h1:6/t5FR01HmlwYqLq7Bi9s9OS7hz+vjvp4sMoeVR8Ncs=
+github.com/rohanthewiz/btypedb v0.8.0/go.mod h1:K+7M8clbmaVh33X9QYm1sA5A7DWDKOE1+O9WFQflMI0=
+github.com/rohanthewiz/bytdb v0.18.0 h1:w6vaDshvTMXb5MTcl6jD5YSEsP3OiHBDt2+2QBGypt8=
+github.com/rohanthewiz/bytdb v0.18.0/go.mod h1:VGidD3mZWGvAWPY2nB+lFpXQFT48bTiA7D++DVqfchk=
 github.com/rohanthewiz/grsh v0.0.0-20260711071403-78d4ea92604e h1:wGdOHgTCIHIsSRnLkyall28o4CSLYuTp7Jc/EvxR6ec=
 github.com/rohanthewiz/grsh v0.0.0-20260711071403-78d4ea92604e/go.mod h1:WIVg9R5I1l6aiDuhyBWj9vx2TohcjYJ2QAbowfhQ8y8=
 github.com/rohanthewiz/logger v1.3.0 h1:cJoocqUvv5wsHcjlW7wupMTruyBCUHuu8J380u5fyFs=
@@ -39,6 +43,8 @@ github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+
 github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
+github.com/tidwall/btype v0.3.0 h1:VU0/oeVecbqY+2OpyzN0wPQU9CBvCnmOv3w5A+pn42A=
+github.com/tidwall/btype v0.3.0/go.mod h1:IRq7GmniRp9OhEKPIalEyUe/3x9oR8AuuKrdv0ANFbc=
 github.com/urfave/cli/v2 v2.27.7 h1:bH59vdhbjLv3LAvIu6gd0usJHgoTTPhCFib8qqOwXYU=
 github.com/urfave/cli/v2 v2.27.7/go.mod h1:CyNAG/xg+iAOg0N4MPGZqVmv2rCoP267496AOXUZjA4=
 github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 h1:gEOO8jv9F4OT7lGCjxCBTO/36wtF6j2nSip77qHd4x4=

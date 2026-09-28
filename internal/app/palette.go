@@ -55,7 +55,17 @@ const (
 type paletteItem struct {
 	label string
 	run   func(*App)
+	// spacer marks a thin divider row between sections of a picker (the
+	// Recent folders picker's recent / frequent halves). It is not a
+	// choice: it is never selected, never run, never counted, and it
+	// only appears while the query is empty — once the user is
+	// filtering, the list is ranked by score and "sections" no longer
+	// describe it.
+	spacer bool
 }
+
+// paletteSpacer is the one spelling of a divider row.
+func paletteSpacer() paletteItem { return paletteItem{spacer: true} }
 
 // paletteMatch pairs an item with its fuzzy score and matched rune
 // indexes for the current query, so the renderer can highlight which
@@ -151,6 +161,17 @@ type paletteModal struct {
 	items    []paletteItem
 	matches  []paletteMatch
 
+	// top is the first match drawn. The palette used to show only the
+	// first rows and ask the user to refine the query; a picker whose
+	// sections run past the fold (5 recent + a spacer + 10 frequent)
+	// needs the arrow keys to reach its tail, so the window follows the
+	// selection instead.
+	top int
+	// rows, when non-zero, asks for that many visible rows instead of
+	// paletteResultsVisible — for a picker whose whole list is meant to
+	// be read at a glance. Still clamped to the window.
+	rows int
+
 	// cancel, when set, runs after the modal is dismissed WITHOUT
 	// running an item — Esc or a click outside. Pickers whose caller
 	// must always receive an answer (the chat permission prompt has an
@@ -190,7 +211,13 @@ func (a *App) openPicker(title string, items []paletteItem) {
 // the modal so the caller can recognise it later (e.g. to close it when
 // the underlying request dies).
 func (a *App) openPickerWithCancel(title string, items []paletteItem, cancel func(*App)) *paletteModal {
-	m := &paletteModal{title: title, items: items, cancel: cancel}
+	return a.openPickerRows(title, items, 0, cancel)
+}
+
+// openPickerRows is openPickerWithCancel with a requested row count (0 =
+// the palette's usual ten), for a picker meant to show its whole list.
+func (a *App) openPickerRows(title string, items []paletteItem, rows int, cancel func(*App)) *paletteModal {
+	m := &paletteModal{title: title, items: items, cancel: cancel, rows: rows}
 	a.openModal(m)
 	m.refresh()
 	return m
@@ -238,6 +265,14 @@ func (m *paletteModal) refresh() {
 	query := m.field.String()
 	m.matches = m.matches[:0]
 	for _, it := range m.items {
+		if it.spacer {
+			// Kept in place on an empty query (the sections are the
+			// point), dropped once filtering ranks by score.
+			if query == "" {
+				m.matches = append(m.matches, paletteMatch{item: it})
+			}
+			continue
+		}
 		score, hits := finder.Score(query, it.label)
 		if score == 0 {
 			continue
@@ -255,6 +290,43 @@ func (m *paletteModal) refresh() {
 	if m.selected < 0 {
 		m.selected = 0
 	}
+	m.selected = m.choosable(m.selected, 1)
+}
+
+// choosable returns the nearest non-spacer match at or after i walking
+// in dir (+1 / -1), or i itself when there is none that way — so the
+// highlight can never rest on a divider, and pressing past the last real
+// row leaves it where it was.
+func (m *paletteModal) choosable(i, dir int) int {
+	for j := i; j >= 0 && j < len(m.matches); j += dir {
+		if !m.matches[j].item.spacer {
+			return j
+		}
+	}
+	return i
+}
+
+// countItems is how many real (non-spacer) entries a list holds — what
+// the shown/total tail reports, since a divider is not a result.
+func countItems(items []paletteItem) int {
+	n := 0
+	for _, it := range items {
+		if !it.spacer {
+			n++
+		}
+	}
+	return n
+}
+
+// countMatches is countItems over the current matches.
+func (m *paletteModal) countMatches() int {
+	n := 0
+	for _, mt := range m.matches {
+		if !mt.item.spacer {
+			n++
+		}
+	}
+	return n
 }
 
 // handleKey routes keyboard input while the palette is open: arrows
@@ -271,11 +343,11 @@ func (m *paletteModal) handleKey(a *App, ev *tcell.EventKey) {
 		m.runSelected(a)
 	case tcell.KeyUp:
 		if m.selected > 0 {
-			m.selected--
+			m.selected = m.choosable(m.selected-1, -1)
 		}
 	case tcell.KeyDown:
 		if m.selected < len(m.matches)-1 {
-			m.selected++
+			m.selected = m.choosable(m.selected+1, 1)
 		}
 	default:
 		if _, edited := m.field.handleKey(ev); edited {
@@ -291,7 +363,19 @@ func (m *paletteModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	mx, my, mw, mh := m.rect(a)
 	rowsStart := my + 4
 	row := y - rowsStart
-	if row >= 0 && row < len(m.matches) && x >= mx && x < mx+mw {
+	// Only rows actually drawn are targets: past the visible window the
+	// frame's bottom border sits where a match index would otherwise
+	// still resolve.
+	if row >= m.visibleRows(mh) {
+		row = -1
+	}
+	if row >= 0 {
+		row += m.top
+	}
+	if row >= len(m.matches) || (row >= 0 && m.matches[row].item.spacer) {
+		row = -1
+	}
+	if row >= 0 && x >= mx && x < mx+mw {
 		m.selected = row
 	}
 	if btn&tcell.Button1 == 0 {
@@ -316,7 +400,7 @@ func (m *paletteModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 // it. Silent no-op on an empty match list (Enter mashed on a
 // no-match query).
 func (m *paletteModal) runSelected(a *App) {
-	if m.selected < 0 || m.selected >= len(m.matches) {
+	if m.selected < 0 || m.selected >= len(m.matches) || m.matches[m.selected].item.spacer {
 		return
 	}
 	run := m.matches[m.selected].item.run
@@ -336,7 +420,7 @@ func (m *paletteModal) rect(a *App) (x, y, w, h int) {
 		w = 30
 	}
 	// Layout: border + title + divider + input + N rows + border.
-	h = paletteResultsVisible + 6
+	h = m.wantRows() + 6
 	if h > a.height-2 {
 		h = a.height - 2
 	}
@@ -349,6 +433,42 @@ func (m *paletteModal) rect(a *App) (x, y, w, h int) {
 		y = 0
 	}
 	return
+}
+
+// wantRows is the row count this palette asks for before the window
+// clamps it.
+func (m *paletteModal) wantRows() int {
+	if m.rows > 0 {
+		return m.rows
+	}
+	return paletteResultsVisible
+}
+
+// visibleRows is how many match rows fit in a modal mh tall — the one
+// number draw, scrolling and hit-testing all share.
+func (m *paletteModal) visibleRows(mh int) int {
+	n := min(mh-5, m.wantRows())
+	return max(n, 0)
+}
+
+// scrollToSelection moves the window just enough to show the highlight.
+func (m *paletteModal) scrollToSelection(visible int) {
+	if visible <= 0 {
+		m.top = 0
+		return
+	}
+	if m.selected < m.top {
+		m.top = m.selected
+	}
+	if m.selected >= m.top+visible {
+		m.top = m.selected - visible + 1
+	}
+	if maxTop := max(len(m.matches)-visible, 0); m.top > maxTop {
+		m.top = maxTop
+	}
+	if m.top < 0 {
+		m.top = 0
+	}
 }
 
 // draw paints the modal: standard chrome, the query field with a
@@ -373,17 +493,15 @@ func (m *paletteModal) draw(a *App) {
 	inputStyle := tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Text)
 	m.field.draw(a.screen, my+3, mx+3, mx+mw-10, inputStyle, true)
 
-	tail := countLabel(len(m.matches), len(m.items)) + " "
+	tail := countLabel(m.countMatches(), countItems(m.items)) + " "
 	drawAt(a.screen, mx+mw-1-runeLen(tail), my+3, tail, c.muted)
 
 	// Action rows — visible window only, capped like the finder; when
 	// more actions match than fit, the user refines the query.
 	rowsStart := my + 4
-	rowsCap := mh - 5
-	if rowsCap > paletteResultsVisible {
-		rowsCap = paletteResultsVisible
-	}
-	visible := m.matches
+	rowsCap := m.visibleRows(mh)
+	m.scrollToSelection(rowsCap)
+	visible := m.matches[m.top:]
 	if len(visible) > rowsCap {
 		visible = visible[:rowsCap]
 	}
@@ -397,7 +515,11 @@ func (m *paletteModal) draw(a *App) {
 			}
 			continue
 		}
-		m.drawRow(a, mx, ry, mw, visible[i], i == m.selected, hitStyle, c.bg)
+		if visible[i].item.spacer {
+			m.drawSpacer(a, mx, ry, mw)
+			continue
+		}
+		m.drawRow(a, mx, ry, mw, visible[i], m.top+i == m.selected, hitStyle, c.bg)
 	}
 }
 
@@ -431,5 +553,21 @@ func (m *paletteModal) drawRow(a *App, mx, ry, mw int, match paletteMatch, selec
 			st = hitOnRow
 		}
 		a.screen.SetContent(startCol+i, ry, ch, nil, st)
+	}
+}
+
+// drawSpacer paints a divider row: a dotted rule inset from the frame, in
+// the border's own color. Dotted and inset so it reads as a pause between
+// two lists rather than as the modal's structure (the solid divider under
+// the title), and in the border color because that is already the one
+// tone every theme tunes to be visible against the modal background
+// without competing with the rows.
+func (m *paletteModal) drawSpacer(a *App, mx, ry, mw int) {
+	c := a.chrome()
+	for cx := mx + 1; cx < mx+mw-1; cx++ {
+		a.screen.SetContent(cx, ry, ' ', nil, c.bgSt)
+	}
+	for cx := mx + 3; cx < mx+mw-3; cx++ {
+		a.screen.SetContent(cx, ry, '┄', nil, c.border)
 	}
 }

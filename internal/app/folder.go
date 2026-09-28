@@ -128,11 +128,10 @@ func (a *App) recordSession() {
 		})
 	}
 	e.Active = active
-	// The recent-file ring rides along in the same entry and the same
-	// write. It is captured whether or not session restore is enabled:
-	// that preference governs reopening tabs, not remembering where the
-	// user has been — the line folder-recency already draws.
-	e.Recent = a.recentFiles
+	// The recent-file ring is NOT written here any more: it lives in the
+	// repository's own history database (recentlocations.go), written by
+	// Close beside this. Leaving e.Recent empty is what retires the old
+	// copy once loadRecentFiles has migrated it.
 	// The tool-window arrangement rides the same entry and the same
 	// write, for the recent ring's reason: it is what the editor DID
 	// here, and the one gesture that ends a session is the one place

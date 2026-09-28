@@ -177,6 +177,10 @@ internal/app/metakeys.go      The ⌘ accelerator layer: the rune table, its hos
 internal/app/nav.go           Back/forward file-navigation history (Esc-o/O, Alt+←/→)
 internal/session/session.go   state.json: recent folders + per-folder tab sessions
 internal/app/folder.go        Open folder (restart), recent list, session record/restore
+internal/history/history.go   Per-repo history: <repo>/.ced/history.bytdb, relative paths, the file ring's changes
+internal/history/index.go     Folder usage index: recency + frequency, a bounded trie, best-first top-k
+internal/history/db.go        The bytdb store: open-briefly, delta writes, sequence re-issue, .gitignore
+internal/app/recentlocations.go Recent locations: 5 recent · spacer · 10 frequent, drill + reveal
 internal/remote/remote.go     `ced --remote` / `--wait`: socket, root-based discovery
 internal/app/remote.go        The listener, the wait registry, the root guard, the ≡ row
 internal/app/hostident.go     OSC 7 cwd + OSC 2 title: the pane learns what you're editing
@@ -3124,6 +3128,64 @@ each folder's tabs and cursors coming back when you return. House rules:
   newTestApp pins both at temp dirs so no test can rewrite the
   developer's real recent-folders list or their restore preference.
 
+### Recent locations + per-repo history (internal/history + app/recentlocations.go)
+≡ Nav → "Recent locations…": THIS repository's folders, in two sections at
+every level — the 5 most recent, a thin spacer (`paletteSpacer`), the 10
+most frequent the first section didn't name. A row with used subfolders
+drills (`›`) into the same picker one level down, under a row revealing
+the folder itself; a leaf is REVEALED in the tree. Switching projects is
+still ≡ File → Recent folders…, deliberately untouched. House rules:
+
+- **HISTORY LIVES IN THE REPO, not ~/.config** (owner's call):
+  `<repo>/.ced/history.bytdb` holds the folder usage AND the recent-file
+  ring (which moved out of state.json's `Entry.Recent`; that field is now
+  only READ, once, to migrate a repo with no ring, and recordSession stops
+  writing it). Paths inside the repo are stored RELATIVE, so a moved
+  checkout keeps its history; a recent file outside it stays absolute.
+  The first write appends `history.bytdb*` to `.ced/.gitignore` —
+  `.ced/format.json` beside it is committed config, the database is not.
+  **Loading creates nothing**: no `.ced/` appears until a write has
+  something to say. `historyPathFn` is pinned by newTestApp.
+- **Reveal, never re-root** (the favorites rule): every row is inside the
+  workspace. A use is a file opened in a NEW tab (openFile's new-tab
+  branch — tab switching would let churn outvote where files get opened)
+  or a folder picked here; only folders strictly inside the root count.
+- **The index is a path trie whose nodes carry the MAX of their subtree's
+  stats**, and top-k is a best-first search on those bounds: a subtree
+  whose bound loses is never opened, so a query costs roughly
+  k·depth·fanout·log, not the size of the index, and "subfolders of X" is
+  the same search started at X. Max, not sum: the tightest bound a record
+  can maintain in O(depth); removal recomputes the ancestors. Frequency
+  ties break on recency — (hits, last) is still a valid lexicographic
+  bound. `TestIndex_SearchMatchesBruteForce` is the proof — keep it.
+  Recency is a persisted SEQUENCE NUMBER, not a clock.
+- **Bounded by eviction with hysteresis**: past `MaxFolders` (400) it
+  drops to 90% in one pass, protecting the most recent quarter, least-used
+  first among the rest. The file ring keeps the newest `MaxRecentFiles`.
+- **The database is opened BRIEFLY — load on first use, write on Close —
+  never held.** bytdb locks its file per engine and two ced windows on
+  one repo are ordinary. A contended open retries 10×25ms, then gives up
+  with the changes still pending (ErrLocked is not flashed). Recording is
+  memory only.
+- **A write ADDS, never overwrites**: the index tracks per-node `delta`
+  hits, a `dirty` set and pending `deletes`; the ring tracks touched and
+  removed paths. Sequence numbers minted since the load are re-issued in
+  order from the stored counters inside the transaction, so two windows'
+  histories merge instead of the last to close erasing the other's
+  (`TestWrite_TwoInstancesAdd`). Deletes run before upserts, and a subtree
+  delete is the range `(p/, p0)` ('0' follows '/'), so `proj2` survives
+  pruning `proj`.
+- **Vetoes don't shorten a section**: `locationPick.accept` skips folders
+  already listed or gone from disk and the search keeps popping; gone
+  folders are pruned AFTER the search (removing nodes mid-search pulls
+  them out from under the heap).
+- **Spacers belong to the unfiltered view**: never selected, run, counted
+  or clicked, and dropped once a query ranks by score. The palette now
+  SCROLLS to the selection (it used to draw only the first rows), and
+  `openPickerRows` asks for a taller frame so both sections fit.
+- No leader key (the flat table is out of letters); the ≡ row gets the
+  palette for free.
+
 ### The which-key band (app/whichkey.go)
 The bottom band listing the leader table is summoned by **`Esc ?`**, not
 by pausing after a lone Esc. A lone Esc is the editor's "drop that"
@@ -3732,8 +3794,8 @@ bulk choice — and it matches its siblings instead of arriving expanded.
 still start expanded; opt into the collapsed default with
 `seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
 the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 146 group actions + 15 headers (163), height 169,
-dividers `[2, 5, 166]`. **Adding a menu row means updating those pins**
+2 top-zone rows + 147 group actions + 15 headers (164), height 170,
+dividers `[2, 5, 167]`. **Adding a menu row means updating those pins**
 (and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
 `TestMenuModalRect_*`). `TestMenuLayout_TerminalRowsAboveTheFold` pins
 the short-window budget against that collapsed default: every top-level
@@ -4450,7 +4512,10 @@ commits back without the same marker.)
   `<project>/.claude/skills` ced reads but doesn't own — extend the
   AGENT, not the editor. The `chats/` archive is not a
   preference either — it is the conversations themselves, the one thing in
-  the chat panel ced cannot reconstruct. `favorites.json` earns
+  the chat panel ced cannot reconstruct. `<repo>/.ced/history.bytdb`
+  is not under `~/.config/ced` at all: it is what the editor did IN that
+  repository (the folders and files you worked in), kept with it and
+  gitignored. `favorites.json` earns
   its place the way mcp.json does: a small map somebody writes by hand
   ("plans" → "ai_docs/plans"), naming a convention ced cannot guess.
   `state.json` is the odd one out

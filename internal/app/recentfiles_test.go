@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rohanthewiz/ced/internal/history"
 	"github.com/rohanthewiz/ced/internal/session"
 )
 
@@ -173,40 +174,61 @@ func TestRecentFiles_SingleFileHasNothingToOffer(t *testing.T) {
 	}
 }
 
-// The ring is per folder and rides the session entry: recorded on Close,
-// seeded at load, in order. Two Apps rather than one, because the
-// question is whether the list survives the editor.
-func TestRecentFiles_SurviveTheSessionEntry(t *testing.T) {
+// The ring is per repository and rides its history database: written on
+// Close, seeded at load, in order — and no longer copied into state.json.
+// Two Apps rather than one, because the question is whether the list
+// survives the editor.
+func TestRecentFiles_SurviveInTheRepoHistory(t *testing.T) {
 	a, root, paths := recentFilesApp(t, 3)
 	store := &session.Store{}
 	a.sessionStore = store
 	a.recordSession()
+	a.writeHistory()
 
-	e, ok := store.Find(root)
-	if !ok {
-		t.Fatal("no entry recorded for the root")
-	}
-	if len(e.Recent) != 3 || e.Recent[0] != paths[2] {
-		t.Fatalf("recorded ring is %v, want most-recent-first from %q", e.Recent, paths[2])
+	if e, ok := store.Find(root); !ok || len(e.Recent) != 0 {
+		t.Fatalf("state.json entry = %+v, want it recorded WITHOUT a ring", e)
 	}
 
+	// b is a second editor on the same repository: same database.
+	aPath := historyPathFn
 	b := newTestApp(t, root)
+	historyPathFn = aPath
 	b.sessionStore = store
 	b.loadRecentFiles()
 
-	if len(b.recentFiles) != 3 {
-		t.Fatalf("seeded ring is %v, want 3 entries", b.recentFiles)
+	if len(b.recentFiles) != 3 || b.recentFiles[0] != paths[2] {
+		t.Fatalf("seeded ring is %v, want 3 entries most-recent-first from %q", b.recentFiles, paths[2])
 	}
-	for i := range e.Recent {
-		if b.recentFiles[i] != e.Recent[i] {
-			t.Fatalf("seeded ring %v does not match the stored one %v", b.recentFiles, e.Recent)
+	for i := range a.recentFiles {
+		if b.recentFiles[i] != a.recentFiles[i] {
+			t.Fatalf("seeded ring %v does not match the written one %v", b.recentFiles, a.recentFiles)
 		}
 	}
-	// And it is a COPY: pruning the fresh App's ring must not reach back
-	// into the store's entry.
-	b.recentFiles = b.recentFiles[:1]
-	if again, _ := store.Find(root); len(again.Recent) != 3 {
-		t.Fatalf("the store's entry was aliased by the seed: %v", again.Recent)
+}
+
+// A repository with no ring in its history is migrated from state.json,
+// where the ring used to live — and the migrated ring reaches the
+// repository's database on the next write.
+func TestRecentFiles_MigrateFromTheSessionEntry(t *testing.T) {
+	root := t.TempDir()
+	one, two := filepath.Join(root, "one.txt"), filepath.Join(root, "two.txt")
+	store := &session.Store{}
+	store.Record(session.Entry{Root: root, Recent: []string{two, one}})
+
+	a := newTestApp(t, root)
+	a.sessionStore = store
+	a.loadRecentFiles()
+	if len(a.recentFiles) != 2 || a.recentFiles[0] != two {
+		t.Fatalf("migrated ring = %v, want [two one]", a.recentFiles)
+	}
+	a.writeHistory()
+
+	back, err := history.Load(root, historyPathFn(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := back.Files(); len(got) != 2 || got[0] != two || got[1] != one {
+		t.Fatalf("history after migration = %v, want [two one]", got)
 	}
 }
 

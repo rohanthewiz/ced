@@ -34,12 +34,13 @@
 //	              order at the exact moment recordSession writes it to disk,
 //	              so the list you'd get back is the one nobody visited.
 //
-// The ring is PER FOLDER and lives in state.json beside that folder's tab
-// list (internal/session), for the same reason the tab list is per folder:
-// "the last file I had open" is a question about a project, and a global
-// list would answer it with somebody else's project. It rides the same
-// durability story too — written on Close, so a kill -9 costs the ring
-// exactly as it costs the tab list.
+// The ring is PER REPOSITORY and lives in the repository itself, in
+// <root>/.ced/history.bytdb beside the folder history (internal/history,
+// recentlocations.go): "the last file I had open" is a question about a
+// project, and a global list would answer it with somebody else's project.
+// Written on Close, so a kill -9 costs the ring exactly as it costs the
+// tab list. It used to live in state.json's per-folder entry, which is
+// still READ once, to migrate a ring into a repository with no history.
 //
 // It is NOT gated on the session-restore preference. That toggle governs
 // whether a folder reopens its tabs; a user who wants a blank editor has
@@ -60,17 +61,27 @@ import (
 // since there is nothing for a picker row to reopen.
 func (a *App) touchRecentFile(path string) {
 	a.recentFiles = session.TouchRecent(a.recentFiles, path, session.MaxRecentFiles)
+	a.repoHistory().TouchFile(path)
 }
 
-// loadRecentFiles seeds the ring from this folder's stored entry. Called
+// loadRecentFiles seeds the ring from the repository's history. Called
 // from loadSessionStore, i.e. before restoreSession — so the tabs coming
 // back touch the ring on TOP of what was remembered, and a restored
 // session's active file is the head exactly as it was at exit.
 //
-// The stored slice is copied rather than aliased: the store's entry is
-// handed out by value but its slice header is not, and the ring is
-// rewritten in place on every prune.
+// A repository with no ring in its history is MIGRATED from state.json's
+// per-folder entry, where the ring used to live: the entries are marked
+// touched, in order, so Close writes them into the repository and
+// recordSession's empty e.Recent then retires the old copy. The stored
+// slice is copied rather than aliased: the store's entry is handed out by
+// value but its slice header is not, and the ring is rewritten in place on
+// every prune.
 func (a *App) loadRecentFiles() {
+	h := a.repoHistory()
+	if files := h.Files(); len(files) > 0 {
+		a.recentFiles = files
+		return
+	}
 	if a.sessionStore == nil {
 		return
 	}
@@ -79,6 +90,9 @@ func (a *App) loadRecentFiles() {
 		return
 	}
 	a.recentFiles = append([]string(nil), e.Recent...)
+	for _, p := range a.recentFiles {
+		h.TouchFile(p)
+	}
 }
 
 // menuRecentFiles opens the picker.
@@ -105,6 +119,7 @@ func (a *App) menuRecentFiles() {
 	kept := a.recentFiles[:0]
 	for _, p := range a.recentFiles {
 		if info, err := os.Stat(p); err != nil || info.IsDir() {
+			a.repoHistory().RemoveFile(p)
 			continue
 		}
 		kept = append(kept, p)

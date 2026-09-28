@@ -85,6 +85,12 @@ func newTestApp(t *testing.T, root string) *App {
 	sessionStatePathFn = func() string { return filepath.Join(sessionHome, "state.json") }
 	sessionConfigPathFn = func() string { return filepath.Join(sessionHome, "config.json") }
 	t.Cleanup(func() { sessionStatePathFn, sessionConfigPathFn = prevStatePath, prevSessionCfg })
+	// Same seam for the per-repository history database: Close writes it
+	// into <root>/.ced/, and a test that roots an App at a real directory
+	// would otherwise leave a .ced/history.bytdb (and a .gitignore) there.
+	prevHistory := historyPathFn
+	historyPathFn = func(string) string { return filepath.Join(sessionHome, "history.bytdb") }
+	t.Cleanup(func() { historyPathFn = prevHistory })
 	// Same seam for favorites.json, and load-bearing for the same
 	// reason: "Go to favorite" reads the file and REVEALS what it names,
 	// so without this a test run would open one of the developer's own
@@ -2017,16 +2023,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 169 {
-		t.Errorf("modalHeight = %d, want 169", h)
+	if h != 170 {
+		t.Errorf("modalHeight = %d, want 170", h)
 	}
-	if got := len(items); got != 163 {
-		t.Errorf("row count = %d, want 163 (2 top-zone + 146 group actions + 15 headers)", got)
+	if got := len(items); got != 164 {
+		t.Errorf("row count = %d, want 164 (2 top-zone + 147 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (166) — headers separate the
+	// one setting off the headerless Quit group (167) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 166}
+	wantDiv := []int{2, 5, 167}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2571,8 +2577,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 172 { // 169 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 172", h)
+	if h != 173 { // 170 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 173", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

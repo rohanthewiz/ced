@@ -658,7 +658,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   top-k (`TestIndex_SearchMatchesBruteForce`). Eviction with hysteresis.
   DB opened briefly (load on first use, write on Close), retries on lock;
   writes ADD via deltas and re-issued sequences
-  (`TestWrite_TwoInstancesAdd`). Spacers only in the unfiltered view.
+  (`TestWrite_TwoInstancesAdd`). A write past `compactAbove` (256KB)
+  ends with a VACUUM — btypedb's own auto-compact never fires on a
+  briefly-opened small file. Spacers only in the unfiltered view.
 - **Favorites (internal/favorites, favorites.go, favmanage.go)**:
   `ced fav <name>` REVEALS in the tree, never re-roots. Relative names;
   CLI walks up (each dir asked in full), the ≡ row resolves strictly in

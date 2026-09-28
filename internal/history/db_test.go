@@ -337,3 +337,64 @@ func TestLoad_SkipsRowsOutsideTheRepo(t *testing.T) {
 		t.Fatal("decodeFolder refused an ordinary relative folder")
 	}
 }
+
+// TestWrite_CompactsPastTheCeiling pins that the log does not grow by the
+// session forever: sizes climb while under compactAbove, and the write
+// that crosses it VACUUMs the file back down to its live set — with every
+// row still there afterwards.
+func TestWrite_CompactsPastTheCeiling(t *testing.T) {
+	root := repo(t)
+	size := func() int64 {
+		fi, err := os.Stat(DBPath(root))
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		return fi.Size()
+	}
+	folder := func(i int) string { return filepath.Join(root, "pkg", fmt.Sprintf("d%02d", i)) }
+
+	h := mustLoad(t, root)
+	for i := 0; i < 20; i++ {
+		h.Folders.Record(folder(i))
+	}
+	mustWrite(t, h, root, nil)
+	live := size()
+
+	// A ceiling a few writes away; restored so other tests keep the real one.
+	old := compactAbove
+	compactAbove = live * 2
+	t.Cleanup(func() { compactAbove = old })
+
+	prev, dropped := live, false
+	for s := 0; s < 40; s++ {
+		h := mustLoad(t, root)
+		for i := 0; i < 20; i++ {
+			h.Folders.Record(folder(i)) // every row rewritten: pure garbage growth
+		}
+		mustWrite(t, h, root, nil)
+		cur := size()
+		if cur > compactAbove*2 {
+			t.Fatalf("session %d: file %d bytes, ceiling %d never compacted", s, cur, compactAbove)
+		}
+		if cur < prev {
+			dropped = true
+			if cur > compactAbove {
+				t.Errorf("session %d: compacted to %d, still over the ceiling %d", s, cur, compactAbove)
+			}
+		}
+		prev = cur
+	}
+	if !dropped {
+		t.Fatal("the file never shrank: no compaction ran")
+	}
+
+	// Compaction drops dead records only: all 20 folders, each with its
+	// 41 hits, survive it.
+	h = mustLoad(t, root)
+	if n := h.Folders.Len(); n != 20 {
+		t.Fatalf("folders after compaction = %d, want 20", n)
+	}
+	if got := h.Folders.find(folder(7)).self.hits; got != 41 {
+		t.Errorf("hits after compaction = %d, want 41", got)
+	}
+}

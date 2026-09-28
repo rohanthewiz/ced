@@ -38,6 +38,24 @@
 // a .ced/ behind by itself; the directory, the database and the ignore
 // entry appear with the first write that has something to say.
 //
+// COMPACTION IS OURS TO ASK FOR. bytdb's storage is an append-only log:
+// every UPDATE and DELETE leaves the old record behind until a compaction
+// rewrites the file. btypedb compacts on its own only past 32MB, and only
+// from a long-lived engine — neither ever happens here. The live set is
+// capped (MaxFolders rows + MaxRecentFiles rows ≈ 45KB at worst, measured
+// with deep paths) while each write appends ~2.6KB, so left alone the file
+// would grow by the session forever. A write therefore ends with a VACUUM
+// once the file passes compactAbove:
+//
+//	size ─╱╲──╱╲──╱╲──   saw-tooth between the live set and the ceiling
+//
+// A fixed ceiling rather than btypedb's growth ratio because the live set
+// is bounded by the caps: the ceiling sits well above the largest live set
+// the caps allow, so a compaction always has something to reclaim and runs
+// once per ~80 sessions, never on every write. It happens inside the
+// write's own open, so it holds the lock no longer than a few ms of extra
+// rewrite of a sub-megabyte file.
+//
 // Schema:
 //
 //	folder_use(path PK, hits, last)  — path relative to the repo
@@ -81,6 +99,11 @@ const (
 	folderSeqKey = "folder_seq"
 	fileSeqKey   = "file_seq"
 )
+
+// compactAbove is the file size past which a write ends with a VACUUM —
+// ~6× the largest live set the caps allow (see the header). A variable so
+// tests can bring the ceiling within reach of a few writes.
+var compactAbove int64 = 256 << 10
 
 // schema is applied on every open. DDL runs outside a transaction (a bytdb
 // rule), and IF NOT EXISTS makes it a no-op after the first run.
@@ -289,7 +312,23 @@ func (h *History) Write(dbPath string, ring []string) error {
 	h.Folders.adoptWrite(remap, folderTop)
 	h.touched = map[string]bool{}
 	h.removed = map[string]bool{}
+	compactIfLarge(db, dbPath)
 	return nil
+}
+
+// compactIfLarge VACUUMs the database once its file has outgrown
+// compactAbove, reclaiming the records overwritten and deleted by earlier
+// writes. Best-effort: the write it follows has already committed, a
+// failed compaction leaves the old log intact (btypedb swaps files by
+// rename), and the next write past the ceiling tries again.
+func compactIfLarge(db *sql.DB, dbPath string) {
+	fi, err := os.Stat(dbPath)
+	if err != nil || fi.Size() <= compactAbove {
+		return
+	}
+	// VACUUM refuses to run inside a transaction, so this must follow the
+	// commit rather than join it.
+	_, _ = db.Exec(`VACUUM`)
 }
 
 // writeFolders writes the folder index's pending changes. It returns the

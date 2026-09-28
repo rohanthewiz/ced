@@ -102,3 +102,14 @@ func kindFor(filePath string) kind {
 		return kindNone
 	}
 }
+
+// FormatsOnSave reports whether a SAVE of filePath runs a formatter at
+// all. Only Go does: gofmt's output is the language's one canonical
+// layout, so reformatting on every save can never fight a choice the
+// file's author made. Every other kind — JSON and the rest of the
+// document formats, and whatever a project's format.json lists — has
+// layouts people choose on purpose, so it is formatted only when asked
+// (≡ File → Format file), never as a side effect of saving.
+func FormatsOnSave(filePath string) bool {
+	return kindFor(filePath) == kindGo
+}

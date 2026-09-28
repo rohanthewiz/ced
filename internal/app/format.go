@@ -8,10 +8,22 @@
 
 package app
 
-// Format-on-save wiring. The pure logic (config parsing, trust file,
+// Formatter wiring. The pure logic (config parsing, trust file,
 // builtin Go tooling) lives in internal/format; this file is the
-// bridge into the editor's event loop and modals. The flow on every
-// successful save:
+// bridge into the editor's event loop and modals.
+//
+// Two doors lead into ONE pipeline (runFormatter):
+//
+//	save / auto-save ──► runFormatOnSave ──(Go only)──┐
+//	≡ File → Format file ──► formatActiveFile ────────┴──► runFormatter
+//
+// Only Go formats as a side effect of saving (format.FormatsOnSave):
+// gofmt's layout is the language's single canonical one, so it can
+// never overrule a choice the author made. Documents — JSON and every
+// other format, including whatever a project's format.json lists —
+// carry layouts people pick on purpose, so they are reformatted only
+// when the user asks. The pipeline itself is identical behind either
+// door:
 //
 //  1. Load <root>/.ced/format.json. Entry for this extension →
 //     check the trust store: Allowed → run; Denied → done; Unknown
@@ -74,7 +86,65 @@ var builtinCommandsFor = format.BuiltinCommandsFor
 
 // runFormatOnSave is called after a successful disk write — by
 // saveTabAt for explicit saves (quiet=false) and by autoSaveTab for
-// idle auto-saves (quiet=true). It branches four ways:
+// idle auto-saves (quiet=true). Only Go files go any further; see the
+// file comment for why everything else waits for the explicit verb.
+func (a *App) runFormatOnSave(idx int, quiet bool) {
+	if idx < 0 || idx >= len(a.tabs) {
+		return
+	}
+	if !format.FormatsOnSave(a.tabs[idx].Path) {
+		return
+	}
+	a.runFormatter(idx, quiet)
+}
+
+// formatActiveFile is the explicit Format verb (≡ File → Format file):
+// the door to the formatter for every kind that does not format on
+// save, and a manual re-run for the one (Go) that does.
+//
+// The pipeline formats the file ON DISK, so a dirty buffer is saved
+// first. For Go that save has already run the formatter, and running
+// it a second time would only race the first run's write — so a Go
+// save ends the verb. A save refused by the clobber guard (the file
+// changed on disk) ends it too: formatting someone else's bytes is not
+// what the user asked for, and the guard's prompt is already up.
+func (a *App) formatActiveFile() {
+	idx := a.activeTab
+	if idx < 0 || idx >= len(a.tabs) {
+		a.flash("No file to format")
+		return
+	}
+	tab := a.tabs[idx]
+	if tab.Path == "" {
+		a.flash("Save the file first — formatters work on the file on disk")
+		return
+	}
+	if tab.Dirty {
+		if !a.saveTabAt(idx) {
+			return
+		}
+		if format.FormatsOnSave(tab.Path) {
+			return
+		}
+	}
+	// An unavailable verb explains itself rather than failing silently:
+	// the fix — a format.json entry — is something the user can do.
+	if !a.runFormatter(idx, false) {
+		a.flash(fmt.Sprintf("No formatter for %s — add one to .ced/format.json", filepath.Base(tab.Path)))
+	}
+}
+
+// menuFormatFile is the ≡ File row for formatActiveFile.
+func (a *App) menuFormatFile() {
+	a.closeMenu()
+	a.formatActiveFile()
+}
+
+// runFormatter runs the formatter pipeline for the tab at idx and
+// reports whether any rung took the file — a run started, a trust or
+// install prompt opened, or an error was surfaced. False means ced has
+// no formatter for this file at all, which the explicit verb turns into
+// a flash; the save path ignores it. It branches four ways:
 //
 //   - Project format.json has an entry for this extension → trust
 //     check, prompt if needed, then run.
@@ -96,13 +166,13 @@ var builtinCommandsFor = format.BuiltinCommandsFor
 // and easy to follow. Errors loading config files are surfaced once
 // (so a typo isn't silently ignored) but never block the save itself
 // — that already happened before this function was called.
-func (a *App) runFormatOnSave(idx int, quiet bool) {
+func (a *App) runFormatter(idx int, quiet bool) bool {
 	if idx < 0 || idx >= len(a.tabs) {
-		return
+		return false
 	}
 	tab := a.tabs[idx]
 	if tab.Path == "" {
-		return
+		return false
 	}
 
 	cfg, err := format.Load(a.rootDir)
@@ -110,13 +180,15 @@ func (a *App) runFormatOnSave(idx int, quiet bool) {
 		if !quiet {
 			a.flash("format: " + err.Error())
 		}
-		return
+		// Reported as handled: the flash above IS the answer, and a
+		// second "no formatter" flash would overwrite the real reason.
+		return true
 	}
 
 	argv := cfg.CommandFor(tab.Path)
 	if argv != nil {
 		a.runWithTrust(idx, cfg, argv, quiet)
-		return
+		return true
 	}
 
 	// Built-in formatting sits between the project config (which
@@ -133,18 +205,19 @@ func (a *App) runFormatOnSave(idx int, quiet bool) {
 	// only works on machines that happen to have a Node toolchain.
 	if builtin := builtinCommandsFor(a.rootDir, tab.Path); len(builtin) > 0 {
 		a.execFormatterChain(tab.Path, builtin, quiet)
-		return
+		return true
 	}
 	if a.execInProcessFormat(tab.Path, quiet) {
-		return
+		return true
 	}
 
 	// Project doesn't format this extension. See if the user has a
 	// personal default we can offer to install — but never from an
 	// auto-save, which must stay prompt-free.
 	if !quiet {
-		a.maybeOfferInstall(idx, tab.Path)
+		return a.maybeOfferInstall(idx, tab.Path)
 	}
+	return false
 }
 
 // runWithTrust drives the existing trust-check + run path, factored
@@ -186,18 +259,22 @@ func (a *App) runWithTrust(idx int, cfg *format.Config, argv []string, quiet boo
 //   - the project's format.json exists but is currently denied at
 //     the trust level — piling on an install prompt while trust is
 //     denied would be confusing UX.
-func (a *App) maybeOfferInstall(idx int, tabPath string) {
+//
+// Reports whether the user saw anything — the prompt, or a load error
+// flashed in its place — so the explicit Format verb knows whether to
+// explain that no formatter exists.
+func (a *App) maybeOfferInstall(idx int, tabPath string) bool {
 	defaults, err := format.LoadDefaults(format.DefaultsPath())
 	if err != nil {
 		a.flash("format defaults: " + err.Error())
-		return
+		return true
 	}
 	if defaults == nil {
-		return
+		return false
 	}
 	ext := strings.TrimPrefix(filepath.Ext(tabPath), ".")
 	if ext == "" {
-		return
+		return false
 	}
 	// Pull the *template* (with $FILE intact) so we can write it
 	// verbatim to the project's format.json on Yes — substituting
@@ -206,27 +283,28 @@ func (a *App) maybeOfferInstall(idx int, tabPath string) {
 	// in the project, and every teammate who pulled the repo.
 	template := append([]string(nil), defaults.Commands[ext]...)
 	if len(template) == 0 {
-		return
+		return false
 	}
 
 	tf, err := format.LoadTrust(format.DefaultTrustPath())
 	if err != nil {
 		a.flash("format trust: " + err.Error())
-		return
+		return true
 	}
 	if tf.IsInstallDeclined(a.rootDir, ext) {
-		return
+		return false
 	}
 	// If a project format.json exists and trust is currently denied,
 	// don't pile on. The user already said no to formatting in this
 	// project; offering to add a new entry would feel like a nag.
 	if cfg, _ := format.Load(a.rootDir); cfg != nil {
 		if tf.CheckTrust(a.rootDir, cfg.Hash()) == format.TrustDenied {
-			return
+			return false
 		}
 	}
 
 	a.openFormatInstallPrompt(idx, ext, template)
+	return true
 }
 
 // openFormatTrustPrompt asks the user whether to allow this project's
@@ -249,7 +327,7 @@ func (a *App) openFormatTrustPrompt(idx int, cfg *format.Config, argv []string) 
 	root := a.rootDir
 	hash := cfg.Hash()
 
-	msg := fmt.Sprintf("Allow %s to run formatters on save?", filepath.Join(format.ConfigDir, format.ConfigFile))
+	msg := fmt.Sprintf("Allow %s to run its formatters?", filepath.Join(format.ConfigDir, format.ConfigFile))
 	m := a.openConfirm("Trust this project's formatter?", msg, func(app *App) {
 		// Yes — record allow, persist, and run. The prompt only opens
 		// from an explicit Save, so the run is a loud one.

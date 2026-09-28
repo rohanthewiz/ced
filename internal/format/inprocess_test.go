@@ -170,3 +170,34 @@ func TestInProcessFormat_DoesNotAliasItsInput(t *testing.T) {
 		t.Error("formatted output changed when the input was overwritten; it aliases src")
 	}
 }
+
+// TestInProcessFormat_KeepsTheFilesIndent pins that an already-indented
+// file keeps its own unit — tabs stay tabs, four spaces stay four — so
+// formatting fixes layout without turning a small edit into a
+// whole-file re-indent. Only a file with no evidence gets two spaces.
+func TestInProcessFormat_KeepsTheFilesIndent(t *testing.T) {
+	cases := []struct {
+		name, src, want string
+	}{
+		{"tabs", "{\n\t\"a\": 1, \"b\": [2]\n}", "{\n\t\"a\": 1,\n\t\"b\": [\n\t\t2\n\t]\n}\n"},
+		{"four spaces", "{\n    \"a\": {\"b\": 1}\n}", "{\n    \"a\": {\n        \"b\": 1\n    }\n}\n"},
+		{"minified falls back", `{"a":[1]}`, "{\n  \"a\": [\n    1\n  ]\n}\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _, err := InProcessFormat("/proj/data.json", []byte(tc.src))
+			if err != nil {
+				t.Fatalf("InProcessFormat: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("got  %q\nwant %q", got, tc.want)
+			}
+			// Idempotent under the detected unit too: a second pass must
+			// read back the unit the first one wrote.
+			again, _, _ := InProcessFormat("/proj/data.json", got)
+			if string(again) != string(got) {
+				t.Fatalf("not idempotent:\nonce  %q\ntwice %q", got, again)
+			}
+		})
+	}
+}

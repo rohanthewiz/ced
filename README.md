@@ -90,9 +90,12 @@ The goals, in order:
   `Backspace` trims, `Esc` clears.
 - **Clipboard over SSH** — OSC 52, including a `tmux` passthrough so
   copy works from inside a tmux session on a remote host.
-- **Format on save** — opt-in per-project via `.ced/format.json`
-  with a first-run trust prompt so cloning a repo never silently
-  executes its commands. See [Format on save](#format-on-save).
+- **Formatting** — Go files are formatted on every save (goimports /
+  gofmt); JSON and anything a project lists in `.ced/format.json` are
+  formatted on request with **≡ File → Format file**, keeping the file's
+  own indentation (tabs stay tabs). A first-run trust prompt means
+  cloning a repo never silently executes its commands. See
+  [Formatting](#formatting).
 - **Auto-save** — dirty buffers are written after you pause for five
   seconds, and immediately when you leave: switch tabs, or click away
   from the terminal window entirely. Undo history survives all of it.
@@ -999,13 +1002,29 @@ one broken manifest costs you that plugin and nothing else.
 hooks, no marks, until you turn it back on. It persists as
 `"plugins": "off"` in `config.json`.
 
-## Format on save
+## Formatting
 
-ced can run a formatter on every save — `gofmt`, `php-cs-fixer`,
-`prettier`, anything you like — but the feature is **off by default**
-and only kicks in for projects that opt in by checking in a config
-file. Quick edits to a stranger's repo will never silently rewrite
-their files.
+**Only Go files are formatted on save.** ced runs `goimports` (or
+`gopls imports` + `gofmt`, or plain `gofmt` — whichever is installed)
+after every save of a `.go` file. Go has one canonical layout, so
+formatting it can never overrule a choice you made.
+
+**Everything else is formatted when you ask**, with **≡ File → Format
+file** (a dirty buffer is saved first). That covers:
+
+- **JSON**, built in — a repo-local or global `prettier`, `biome` or
+  `deno` if one is installed, otherwise ced's own formatter. The file's
+  **existing indentation is kept**: a tab-indented file stays tabs, a
+  four-space file stays four spaces; only a minified file gets the
+  two-space default. When the repo configures the tool itself
+  (`.prettierrc`, `biome.json`, `deno.json`, …) that config wins.
+  JSON-with-comments files (`tsconfig.json`, `.vscode/*`) are left alone.
+- **Any extension your project lists** in `.ced/format.json` —
+  `php-cs-fixer`, `ruff`, `prettier`, anything you like. This is **off by
+  default** and only kicks in for projects that opt in by checking in a
+  config file, so quick edits to a stranger's repo never rewrite their
+  files. A `"go"` entry replaces the built-in Go formatter and runs on
+  save like it.
 
 ### Setup
 
@@ -1036,7 +1055,7 @@ The first time ced would run a formatter from a new (or edited)
 `.ced/format.json`, you get a Yes / No prompt:
 
 > **Trust this project's formatter?**
-> Allow .ced/format.json to run formatters on save?
+> Allow .ced/format.json to run its formatters?
 
 Pick **Yes** once and ced will run the configured formatters
 silently from then on. Pick **No** and it will never run them in this
@@ -1049,9 +1068,9 @@ The hash is the security trick: a teammate can't push a "v2" of the
 config that runs `rm -rf` — your editor will re-prompt the next time
 you save, because the file has changed since you trusted it.
 
-### What happens on save
+### What happens when a formatter runs
 
-1. Save writes the file to disk first. A broken formatter never
+1. The file is written to disk first. A broken formatter never
    blocks the save.
 2. ced looks up the file's extension in `format.json`. No
    match → done.
@@ -1075,7 +1094,7 @@ the formatter runs every time you pause.
 Two reasonable patterns:
 
 - **Commit `.ced/format.json`** so everyone on the team gets
-  the same format-on-save behavior automatically.
+  the same formatters automatically.
 - **Add `.ced/` to `.gitignore`** if developers prefer their
   own setups — each person's local copy can configure whatever
   formatters they like.
@@ -1098,7 +1117,7 @@ project file):
 }
 ```
 
-These never run on their own. Instead, when you save a file in a
+These never run on their own. Instead, when you format a file in a
 project where:
 
 1. The project's `.ced/format.json` is missing or has no
@@ -1109,7 +1128,7 @@ project where:
 
 - **Yes** — merges the entry into the project's config (creating
   `.ced/format.json` if it didn't exist), auto-trusts the
-  resulting file, and runs the formatter on the save you just made.
+  resulting file, and runs the formatter on the file you just asked about.
 - **No / Esc** — remembered per-extension in the trust file. You
   won't be re-asked about that file type in this project until you
   manually edit the project config.

@@ -432,10 +432,18 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   the revision (`liveProblems`). 400ms debounce armed only for validated
   kinds; parse once at open. One problem reported; columns in runes,
   offset-1. Go deliberately not validated (gopls does it).
-- Format-on-save order: project `format.json` (trust-gated) → builtin
+- **Only Go formats on save** (`format.FormatsOnSave`). Everything else
+  (JSON, non-Go `format.json` entries) runs only via ≡ File → "Format
+  file" (`formatActiveFile`: saves a dirty tab first; a Go save already
+  formatted, so it stops there). Both doors share `runFormatter`.
+- Formatter order: project `format.json` (trust-gated) → builtin
   external (`BuiltinCommandsFor(root, path)`) → in-process → install
   offer. Go: goimports, else `gopls imports -w` + `gofmt -w`, else gofmt.
   `quiet=true` (auto-save) never prompts or flashes.
+- Documents keep their indentation (`format.DetectIndent`, indent.go):
+  narrowest space run or tabs by vote; no evidence → tool default. JSON
+  tools get it as flags unless the repo configures the tool (prettier
+  `--config-precedence prefer-file`; biome/deno skip on root config).
 
 ### Auto-save (app/autosave.go)
 - Debounce on the sum of EditRevs; default ON; silent; quiet format;
@@ -730,8 +738,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 147 group
-  actions + 15 headers (164), height 170, dividers `[2, 5, 167]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 148 group
+  actions + 15 headers (165), height 171, dividers `[2, 5, 168]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

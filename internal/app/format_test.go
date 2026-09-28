@@ -862,10 +862,10 @@ func TestHandleFormatDone_QuietStillReloads(t *testing.T) {
 // The in-process rung — ced's own formatter, the floor of the ladder.
 // -----------------------------------------------------------------------------
 
-// TestRunFormatOnSave_InProcessFormatsJSON pins the rung that makes
+// TestRunFormatter_InProcessFormatsJSON pins the rung that makes
 // this feature real on a bare machine. No project config, no tool on
 // PATH, no Node toolchain — and the file still comes back formatted.
-func TestRunFormatOnSave_InProcessFormatsJSON(t *testing.T) {
+func TestRunFormatter_InProcessFormatsJSON(t *testing.T) {
 	useTestTrustFile(t)
 	root := t.TempDir()
 	a := newTestApp(t, root)
@@ -875,7 +875,7 @@ func TestRunFormatOnSave_InProcessFormatsJSON(t *testing.T) {
 	}
 	openTabAtPath(t, a, target)
 
-	a.runFormatOnSave(0, false)
+	a.runFormatter(0, false)
 
 	if confirmOf(a) != nil {
 		t.Fatal("in-process formatting must not open a trust prompt — the code is ours")
@@ -890,10 +890,10 @@ func TestRunFormatOnSave_InProcessFormatsJSON(t *testing.T) {
 	}
 }
 
-// TestRunFormatOnSave_InProcessRefusesBrokenJSON pins the rule that
+// TestRunFormatter_InProcessRefusesBrokenJSON pins the rule that
 // keeps a formatter from destroying work: a file that does not parse is
 // LEFT EXACTLY AS IT WAS. The validator has already underlined why.
-func TestRunFormatOnSave_InProcessRefusesBrokenJSON(t *testing.T) {
+func TestRunFormatter_InProcessRefusesBrokenJSON(t *testing.T) {
 	useTestTrustFile(t)
 	root := t.TempDir()
 	a := newTestApp(t, root)
@@ -904,7 +904,7 @@ func TestRunFormatOnSave_InProcessRefusesBrokenJSON(t *testing.T) {
 	}
 	openTabAtPath(t, a, target)
 
-	a.runFormatOnSave(0, false)
+	a.runFormatter(0, false)
 
 	ev := waitForFormatEvent(t, a)
 	if ev.err == nil {
@@ -916,11 +916,11 @@ func TestRunFormatOnSave_InProcessRefusesBrokenJSON(t *testing.T) {
 	}
 }
 
-// TestRunFormatOnSave_InProcessSkipsAnUnchangedWrite pins that a save
+// TestRunFormatter_InProcessSkipsAnUnchangedWrite pins that a save
 // of an already-formatted file touches nothing. A rewrite bumps the
 // mtime, which every other layer reads as "somebody changed this file"
 // — so an idempotent save has to be indistinguishable from no save.
-func TestRunFormatOnSave_InProcessSkipsAnUnchangedWrite(t *testing.T) {
+func TestRunFormatter_InProcessSkipsAnUnchangedWrite(t *testing.T) {
 	useTestTrustFile(t)
 	root := t.TempDir()
 	a := newTestApp(t, root)
@@ -934,7 +934,7 @@ func TestRunFormatOnSave_InProcessSkipsAnUnchangedWrite(t *testing.T) {
 		t.Fatalf("stat: %v", err)
 	}
 
-	a.runFormatOnSave(0, false)
+	a.runFormatter(0, false)
 	if ev := waitForFormatEvent(t, a); ev.err != nil {
 		t.Fatalf("run err: %v", ev.err)
 	}
@@ -948,10 +948,10 @@ func TestRunFormatOnSave_InProcessSkipsAnUnchangedWrite(t *testing.T) {
 	}
 }
 
-// TestRunFormatOnSave_ExternalToolOutranksInProcess pins the ladder's
+// TestRunFormatter_ExternalToolOutranksInProcess pins the ladder's
 // order. A repo that has chosen prettier must keep it: ced formatting
 // the file its own way would be the editor arguing with the project.
-func TestRunFormatOnSave_ExternalToolOutranksInProcess(t *testing.T) {
+func TestRunFormatter_ExternalToolOutranksInProcess(t *testing.T) {
 	useTestTrustFile(t)
 	root := t.TempDir()
 	a := newTestApp(t, root)
@@ -968,7 +968,7 @@ func TestRunFormatOnSave_ExternalToolOutranksInProcess(t *testing.T) {
 	}
 	t.Cleanup(func() { builtinCommandsFor = format.BuiltinCommandsFor })
 
-	a.runFormatOnSave(0, false)
+	a.runFormatter(0, false)
 	if ev := waitForFormatEvent(t, a); ev.err != nil {
 		t.Fatalf("run err: %v", ev.err)
 	}
@@ -976,5 +976,187 @@ func TestRunFormatOnSave_ExternalToolOutranksInProcess(t *testing.T) {
 	got, _ := os.ReadFile(target)
 	if string(got) != "external\n" {
 		t.Fatalf("got %q — the in-process rung ran over an installed tool", string(got))
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Go-only on save; everything else through the explicit Format verb.
+// -----------------------------------------------------------------------------
+
+// TestRunFormatOnSave_SkipsJSON pins the headline of the on-save policy:
+// saving a JSON file leaves its layout exactly as the user wrote it — no
+// run starts and the bytes on disk do not move.
+func TestRunFormatOnSave_SkipsJSON(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "data.json")
+	const src = `{"a":1,"b":[2,3]}`
+	if err := os.WriteFile(target, []byte(src), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+
+	a.runFormatOnSave(0, false)
+
+	if a.formatRunning(target) {
+		t.Fatal("a formatter run started for a JSON save")
+	}
+	if got, _ := os.ReadFile(target); string(got) != src {
+		t.Fatalf("JSON rewritten on save: %q", got)
+	}
+}
+
+// TestRunFormatOnSave_SkipsProjectEntryForNonGo pins that a project
+// format.json entry for a non-Go extension no longer fires on save —
+// not even its trust prompt. The entry is reached through Format file.
+func TestRunFormatOnSave_SkipsProjectEntryForNonGo(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	writeFormatConfig(t, root, `{"commands":{"py":["echo","ran","$FILE"]}}`)
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "script.py")
+	if err := os.WriteFile(target, []byte("x = 1\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+
+	a.runFormatOnSave(0, false)
+
+	if confirmOf(a) != nil {
+		t.Fatal("a non-Go save opened the format trust prompt")
+	}
+	if a.formatRunning(target) {
+		t.Fatal("a formatter run started for a non-Go save")
+	}
+}
+
+// TestFormatActiveFile_SavesThenFormatsJSON walks the explicit verb on a
+// dirty JSON tab: the buffer is saved first (the pipeline formats the
+// DISK copy), then formatted, and the buffer adopts the result.
+func TestFormatActiveFile_SavesThenFormatsJSON(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "data.json")
+	if err := os.WriteFile(target, []byte(`{"a":1}`), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tab := openTabAtPath(t, a, target)
+	// Typed at the top of the buffer: still valid JSON, but only the
+	// saved copy has it — so a formatter that skipped the save would
+	// format the old bytes and the "b" key would be missing below.
+	tab.InsertString(`{"b":2,"inner":`)
+	// Anchor moves with the cursor: a lone Cursor move would leave a
+	// selection behind, and the next insert would replace it.
+	tab.Cursor = editor.Position{Line: 0, Col: len([]rune(tab.Buffer.Lines[0]))}
+	tab.Anchor = tab.Cursor
+	tab.InsertString(`}`)
+
+	a.formatActiveFile()
+
+	if tab.Dirty {
+		t.Fatal("dirty buffer was not saved before formatting")
+	}
+	ev := waitForFormatEvent(t, a)
+	if ev.err != nil {
+		t.Fatalf("format err: %v", ev.err)
+	}
+	a.handleFormatDone(ev)
+	const want = "{\n  \"b\": 2,\n  \"inner\": {\n    \"a\": 1\n  }\n}\n"
+	if got, _ := os.ReadFile(target); string(got) != want {
+		t.Fatalf("disk:\ngot  %q\nwant %q", got, want)
+	}
+	if got := tab.Buffer.String(); got != want {
+		t.Fatalf("buffer:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestFormatActiveFile_KeepsTabIndentation is the second half of the
+// request end to end: a tab-indented JSON file whose layout drifted comes
+// back fixed AND still tab-indented, not re-indented to two spaces.
+func TestFormatActiveFile_KeepsTabIndentation(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "data.json")
+	if err := os.WriteFile(target, []byte("{\n\t\"a\": 1, \"b\": [2,\n3]\n}\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+
+	a.formatActiveFile()
+
+	if ev := waitForFormatEvent(t, a); ev.err != nil {
+		t.Fatalf("format err: %v", ev.err)
+	}
+	const want = "{\n\t\"a\": 1,\n\t\"b\": [\n\t\t2,\n\t\t3\n\t]\n}\n"
+	if got, _ := os.ReadFile(target); string(got) != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}
+
+// TestFormatActiveFile_NoFormatterExplains pins the "unavailable row
+// explains itself" rule: a file ced has no formatter for gets a flash
+// naming the fix instead of silence.
+func TestFormatActiveFile_NoFormatterExplains(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "notes.txt")
+	if err := os.WriteFile(target, []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+	a.statusMsg = ""
+
+	a.formatActiveFile()
+
+	if !strings.Contains(a.statusMsg, "No formatter for notes.txt") {
+		t.Fatalf("statusMsg = %q, want the no-formatter explanation", a.statusMsg)
+	}
+}
+
+// TestFormatActiveFile_ProjectEntryPromptsForTrust pins that a project
+// format.json entry for a non-Go kind is still reachable — through the
+// explicit verb, behind the same trust prompt.
+func TestFormatActiveFile_ProjectEntryPromptsForTrust(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	writeFormatConfig(t, root, `{"commands":{"py":["echo","ran","$FILE"]}}`)
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "script.py")
+	if err := os.WriteFile(target, []byte("x = 1\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+
+	a.formatActiveFile()
+
+	if confirmOf(a) == nil {
+		t.Fatal("Format file on a format.json kind should open the trust prompt")
+	}
+}
+
+// TestFormatActiveFile_DirtyGoFormatsOnce pins that the verb does not
+// run Go's formatter twice: saving a dirty Go tab already formats it, so
+// a second run would only race the first one's write.
+func TestFormatActiveFile_DirtyGoFormatsOnce(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "main.go")
+	if err := os.WriteFile(target, []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tab := openTabAtPath(t, a, target)
+	tab.InsertString("// edited\n")
+	calls := stubBuiltinFormatter(t, []string{"true"})
+
+	a.formatActiveFile()
+	waitForFormatEvent(t, a)
+
+	if *calls != 1 {
+		t.Fatalf("builtin resolver consulted %d times, want 1", *calls)
 	}
 }

@@ -116,7 +116,9 @@ plus the LSP work done in the seeding session itself
 - **N-029** · raised `2026-0928-1408-recent-locations-per-repo-history` · value low
   README does not mention ≡ Nav → Recent locations…, the drill-in, or that
   recent files / locations now live in `<repo>/.ced/history.bytdb`
-  (gitignored). An instance of N-003.
+  (gitignored), nor the "No file open" placeholder's Recent files ·
+  Recent locations links (added `2026-0928-1735-empty-editor-recent-links`).
+  An instance of N-003.
 
 ## Roadmap
 

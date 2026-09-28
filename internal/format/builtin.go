@@ -51,13 +51,35 @@
 // statement about the developer's laptop, which may have nothing to do
 // with the project they're editing. Both are used, in that order, so
 // the repo's answer wins where the repo has one.
+//
+// # Keeping the file's indentation
+//
+// Every JSON tool here defaults to two spaces, so without help a
+// tab-indented (or four-space) file would be re-indented wholesale the
+// first time it was formatted. ced reads the file's existing unit
+// (indent.go) and hands it to the tool as flags — but ONLY when the
+// repo has not configured the tool itself, because a biome.json or a
+// .prettierrc is the repo's explicit answer and outranks anything ced
+// infers from one file:
+//
+//	prettier   --config-precedence prefer-file: prettier itself drops
+//	           our flags when it finds any config (.prettierrc, the
+//	           package.json key, .editorconfig) — its resolution rules
+//	           are too many for ced to re-implement faithfully
+//	biome      flags only when <root> has no biome.json[c]
+//	deno       flags only when <root> has no deno.json[c]
+//
+// A file with no indentation to read (minified, one line) gets no flags
+// at all: the tool's own default applies, exactly as before.
 
 package format
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 )
 
 // lookPath is swappable in tests so builtin resolution doesn't depend
@@ -80,13 +102,54 @@ const nodeBinDir = "node_modules/.bin"
 // last because a machine with deno installed is usually editing Deno
 // projects, where the file is likelier to be covered by a deno.json
 // the project would rather ced didn't second-guess.
+//
+// indentArgs turns a detected Indent into that tool's flags; configs
+// names the root-level files whose presence means the repo owns the
+// tool's style, so no flags are passed (see the file comment). prettier
+// lists none because its own --config-precedence makes that call.
 var jsonFormatters = []struct {
-	bin  string
-	args []string
+	bin        string
+	args       []string
+	configs    []string
+	indentArgs func(Indent) []string
 }{
-	{"prettier", []string{"--write"}},
-	{"biome", []string{"format", "--write"}},
-	{"deno", []string{"fmt"}},
+	{"prettier", []string{"--write"}, nil, prettierIndentArgs},
+	{"biome", []string{"format", "--write"}, []string{"biome.json", "biome.jsonc"}, biomeIndentArgs},
+	{"deno", []string{"fmt"}, []string{"deno.json", "deno.jsonc"}, denoIndentArgs},
+}
+
+// indentSampleBytes bounds how much of a file is read to detect its
+// indentation. The command list is built on the main loop, so the read
+// must stay small no matter how large the file; the first 64KB of a
+// structured document holds thousands of indented lines, far more
+// evidence than the narrowest-run rule needs.
+const indentSampleBytes = 64 << 10
+
+// prettierIndentArgs asks prettier for the file's unit while letting any
+// prettier config the repo has override it.
+func prettierIndentArgs(in Indent) []string {
+	args := []string{"--config-precedence", "prefer-file"}
+	if in.Tabs {
+		return append(args, "--use-tabs")
+	}
+	return append(args, "--tab-width", strconv.Itoa(in.Width))
+}
+
+// biomeIndentArgs spells the unit in biome's flag vocabulary.
+func biomeIndentArgs(in Indent) []string {
+	if in.Tabs {
+		return []string{"--indent-style=tab"}
+	}
+	return []string{"--indent-style=space", "--indent-width=" + strconv.Itoa(in.Width)}
+}
+
+// denoIndentArgs spells the unit in deno fmt's flag vocabulary. Spaces
+// are deno's default, so only the width needs saying.
+func denoIndentArgs(in Indent) []string {
+	if in.Tabs {
+		return []string{"--use-tabs"}
+	}
+	return []string{"--indent-width=" + strconv.Itoa(in.Width)}
 }
 
 // BuiltinCommandsFor returns the built-in external formatter pipeline
@@ -142,14 +205,53 @@ func goCommands(abs string) [][]string {
 // tools formats completely on its own, and running two would just mean
 // the second one reformatting the first one's output to a different
 // house style.
+//
+// The file is sampled for its indentation only once a tool has been
+// found, so a machine with no JSON formatter never pays the read.
 func jsonCommands(rootDir, abs string) [][]string {
 	for _, f := range jsonFormatters {
-		if bin, ok := resolveTool(rootDir, f.bin); ok {
-			argv := append([]string{bin}, f.args...)
-			return [][]string{append(argv, abs)}
+		bin, ok := resolveTool(rootDir, f.bin)
+		if !ok {
+			continue
 		}
+		argv := append([]string{bin}, f.args...)
+		if in := sampleIndent(abs); in.Known() && !hasAnyFile(rootDir, f.configs) {
+			argv = append(argv, f.indentArgs(in)...)
+		}
+		return [][]string{append(argv, abs)}
 	}
 	return nil
+}
+
+// sampleIndent detects the indentation of the file at path from its
+// first indentSampleBytes. An unreadable file reports the zero Indent,
+// which means "pass no flags" — the tool's default, the behaviour
+// before indentation was preserved at all.
+func sampleIndent(path string) Indent {
+	f, err := os.Open(path)
+	if err != nil {
+		return Indent{}
+	}
+	defer f.Close()
+	head, err := io.ReadAll(io.LimitReader(f, indentSampleBytes))
+	if err != nil {
+		return Indent{}
+	}
+	return DetectIndent(head)
+}
+
+// hasAnyFile reports whether any of names exists directly in dir. An
+// empty dir (no project root) has none.
+func hasAnyFile(dir string, names []string) bool {
+	if dir == "" {
+		return false
+	}
+	for _, n := range names {
+		if _, err := os.Stat(filepath.Join(dir, n)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveTool finds name in the project's own node_modules/.bin, then

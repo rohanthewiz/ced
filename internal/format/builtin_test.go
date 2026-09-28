@@ -295,3 +295,99 @@ func equalArgv(got, want []string) bool {
 	}
 	return true
 }
+
+// -----------------------------------------------------------------------------
+// Keeping the file's indentation through an external JSON tool.
+// -----------------------------------------------------------------------------
+
+// writeJSONFixture writes body to data.json in a fresh temp root and
+// returns (root, path). The builtin resolver samples the real file, so
+// indentation tests need one on disk.
+func writeJSONFixture(t *testing.T, body string) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	p := filepath.Join(root, "data.json")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	return root, p
+}
+
+// TestBuiltinCommandsFor_JSONPassesTheFilesIndent pins that each tool
+// is told the file's own unit in its own flag vocabulary, so a tab- or
+// four-space-indented file is not re-indented to the tool's two-space
+// default.
+func TestBuiltinCommandsFor_JSONPassesTheFilesIndent(t *testing.T) {
+	const tabs = "{\n\t\"a\": 1\n}\n"
+	const four = "{\n    \"a\": 1\n}\n"
+	cases := []struct {
+		name  string
+		tool  string
+		body  string
+		flags []string
+	}{
+		{"prettier tabs", "prettier", tabs, []string{"--write", "--config-precedence", "prefer-file", "--use-tabs"}},
+		{"prettier four", "prettier", four, []string{"--write", "--config-precedence", "prefer-file", "--tab-width", "4"}},
+		{"biome tabs", "biome", tabs, []string{"format", "--write", "--indent-style=tab"}},
+		{"biome four", "biome", four, []string{"format", "--write", "--indent-style=space", "--indent-width=4"}},
+		{"deno tabs", "deno", tabs, []string{"fmt", "--use-tabs"}},
+		{"deno four", "deno", four, []string{"fmt", "--indent-width=4"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubLookPath(t, map[string]string{tc.tool: "/fake/bin/" + tc.tool})
+			root, p := writeJSONFixture(t, tc.body)
+			cmds := BuiltinCommandsFor(root, p)
+			if len(cmds) != 1 {
+				t.Fatalf("cmds = %v, want exactly one command", cmds)
+			}
+			want := append([]string{"/fake/bin/" + tc.tool}, tc.flags...)
+			want = append(want, p)
+			if !equalArgv(cmds[0], want) {
+				t.Errorf("cmds[0] = %v, want %v", cmds[0], want)
+			}
+		})
+	}
+}
+
+// TestBuiltinCommandsFor_JSONMinifiedGetsNoIndentFlags pins the
+// no-evidence case: a one-line file says nothing about its unit, so the
+// tool runs with exactly the argv it had before indentation was read.
+func TestBuiltinCommandsFor_JSONMinifiedGetsNoIndentFlags(t *testing.T) {
+	stubLookPath(t, map[string]string{"prettier": "/fake/bin/prettier"})
+	root, p := writeJSONFixture(t, `{"a":1}`)
+	cmds := BuiltinCommandsFor(root, p)
+	want := []string{"/fake/bin/prettier", "--write", p}
+	if len(cmds) != 1 || !equalArgv(cmds[0], want) {
+		t.Fatalf("cmds = %v, want [%v]", cmds, want)
+	}
+}
+
+// TestBuiltinCommandsFor_JSONRepoConfigOwnsTheStyle pins the precedence
+// rule: a biome.json or deno.json at the root is the repo's explicit
+// answer, so ced passes no indentation flags that would override it.
+func TestBuiltinCommandsFor_JSONRepoConfigOwnsTheStyle(t *testing.T) {
+	for _, tc := range []struct{ tool, config string }{
+		{"biome", "biome.json"},
+		{"biome", "biome.jsonc"},
+		{"deno", "deno.json"},
+		{"deno", "deno.jsonc"},
+	} {
+		t.Run(tc.config, func(t *testing.T) {
+			stubLookPath(t, map[string]string{tc.tool: "/fake/bin/" + tc.tool})
+			root, p := writeJSONFixture(t, "{\n\t\"a\": 1\n}\n")
+			if err := os.WriteFile(filepath.Join(root, tc.config), []byte("{}"), 0o644); err != nil {
+				t.Fatalf("config: %v", err)
+			}
+			cmds := BuiltinCommandsFor(root, p)
+			if len(cmds) != 1 {
+				t.Fatalf("cmds = %v, want exactly one command", cmds)
+			}
+			for _, a := range cmds[0] {
+				if a == "--use-tabs" || a == "--indent-style=tab" {
+					t.Fatalf("cmds[0] = %v — indentation flag passed over the repo's %s", cmds[0], tc.config)
+				}
+			}
+		})
+	}
+}

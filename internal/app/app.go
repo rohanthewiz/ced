@@ -265,6 +265,12 @@ func builtinMenuGroups() []menuGroup {
 			// desktop editor has. Auto-save is the preference that governs
 			// the Save row, so it sits under it.
 			{label: "Save", shortcut: "esc s", action: (*App).menuSave, enabled: (*App).hasSavableTab},
+			// The explicit formatter (format.go). Directly under Save
+			// because only Go formats AS PART of a save; every other
+			// kind — JSON, format.json entries — is formatted here, on
+			// request. No leader: the flat table is out of mnemonic
+			// letters, and the palette reaches it for free.
+			{label: "Format file", action: (*App).menuFormatFile, enabled: (*App).hasSavableTab},
 			{label: "Save & close tab", action: (*App).menuSaveAndClose, enabled: (*App).hasSavableTab},
 			{label: "Close tab", shortcut: "esc w", action: (*App).menuClose, enabled: (*App).hasTab},
 			{label: "Revert file", action: (*App).menuRevert, enabled: (*App).hasRevert},

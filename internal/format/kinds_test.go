@@ -146,3 +146,23 @@ func TestKindFor_AgreesWithTheThreeVerbs(t *testing.T) {
 		t.Error("BuiltinHandles(tsconfig.json) = true, want false")
 	}
 }
+
+// TestFormatsOnSave_OnlyGo pins the on-save policy: Go formats on every
+// save, and no other kind does — JSON, JSONC, and unknown extensions all
+// wait for the explicit Format verb.
+func TestFormatsOnSave_OnlyGo(t *testing.T) {
+	cases := map[string]bool{
+		"/proj/main.go":       true,
+		"/proj/MAIN.GO":       true,
+		"/proj/data.json":     false,
+		"/proj/tsconfig.json": false,
+		"/proj/notes.md":      false,
+		"/proj/script.py":     false,
+		"/proj/no-extension":  false,
+	}
+	for p, want := range cases {
+		if got := FormatsOnSave(p); got != want {
+			t.Errorf("FormatsOnSave(%q) = %v, want %v", p, got, want)
+		}
+	}
+}

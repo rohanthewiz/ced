@@ -46,15 +46,17 @@ import (
 	"encoding/json"
 )
 
-// jsonIndent is the indentation one level of JSON nesting gets. Two
+// jsonIndent is the indentation one level of JSON nesting gets WHEN THE
+// FILE HAS NO OPINION of its own (minified, or a single line). Two
 // spaces because that is what every tool in this file's ladder emits by
 // default (prettier, biome, deno, `jq --indent 2`), so a project that
-// later installs one of them sees no churn on its first save.
+// later installs one of them sees no churn on its first format.
 //
-// Not configurable, and that is the same call the rest of ced makes:
-// there is no settings dialog by design, and a project that wants
-// something else says so in .ced/format.json, which overrides this
-// whole path.
+// A file that is already indented keeps its own unit — tabs stay tabs,
+// four spaces stay four (indent.go). The default is only a fallback,
+// and it is not configurable for the same reason the rest of ced has no
+// settings dialog: a project that wants something else says so in
+// .ced/format.json, which overrides this whole path.
 const jsonIndent = "  "
 
 // InProcessFormat formats src as whatever language filePath names.
@@ -91,12 +93,20 @@ func formatJSON(src []byte) ([]byte, error) {
 		return append([]byte(nil), src...), nil
 	}
 
+	// The unit is read from the ORIGINAL bytes, before json.Indent
+	// throws the old layout away: a tab-indented package.json must come
+	// back tab-indented, or a one-key edit becomes a whole-file diff.
+	// Detection is idempotent with the output — a file this function
+	// wrote detects as the unit it was written with — so repeated
+	// formats never drift.
+	unit := DetectIndent(src).Unit(jsonIndent)
+
 	// Indent is fed the TRIMMED bytes: it preserves whatever leading
 	// whitespace it is handed, so passing src verbatim would indent the
 	// document one level deeper on every single save — a formatter that
 	// is not idempotent is a formatter that fights the file.
 	var buf bytes.Buffer
-	if err := json.Indent(&buf, trimmed, "", jsonIndent); err != nil {
+	if err := json.Indent(&buf, trimmed, "", unit); err != nil {
 		return nil, err
 	}
 

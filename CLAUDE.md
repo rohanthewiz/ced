@@ -1,4541 +1,790 @@
-<!--
-  File: CLAUDE.md
-  Author: Rohan Allison <rohanthewiz@gmail.com>
-  Created: 2026-04-29
-  Copyright: 2026 Rohan Allison. All rights reserved.
-  Portions copyright 2026 Cloudmanic, LLC. Original author: Spicer Matthews.
--->
-
 # CLAUDE.md — ced
 
-Project-specific guidance for Claude Code. Read this first; it captures
-conventions and design decisions that aren't obvious from the code alone.
+Project-specific guidance for Claude Code. This file holds the RULES;
+the reasoning behind each one lives in the header comment of the file
+named in its section heading — read that before changing the feature.
+(The long-form version of this file is in git history:
+`git show 57bed9f:CLAUDE.md`.)
 
 ## What this project is
 
-ced ("Cats Editor") is an opinionated, **mouse-first** terminal code editor aimed at
-SSH-into-tmux workflows. It looks and behaves like a tiny VS Code: file
-tree on the left, tabs across the top, syntax-highlighted editor in the
-middle, status bar at the bottom. It ships as a single static Go binary
-with no CGO.
+ced ("Cats Editor") is an opinionated, **mouse-first** terminal code
+editor for SSH-into-tmux workflows: file tree left, tabs on top,
+syntax-highlighted editor, status bar. One static Go binary, no CGO.
 
-Users open the action menu (Save, Quit, Show/Hide Sidebar, …) by clicking
-the `≡` icon, right-clicking, or double-tapping `Esc`. There are
-intentionally **almost no `Ctrl+` shortcuts** for editor actions — they
-conflict with `tmux` and terminal emulators. Don't add more. The one
-sanctioned exception is `Ctrl-D` (duplicate line): it collides with
-nothing (not flow control, not the tmux/zellij prefixes), and the owner
-approved it explicitly. `Alt+Up/Down` (move line) is fine — Alt never
-fights tmux.
-
-**`Cmd+` is the one modifier that is genuinely free**, and it is a BONUS
-LAYER — every chord is a second door onto a verb the Esc table or the ≡
-menu already reaches, pinned by test, so a terminal that keeps `Cmd` for
-itself costs the user nothing. It arrives only through the kitty
-keyboard protocol (as `ModMeta`) and only fires behind `metaAccelArmed`,
-which trusts a cats Tier-1 pane or a self-identified kitty/Ghostty/
-WezTerm — the gate exists so a terminal folding Option into Meta can't
-misfire a verb. `⌘←` / `⌘→` (line start / end, `Shift` to select) are
-the one pair that is NOT in that rune table and cannot be: they're arrow
-keys, so they dispatch from the editing switch beside `Alt+Up/Down`. See
-metakeys.go — the whole rationale lives in its header comment.
-
-**tmux folds Esc sequences into Alt events.** tmux buffers a lone ESC
-for its escape-time (500ms default), so a fast double-Esc reaches tcell
-as one `\x1b\x1b` write → a single `KeyEsc + ModAlt` event, and "Esc,
-s" reaches it as `Alt+s`. handleKey therefore treats Alt+Esc as the
-double-Esc menu toggle and Alt+<bound rune> as that leader. Keep those
-branches — removing them makes the keyboard menu and every leader
-unreachable inside tmux.
-
-**Every file action also lives in the main ≡ menu.** macOS Terminal +
-tmux often swallows right-click, so the editor cannot rely on
-right-click as the only path to anything. Tree right-click is a redundant
-shortcut, not a primary surface — when adding new file-management
-features, make sure they're reachable from the main menu first.
-
-**Right-click is `tcell.ButtonSecondary` (Button2), NOT `Button3`.** tcell
-v2 reversed v1's X11 numbering: Button2 is the right button and Button3 is
-the MIDDLE one. The dispatch in `handleMouse` checked Button3 for a long
-time, so real right-clicks did nothing in every terminal (middle-click
-opened the menu) while the "Terminal swallows it" lore took the blame.
-Tests must send `ButtonSecondary` to simulate a right press — a Button3
-test passes against code that never sees a right-click.
+- The action menu opens via the `≡` icon, right-click, or double-`Esc`.
+  **Almost no `Ctrl+` shortcuts** — they fight tmux/terminals. Don't add
+  more. Sanctioned exception: `Ctrl-D` (duplicate line). `Alt+Up/Down`
+  (move line) is fine.
+- **`Cmd+` is a BONUS LAYER** (metakeys.go): every ⌘ chord is a second
+  door onto a verb the Esc table or ≡ menu already reaches
+  (`TestMetaAccelsAreNeverTheOnlyPath`). Arrives only via the kitty
+  protocol as `ModMeta`, gated by `metaAccelArmed`. `⌘←/⌘→` are the one
+  pair dispatched from the editing switch, not the rune table.
+- **tmux folds Esc sequences into Alt events**: a fast double-Esc arrives
+  as `KeyEsc+ModAlt`, "Esc s" as `Alt+s`. handleKey treats Alt+Esc as the
+  menu toggle and Alt+<bound rune> as that leader. Keep those branches.
+- **Every file action also lives in the main ≡ menu** — macOS Terminal +
+  tmux often swallow right-click, so right-click is never the only path.
+- **Right-click is `tcell.ButtonSecondary` (Button2), NOT `Button3`**
+  (Button3 is middle in tcell v2). Tests must send `ButtonSecondary`.
+- **Keyboard-owning surfaces (modals, prompts, the find bar) can't reach
+  the ≡ menu**, so any button on them needs an in-surface key/Alt chord
+  (Alt is safe inside them — the modal eats it before the leader branch).
 
 ## Module / repo
 
-- Module: `github.com/rohanthewiz/ced`
-- Binary name: `ced` (one word, lowercase — Makefile, goreleaser, the
-  cats plugin manifest's `bin` entry and install.sh all assume this)
-- Official install: the cats plugin (`cats-plugin.toml`), which links
-  `~/.cats/bin/ced`. **No Homebrew formula** — the tap (`Formula/`) and
-  goreleaser's `brews:` block were removed on 2026-09-14.
+- Module `github.com/rohanthewiz/ced`; binary `ced` (Makefile,
+  goreleaser, cats-plugin.toml `bin`, install.sh all assume it).
+- Official install: the cats plugin (`cats-plugin.toml` → `~/.cats/bin/ced`).
+  **No Homebrew formula/tap**, ever.
 
 ## Architecture map
 
 ```
-main.go                       Entry — the urfave/cli surface + `ced fav`
-internal/favorites/favorites.go favorites.json: two scopes, the walk-up resolver
-internal/app/favorites.go     RevealPath — expand the tree to a path, keep the root
-internal/app/favmanage.go     ≡ Manage favorites: the two lists, the verbs, the scope chip
-internal/app/openineditor.go  Hand a file or folder to $VISUAL / $EDITOR
-internal/app/toolwindow.go    TOOL WINDOWS: the registry, the three edges, one visible
-                              per edge, sizes per tool per axis, every dock rect
-internal/app/tooladapt.go     Each panel's show/hide verbs — the seam to the layer above
-internal/app/toolheader.go    A dock's header rule, title and ✕, for a panel with none
-internal/app/toollayout.go    The per-project layout: encode, restore, save (state.json)
-internal/app/toolmenu.go      ≡ Tool windows: the tool picker, the edge picker, reset
-internal/app/app.go           Event loop, layout, menu modal, splitter, all rendering
-internal/app/inputburst.go    One frame per wheel/motion BURST, not per event
-internal/editor/buffer.go     Position + Buffer ([]string lines), edit primitives
-internal/editor/tab.go        Tab: path, buffer, cursor, anchor, scroll, dirty state
-internal/editor/undo.go       Snapshot stack: coalescing, the byte budget, revert
-internal/editor/fileio.go     Open guards, line-ending/BOM round-trip, atomic save
-internal/editor/highlight.go  Chroma → []tcell.Style per line (+ HighlightLang, by name)
-internal/editor/markdown.go   Markdown VIEW: the per-tab flag, the row cache, the paint
-internal/editor/markdownblocks.go  Blocks → display rows: headings, code, lists, quotes, tables
-internal/editor/markdowninline.go  One line of markdown → styled spans
-internal/app/markdown.go      Preview toggle, its surfaces, and the pane's four differences
-internal/editor/softwrap.go   Soft wrap layout: row starts, row-unit scroll/hit-test/Up-Down
-internal/app/softwrap.go      Soft wrap toggle: tree + editor right-click rows, ≡ View, status
-internal/editor/syntax.go     Re-lex settle policy + the style-grid patch
-internal/app/syntax.go        The settle timer that wakes the loop for the re-lex
-internal/app/tabbar.go        Tab strip: scroll, overflow button, switching
-internal/app/tablabel.go      Tab labels: the basename, widened only when two collide
-internal/diff/diff.go         Patience line differ + unified-diff rendering (pure Go)
-internal/app/compare.go       Compare panel: buffer ↔ file / saved copy / pasted text
-internal/editor/find.go       Match model + the one scanner (options: case, whole word)
-internal/editor/replace.go    Replace current / replace all — one undo step, bottom-up
-internal/editor/multiedit.go  Multi-range edit of one buffer — bottom-up, ONE undo step
-internal/app/find.go          The find bar: two rows, option toggles, replace buttons
-internal/app/goto.go          Go to line — line, line:col, or a pasted compiler ref
-internal/search/search.go     Project-wide text search over the finder's index
-internal/app/projectsearch.go Find in project: search → the find-all panel
-internal/editor/decoration.go Span/GutterMark overlay system merged in Tab.Render
-internal/editor/multicaret.go Secondary carets + the bottom-up edit fan-out
-internal/editor/wordhl.go     Word scanner, occurrence matcher, word-highlight source
-internal/editor/symbolhl.go   Server-resolved symbol uses: the set, its revision pin, the paint
-internal/editor/linenote.go   End-of-line notes: the revision-pinned set and its paint
-internal/editor/bracket.go    Brace matcher: budgeted scan, string/comment skip, pair source
-internal/app/multicaret.go    Multi-caret UI: ≡ rows, Esc-m/M/*, Alt+click, status
-internal/app/wordhl.go        Word-highlight ≡ toggle + per-tab flag plumbing
-internal/app/bracket.go       Go to matching bracket (Esc-%) + its three refusals
-internal/app/findall.go       Find-all peek list: compacted rows, preview, Esc-restore
-internal/lsp/client.go        Minimal JSON-RPC-over-stdio LSP client (stdlib only)
-internal/lsp/workspaceedit.go WorkspaceEdit's two wire shapes → one normal form
-internal/lsp/codeaction.go    Code actions: the response union + applyEdit's params
-internal/app/lsp.go           Server lifecycle, doc sync, diagnostics, definition, hover
-internal/app/lspservers.go    The language-server registry: ext → server, per-server state
-internal/app/lspgoto.go       Implementation / type definition / incoming calls: jump or list
-internal/app/lsprestart.go    ≡ Restart language server: the retry gesture, and the slot generation
-internal/lsp/callhierarchy.go prepareCallHierarchy + incomingCalls → call-site Locations
-internal/app/lspprogress.go   $/progress + showMessage → the status bar's server segment
-internal/app/lsphighlight.go  documentHighlight → Tab.SetSymbolUses (reads + underlined writes)
-internal/app/lspinlay.go      Inlay hints → end-of-line notes: refresh policy, anchor restating
-internal/app/lspsymbols.go    Document symbols → the "go to symbol in file" picker
-internal/app/lspworkspacesymbols.go  workspace/symbol → prompt, then the project-wide symbol picker
-internal/app/lspreferences.go References → the Find-all panel's project mode
-internal/app/lspsignature.go  Signature help → the hover tooltip, active param lit
-internal/app/lsprename.go     Rename symbol: prompt → server edit → the primitive
-internal/app/lspcodeaction.go Code actions: picker, executeCommand, server applyEdit
-internal/app/hovermodal.go    Caret-anchored tooltip (hover + signature help)
-internal/app/diagtip.go       Diagnostic messages: pointer tooltip, Esc-i lead, step flash
-internal/app/workspaceedit.go Cross-file apply: validate, write, one-gesture undo
-internal/app/termdiag.go      Terminal output → clickable path:line:col jumps
-internal/app/copilot.go       GitHub Copilot sidecar: lifecycle + device-flow sign-in
-internal/app/copilot_ghost.go Copilot phase 2: doc sync + inline completions (ghost text)
-internal/app/copilot_chat.go  Copilot phase 3: ACP chat panel (left strip, streaming turns)
-internal/app/chatcomposer.go  The chat prompt's multi-line input widget (hard-wrap, caret math)
-internal/app/chatagent.go     Chat backend registry + ≡ picker (Copilot / Claude Code / Gemini)
-internal/app/copilot_chat_context.go  Chat context: file / selection attachments
-internal/chatstore/chatstore.go One JSON file per saved conversation + the cap
-internal/app/chatarchive.go   New chat, the archive, and the Recent chats picker
-internal/app/summarize.go     AI summarize: selection-or-file, one visible chat turn
-internal/gonotes/gonotes.go   GoNotes v1 REST client: env credentials, shared token cache
-internal/app/gonotes.go       Capture selection/file as a GoNotes note (+ AI-drafted title)
-internal/app/copilot_chat_perm.go     Phase 4: permission prompts + agent fs read/write
-internal/lsp/acp.go           ACP framing (ndjson) + onRequest hook over the same Client
-internal/lsp/ndjson.go        StartNDJSON — generic ndjson process launcher (ACP + MCP), env-aware
-internal/mcp/config.go        mcp.json inventory (Claude-Desktop shape): stdio/http/sse entries
-internal/mcp/client.go        MCP client: handshake, tools/list, tools/call, roots/list + ping
-internal/app/mcp.go           MCP state, ≡ server/tool pickers, and the chat-agent declaration
-internal/skills/skills.go     SKILL.md inventory: three dirs scanned, frontmatter, shadowing
-internal/app/skills.go        Skills state, ≡ pickers, skill → chat attachment + directive
-internal/plugins/plugins.go   plugin.json manifests: commands / hooks / decorations + validation
-internal/plugins/diag.go      Compiler-style output → Diagnostic (path:line:col: sev: msg)
-internal/app/plugins.go       Plugin state, ≡ group, dynamic command splice, Esc-x namespace
-internal/app/plugincmd.go     Command runs: stdin modes, stdout application, the sh -c helper
-internal/app/plugindeco.go    Hooks, decoration providers, edit debounce, pluginDecoSource
-internal/editor/ghost.go      GhostText display form + the render-row splice overlay
-internal/app/autosave.go      Idle-debounced auto-save (EditRev signature → autoSaveEvent)
-internal/app/zipops.go        Zip file/folder — stdlib archive/zip, async zipDoneEvent
-internal/app/format.go        Format-on-save bridge: project config, builtin Go, prompts
-internal/app/validate.go      ced's own syntax check: the debounce, the revision gate, its source
-internal/app/diagmerge.go     diagsFor — every producer's diagnostics, one question
-internal/app/metakeys.go      The ⌘ accelerator layer: the rune table, its host gate,
-                              and ⌘←/⌘→ (line start/end) beside it
-internal/app/nav.go           Back/forward file-navigation history (Esc-o/O, Alt+←/→)
-internal/session/session.go   state.json: recent folders + per-folder tab sessions
-internal/app/folder.go        Open folder (restart), recent list, session record/restore
-internal/history/history.go   Per-repo history: <repo>/.ced/history.bytdb, relative paths, the file ring's changes
-internal/history/index.go     Folder usage index: recency + frequency, a bounded trie, best-first top-k
-internal/history/db.go        The bytdb store: open-briefly, delta writes, sequence re-issue, .gitignore
-internal/app/recentlocations.go Recent locations: 5 recent · spacer · 10 frequent, drill + reveal
-internal/remote/remote.go     `ced --remote` / `--wait`: socket, root-based discovery
-internal/app/remote.go        The listener, the wait registry, the root guard, the ≡ row
-internal/app/hostident.go     OSC 7 cwd + OSC 2 title: the pane learns what you're editing
-internal/cats/detect.go       cats capabilities: env sniff (free) + control-socket ping
-internal/cats/client.go       Control socket: one call per connection, typed §7 verbs
-internal/cats/events.go       events.subscribe stream — reconnects forever, survives restarts
-internal/cats/hooks.go        Hook reporter: idle/working/blocked → cats badge/toast/push
-internal/app/cats_glue.go     Tier detection, the state reporter, sibling-agent notifications
-internal/app/gitcommitmsg.go  Commit the panel's selection + agent-drafted messages
-internal/app/gitcommitreceipt.go The transient panel naming the commit that just landed
-internal/app/gitlog.go        Git log panel: commit list + `git show` detail (Esc-L)
-internal/app/gitlogactions.go Git log verbs: cherry-pick, revert, reset, branch/tag, copies
-internal/app/gitstatusreport.go git's own `git status` report, on demand, in the info modal
-internal/app/terminal.go      Embedded grsh terminal panel (REPL strip, not a PTY)
-internal/app/runexec.go       Run an executable: dir picker → staged line in the terminal
-internal/format/              format.json load, trust store, builtin goimports / gopls imports / gofmt,
-                              kinds.go (what IS this file), inprocess.go (ced's own JSON pass),
-                              validate.go (the syntax check and its Problem)
-internal/filetree/filetree.go Lazy tree, identity-preserving refresh, hit-test, render,
-                              the mark set (paths, pruned by Refresh, one borrowed cell)
-internal/app/treemarks.go     Tree multi-selection: the gestures, the Actions picker, the verbs
-internal/filetree/filter.go   Type-to-find: pattern + scope, visible-row substring match, the lit span
-internal/app/treefilter.go    Type-to-find keys: build/trim/cycle/clear, scope pick, first-match jump
-internal/app/treeautofit.go   Sidebar auto-fit: width derived from the tree, locked by a drag
-internal/app/overflow.go      The ▴/▾ overflow markers (editor, both git panels, tree),
-                              what is off-screen each way, and the hover popup
-internal/clipboard/clipboard.go OSC 52 to /dev/tty with tmux passthrough wrap
-internal/userconfig/userconfig.go ~/.config/ced/config.json loader/writer (icons, autosave, termdock, execmarks, treeautofit, inlayhints, chat*, session, theme) + mcp.json / state.json / themes / skills dir paths
-internal/icons/icons.go       Nerd Font detection + per-file glyph mapping
-internal/theme/theme.go       Theme struct (tcell colors) + Default() fallback
-internal/theme/palette.go     Canonical color keys + the 8-core derivation table
-internal/theme/builtin.go     Spec type + the ten shipped themes
-internal/theme/load.go        themes/*.json registry, shadowing, encode/save
-internal/app/theme.go         Theme state, live switch, ≡ picker, save-to-preview
-internal/version/version.go   const Version = "x.y.z" — single line, CI bumps it
+main.go                       urfave/cli surface + `ced fav`
+internal/version/version.go   const Version — single line
+internal/editor/
+  buffer.go tab.go            Position/Buffer ([]string); Tab: path, cursor, anchor, scroll, dirty
+  undo.go                     Snapshot stack: coalescing, byte budget
+  fileio.go                   Open guards, line-ending/BOM round-trip, atomic save
+  highlight.go syntax.go      Chroma → style grid; re-lex settle policy + grid patch
+  markdown*.go                Markdown preview: flag, row cache, blocks, inline spans
+  softwrap.go                 Soft-wrap layout, row-unit scroll/hit-test/Up-Down
+  find.go replace.go          The one match scanner; replace current/all
+  multiedit.go multicaret.go  Multi-range edit (one undo step); secondary carets
+  decoration.go               Span/GutterMark overlay merged in Tab.Render
+  wordhl.go symbolhl.go       Word highlight; server-resolved symbol uses
+  linenote.go bracket.go      End-of-line notes (inlay hints); brace matcher
+  ghost.go                    Ghost-text display form + render-row splice
+internal/diff/diff.go         Patience line differ + unified rendering
+internal/search/search.go     Project-wide text search over the finder index
+internal/lsp/                 JSON-RPC client (LSP + ACP/ndjson), workspaceedit,
+                              codeaction, callhierarchy, progress, types
+internal/mcp/                 mcp.json inventory + MCP client
+internal/skills/              SKILL.md inventory + frontmatter
+internal/plugins/             plugin.json manifests; diag.go compiler-output parser
+internal/chatstore/           One JSON file per saved conversation
+internal/gonotes/             GoNotes REST client
+internal/session/session.go   state.json: recent folders, per-folder tabs, layout
+internal/history/             <repo>/.ced/history.bytdb: folder index (trie), file ring
+internal/remote/remote.go     `ced --remote/--wait`: sockets, root-based discovery
+internal/cats/                cats detection, control socket, event stream, hooks
+internal/favorites/           favorites.json: two scopes, walk-up resolver
+internal/filetree/            Lazy tree, identity-preserving refresh, marks; filter.go
+internal/format/              format.json, trust store, builtin ladder, kinds.go,
+                              inprocess.go (JSON), validate.go
+internal/theme/               Theme struct, palette derivation, builtins, loader
+internal/userconfig/          ~/.config/ced/config.json + other config paths
+internal/clipboard/           OSC 52 with tmux passthrough
+internal/icons/               Nerd Font detection + glyphs
+internal/app/
+  app.go                      Event loop, layout, rendering
+  inputburst.go               One frame per wheel/motion burst
+  modal.go leader.go whichkey.go  Modal slot; leader table + namespaces; which-key band
+  metakeys.go nav.go          ⌘ layer; back/forward history
+  tabbar.go tablabel.go statusbar.go
+  toolwindow.go tooladapt.go toolheader.go toollayout.go toolmenu.go  Tool windows
+  splitter.go treeautofit.go treefilter.go treemarks.go overflow.go
+  find.go findall.go projectsearch.go goto.go bracket.go
+  markdown.go softwrap.go wordhl.go multicaret.go
+  lsp*.go hovermodal.go diagtip.go diagmerge.go workspaceedit.go
+  copilot*.go chatcomposer.go chatagent.go chatarchive.go summarize.go gonotes.go
+  mcp.go skills.go plugins.go plugincmd.go plugindeco.go
+  git*.go compare.go           Git panel/log/commit/receipt/status; compare panel
+  terminal.go termdiag.go runexec.go openineditor.go
+  autosave.go format.go validate.go syntax.go zipops.go
+  folder.go favorites.go favmanage.go recentlocations.go remote.go
+  cats_glue.go hostident.go theme.go
 ```
 
 ## Conventions
 
 ### File headers
 Every new source file gets the header block (file name, author, created
-date, copyright year). See existing files for the exact format. Keep
-copyright year matching the **current year** (2026 right now).
-
-**Attribution on inherited files.** This codebase is a fork of Cloudmanic's
-SpiceEdit. Files still carrying `Author: Spicer Matthews` are ones we
-haven't substantially rewritten — leave them as they are. When a file
-crosses into substantial rework (roughly: half its original lines churned,
-or 200+ lines changed), flip `Author:` to the current maintainer and add
-the `Portions copyright 2026 Cloudmanic, LLC. Original author: Spicer
-Matthews.` line under the copyright. Files created after the fork get a
-plain maintainer header with no Cloudmanic line. **`LICENSE` is never
-touched** — MIT notice retention is a condition of the license, and it's
-the file that actually discharges it.
+date, copyright year — see existing files). Copyright year = current
+year (2026). This is a fork of Cloudmanic's SpiceEdit: files still
+saying `Author: Spicer Matthews` stay as they are until substantially
+reworked (~half the lines or 200+ changed), then flip `Author:` to the
+maintainer and add `Portions copyright 2026 Cloudmanic, LLC. Original
+author: Spicer Matthews.` New files get a plain maintainer header.
+**Never touch `LICENSE`.**
 
 ### Comments
-- A short doc comment above every function (public **and** private)
-  explaining intent. This is a project-wide convention — don't skip it.
-- Skip throwaway "what" comments inside functions; favor "why" notes
-  for non-obvious decisions.
+- A short doc comment above every function, public and private.
+- Favor "why" notes over "what" inside functions.
 
-### Tests — required, not optional
-**Every source file gets a corresponding `_test.go` file in the same
-package.** New code without tests should not be merged. The bar:
-
-- New exported functions: cover happy path + the obvious failure mode.
-- New unexported helpers with non-trivial logic: same.
-- Bug fixes: add a test that fails before the fix and passes after.
-- Pure data / glue (theme palettes, single-constant files): a smoke
-  test that the value is sensible is enough.
-
-Conventions:
-- One `_test.go` per source file, in the same package (NOT `_test`),
-  so tests can poke unexported helpers directly. Don't split tests
-  for one source file across multiple test files.
-- Each `Test*` function gets a short doc comment above it explaining
-  the behavior it pins down — the same "why over what" rule as
-  production code. See `internal/app/fileops_test.go` for the style.
-- Use `t.TempDir()` for filesystem state; never write into the repo
-  or `/tmp` directly.
-- For UI / drawing code that takes a `tcell.Screen`, build one with
-  `tcell.NewSimulationScreen("UTF-8")` and assert against
-  `scr.GetContents()`.
-- Skip a test (`t.Skip`) only when the environment can't satisfy a
-  hard requirement (e.g. `/dev/tty` in CI). Don't skip to dodge a
-  flaky test — fix it.
-
-Run them locally:
-```sh
-make test          # go test ./... with race detector
-make coverage      # generates coverage.out + an HTML report
-```
-
-CI (`.github/workflows/test.yml`) runs `go test ./...` on every push
-and every PR; broken tests block merges via the PR's required-checks.
+### Tests — required
+- **Every source file gets a `_test.go` in the same package** (not
+  `_test`), one test file per source file.
+- Exported funcs: happy path + obvious failure. Non-trivial helpers:
+  same. Bug fixes: a test that fails before the fix. Pure data: a smoke
+  test.
+- Each `Test*` gets a short doc comment (style: `internal/app/fileops_test.go`).
+- `t.TempDir()` for filesystem state; never write into the repo or /tmp.
+- UI code: `tcell.NewSimulationScreen("UTF-8")` + `scr.GetContents()`.
+- `t.Skip` only for unsatisfiable environment needs, never for flakiness.
+- `make test` (race detector) / `make coverage`. CI does NOT actually run
+  on this fork (see Releases) — run tests locally.
+- **newTestApp stubs every host side effect** (LSP/Copilot/chat dead,
+  `lspLookPath`/`chatLookPath` never-found, builtin formatters nil,
+  plugin/skill/theme/chat-archive/history/session/favorites paths at temp
+  dirs, `pluginShell` refusing, `editorEnv` empty, `gonotesCreate`
+  refusing, rc.grsh disabled, tree auto-fit off). New integrations that
+  touch the machine need a package-var seam pinned there. Tests build
+  `App` directly, so menu sections start expanded and inlay hints off.
 
 ### Commits
 - No "Generated with Claude Code" trailers, no Co-Authored-By Claude.
-- Don't ask for commit-message approval — commit directly with a good
-  message when the user asks you to commit.
-
-## Design patterns to preserve
-
-### `cursorMoved` flag (tab.go)
-The cursor only triggers `EnsureVisible` when something actually moved
-the cursor. Every cursor mutator sets `t.cursorMoved = true`; `Render`
-consumes the flag and clears it. **Do not** call `EnsureVisible`
-unconditionally — that re-introduces the "scroll yanks back to cursor
-on every tick" bug.
-
-### Deferred syntax highlighting (editor/syntax.go + app/syntax.go)
-`Highlight` is O(file) — it tokenises the whole buffer and allocates a
-per-rune style grid. Render used to call it whenever `StyleStale` was
-set, which every mutation sets, so one typed rune re-lexed the file:
-70ms and 36MB of garbage per keystroke in `internal/app/app.go`. Chroma
-has no incremental API, so the answer is asking less often. House rules:
-
-- **Intra-line edits DEFER; structural edits re-lex NOW.** Typing,
-  backspace, delete and a same-line selection replace patch the edited
-  row's style slice and wait out `SyntaxSettle`. Enter, a multi-line
-  paste, undo, line ops, comment toggle, reload and a theme switch go
-  through `InvalidateStyles` and re-lex on the next render. That boundary
-  is free — it's the same "structural" cut the undo grouping makes — and
-  it's load-bearing: a grid whose ROWS no longer align with the buffer's
-  would repaint the whole screen below the edit in the wrong colors.
-- **A deferred edit must PATCH the grid** (`stylesAfterInsert` /
-  `stylesAfterDelete`). Without it everything right of the caret smears
-  one column for the length of the settle window. Typed runes inherit
-  their left neighbour's style, so a character typed inside a string
-  stays string-colored until the real lex confirms it.
-- **`InvalidateStyles` is the DEFAULT contract** for any new mutation
-  path; deferral is the opt-in, and only for edits that provably keep
-  the rows aligned. A new mutator that just sets `StyleStale = true`
-  inherits whatever `styleDefer` the last edit left — that's the bug
-  this shape exists to prevent.
-- The settle timer lives in the app (the editor has no loop to wake
-  itself from) and is armed **only while a tab is waiting on it** — the
-  caret-blink constraint.
-- Over `MaxHighlightBytes` (512KB) a tab opens with `SyntaxOff` and says
-  so in the status bar. At ~0.5ms/KB even one pass per pause is a freeze.
-- `SyntaxSettle` is a package var **only** so tests can collapse the
-  window instead of sleeping. It is not a user setting.
-
-### Undo history and its byte budget (editor/undo.go)
-Full-buffer snapshots with typing/backspace/delete coalescing, capped by
-BYTES rather than by entry count. House rules:
-
-- **The entry cap is the backstop; the byte budget is the real limit.**
-  A snapshot of a 25k-line file costs 400KB in slice headers alone, so
-  500 of them is ~200MB per tab and a user with eight big files open pays
-  it eight times. `maxUndoBytes` (32MB, shared by BOTH stacks because
-  entries move between them) is what makes the depth scale to the file.
-- **`snapshotCost` charges headers plus only the lines that CHANGED.**
-  Copying a `[]string` copies headers, not characters: every untouched
-  line is the same string the live buffer and the neighbouring snapshots
-  already hold, so charging each entry for the whole file would over-count
-  by the depth of the stack and amputate a 1MB file's history for no
-  reason. The header term alone would miss the opposite case — editing
-  very long lines (minified JS, a data blob), where each step strands a
-  multi-megabyte string nothing else references. Both terms are needed.
-- **Every entry is measured against the one it will sit ON**
-  (`undoTop`, or the popped entry in Undo), because those two are exactly
-  one edit apart, which is the comparison the estimate is built for. The
-  cost is stamped once and stored, so eviction is O(1) — re-measuring the
-  bottom of the stack on every push would make it quadratic in line count.
-- **Trimming never empties the stack.** "Undo the thing I just did" has
-  to work even for a single step big enough to blow the whole budget (a
-  multi-megabyte paste), and a history of zero is indistinguishable from
-  undo being broken.
-- `pushUndoEntry` is the single write path for the undo stack, and the
-  running sums are maintained on every path (push, Undo, Redo, redo
-  invalidation, `initUndo`). A sum that drifts up silently shrinks the
-  history until the budget falsely binds.
-- **The workspace-edit journal is the ONLY thing that sits above this
-  stack** (app/workspaceedit.go). It never touches `undoSuppress` — it
-  goes through `pushUndo(undoGroupStructural)` plus direct Buffer edits,
-  the ReplaceAll route — and it validates a participant with `EditRev`
-  AND `UndoDepth`, because trimUndo can shrink a stack without the buffer
-  changing. `UndoDepth` is the only thing about the stack that's exported,
-  and that is what it's for.
-- **`Tab.ReloadAsEdit` is the second thing on the `pushUndo(structural)`
-  + direct-Buffer route**, and for the same reason: it files its own
-  single snapshot, which is exactly the arrangement that makes touching
-  `undoSuppress` unnecessary. It is how a rewrite ced ITSELF caused
-  (format-on-save, a plugin) is adopted — one step on top of the history
-  rather than `Reload`'s reset of it. See the format-on-save section.
-
-### File IO guards and round-trip (editor/fileio.go)
-The two edges of a Tab's life, grouped because they're the same question
-asked twice: can we faithfully round-trip this file, and did we?
-
-- **Guards run BEFORE the read.** `MaxOpenBytes` is checked on the stat;
-  a limit checked afterwards has already paid for the damage. The binary
-  sniff is one NUL in the first 8KB — that catches executables, archives,
-  images and UTF-16 without a content-type table, and UTF-16 is a file
-  ced genuinely cannot round-trip, so refusing is right rather than
-  merely convenient. Both refusals name the reason; the tree opens
-  whatever gets clicked, so the message is the whole UI.
-- **The buffer always holds bare LF.** `LineEnding` and `BOM` are
-  detected on load and re-emitted on write, so nothing above this layer
-  thinks about CRLF. Normalisation is whole-file, not per-line: a file's
-  ending is a property of the FILE, and re-emitting it uniformly is what
-  stops a mixed-ending file getting more mixed on every save. (Classic
-  Mac CR-only is deliberately not detected — guessing wrong joins the
-  whole file into one line.)
-- **Saves are temp-file + rename**, and three details are load-bearing:
-  the temp lives in the TARGET's directory (rename is only atomic within
-  a filesystem), symlinks are resolved first (renaming onto a link
-  replaces the LINK with a regular file), and mode is copied from the
-  existing file (`os.WriteFile`'s perm only applies at creation, so the
-  old in-place write preserved it for free). A read-only directory falls
-  back to an in-place write — degrading beats refusing to save.
-- Not preserved: hard links and root-owned ownership. Standard trade for
-  atomicity; vim does the same.
-- **External formatters still win.** gofmt/goimports always emit LF, so
-  format-on-save normalises a CRLF Go file regardless of any of this.
-
-### Tab strip scrolling and switching (app/tabbar.go)
-- **`tabScroll` is DERIVED, never a preference.** `layoutTabs` re-derives
-  it every frame via `ensureActiveTabVisible`, which pushes forward until
-  the active tab fits and **pulls back** when closing tabs leaves dead
-  space. Omitting the pull-back is invisible in any test that only opens
-  files.
-- **A tab that doesn't fit is not laid out at all.** `lastTabRects` is
-  what hit-testing reads, so a rect past the edge would make a click land
-  on a tab the user can't see. The active tab is the one exception, on a
-  strip too narrow for even one.
-- **`switchToTab` is the single place a switch records nav history.** The
-  click path used to do it inline, so every new surface would have had to
-  remember; the keyboard ones would have quietly not.
-- The `+N` overflow button counts undrawn tabs and opens the switcher —
-  the only mouse path to a hidden tab. One rect for draw and hit-test.
-- **`Esc [` and `Esc ]` CANNOT be bound.** `\x1b[` is the CSI introducer
-  and `\x1b]` is OSC, so the terminal eats the pair before the leader
-  table sees it — the binding tests green and does nothing in a real
-  terminal. Same trap for `P`, `N`, `\`, `^`, `_`, `#`. Tab switching is
-  `Esc ,` / `Esc .` (`<` and `>` live on those keys) and `Esc b`.
-
-### Tab labels and the status bar's path (app/tablabel.go, app/statusbar.go)
-Which main.go is this? Every tab used to be drawn as its basename, so a
-Go project with three `main.go` / `handler.go` / `syntax.go` files open
-showed identical tabs and the only way to tell them apart was to click
-one. Two halves, one question. House rules:
-
-- **A label is the basename until another OPEN tab claims it**, and then
-  it grows by whole directory segments until the tie breaks
-  (`cmd/main.go` beside `web/main.go`). The strip is the editor's
-  scarcest horizontal space — it scrolls, and a tab that doesn't fit is
-  not laid out at all — so directory columns spent on files nobody could
-  confuse would cost visible tabs for nothing.
-- **Growth is per COLLIDING GROUP, re-derived each round.** Widening the
-  two `main.go`s must not widen the `tabbar.go` sitting beside them, and
-  a tab drops out of the growth the moment its label is unique. A round
-  in which nothing can grow ends the loop — which is also the
-  termination proof for two untitled buffers, which have no directories
-  to take.
-- **The cache is keyed by the LIST OF OPEN PATHS, not a dirty flag.**
-  Tabs are born, closed, renamed, reordered and restored from half a
-  dozen files; a flag one of them forgot to set would draw a stale label
-  with nothing on screen to explain it, while comparing the paths cannot
-  be wrong. The list is tiny, and the comparison is what a cache hit
-  costs.
-- **`tabWidth` measures the LABEL.** A width taken from the basename
-  clips exactly the directory that carries the information. The icon
-  still keys off the real file name — a glyph is chosen by extension,
-  not by how much path the strip had to show.
-- **The status bar answers the same question for the file in FRONT of
-  you**: the directory (project-relative inside the root, absolute
-  outside it — a `../../..` chain says nothing), truncated from the
-  FRONT per the find-all label rule, budgeted to a share of the window
-  so it can never push Ln/Col off a narrow terminal, and empty for a
-  file at the root, whose name already is its path. The trailing `⧉` is
-  the mouse twin of ≡ File → "Copy absolute path" and copies the full
-  filespec; it trails the path rather than sitting between the name and
-  it, so the two read as one thing. It is drawn even when the directory
-  came to nothing — a root-level file still has a path worth copying.
-
-### Scroll clamping with overscroll
-`tab.clampScroll(viewH)` allows the last line to scroll roughly to the
-middle (`overscroll = max(viewH/2, 3)`). This is intentional — without
-it, you can't comfortably read the bottom of a file.
-
-### One frame per input burst (app/inputburst.go)
-Run paints after every event, and a frame costs ~1ms. A free-spinning
-wheel (MX Master) sends notches far faster than that and keeps sending
-them after the view clamps at end of file, so a few thousand queued
-seconds of painting — the editor froze at the bottom of CLAUDE.md and
-thawed by itself. After a WHEEL or BUTTONLESS-MOTION event, `deferFrame`
-skips the frame while more input is already queued, capped at
-`burstFrameMax` (~30fps) so a sustained spin still scrolls visibly. It
-defers ONLY with an event pending, so Run never blocks over an unpainted
-screen; keys, presses, drags and timers still paint one by one. Don't put
-the unconditional per-event draw back.
-
-### Custom tcell events for goroutine → main-loop messaging
-Background work (auto-scroll during drag, 10s tree refresh) posts custom
-events (`autoScrollEvent`, `treeRefreshEvent`) onto the tcell event queue
-and the main loop handles them. Don't mutate UI state from goroutines
-directly.
-
-### Identity-preserving tree refresh (filetree.go)
-`reload` walks the existing children, matches survivors by name, and
-keeps their `*Node` pointers (and their `Expanded` state). New entries
-get fresh nodes; gone entries are dropped. This is what makes the
-10-second auto-refresh feel non-jarring — open folders stay open.
-
-### Decoration layer (editor/decoration.go)
-Any "paint something over the code" feature is a `DecorationSource`
-producing `Span`s (range + `StyleDelta`) and `GutterMark`s — never a
-new branch inside `Tab.Render`'s paint loop. External sources register
-via `Tab.DecoSources`; built-ins (selection, find) run last so merge
-precedence is: syntax < external annotations < selection < find. The
-gutter mark column is the single cell at `x + gutterWidth`, between
-the line numbers and the code.
-
-### Multi-caret editing (editor/multicaret.go + app/multicaret.go)
-Extra editing points that type, delete, and move alongside the primary
-one. House rules:
-
-- **Primary + secondaries, NOT a list of equal carets.** `Tab.Cursor` /
-  `Tab.Anchor` stay exactly what they were — the caret the hardware
-  cursor sits on, the one `EnsureVisible` scrolls to, the one find,
-  ghost text, hover, line ops, and the status bar already read.
-  Secondaries live in `Tab.Carets`, empty in the common case. Don't
-  "clean this up" into one slice; every one of those features would
-  need to learn which entry is special.
-- **The fan-out reuses the single-caret primitives.** `applyAtCarets`
-  swaps each caret into Cursor/Anchor, runs the ORIGINAL code
-  (`insertRuneAt`, `backspaceAt`, …), and reads the position back —
-  which is why the exported methods are thin wrappers and the cores are
-  unexported. A core must never call an exported sibling: that
-  re-enters the fan-out and visits every caret once per caret.
-- **Bottom-up, always.** Carets are visited in descending document
-  order so an edit can only move text AFTER the carets still waiting.
-  Top-down invalidates every position below the first edit.
-- **One undo step per burst.** The fan-out pushes one structural
-  snapshot and sets `undoSuppress`; `pushUndo` returns early while it's
-  set. Nothing else may set that flag — an unbalanced true silently
-  disables undo. Undo/redo then DROP the carets (`applySnapshot`),
-  because their positions were measured against a buffer that's gone.
-- **Explicit jumps drop the carets**: `MoveCursorTo` (click, definition
-  jump, nav history), `FocusCurrentMatch`, `SelectAll`, `Reload`. Arrow
-  keys and Home/End do the opposite and move ALL of them — that's how a
-  column gets lined up ("place carets, press End, type"). Alt+click adds
-  a caret and deliberately starts no drag.
-- **Secondary carets are PAINTED, not decorated** (`paintCarets`, called
-  per row from Render). A caret is a zero-width position; the one at
-  end-of-line has no cell for a Span to cover, and end-of-line is
-  exactly where a column lands after End. Same exception shape as ghost
-  text. Their SELECTIONS are decorations, though — `selectionSource`
-  iterates `AllCarets`.
-- **New carets are promoted to primary** (`promoteCaret`) so the
-  viewport follows what the user just created, and "the primary is the
-  last caret you placed" stays true. `caretGoalCol` (the widest caret's
-  column) is what keeps a column from walking left across short lines —
-  don't replace it with `Cursor.Col`, that's the drift bug.
-- **Secondary carets blink on ced's own ticker** (`caretBlinkAfterEvent`
-  arms it from the dispatch tail, `caretBlinkEvent` toggles
-  `Tab.CaretsHidden`). Two constraints: it must be armed ONLY while
-  carets exist — the loop is event-driven, so a standing timer would
-  wake an idle editor twice a second forever — and `stopCaretBlink` must
-  restore the on-phase, or disarming mid-blink strands a caret
-  invisible. Not tcell's `AttrBlink`: SGR blink toggles the GLYPH, and
-  an end-of-line caret paints a space.
-- **Whole-line gestures collapse the set** (`dropCaretsForLineOp` in
-  DuplicateLines / MoveLines / ToggleLineComment). Two of them change
-  the line count or order, so surviving carets would point at the wrong
-  line; fanning them out isn't the fix either (two carets on one line
-  would duplicate it twice).
-- Leaders: Esc-m below, Esc-M above, Esc-* next occurrence (all
-  repeatable), Esc-& every occurrence (not — it has nothing left to
-  add). Esc clears carets as a SIDE EFFECT (like the ghost and the
-  chat highlight) — it must not consume the keystroke.
-
-### Matching word highlight (editor/wordhl.go + app/wordhl.go)
-Every other visible instance of the word under the cursor, tinted.
-House rules:
-
-- **A DecorationSource, running FIRST** among the built-ins, so
-  selection and find always paint over it. Subordinate in PRECEDENCE,
-  not in weight — the first cut derived `word-highlight` as a quiet 18%
-  accent wash "because it's ambient", and it was invisible on an
-  ordinary terminal. The key is now a NEUTRAL box (26% fg over bg) plus
-  bold on the span. Neutral is load-bearing: `selection` is also an
-  accent wash, so any accent tint strong enough to see read as "I
-  selected that". Keep the blue fill exclusive to the selection, and
-  keep the bold — a background step alone is at the mercy of the
-  terminal's contrast.
-- **Window-scoped by design.** Find caches its match list against a
-  query; the word under the cursor changes on every caret move, so
-  there's nothing to cache and the scan runs inside the frame.
-  Scanning `[firstLine, lastLine]` keeps that proportional to the
-  screen. The tradeoff (a match scrolled off-screen doesn't light its
-  on-screen twin) is deliberate — don't "fix" it with a whole-buffer
-  scan per frame.
-- **Case-sensitive, whole-word from a bare cursor** (unlike find, which
-  is a reading tool). `caretQuery` decides whole-word from what the
-  RANGE is, not from which branch found it — a selection that exactly
-  spans an identifier matches whole-word. That's what keeps Esc-* from
-  widening `count` to `counter` after its first press turns the word
-  into a selection.
-- **Quiet unless it has something to say**: a lone on-screen match, a
-  caret in punctuation, a one-rune selection, and multi-caret mode all
-  produce nothing.
-- `MatchOccurrences` and `WordRange` are shared with multicaret.go —
-  one scanner, two consumers. `Tab.WordHighlight` gates it per tab
-  because sources are asked per-tab; `App.wordHLEnabled` is the
-  authoritative copy and `applyWordHighlight` the single write path.
-  Brace matching (below) is the other caret-driven ambient source, and
-  runs immediately after this one — see it for why its box is the louder
-  of the two.
-
-### Inlay hints as end-of-line notes (editor/linenote.go + app/lspinlay.go)
-Inferred types and parameter names, shown as a muted `» x: int · level: 3`
-AFTER the line's last character. ≡ View toggle, `"inlayhints"` (default
-on), no leader. House rules:
-
-- **END OF LINE, NEVER INSIDE IT, and that is the whole design.** An IDE
-  splices `f(‹level:› 3)` into the line. Here that would add cells the
-  buffer doesn't own to EVERY visible row, and ghost.go already says what
-  one such splice costs — tolerable there only because it sits at the
-  caret on one row. Mid-line hints would put a column mapping between
-  buffer and screen that HitTest, PosScreenCell, the wrap layout,
-  secondary carets, ScrollX and every cell-round-tripping tooltip would
-  each have to learn, with "a click lands one word off" as the failure
-  mode. Cells past a line's end belong to no rune, so NOTHING about
-  geometry changes (`TestLineNote_CostsNoGeometry`). Don't "upgrade" this
-  to in-place hints without paying that whole bill.
-- **A hint loses its anchor when it moves, so the note RESTATES it**
-  (`inlayNote`, a pure function of the line): a type hint is prefixed
-  with the word it followed, a parameter hint suffixed with the argument
-  it preceded (nesting counted, capped). Servers disagree about who
-  supplies the colon — gopls sends a bare `float64`, rust-analyzer
-  `: i32` — so `inlayTypePart` normalises it. `_`'s type is dropped.
-- **A note is DROPPED, never squeezed**: drawn only in room the line left
-  over, cut with `…`, and always one cell short of the pane — the last
-  column is the overflow markers'.
-- **The set dies with the revision** (symbolhl's rule). Because notes
-  occupy no layout, their vanishing while you type moves nothing.
-- **No timer of its own.** `inlayAfterEvent` (dispatch tail) asks the
-  first time the ACTIVE tab is in sync (`lsp.syncedRev`) at a revision
-  nobody asked about — so the LSP debounce is this feature's debounce.
-  **One ask per (path, rev), recorded BEFORE the answer and kept whatever
-  it was**, or an empty answer re-requests on every event forever. An
-  ERROR marks the server `noInlay`; a server finishing a load
-  (`$/progress` end) clears the record, since a cold server's empty
-  answer wasn't its real one. Whole document (a window-scoped ask would
-  re-ask per scroll), capped at `inlayMaxLines`.
-- **Hints must be switched ON in some servers** — gopls ships with all of
-  them off — which is what `lspServerDef.initOptions` →
-  `InitializeWithOptions` is for. `TestInlay_EndToEndWithRealGopls` is the
-  only thing that catches a typo in those option names; it already caught
-  the colon disagreement.
-- The ≡ row sits BELOW the terminal rows in View (the above-the-fold
-  pin). Tests build `App` directly, so hints are OFF there by default.
-
-### Semantic symbol highlight (editor/symbolhl.go + app/lsphighlight.go)
-"Highlight symbol uses" (≡ Code, no leader): the server's exact answer
-to the question the word highlight guesses at — the same BINDING, not the
-same spelling, with writes marked. House rules:
-
-- **A VERB, NOT AMBIENT**, which is the word highlighter's own rule
-  applied honestly: that source re-runs per caret move because it is a
-  free window-scoped scan; this is a round trip, and cursor travel never
-  spends a request (the ghost-text rule). The ambient layer stays the
-  free guess; this is the deliberate answer for two `err`s in one
-  function.
-- **It REPLACES the word highlight while live** — `wordHighlightSource`
-  stands down (the multi-caret stand-down rule). Two washes over one set
-  of cells, one a superset of the other, would hide which cells the
-  server vouched for. It is a BUILT-IN source for that reason: built-ins
-  are where that ordering is decided.
-- **The set dies with the revision** (`LiveSymbolUses` compares
-  `EditRev`). The ranges are coordinates into text the server saw; no
-  patching through edits — a stale box on the wrong word is the one
-  thing this must never show. Esc clears it as a side effect.
-- Same fill as the word highlight, **writes UNDERLINED** — a difference
-  in kind, not hue (the bracket matcher's rule).
-- The answer installs on the tab found BY PATH, not the active one: it is
-  a property of that document. Pinned to (path, EditRev) like ghost text.
-
-### Brace matching (editor/bracket.go + app/bracket.go)
-The bracket under the caret and its partner, boxed; `Esc %` jumps
-between them. House rules:
-
-- **IT IS ALWAYS ON.** No config key, no ≡ toggle — the overflow
-  markers' rule, for the overflow markers' reason: the answer is
-  information about code the user is already looking at, and there is
-  nothing here a preference could usefully say no to. The word
-  highlight has a toggle because it is a *search* the caret keeps
-  re-running; this is a fact about the two characters under it.
-- **THE MATCHER READS THE SYNTAX GRID, which is what makes it correct.**
-  A naive counter pairs the braces inside `fmt.Printf("{%d}", n)` and
-  then reports every brace after it one level off — not a cosmetic
-  error, a confident wrong answer. `Tab.Styles` already holds a
-  per-rune foreground Chroma assigned, so a bracket painted syn-string
-  or syn-comment is skipped for one color compare. The grid is the
-  render's, not a fresh lex: forcing an O(file) Chroma pass out of a
-  keystroke handler is exactly what syntax.go's settle policy exists to
-  stop, and the frame the user is looking at is where their own sense
-  of "that's inside a string" came from. `inStringOrComment` degrades
-  to "code" three ways — no grid (SyntaxOff), a row the grid doesn't
-  cover, and a theme whose `syn-string` IS its `fg` (where the
-  classifier can no longer tell content from code and must not skip
-  every real bracket in the file).
-- **This is the feature that found the `styleForToken` bug.** Chroma
-  numbers its token types so `Category()` is the thousand block:
-  `LiteralString` (3100) and `LiteralNumber` (3200) both divide down to
-  `Literal` (3000), so those two `case` arms sitting beside the other
-  category cases were unreachable and every string and number in the
-  editor was painted with the CONSTANT color. The Literal family is the
-  one place `SubCategory()` has to be asked, and
-  `TestStyleForToken_LiteralFamilySplitsStringsFromNumbers` pins it —
-  a regression there would silently take brace matching with it.
-- **The scan is BUDGETED, and running out is NOT the same as finding
-  nothing.** It cannot be window-scoped the way the word highlighter is
-  (a function's closing brace is usually off screen, and the jump verb
-  has to reach it), so `bracketScanLines` bounds it instead. Hitting
-  that bound is reported as `Conclusive=false` and paints NOTHING —
-  reporting it as unmatched would tint a perfectly balanced brace red
-  purely for living in a big file. `Matched` and `Conclusive` are two
-  facts on purpose, and the app flashes three different messages from
-  them.
-- **Loudness is the INVERSE of cell count.** `word-highlight` is a 26%
-  neutral wash because it can cover dozens of cells; `bracket-match` is
-  the same neutral idea at 42% plus bold because it covers exactly two,
-  and finding the second one from across the screen is the whole
-  feature. Neutral for the word highlight's reason — the blue fill
-  stays the selection's alone. An unmatched bracket takes `err` as a
-  FOREGROUND rather than a fill: one cell of solid red would shout, and
-  making the two states differ in KIND rather than only in hue is what
-  stops "matched" and "broken" reading alike at a glance.
-- **Only `()[]{}`.** Angle brackets are excluded deliberately — `<` and
-  `>` are comparisons far more often than pairs, so matching them would
-  light up two unrelated inequalities on most lines of code. Quotes too:
-  the grid already colors a string end to end, which says it better than
-  two boxed cells would.
-- **The caret is ON the bracket, or immediately after it** — WordRange's
-  courtesy, and for its reason (the caret lands past a character you
-  just typed, so without the fallback the pair stays dark at the one
-  moment it is most wanted). ON wins the tie, which is what lets the
-  jump ROUND-TRIP: the verb lands the caret on the partner, so pressing
-  `%` again comes straight back. That is why the binding is `repeat`.
-- **Quiet in multi-caret mode**, the word highlight's rule: every
-  position that matters is already marked by a caret the user placed.
-- Leader is **`Esc %`** — vim's own key for this, still free, the same
-  muscle-memory argument that put the palette on `k` and next-occurrence
-  on `*`. The ≡ **Nav** row is its twin and is gated only on there
-  being a text buffer: the honest predicate is the scan itself,
-  menuLayout runs predicates every frame the menu is open, and "put the
-  cursor on a bracket first" is a better answer than a dimmed row that
-  cannot say it — the terminal-locations trade.
-
-### Markdown viewer (editor/markdown*.go + app/markdown.go)
-The same .md buffer drawn as a formatted document instead of as source.
-Esc-v, the ≡ **View** row, a **Preview** / **Stop Preview** row in both
-right-click menus, the status bar's `preview` segment. House rules:
-
-- **Each menu carries ONE row of the pair, never both.** In the TREE it
-  is labelled by the CLICKED file's own tab (`previewingPath`, not
-  `markdownTab` — the file under the pointer is usually not the file in
-  front of you, which is the case Stop Preview exists for), and the
-  action reads the same tab the label does, so the popup can never
-  offer "Preview" on a document it is already previewing; Stop Preview
-  focuses the tab on its way. In the EDITOR menu the two live in
-  different popups entirely: Preview is a conditional append beside the
-  cats rows, and a previewed pane gets `openPreviewContext` — one row,
-  because the fixed vocabulary above it is things you do to a spot in
-  TEXT and a rendered document has no caret to aim them at. That popup
-  is also the reason the preview cannot be a trap: a preview swallows
-  every key but navigation, so a reader who arrived from the tree and
-  never learned Esc-v still has a way out under the pointer.
-- **"Stop Preview", not the ≡ row's "Show markdown source".** A context
-  row is read in one glance beside Rename and Delete, where the
-  shortest spelling of the verb wins.
-
-- **IT IS A VIEW, NOT A MODE.** `Tab.mdView` is a flag beside the
-  buffer, deliberately not a second `Mode` like the image viewer's: an
-  image tab has no text to go back to, so imageMode short-circuits every
-  mutating method and Save refuses, while a previewed tab is an ordinary
-  editable file that is being LOOKED at differently for a moment. The
-  buffer, the undo history, the dirty flag, the caret, the find state,
-  auto-save, the LSP sync and the git gutter all keep running underneath,
-  and `TestSetMarkdownView_LeavesTheBufferAlone` is what pins that — a
-  rendering change that quietly edited would be the worst bug this
-  feature could have, and the only surface it would show on is a diff
-  somebody reads later.
-- **MDScroll is its own counter.** A display row is not a buffer line —
-  a paragraph becomes several, a heading gains a rule, a fence loses its
-  markers — so borrowing `ScrollY` would let scrolling the preview
-  silently rewrite the position the source view is restored to. Restoring
-  the view the user left is the whole point of a toggle.
-- **The rows are DERIVED and memoized on (EditRev, width)**, the chat
-  transcript's `chatRows` shape: the model is the text, the rows are a
-  function of it, so a resize re-flows for free and an edit invalidates
-  by itself. A theme switch has to invalidate EXPLICITLY (`restyleTabs`
-  calls `InvalidateMarkdown`) because the rows carry resolved
-  `tcell.Style`s — they are the second cache of theme-derived color in
-  the editor, and `Tab.Styles`' rule applies to them.
-- **`MarkdownRows` is exported because DRAW AND HIT-TESTING SHARE IT**
-  (the btnRect rule). Scrolling, the double-click's row→line mapping and
-  the overflow markers' counts all ask through it at
-  `MDContentWidth(paneW)`, so none of the four can disagree with what is
-  on screen.
-- **EVERY ROW NAMES ITS SOURCE LINE**, which is what turns the preview
-  from a picture into a place. A synthesized row (a heading's rule, a
-  table border, a paragraph's continuation) carries -1 and means the
-  nearest real row above it, so a double-click anywhere lands somewhere
-  honest. That property is also why the walk is FLAT — a document tree
-  would buy nesting only the block quote needs, and it recurses into a
-  fresh renderer instead.
-- **Keys are swallowed with navigation carved out.** Dropping every key
-  (the image tab's rule) would make the preview unscrollable from a
-  keyboard, which on a terminal that eats clicks means unreadable;
-  passing them through would type into a buffer with no visible caret.
-  Leaders are dispatched far above this branch, so Esc-v gets the source
-  back and the whole ≡ menu stays reachable from inside a preview.
-- **Prose WORD-wraps, code HARD-wraps** — the chat transcript's split,
-  and here it is load-bearing twice: a code line's columns are
-  meaningful, and tabs are EXPANDED at row-build time because the
-  preview has no tab-stop pass under it the way `Tab.Render` does.
-- **A fence is highlighted through `HighlightLang`**, one Chroma pass
-  for the whole block (the lexer is stateful — a string literal spans
-  lines, and per-line calls would mis-color every multi-line construct).
-  That is the reason this renderer lives in package editor at all rather
-  than in an `internal/markdown` beside internal/diff: the highlighter
-  is right here, and a flat code block is the single biggest thing a
-  markdown reader for PROGRAMMERS could get wrong.
-- **`md-code-bg` is a derived theme key, not a reuse of `line-hl`.**
-  That one is a few units off the background by design — right for a
-  one-row cursor wash, invisible across a twenty-row slab, which is
-  exactly the failure a "this is ambient, keep it quiet" choice
-  produces. The derivation steps toward `line` (the separator color) and
-  `TestDerive_MDCodeBGIsVisiblyOffTheBackground` holds every shipped
-  theme to a real step without letting it become a second selection.
-- **No config key and no "preview .md by default".** The toggle answers
-  "how do I want to look at THIS file right now", and the same file is a
-  document one minute and something you are editing the next. A
-  persisted default would also have to decide what happens when you type
-  into a preview, and "you cannot" is a bad thing to discover by
-  surprise on a file you opened to fix a typo in.
-- The ≡ row sits BELOW the terminal rows in **View**, not above them:
-  `TestMenuLayout_TerminalRowsAboveTheFold` pins those two on a short
-  window, and every row inserted before them spends that budget. It dims
-  on a non-markdown file rather than flashing a reason — there is
-  nothing to say beyond "this isn't one", which the filename already
-  says. Leader is **Esc-v** (View / preView), in the flat table rather
-  than a namespace because it is a one-key toggle on the file in front
-  of you, reached for mid-read.
-- It is a READER: nothing round-trips, reference-style links are left
-  literal (resolving one needs a definition table this does not build),
-  and raw HTML passes through muted. A link renders its TEXT, since a
-  terminal has nothing to click and repeating every href would double a
-  link-dense document to say what the source says one keystroke away.
-
-### Soft wrap (editor/softwrap.go + app/softwrap.go)
-A long line drawn across as many rows as it needs. The right-click row
-on a FILE in the tree ("Soft Wrap" / "Stop Soft Wrap") is the primary
-door and opens the file already wrapped; the editor's right-click menu,
-the ≡ **View** row and the status bar's ` · wrap` segment are the rest.
-House rules:
-
-- **A VIEW FLAG PER TAB, beside `mdView`.** The buffer, undo, EditRev and
-  every LSP column are untouched. Not a config key: the same repo holds
-  files that want it and files that don't. It DOES ride the session
-  (`session.TabState.Wrap`) — unlike a preview, it's how you chose to
-  keep reading the file. Restore calls `SetSoftWrap` BEFORE
-  `RestoreView`, which clears the reveal SetSoftWrap armed.
-- **`ScrollY` STAYS A LINE INDEX.** The viewport starts at the top of
-  line ScrollY; wrap changes what each line costs in rows, never what the
-  offset counts — which is why the overflow counts, the Find-all restore,
-  the session and the wheel needed no changes. The stated price: a single
-  line taller than the viewport shows its first screenful only.
-- **ONE LAYOUT.** `wrapLayout` (spliced ghost text included, because
-  Render wraps the spliced row) feeds Render, `HitTest`, `PosScreenCell`,
-  `EnsureVisible`, `CenterOnCursor`, `CursorLineVisible`, Up/Down and
-  `LastVisibleLine`. Render now places the hardware cursor through
-  `PosScreenCell` rather than its own copy of the math. Any new code that
-  maps a screen row to a line must ask `HitTest` — `ScrollY + row` is
-  wrong under wrap (gitblame's column press was the one site that did).
-- **`wrapW` is cached from the last render** (the `annCols` rule) for the
-  helpers handed no width: Up/Down, `CursorLineVisible`,
-  `LastVisibleLine`. Until the first wrapped render they answer unwrapped,
-  which is what the screen still shows.
-- **Rows wrap one cell short of the pane.** The end-of-line caret on an
-  exactly-full row needs a cell, and the vertical overflow marker paints
-  that column on the first and last row. Words break first (whitespace
-  stays on the row it ends, so no rune is dropped); an unbreakable run is
-  cut at the edge. A column equal to a row's start belongs to THAT row —
-  `paintCarets` takes the row's `[from, to)` span plus `lastRow` so a
-  secondary caret on a boundary isn't painted twice.
-- **Up/Down step by SCREEN ROW** when wrapped (`moveVisualRows`, only for
-  a pure vertical move), keeping the offset within the row; Home/End stay
-  logical-line. The flash says so because it's the one change a user
-  could mistake for a bug. No leader key (the flat table is full).
-
-### Find verbs — options, replace, go to line (editor/find.go,
-### editor/replace.go, app/find.go, app/goto.go)
-The bar grew from "type and jump" into the three verbs a search surface
-owes you. House rules:
-
-- **ONE scanner decides what a hit is** (`matchCols` in editor/find.go).
-  `FindAllOpts` (whole buffer, optionally case-folded), `FindAll` (the
-  zero-options entry point project search and the seeding ladder use),
-  and `MatchOccurrences` (the word highlighter's line window) all come
-  through it. Two implementations would drift, and the user would have
-  no way to tell which one answered. Case folding is per-RUNE
-  (`foldRunes`), not `strings.ToLower`: a few runes lowercase to more
-  than one rune, and a fold that changes the rune count shifts every
-  column reported after it, painting the highlight over the wrong cells.
-- **Options live on the App, are PUSHED to the tab, and are not
-  persisted.** `App.findCase` / `findWord` are authoritative because
-  they describe how the USER searches — flipping "match case" then
-  switching tabs must not silently switch it back — and
-  `applyFindOptions` is the single write path (the applyWordHighlight
-  shape). `Tab.SetFindOptions` re-runs the query, so a match list can
-  never outlive the options that produced it. No config key, unlike the
-  Find-all dock: a saved "match case" would silently narrow the first
-  search of every future session, with no bar on screen to explain the
-  hit that didn't appear.
-- **The bar is 1 row for find, 2 for replace, and everything pinned
-  above the status bar asks `findBarRows()`** — never the
-  `findBarHeight` constant, which is now just the per-row unit. A
-  replace row that floated over the editor would cover the line it is
-  about to rewrite (the Find-all displacement argument).
-- **Both inputs are the shared `textField`** (the house rule for every
-  single-line input). It already knows caret motion, scroll, click-to-
-  position and paste; the hand-rolled copy that used to live here is
-  what this replaced.
-- **Alt is safe INSIDE the bar** and nowhere else in the editor body:
-  the bar owns the keyboard, so handleKey's Alt+rune leader branch never
-  sees `alt+c` / `alt+w` / `alt+a` — including in tmux, where "Esc c"
-  arrives folded as Alt+c. That's what makes in-bar chords possible at
-  all when the ≡ menu is unreachable from a keyboard-owning surface. The
-  two toggles ALSO get ≡ rows for the same reason the Find-all dock
-  does, and clickable `Aa` / `|W|` buttons because clicks come first here.
-- **A replace is ONE undo step, and replace-all goes bottom-up.**
-  `ReplaceCurrent` selects the match and calls `InsertString` — that path
-  already records exactly one structural step. `ReplaceAll` files one
-  snapshot itself and then edits the **Buffer** directly: Buffer
-  primitives record no history, which is how it stays one step WITHOUT
-  touching `undoSuppress` (that flag belongs to the caret fan-out alone —
-  an unbalanced `true` silently disables undo). Descending document
-  order is load-bearing: a replacement of a different width shifts every
-  later column on the line, so a top-down pass corrupts the tail.
-- `ReplaceAll` **re-scans** rather than trusting `FindMatches`, and
-  `ReplaceCurrent` advances PAST what it wrote, so `s/a/aa/` terminates.
-- **Go to line clamps, and parses a pasted compiler reference**
-  (`app.go:314:22` → line 314, col 22). The number usually comes from a
-  build log that may be a few edits stale; landing on the last line beats
-  a modal that says no. Leader is `Esc j` — not `l`, which is one stray
-  Esc away from every word with an L in it (the same argument that put
-  the git Log on a shifted `L`). Replace is `Esc e`: `r` is redo, and
-  pairing a MUTATING verb with find under the shift convention would say
-  the wrong thing about what pressing it does.
-
-### Find all in file (app/findall.go)
-Every occurrence of a query listed as one compacted row each — line
-number, then the line with the hit lit — under the editor. Esc-F, the ≡
-Find group, or ↓ from the find bar. House rules:
-
-- **It's a PEEK, which is why it isn't a palette picker.** The house
-  rule is that every choose-one-from-a-list UI reuses `openPicker`, and
-  this is the one documented exception. The palette's grammar is
-  pick-run-close with a no-op dismissal; here moving the highlight moves
-  the editor's cursor LIVE and Esc puts it back, a click PREVIEWS
-  instead of dismissing, and a row is two columns (number ┃ code) rather
-  than a label. Three different contracts, not a skin. Don't "unify"
-  them — the picker would have to grow a preview hook, a cancel that
-  undoes, and a two-column row, at which point it isn't the palette.
-- **It takes rows OUT of the editor band, never floats over it**
-  (`editorBandRows` → `editorRect` → `findAllPanelHeight`). A popup that
-  covered the line it was previewing would defeat the feature. It still
-  needs no clamp negotiation with the bottom panels — it is alone on its
-  edge, so the trade is with the editor alone, and `findAllMinEditorRows`
-  is the floor it never eats through.
-- **The strip's own bottom border IS its resize handle** — the git
-  panels' header rule turned upside down (same edge: the one shared with
-  the editor), so the seam **costs no rows**, the overflow markers'
-  shared-cell trade. `App.findAllRows` states the size in RESULT ROWS
-  (0 = auto), and `dragFindAllTo` clamps what is STORED as well as what
-  is drawn: a banked overshoot is dead space the user must drag back up
-  through before the seam appears to move. It lives on App beside the
-  dock because the popup is transient and the size isn't — but unlike
-  the dock it is **not persisted**: the dock says which shape of answer
-  you want, while a height is a moment-to-moment trade against the code
-  underneath. **The drag is continued in TWO places on purpose**
-  (`findAllDragMode`): unpinned, the list owns the modal slot and the
-  single-slot absorb answers before the router's drag chain is ever
-  reached, so a gesture handled only there would freeze on the first
-  motion; pinned, the router's branch gets there first. One mover, two
-  routes. No handle in the RIGHT dock — full height is the point of that
-  mode, and its bottom edge is the band's own. The grip is centred in
-  the rule's FREE span rather than in the rule, because the footer hint
-  owns the left end and is the wider of the two on any ordinary window. `editorBandRows` exists because
-  the popup (like every panel) must ask "what would the editor have
-  left?" — a question `editorRect` can't answer, since it already
-  subtracts them.
-- **Two docks, one displacement rule.** TOP (default) takes rows off the
-  top — pinned under the tab bar, editor pushed down: the list is what
-  you're reading and the code is the reference under it. RIGHT takes
-  COLUMNS off the editor's right edge and runs full height, which trades
-  line length for showing three times as many hits. So `editorRect`
-  returns `y = 1 + findAllPanelHeight()` and `w = editorBandCols() -
-  findAllPanelWidth()`, with exactly one of the two ever non-zero.
-  Everything that positions itself inside the editor already reads that
-  x/y — hit-testing, drag auto-scroll, the hover modal, Alt+click — so
-  nothing else needed to learn about it. Keep it that way: **no call
-  site may assume the editor starts at row 1 or runs to the right edge
-  of its band.** Width precedence in the right dock follows
-  `gitPanelHeight`: the editor's reserve caps the column, but the
-  column's own floor is applied last and wins on a band too narrow for
-  both — a list too narrow to read is worse than a narrow editor.
-- **The dock is a persisted preference with THREE surfaces**
-  (`"findalldock"`, default top): the ◨/⬒ button in the popup's title
-  row, `d` inside the popup, and the ≡ View row. The `d` key is not
-  redundant — a modal owns the keyboard, so the ≡ menu is unreachable
-  from inside the list, which would leave a mouse-only path on a
-  terminal that eats clicks (the macOS-Terminal rule). The glyph names
-  the layout it switches TO, and both halves are single-width per the
-  marker rule. A flip re-runs `preview` because the band it centered
-  against just changed.
-- **A preview CENTERS an off-screen hit** (`Tab.CenterOnCursor`), rather
-  than just scrolling it into view: EnsureVisible's minimal scroll parks
-  it on the last row — every line before it, none after — which is
-  useless when the question is "what is this line doing?". Like
-  RestoreView it must CLEAR `cursorMoved`, or the next Render
-  minimally-scrolls the line straight back to the edge. A hit ALREADY on
-  screen is left exactly where it is (`Tab.CursorLineVisible`), so
-  walking a cluster of nearby hits holds the view still and only falling
-  out of the band re-centers. The primitive stays unconditional — that
-  policy belongs to the caller, not to the Tab.
-- **Esc restores through `Tab.RestoreView`, not `MoveCursorTo`.** Every
-  other cursor write sets `cursorMoved` so the next Render scrolls the
-  cursor into view; a restore wants the opposite, because the captured
-  SCROLL is part of what's being put back. Without it, a user who
-  wheeled away from their own cursor before peeking gets a viewport
-  yanked to the cursor instead of their view. Everything else that
-  dismisses (Enter, double-click, a click outside) ACCEPTS — Esc is the
-  one gesture that means "put it back".
-- **The tab's find state is BORROWED, and returned on both exits.** The
-  popup sets `SetFindQuery` so the editor tints every occurrence while
-  the list explains them, and `FindIndex` tracks the highlighted row so
-  the previewed hit paints as the current match for free. The tint has
-  to leave with the list — same contract as closing the find bar.
-- **Rows are compacted at open, once.** Leading indentation comes off
-  and interior tabs render as ONE space, which keeps the display text
-  aligned rune-for-rune with the buffer so a match column maps to a
-  display column by subtracting the trim. No width table, nothing to
-  drift. Two hits on one line are two rows — the list is occurrences,
-  not lines.
-- **The filter box is SEEDED with the query and the seed is INERT**
-  (`findAllModal.seed`, `filterNeedle`). It opens holding the search
-  expression, caret at the end, so `/` plus a keystroke carries the same
-  question on instead of restating it — but while the box still holds
-  exactly the seed it narrows nothing, because a row's display text is
-  compacted (the bullet above) and a query carrying a tab, or one that
-  matched inside the indentation, is not literally present in its own
-  results. Filtering by it would open the list empty on the very search
-  that filled it. One edit hands filtering back to the ordinary contains
-  rule. Seeding belongs to producers whose query IS text the rows carry
-  (in-file search, project search, references); the workspace-edit
-  RECEIPT leaves it empty, since its query is a label ("Rename foo →
-  bar") that would narrow to nothing the moment it was touched.
-- **ONLY A SELECTION SEARCHES SILENTLY** (`findAllSelectionQuery`);
-  everything else asks. A highlighted single-line region is the user
-  pointing at the exact text, so a prompt there could only be answered
-  "yes, that". The find bar's leftovers and the word the cursor happens
-  to sit in are IMPLICATIONS, and a result list is indistinguishable from
-  a correct answer to the wrong query — so those go in the prompt as a
-  PRE-FILL (`findAllPromptSeed`: bar first, then the word), where Enter
-  accepts the guess and any other key replaces it. The old ladder ran the
-  guess. A multi-line selection is not a search term (FindAll matches
-  within a line) and falls through to the prompt like every other unclear
-  case. The seed must be read BEFORE `openPrompt` — `openModal` →
-  `closeAllModals` wipes the find bar that may be seeding it. The bar's
-  own ↓ gesture (`openFindAllFromBar`) is untouched: the user just typed
-  that, so it is not a guess. No match flashes rather than opening an
-  empty box.
-
-### Find in project (internal/search + app/projectsearch.go)
-The same panel, a second scope: every occurrence across the tree, rows
-carrying a path. Extending the list beat building one — it already had
-the two-column row, the displacing strip, the right dock, scrolling, the
-Esc contract and the mouse story. House rules:
-
-- **Pure Go, not ripgrep.** Neither rg nor grep is on every machine and
-  the promise is one static binary that works when it lands. Cost is
-  bounded three other ways: the file list is the FINDER'S index (so the
-  project's own gitignore rules already excluded node_modules, vendor and
-  build output), files too big or binary are skipped, and results are
-  capped — **with the cap reported in the title**, because a silently
-  short list reads as "that's all of them", the one wrong answer a search
-  can give.
-- **One matcher.** Matching delegates to `editor.FindAll`, so an in-file
-  search and a project search can never disagree about what a hit is. A
-  second implementation would drift. Row compaction is shared with
-  `compactLine` for the same reason.
-- **Project mode does NOT preview.** Walking rows in the in-file list
-  moves the cursor live; across files that would mean opening a file per
-  keystroke — firing the LSP's didOpen, Copilot's didOpen, every plugin's
-  open hook and a syntax pass, and leaving a tab behind for every row
-  merely scrolled past. The row IS the preview (it carries the whole line
-  with the hit lit); Enter or a double-click opens and closes the list.
-  **A single CLICK on a row navigates too — opens the file at the hit —
-  and leaves the list in place** (`jumpToSelected`, the navigation half
-  of `openSelected`). That is the in-file list's click contract, and it
-  is safe where keyboard walking is not because a click is one deliberate
-  gesture per file opened. Every project-mode producer (search,
-  references, the workspace-edit receipt) inherits it. Esc restores no
-  VIEW, but it must take back the TINT: each jump lights the query in
-  the file it opened, and that is recorded per path in
-  `App.projFindTints` (`tintForProjectFind`). Dismissing the list, an
-  accept that closes it, and a plain Esc in the editor all go through
-  `clearProjectFindTints`, which restores each tab's prior query and
-  skips any tab whose query has changed since — the user owns that one.
-  (It used to return early, and the highlights outlived the list and
-  even Esc.) A keyboard preview mode, if ever wanted, needs a
-  real preview-TAB concept (one reusable slot), not a special case here.
-- **Labels truncate from the FRONT.** The distinguishing part of a path
-  is its tail; twenty rows reading `internal/app/…` say nothing. The
-  column caps at a share of the panel, not a constant — the two docks
-  differ by a factor of three in width.
-- Results arrive as a generation-stamped event and are dropped if stale
-  or if a modal/menu took the slot meanwhile. **It ALWAYS prompts, and a
-  single-line selection SEEDS the prompt** (`projectSearchSeed`:
-  selection, then the find bar, then the cursor word) — the one place
-  the in-file list's "only a selection searches silently" rule is
-  deliberately not followed. In a buffer a wrong guess is a free retry;
-  here it spends a whole-tree walk, and the selection is usually the
-  right neighbourhood of the query rather than the query itself, so the
-  moment to trim it is before Enter. Enter on the seed is still one
-  keystroke. Leader is `Esc P`, the shifted twin of `Esc p` (names vs.
-  contents).
-
-### LSP integration (internal/lsp + app/lsp.go)
-The client is a hand-rolled JSON-RPC subset — do NOT add an LSP
-framework dependency. House rules it must keep obeying:
-
-- **Silent degradation**: no gopls on PATH / crash / timeout → the
-  editor works normally, no nagging. Same contract as formatters.
-- **Several servers, ONE PER FILE, chosen by extension**
-  (lspservers.go: gopls, typescript-language-server, rust-analyzer,
-  pyright/basedpyright/pylsp, clangd, zls). Installing the binary is the
-  opt-in — no config key — and nothing spawns until a file it handles is
-  opened. Every per-document map stays keyed by PATH because a path names
-  exactly one server (`TestLSPServers_ExtensionsAreDisjoint`). Every verb
-  gets its connection from `a.lspClientFor(path)` — never a stored
-  "the client" — and degradation is PER SERVER: a missing or crashed
-  rust-analyzer kills its own slot and clears its own diagnostics, not
-  gopls'. `lspState.dead` is the integration-wide switch (shutdown, the
-  test harness); a server's own verdict lives in its slot. The languageId
-  is Copilot's table, deliberately not a second one.
-- **No auto-restart; ≡ Code → "Restart language server" is the retry**
-  (lsprestart.go), acting on the ACTIVE file's server. Never dimmed — it
-  is wanted most on a dead or not-installed server, and the flash names
-  the binaries looked for. **`lspServer.gen` is load-bearing**: closing
-  the old client fires its onExit AFTER the slot is re-armed, so
-  ready/exit events carry the generation they spawned under and the
-  handlers drop mismatches (the chat `connSeq` rule). `lspDropServer` is
-  the teardown a crash and a restart share. The row never clears
-  `lspState.dead`. Its tests lean on newTestApp's `lspLookPath` pin, since
-  the happy path ends in a real spawn.
-- **Events only**: the read loop, start handshake, debounce timers,
-  and definition/hover requests all run off-loop and post
-  `lsp*Event`s; only the main loop touches `App.lsp`.
-- **Sync via `Tab.EditRev`**: every content mutation bumps it; the
-  post-event check (`lspAfterEvent`) compares against `syncedRev`
-  and arms a 300ms debounce. Saves flush pending changes BEFORE
-  didSave. New Tab mutation paths must bump `EditRev` or the server
-  silently diagnoses stale text.
-- Diagnostics are just another `DecorationSource` (registered after
-  the git source so the diag gutter dot outranks the git mark).
-- The handshake also declares `workspace.workspaceEdit` with
-  `documentChanges: true` and an EMPTY `resourceOperations`, which is how
-  a server learns ced can apply text edits but cannot create, rename or
-  delete files on its behalf — see the workspace-edit section.
-- **Go to definition FLIPS TO USAGES at the declaration.** A server asked
-  about a declaration answers with the declaration itself, so a plain
-  jump would move nothing; `handleLSPDefinition` detects that
-  (`definitionIsHere`: same file, request position inside the range,
-  end inclusive for WordRange's reason) and runs `menuFindReferences`
-  from that position instead — JetBrains' ⌘B turn. Only while the tab
-  that asked is still in front.
-- **⌘+click is the definition verb's modified click** (`editorGoToPress`):
-  caret placed under the pointer first, then the same verb, so at a
-  declaration the click opens the usages. A mouse report has no ⌘ bit
-  (SGR carries only shift/alt/ctrl — metakeys.go's header), so **cats
-  spells ⌘ on a mouse event as CTRL+ALT** (its `inputenc.mouseMods`) and
-  `isMetaClick` reads that pair, or a real `ModMeta`, as the gesture.
-  Plain Alt+click stays multicaret's and **plain Ctrl+click is left
-  unbound** on purpose, so a host that can deliver one keeps a modified
-  click of its own. Starts no drag (Alt+click's rule). On a file with no
-  server the caret still moves and the flash says why.
-- Leaders: Esc-d definition (or usages), Esc-i hover, Esc-I signature
-  help, Esc-D the file's symbol outline, Esc-R references, Esc-c code
-  actions, Esc-E rename. The ≡ Code group also carries the multi-file undo row, which
-  has no leader (see that section). Definition jumps record into the
-  app-wide navigation history (nav.go) — there is no LSP-private jump
-  stack.
-- **The handshake's `onRequest` hook is NARROW, and that is enforced by a
-  sentinel.** ced's gopls connection is the only LSP client here that
-  answers server→client REQUESTS (workspace/applyEdit — see code
-  actions), and a hook that owned the whole surface would inherit
-  `workspace/configuration`, which gopls BLOCKS on while type-checking.
-  `lsp.ErrRequestUnhandled` is how a hook declines one method and leaves
-  the built-in auto-responder in charge of the rest. `StartWithRequests`
-  is a separate constructor because the hook must be installed BEFORE the
-  read loop starts (the NewClientACP rule) — assigning it afterwards
-  races the goroutine that reads it.
-- **Absolute paths only**: `New()` absolutizes rootDir and `openFile`
-  absolutizes tab paths. A relative root produces a malformed rootUri
-  and gopls then publishes diagnostics keyed by absolute paths that
-  never match the tabs — the "gopls installed but no squiggles" bug.
-- Tests kill the integration (`a.lsp.dead = true` in newTestApp) AND pin
-  `lspLookPath` at "never found" — many tests clear `dead` to inject a
-  fake, after which any other handled extension would spawn the machine's
-  own server. The two real-gopls tests opt back in with
-  `useRealLSPBinaries`. So openFile can't spawn a real server; LSP tests inject `fakeLSPConn`
-  through `a.lspInstall(lspGoServerID, fake)`.
-
-### Diagnostic messages (app/diagtip.go)
-The gutter dot and underline say THAT a line is broken; this says WHAT.
-Four doors, one text (`diagTipLines`): click a diagnosed line's gutter;
-rest the pointer on a diagnosed
-line's gutter or on the underline itself → a passive tooltip; Esc-i
-leads with the diagnostics at the caret (and answers alone when the
-server has no hover text); next/previous problem flash the message they
-land on. House rules:
-
-- **The tooltip is the overflow popup's shape, not the LSP dwell's.** It
-  reads `lsp.diags`, a cache, so it runs on EVERY host, and it arms only
-  when the cell really carries a diagnostic. When it is open the Tier-1
-  dwell tooltip stands down — two boxes over one identifier is noise and
-  "this is broken" is the more urgent answer.
-- **A CLICK on a diagnosed line's gutter opens it at once, and a second
-  click closes it** (`diagGutterPress`) — the mouse door for a terminal
-  that reports presses but no motion (macOS Terminal.app), where the
-  dwell can never fire. Gutter only, and only a DIAGNOSED line: a clean
-  line's gutter still places the caret, and a click in the code is
-  always the caret's. Claimed presses move no caret and start no drag
-  (the blame column's rule), and it runs AFTER `blameColumnPress`.
-  `noteDiagPointer` has already dismissed the tip on that same press, so
-  `diagTip.pressClosed` is the toggle's memory; the press also stamps the
-  pointer cell, or the button RELEASE reads as travel and closes it.
-  `openDiagTipAt` is the one opener both doors share.
-- **Gutter answers by line, code answers by rune.** The dot marks a
-  diagnostic's FIRST line, so the gutter lists what starts there; a code
-  cell must be ON an underlined rune (the PosScreenCell round trip,
-  hoverdwell's rule — HitTest's nearest-column answer past EOL would
-  describe an underline twenty cells away). Zero-width ranges get the
-  underline's one-cell stretch.
-- **Messages are wrapped, never ellipsised** — the tooltip exists for the
-  text the gutter couldn't show. Capped, with the cut pointing at the
-  Problems panel.
-
-### Go to symbol in file (lsp/types.go + app/lspsymbols.go)
-The active document's declarations, listed in the palette, jump on
-Enter (Esc-D, ≡ Code). House rules:
-
-- **The protocol's two answers collapse in `internal/lsp`, not in the
-  app.** `documentSymbol` returns either the hierarchical
-  `DocumentSymbol[]` or the legacy flat `SymbolInformation[]`;
-  `ParseDocumentSymbols` normalises both into one document-ordered
-  `[]Symbol` carrying a Depth. It tells them apart by a **"location"
-  key, not by a failed unmarshal** — both shapes decode cleanly into
-  either struct, so an error-based sniff would "succeed" with every
-  position at 0:0 and every row jumping to line 1. The jump target is
-  `selectionRange` (the NAME); `range` is the whole declaration, and
-  landing on a 200-line function's opening brace is what this avoids.
-- **It's a PICKER, not a palette source.** palette.go's doc comment
-  floats symbols as a merge source, and that's the one place it
-  shouldn't go: sources are collected synchronously at open, and this
-  costs a round trip to gopls. Feeding it in would either block the
-  palette on a cold server or make its contents arrive late and
-  reorder under the user's fingers.
-- **The kind word goes LAST in a row label.** The fuzzy scorer rewards
-  early matches, so a leading "function " would make every row score
-  alike on the first letters typed. Trailing, "func" still narrows by
-  kind while the name keeps the position that ranks. Indentation is
-  two spaces per Depth, pure decoration that survives filtering — it's
-  what makes an unfiltered list read as the file's outline.
-- Same contracts as the other two verbs: flush before asking (an
-  unsynced new function missing from the list reads as the feature
-  being broken), drop a response whose document is no longer active,
-  re-check the path when a row FIRES (a picker owns the keyboard, not
-  the world), record nav explicitly (a same-file jump is invisible to
-  openFile's path-change recording), and center an off-screen landing
-  per goToLine's policy.
-- Leader is **Esc-D**, the shifted twin of definition's Esc-d: same
-  verb, wider scope — 'd' goes to the definition of what's under the
-  cursor, 'D' lists every definition in the file. The f/F, p/P, h/H
-  convention.
-
-### Server progress and messages (lsp/progress.go + app/lspprogress.go)
-What a server says about ITSELF. A cold gopls (or a minute of
-rust-analyzer indexing) answers every verb with "nothing", which reads as
-the verb being broken; the server was explaining why all along and ced
-dropped the notification. House rules:
-
-- **A status-bar SEGMENT, not a flash** — progress arrives in bursts of
-  dozens of reports and would bury every other message. It trails the
-  bar (first thing clipped, never Ln/Col), shows the ACTIVE file's server
-  only, and leaves by itself. `starting…` during the handshake is the
-  same segment's earliest state.
-- **Tokens are a SET**: a server runs several pieces of work at once, so
-  one `end` must not blank the others. A report carries only what
-  changed — the title comes once, on begin.
-- **Empty answers gain `lspLoadingNote`** ("— gopls is still loading")
-  while the server is busy. Use it on any new verb's "nothing found"
-  flash.
-- **Only errors and warnings from `window/showMessage` flash.** Info is
-  the server narrating, and the segment going away already says it.
-- `ParseProgress` refuses a value with no `kind`: the same notification
-  carries partial RESULTS for requests that asked for them.
-- The handshake declares `window.workDoneProgress`; the token-creation
-  request is the auto-responder's (null is the spec's "yes"). A server's
-  exit clears its progress — nothing would ever send the `end`.
-
-### Go to symbol in project (lsp/workspacesymbol.go + app/lspworkspacesymbols.go)
-The p/P widening of the file outline: a declaration by NAME, in any
-file. ≡ Code row, no leader key. House rules:
-
-- **It PROMPTS first, unlike the file outline**, because
-  `workspace/symbol` is query-driven — a server answers `""` with nothing
-  or an arbitrary slice, so there is no whole list to fetch and filter
-  locally. The question is asked ONCE (seeded with the cursor word) and
-  the picker narrows the ANSWER; a picker that re-queried per keystroke
-  would need a hook the palette lacks and would reorder under the
-  user's fingers.
-- **Every READY server is asked and the answers merged** — the question
-  is about the project, not the active file, so the row is gated on
-  `lspAnyReady`, not `hasLSPActions`. It never SPAWNS a server. One
-  server's ranking is kept as it came; a merge has no shared ranking and
-  falls back to name order. One server failing costs its own hits only.
-- Generation-checked (`lsp.symSeq`, it opens a modal), capped with the
-  cap in the title, name FIRST in the row for the scorer, and the jump
-  is `lspJumpTo`.
-
-### Go to implementation / type definition (app/lspgoto.go)
-Definition's two siblings, ≡ Code rows with no leader key. They share
-definition's wire shape exactly (`lsp.Client.Locations(method, …)` — the
-method string is the only difference, so the conn interface grew ONE
-member, not one per synonym) and differ in that the answer is often
-plural. **One location jumps, several list**: the jump is
-`lspJumpTo` (extracted from definition's landing — nav recorded from the
-request's origin, the open suppressed) and the list is
-`openLocationsPanel` (extracted from references — the Find-all project
-mode, heading the only thing changed). They share references' generation
-(`lsp.refSeq`), since any of them can open that one panel. `linkSupport`
-is deliberately undeclared so servers answer with plain Locations.
-
-**Find incoming calls** is the third verb on the same request-and-fork
-(`lspLocFetch` is the seam: anything that turns a position into
-locations). It is references minus everything that isn't a CALL — the
-declaration, a callback passed by value, a doc link. Two round trips
-(`lsp.Client.IncomingCalls`), and the prepared item is echoed back
-VERBATIM because its server-private `data` is what identifies the symbol
-(the Diagnostic / CompletionItem rule). It **always lists**, even one
-site: a who-question answered by a silent jump hides that the answer was
-"only one". A caller the server gives no ranges for still gets a row at
-its own name.
-
-### Find references (lsp/client.go + app/lspreferences.go)
-Every use of the symbol under the cursor, listed in the Find-all panel's
-PROJECT mode (Esc-R, ≡ Code). House rules:
-
-- **It reuses the panel; it does not build one.** findall.go's project
-  mode already answers every question a cross-file result list raises —
-  path-carrying rows, a strip that displaces the editor, the right dock,
-  scrolling, the Esc contract, the mouse story, the truncation notice. A
-  second list would drift from this one exactly where a user would
-  notice. The ONLY thing a non-search producer may change is
-  `findAllModal.heading` (the title verb); if a second thing ever needs
-  changing, that's the signal the two really are different features.
-- **The result OPENS A PANEL, so it is generation-checked**
-  (`lsp.refSeq`) — unlike definition and hover, which are content with a
-  path check because they only move a cursor or pop a modal. Same guards
-  as project search besides: an empty answer flashes rather than opening
-  a blank list, and a result landing while a modal or the menu owns the
-  screen reports its count instead of stealing the slot.
-- **Context text is fetched off-loop and reconciled ON it.** A Location
-  carries no text, so `collectRefLines` (on the request goroutine) reads
-  each file ONCE however many hits it holds, and `referenceHits` (main
-  loop) then prefers an OPEN TAB's buffer line over the disk copy. That
-  order is load-bearing: gopls answered from the text ced synced to it,
-  so rendering those columns against a stale on-disk line would light up
-  the wrong cells of the wrong text. Which is also why columns stay in
-  UTF-16 across the hop and convert once, against the text that will
-  actually be drawn (`refEndOfLine` is the multi-line-range sentinel
-  that survives it).
-- **Sorted before capped**, so the truncation is a prefix of what the
-  user sees, in search.Project's order so the two lists read alike. An
-  unreadable file costs its rows their CONTEXT, not their existence —
-  the location is the answer, the line is decoration.
-- **The word under the cursor is resolved first and a miss refuses.**
-  It isn't just the title: the panel tints that word in whatever file a
-  row opens. `includeDeclaration` is always true — a "who uses this?"
-  list that omits the thing being used reads as a hole.
-- `referencesTimeout` is 30s, not the client's 5s default: this is the
-  one verb whose cost scales with the PROJECT rather than the file.
-- Leader is **Esc-R** — the letter References' own name offers once `r`
-  is spoken for by redo (the rEplace argument). Deliberately not a
-  shifted twin of redo: redo's twin is `Z`, beside its own `z` alias.
-
-### Signature help (lsp/types.go + app/lspsignature.go)
-The parameter list of the call the cursor is inside, with the parameter
-you're typing lit (Esc-I, ≡ Code). House rules:
-
-- **IT IS MANUAL, AND THAT IS STRUCTURAL.** Every other editor pops this
-  automatically on `(` and `,`; ced cannot, because a modal here OWNS
-  THE KEYBOARD (the single-slot modal interface) — a tooltip that
-  appeared while you typed would swallow the very next keystroke it
-  exists to help you write. The live version of this feature needs a
-  NON-modal overlay, and ced already has exactly one of those: ghost
-  text (editor/ghost.go). If signature help ever goes live-while-typing,
-  that is the layer it goes through. Don't bolt an auto-trigger onto
-  this one.
-- **The emphasis IS the feature.** Without it this is hover on the
-  enclosing function, which the user could already get by moving the
-  cursor. So `hoverModal` grew one field (`emph []hoverEmph`) — the
-  findAllModal.heading arrangement one floor down: two verbs, one
-  tooltip, because the geometry, the trigger-happy dismissal and the
-  "this is a glance" framing are identical.
-- **The label is HARD-wrapped, the prose WORD-wrapped** — the chat
-  transcript's code/text split, and here it is load-bearing twice: a
-  signature is code, so collapsing its whitespace misrepresents it, and
-  only an exact rune-per-column mapping lets an offset become a
-  (row, col) by division. A word wrapper drops and merges spaces, so
-  every offset past the first break would be a guess. A parameter
-  straddling a break gets one emphasis run per row.
-- **The protocol's optionals collapse in `internal/lsp`, not the app**
-  (the ParseDocumentSymbols rule). `activeSignature`/`activeParameter`
-  are POINTERS on the wire because absent must be distinguishable from
-  zero — and zero is the first signature and the first parameter, the
-  common answer. A signature's own `activeParameter` overrides the
-  help's (spec precedence). `paramRange` resolves the label's two shapes,
-  offsets FIRST because they're exact; the string form is a substring
-  search that can land on the wrong occurrence in `f(int, int)`, which
-  costs a few columns of misplaced emphasis, not a wrong tooltip.
-- **A cursor outside a call is a real answer**, so nil-with-nil-error
-  reads as "nothing here" and the flash says "No signature help **here**"
-  — the usual cause is the position, not the server, and a bare "no
-  signature help" reads as the latter. (gopls also declines inside a
-  string literal argument; that's its call, and the message is right for
-  it too.)
-- The active parameter's OWN documentation precedes the signature's: it
-  answers the question that made the user press the key, and the tooltip
-  is capped, so it must not be what gets cut. `firstParagraph` trims a Go
-  doc comment to its opening statement rather than truncating
-  mid-sentence.
-- Leader is **Esc-I**, a true shifted twin of hover's Esc-i: same
-  tooltip, same glance, one question over — 'i' describes the symbol
-  under the cursor, 'I' describes the call the cursor stands inside.
-
-### Workspace edits — the multi-file primitive
-### (lsp/workspaceedit.go, editor/multiedit.go, app/workspaceedit.go)
-Applying a server-authored `WorkspaceEdit` — text edits spanning files the
-user may never have opened — as ONE gesture they can undo with one press.
-It is a PRIMITIVE, not a verb: code actions and rename both reduce to
-about thirty lines on top of it, which is the argument for building it
-properly rather than special-casing rename. House rules:
-
-- **It opens NO TABS, and the Find-all panel is the receipt.** A rename
-  can touch a dozen files; opening each would fire didOpen for the LSP and
-  Copilot, every plugin's open hook and a syntax pass, then leave a DIRTY
-  tab behind — a dozen modal round-trips at quit, most not even laid out
-  on the strip. That is exactly the cost find-in-project refuses to pay.
-  Files with no tab are loaded into a DETACHED `editor.Tab`, edited, and
-  written through `Tab.Save` (so the open guards, the BOM and the line
-  ending all round-trip); files with a tab are edited in their BUFFER.
-  Visibility comes from `reportWorkspaceEdit`, which lists every applied
-  edit in the Find-all panel's project mode — the `heading` field is still
-  the only thing a non-search producer may change.
-- **The open buffer outranks disk, always.** The server answered from the
-  text ced synced to it, which for an open tab includes unsaved edits.
-  Writing that file's disk copy behind a dirty buffer would apply
-  coordinates to text they were never measured against — `referenceHits`'
-  rule, and here it is the difference between a rename and a corruption.
-  **Open participants are NOT saved**: that would also commit whatever
-  else the user had unsaved and bypass format-on-save's prompts. Auto-save
-  takes them two seconds later, and the flash names the asymmetry.
-- **Validate everything, THEN apply.** A half-applied rename does not
-  compile and the file that failed is the one nobody notices, so
-  `planWorkspaceEdit` does every read, guard and conversion while writing
-  nothing, and one refusal kills the whole edit naming the file and the
-  reason. Order inside the apply is the rest of the story: buffer edits
-  first (pure memory, cannot fail), then disk writes in path order, and a
-  failed write rolls back through the same per-tab snapshots — which is
-  what those retained detached Tabs are for. A rollback that itself fails
-  leaves the journal ARMED rather than clearing it.
-- **The undo journal is ONE SLOT sitting above the per-tab stacks**, the
-  only thing in this editor that does. Validity is `EditRev` **and**
-  `UndoDepth` per participant: EditRev alone can't say the snapshot is
-  still on top (`trimUndo` evicts from the BOTTOM, shrinking a stack
-  without the buffer changing), and depth alone can't either (a push plus
-  an eviction nets to zero). A detached file also checks its mtime — if
-  somebody else wrote it since, rewriting would discard their change.
-- **Plain undo CLAIMS the group from a participant tab**, and degrades
-  LOUDLY when it can't. A reflex Esc-u would otherwise roll back one file
-  of a rename and leave the rest, silently. When a participant has moved,
-  `menuUndo` says which file broke it, undoes just this tab, and CLEARS
-  the slot — falling through beats refusing (an undo that does nothing
-  reads as broken), announcing beats silence, and clearing is what stops a
-  later press half-applying the rest. `closeTab` drops the journal too: a
-  closed tab takes its undo stack with it.
-- **The protocol's two shapes collapse in `internal/lsp`** (the
-  ParseDocumentSymbols rule). `documentChanges` wins over `changes` — it
-  is the shape carrying versions and resource ops, so preferring it never
-  loses information. Sniffing is on a FIELD (`kind`, then `textDocument`),
-  never a failed unmarshal: a `CreateFile` decodes cleanly as a
-  `TextDocumentEdit` with everything zeroed, so an error-based sniff would
-  turn "create this file" into a document with no edits. `changes` is a
-  MAP, so its documents are sorted by path — Go randomises map order, and
-  an unsorted walk would give two runs of one rename two different orders.
-  `documentChanges` is an array whose order the spec makes meaningful, so
-  it is preserved.
-- **Resource ops are declined at the capability and refused BY NAME at the
-  parse.** `Initialize` declares `workspaceEdit.resourceOperations: []`,
-  so a conforming server refuses a package rename ITSELF with its own
-  reason, before anything is applied. `ParseWorkspaceEdit` still parses
-  them, and the app refuses the whole edit naming what it saw — applying
-  the text edits while dropping the file move would rewrite every
-  identifier and leave a tree that no longer builds.
-- **Confinement runs AFTER `EvalSymlinks`, on both sides.**
-  `writeFileAtomic` resolves symlinks before writing, so a lexical check
-  alone is escapable — a link inside the root pointing out of it would
-  pass and then be written through. The ROOT is resolved too, or every
-  file in a project under `/tmp` reads as outside its own root on macOS.
-  `resolveInRoot` is the one implementation (chatFSResolve delegates to
-  it); containment itself is gitstatus.go's `pathInside`.
-- **`ClampEnd`, not `Clamp`, for an exclusive range end.** Clamp pins the
-  line to the last line and THEN the column to that line's length, so
-  `{LineCount, 0}` — how the protocol spells "the whole document" — would
-  spare the final line's text. **Overlapping edits refuse**: applied
-  bottom-up they don't fail, they produce plausible garbage.
-- **`ApplyMultiEdit` is the per-tab half, and `ReplaceAll` was refactored
-  ONTO it** — that pass was this codebase's first multi-range edit, and
-  two copies of "edit a set of ranges as one step" would drift. One
-  `pushUndo(undoGroupStructural)` up front then direct Buffer edits, which
-  is how it stays one step WITHOUT touching `undoSuppress` (that flag is
-  the caret fan-out's alone). Bottom-up, always. `EditResults` derives
-  where each edit LANDED analytically rather than recording it during the
-  pass, because the pass runs backwards and every recorded position would
-  need fixing up as earlier edits arrived.
-- **Planning reads files ON THE MAIN LOOP**, deliberately. Which files are
-  open, which buffers are dirty and which revisions are synced is
-  main-loop-only state, and splitting the read from the validation across
-  the loop boundary would re-open the staleness window this exists to
-  close. Bounded: tens of small files, once per deliberate gesture. The
-  escape hatch if it ever hurts is reading into a map on the request
-  goroutine and re-stat'ing on the loop.
-- Staleness has three comparisons, each against the thing that produced
-  the coordinates: the origin tab's `EditRev` vs. what `captureWSRequest`
-  recorded, every open participant's `EditRev`/`syncedRev` pair (which
-  catches a keystroke plus a fired debounce that would leave the first
-  test true again), and the server's own `textDocument.version` against
-  ced's didChange counter when it makes one.
-- **`applyServerEdit` reports ACCEPTANCE; `applyServerEditWith` reports
-  the OUTCOME**, and the gap between them is the confirmation prompt. The
-  callback exists for exactly one caller — a server-initiated
-  `workspace/applyEdit` is a REQUEST whose response field is literally
-  `applied`, so it is the one edit here ced must report on rather than
-  merely perform. Every other verb asks a question and is told the
-  answer; "accepted" is all those need. `done` fires EXACTLY ONCE on
-  every path (refusal, no-confirm commit, and whichever of the
-  confirmation's two hooks runs — which is what `confirmModal.cancelHook`
-  is for), because a caller is blocked on it. This was the one addition
-  the primitive needed when code actions were built on it, and it is the
-  shape a third verb should reach for rather than a new one.
-- No leader key — the flat table is out of mnemonic letters and plain undo
-  covers the common case. The ≡ **Code** row (`wsEditUndoLabel`, dynamic)
-  is the path for the two cases plain undo can't serve: the active tab
-  isn't a participant, or every touched file went straight to disk.
-
-### Rename symbol (lsp/client.go + app/lsprename.go)
-The first verb built on the workspace-edit primitive, and the proof that
-building the primitive first was right: prompt, ask, hand over. Esc-E, ≡
-Code. House rules:
-
-- **It owns almost nothing.** Everything a cross-file rewrite raises —
-  which files to open (none), which text the coordinates were measured
-  against, rollback, the one-gesture undo, the receipt — belongs to
-  `applyServerEdit`. What this file owes on top is the LABEL
-  (`renameLabel`, one spelling), because it becomes the confirmation
-  title, the flash, the ≡ undo row and the receipt heading, and four
-  hand-built strings would drift. A future verb that needs more than a
-  label from the primitive is the signal something is wrong with the
-  primitive, not with the verb.
-- **THE PROMPT SITS BETWEEN THE ASK AND THE REQUEST**, which is why
-  `startRename` is split out of `menuRenameSymbol`. The modal owns the
-  keyboard, so the user can't type into the buffer — but the LSP debounce,
-  auto-save, a chat agent's write and the disk reconciliation are all
-  still running. So the position is captured when the prompt OPENS,
-  re-verified against `EditRev` when it SUBMITS, and `captureWSRequest` is
-  taken at submit time AFTER the flush, so the contract describes the text
-  the server is about to answer from rather than what was on screen when
-  the user reached for the key. Capturing before the flush records the
-  pre-sync revision and makes the plan refuse its own request.
-- **Generation-checked, because this one WRITES FILES.** Stronger than the
-  references rule (that answer only opens a panel) and stronger than
-  definition/hover's path check: a superseded rename's edit planned against
-  a buffer the newer one already rewrote corrupts it plausibly.
-- **The old name never goes on the wire** — the POSITION is the symbol's
-  identity, which is exactly what separates this from a textual
-  replace-all. `cursorWord` is a UI affordance only: it seeds the prompt so
-  a small correction is a keystroke, and it refuses a cursor on nothing
-  BEFORE the user is asked to think of a name for it.
-- **Two client-side refusals, deliberately narrow**: an unchanged name
-  (the round trip is guaranteed to come back with "nothing to change",
-  which is a confusing way to say "you didn't change it") and whitespace
-  (no language ced will speak allows it). Everything else — a keyword, a
-  leading digit, a collision — is the SERVER's judgment, and its message
-  names the actual rule. Don't grow this list into an identifier validator.
-- **No `prepareSupport`.** That option buys a round trip to validate a
-  position and hand back a placeholder ced already has, and gopls refuses
-  an illegal rename with a better message than a prepare step's silence.
-  `renameTimeout` is 30s for references' reason and then some — a rename
-  IS a project-wide reference search plus the edit built from it.
-- Leader is **Esc-E**, the shifted twin of rEplace's `Esc e` under the
-  f/F, p/P, d/D convention: same verb, wider and smarter scope — 'e'
-  replaces text you name in this file by matching characters, 'E' replaces
-  a SYMBOL the compiler names, everywhere it is bound. It is not 'n'
-  (new file) and deliberately not 'N': `\x1bN` is SS2, one of the ESC
-  pairs a terminal can eat before tcell sees it. The ≡ row sits directly
-  above the multi-file undo row — the one write in a group of reads, next
-  to the thing that takes it back.
-
-### Code actions (lsp/codeaction.go + app/lspcodeaction.go)
-What the server can do to the cursor or the selection — fix this error,
-organize these imports, extract that block — listed in the palette
-(Esc-c, ≡ Code). It is the second verb on the workspace-edit primitive
-and the one that was queued to PROVE it: rename asks a question and
-applies the answer, while this arrives by two routes, one of which isn't
-a response at all. House rules:
-
-- **THE SECOND ROUTE IS A SERVER REQUEST**, and everything unusual here
-  follows from it. An action carrying no edit of its own is run through
-  `workspace/executeCommand`, and what it CHANGES comes back unprompted
-  as `workspace/applyEdit` — with a JSON-RPC id waiting on a field called
-  `applied`. Hence `applyServerEditWith` (see the primitive), hence the
-  narrow `onRequest` hook plus `lsp.ErrRequestUnhandled` (see the LSP
-  section), and hence a `wsRequest` that is EMPTY: nobody asked a
-  question, so there is no origin revision to claim. The per-participant
-  sync checks still run and are the ones that matter.
-- **An unprompted edit REFUSES while a dialog owns the screen.**
-  `openModal` replaces rather than refuses, so applying under a prompt
-  the user is mid-answer on would pop a confirmation over it and silently
-  drop that modal's own pending reply. Unlike a chat permission request —
-  where an agent is stuck, so the prompt queues — a server can simply be
-  told no, with a reason, and the user re-runs the action.
-- **The handler BLOCKS the serving goroutine** — the ACP
-  permission-request shape, for the same reason: the answer is a decision
-  the main loop makes, possibly with a confirmation dialog in the middle
-  of it. `wsApplyTimeout` (90s) is deliberately SHORTER than the client's
-  `executeCommandTimeout` (2 min), so a user who walks away releases the
-  server rather than the other way round. That budget is the longest in
-  the client because THE USER IS INSIDE IT: the server is blocked in
-  executeCommand while ced's confirmation sits on screen.
-- **The range is the SELECTION when there is one, the cursor otherwise**,
-  and that distinction is the whole interface. "Extract to function" only
-  exists for a span, so a verb that always asked about a point would
-  silently never offer half of what the server has; a quick fix only
-  exists where a diagnostic is, so a verb that always asked about a
-  selection would need one before it could offer anything. The ≡ row's
-  label is dynamic and says which span it will cover.
-- **Diagnostics are echoed back VERBATIM**, which is how a quick fix
-  finds the problem it fixes. `lsp.Diagnostic` round-trips its raw JSON
-  (`UnmarshalJSON`/`MarshalJSON`) because the fields doing the matching —
-  `data`, `code`, server-private extensions — are exactly the ones this
-  client has no reason to model. Same argument the Copilot layer makes
-  for echoing a completion item's raw JSON, and the same reason a
-  command's `Arguments` stay `json.RawMessage`. Overlap is generous: a
-  zero-width cursor range must match a diagnostic that CONTAINS it.
-- **The response union collapses in `internal/lsp`** (the
-  ParseDocumentSymbols rule), and the discriminator is the JSON TYPE of
-  the `command` field — a string on a bare Command, an object on a
-  CodeAction literal. Never a failed unmarshal: a bare Command decodes
-  cleanly as a CodeAction with everything zeroed, so an error-based sniff
-  would turn "run this command" into a row that does nothing at all.
-- **No `resolveSupport`, the `prepareSupport` trade.** Declaring it tells
-  the server to send actions with NO edit and wait for a
-  `codeAction/resolve` round trip; not declaring it makes the server
-  compute edits up front, so a picked row applies immediately. The cost
-  is work the server does for actions nobody picks, which is its own
-  cheapest work. `codeActionLiteralSupport` IS declared, or a server
-  sends only bare Commands the editor could execute blind.
-- **DISABLED actions are dropped, not dimmed.** The surface is the fuzzy
-  picker, in which every row is a verb that runs; a row answering Enter
-  with "you can't do that here" is worse than one never offered, and the
-  palette has no disabled state to borrow. An action with neither an edit
-  nor a command is dropped for the same reason.
-- **Edit before command**, per the spec, and a REFUSED edit skips the
-  command — running the follow-up to something that never happened is the
-  one way this verb could do half a thing silently.
-- Generation-checked (`actionSeq`) for rename's reason — a picked row
-  WRITES FILES — plus the symbols verb's path check. The picker sits
-  between the response and the apply the way rename's prompt sits between
-  the ask and the request, so the contract is captured at ask time (after
-  the flush) and validated when a row FIRES.
-- Leader is **Esc-c**, the letter the verb's own name offers and the last
-  obvious one free in the flat table. It collides with the AI
-  namespace's `Esc a c`, which is what a namespace is for. Not VS Code's
-  `Ctrl-.` in any form: `.` is next-tab and Ctrl is out by the project's
-  founding rule.
-
-### Copilot sidecar (app/copilot.go) — phase 1 of the AI integration
-Runs GitHub's official `copilot-language-server` (native binary, found
-on PATH like gopls) over the SAME `internal/lsp` JSON-RPC client — the
-transport is protocol-generic; do not add a second framing layer or an
-SDK dependency. House rules:
-
-- **Same contracts as LSP**: silent degradation (no binary → dead, no
-  nagging; installing the binary is the opt-in, the `"copilot"` config
-  key is the opt-out, default on), events-only (`copilot*Event`s; only
-  the main loop touches `App.copilot`), no auto-restart after a crash
-  (the ≡ enable/disable toggle is the deliberate retry path — enabling
-  clears the `dead` verdict).
-- **Auth is the device flow** via the server's custom methods: `signIn`
-  returns a user code + confirm command; the confirm
-  (`workspace/executeCommand`) BLOCKS until browser auth finishes,
-  which is why `lsp.Client` has `CallWithTimeout` — never funnel that
-  call through the 5s default. While it's pending the code stays in
-  the status bar (`pendingCode`), because the modal that showed it is
-  already gone.
-- **Menu rows stay clickable when unavailable** — unlike the dimming
-  LSP rows, `menuCopilotAuth` flashes WHY (disabled / not installed).
-  Sign in is a new user's first touch; a dimmed row is a dead end.
-- The handshake must send `initializationOptions.editorInfo` +
-  `editorPluginInfo` or the server refuses service.
-- Host side-effects (clipboard copy, browser open) go through the
-  stubbable vars `copilotCopyCode` / `copilotOpenBrowser`; newTestApp
-  neuters both and sets `a.copilot.dead = true` so tests never spawn a
-  real sidecar. Copilot tests inject `fakeCopilotConn`.
-
-### Copilot ghost text (app/copilot_ghost.go + editor/ghost.go) — phase 2
-Inline completions painted dimmed at the caret, Tab to accept. House
-rules:
-
-- **Ghost text is NOT a DecorationSource** — decorations restyle cells
-  the buffer owns; a suggestion ADDS cells. `Tab.Render` splices the
-  proposal into the cursor row's runes/styles AFTER decoration merge
-  (`ghostOverlay`), so the paint walk (tab stops, ScrollX, overflow
-  arrows) needs zero ghost awareness. Only the first line renders
-  inline; extra lines are summarised by a `⋯+N` marker — no virtual
-  rows, ever (they'd ripple through scrolling and hit-testing).
-- **Doc sync is lazy**: didOpen/didClose track tab lifecycle (all text
-  files, not just Go — `copilotLanguageID` maps ext → languageId), but
-  didChange flushes only right before a completion request. The Copilot
-  server only answers questions we ask; steady sync would be traffic
-  for nobody.
-- **Only EditRev movement arms the 300ms debounce** (dispatch-tail
-  `copilotAfterEvent`, mirrors `lspAfterEvent`) — cursor travel never
-  spends a request. Responses are validated against the request's
-  (path, EditRev, cursor) AND a reqSeq before painting; anything stale
-  drops silently. `copilotOpenDoc` seeds `armRev` so merely opening a
-  file never fires a request.
-- **Accept replaces the server's range** (select + InsertString = one
-  undo step) with the full InsertText — never the display form.
-  Acceptance telemetry = executing the item's command; shown telemetry
-  (`didShowCompletion`) echoes the RAW item JSON so correlation fields
-  this client doesn't model survive. The Tab key falls through to
-  plain indent when no ghost is painted.
-- **Separate opt-out**: the `"suggestions"` config key (default on,
-  `SaveSuggestions`, ≡ Copilot group toggle) controls ghost text
-  independently of `"copilot"` — a user can keep the sidecar for
-  sign-in/chat while disabling just the ghost text. Toggling off
-  clears any visible ghost immediately.
-- Ghost bookkeeping lives on `App.copilot` (ghostPath/Rev/Pos/Item/
-  Raw); the Tab only carries the display form. Esc clears the ghost as
-  a side effect (never swallowed); `copilotDisconnect` tears down the
-  ghost, timer, and doc maps.
-
-### Copilot chat panel (app/copilot_chat.go + lsp/acp.go) — phase 3
-A chat panel backed by the Agent Client Protocol: the SAME
-`copilot-language-server` binary run as a SECOND process in `--acp`
-mode (chat and completions are separate protocols by GitHub's design).
-House rules:
-
-- **ACP rides internal/lsp, not a new transport.** ACP is the same
-  JSON-RPC 2.0 envelope with two differences, both handled inside the
-  existing Client: ndjson framing (`Client.ndjson`, `StartACP` /
-  `NewClientACP` in lsp/acp.go) and real agent→client requests
-  answered via the `onRequest` hook (runs on the read loop — post
-  events, never touch App). Do not add an ACP SDK or a second framing
-  package.
-- **Same contracts as the sidecar**: silent degradation (no binary →
-  dead), events-only (`chat*Event`s; only the main loop touches
-  `App.chat`), no auto-restart (re-picking the agent under ≡ Chat
-  agent is the retry path; for the Copilot backend the ≡ Copilot
-  off/on toggle also works and clears BOTH dead verdicts). The
-  `"copilot"` key gates only the Copilot backend (see the agent
-  registry below); when Copilot is the active backend, disabling it
-  tears down and closes the panel. Copilot's auth is phase 1's device
-  flow (the agent reads the same credential store); a failed
-  handshake writes WHY into the transcript plus a per-agent auth hint
-  — unlike the sidecar, the open panel must never fail silently.
-- **Switchable backend (app/chatagent.go)**: the panel is a generic
-  ACP client and Copilot is just the default entry in a small agent
-  registry (`chatAgents`: Copilot, Claude Code via `claude-code-acp`,
-  Gemini via `gemini --experimental-acp`). ONE panel, switchable
-  backend — never a second panel; an edge is single-occupancy.
-  The ≡ "Chat agent" row opens the registry as a picker; unlike the
-  model picker it KEEPS the current agent, annotated "(current —
-  restart)", because re-picking is the deliberate crash-retry gesture
-  (it clears the dead verdict) and non-Copilot backends have no other
-  one. The choice persists as `"chatagent"` in config.json; an
-  unknown saved id resolves to the default silently (the stale-
-  chatmodel rule). All reads go through `App.chatAgent()`, which maps
-  the zero value to Copilot so hand-built test Apps behave unchanged.
-  Every teardown bumps `chatState.connSeq`, and ready/exit/turn-done
-  events carry the generation they were launched under — handlers
-  drop mismatches, or a switch mid-handshake installs the OLD agent's
-  client and the old process's exit marks the fresh agent dead. Tests
-  stub `chatLookPath` (newTestApp pins it to "never found") so agent
-  switching can never spawn a dev machine's real binaries. Everything
-  downstream of the spawn — turns, streaming, the model roster picker,
-  context attachments (embedded or fenced-text fallback) — is already
-  agent-agnostic; keep it that way.
-- **It is a TOOL WINDOW, docked RIGHT by default** (toolwindow.go).
-  `chatPanelRect` is a read of `toolRect` and the width comes from the
-  layout — don't reintroduce per-feature geometry branches. It used to
-  dock LEFT and flip the file tree across the window, which was the
-  workaround for the editor having no right edge; the right edge now
-  exists, so the tree stays where the user put it. Single occupancy is
-  per EDGE and is `claimDock`'s: whatever else is showing on the chat's
-  edge yields, and the evicted tool keeps its own dock assignment so
-  re-opening it evicts the chat right back. ONE panel, switchable
-  backend — never a second panel.
-- **Turns**: Enter → `session/prompt` (blocks for the whole turn —
-  `CallWithTimeout`, never the 5s default) while `session/update`
-  notifications stream `agent_message_chunk`s into the transcript;
-  chunks merge into ONE trailing agent message. ⏹ sends
-  `session/cancel` (once per turn). A prompt typed mid-handshake is
-  queued (`queuedPrompt`, the signInWanted pattern) — the first Enter
-  must never vanish.
-- **Model selection**: `session/new` returns the model roster
-  (`availableModels` + `currentModelId`); the ≡ Copilot "Chat model"
-  row opens it as a fuzzy picker (openPicker, current model excluded,
-  premium multiplier shown) and picks go out as `session/set_model`.
-  The choice persists as `"chatmodel"` in config.json and is re-applied
-  during every handshake; a stale saved id is silently skipped — it
-  must never break the handshake. Roster/current live on `App.chat`
-  and die with the connection; `modelPref` survives. All Copilot menu
-  rows (auth, chat toggle, model, suggestions, kill switch) live in
-  the ≡ Copilot group — owner preference, one block.
-- **MCP servers are declared, not connected** (mcp.go): `session/new`
-  carries ced's configured inventory in `mcpServers`, and the agent
-  spawns its own copies. It's agent-agnostic — see the MCP section.
-- **Permissions + fs are real as of phase 4** (copilot_chat_perm.go):
-  the handshake declares fs read/write capabilities, and
-  `session/request_permission` opens the agent's own options as a
-  picker (the openPicker house rule) instead of auto-declining. See
-  the phase-4 section below for the house rules; the retired
-  chat-only scope guard should not be reintroduced piecemeal.
-- **Transcript is the model, rows are derived**: `chatRows(width)`
-  re-wraps `[]chatMsg` on demand (word wrap for prose, hard wrap for
-  fenced code, ❯ gutter on user prompts), so resizes re-flow for
-  free. Scroll follows the termAtBottom rule. The composer is the
-  MULTI-line `chatComposer` (chatcomposer.go) — textField grown a second
-  dimension, for the chat prompt ONLY; every other single-line input
-  stays on `textField`, because a widget that can hold a newline must
-  not be reachable from surfaces that would send it somewhere expecting
-  one line. Enter sends; **Alt+Enter (Shift+Enter where the terminal
-  can tell) breaks the line**; Up/Down move the caret while it has
-  somewhere to go and fall back to prompt HISTORY at the composer's
-  edges — exactly what they meant when the composer was one row tall.
-  The band grows a row per wrapped line and displaces the transcript
-  (the Find-all rule: nothing floats over what it serves), capped at
-  `chatComposerMaxRows`, past which the widget scrolls internally;
-  `chatComposerEdit` keeps a bottom-pinned transcript pinned while the
-  band resizes under it. Composer rows HARD-wrap (the find-bar /
-  signature-label argument: only rune==column lets a caret index become
-  a (row, col) by arithmetic) — the word-wrapped transcript is prose
-  being READ, the composer is text being EDITED. **The legacy Alt+Enter
-  fold is rewritten in handleKey**: a terminal without CSI-u (tmux
-  included) sends ESC CR, which tcell reports as rune 'm' carrying
-  ModAlt|ModCtrl — rewritten to KeyEnter+ModAlt BEFORE the leader
-  branches, because 'm' is a bound leader rune and the chord otherwise
-  fired multicaret on the buffer behind the panel.
-- **A focused chat panel owns the paste.** `chatPasteTarget`
-  (textpaste.go) claims bracketed pastes for the composer, and
-  `editorPasteTarget` returns nil while the panel has focus — the two
-  predicates are mutually exclusive on purpose. Without that gate a
-  paste aimed at the prompt resolved through the active tab and landed
-  in the FILE behind the panel. Both gestures funnel through
-  `chatInsertPaste` → the composer's own sanitize, so Cmd+V and a
-  terminal paste can never drift apart. The composer keeps a paste's
-  line breaks (it is multi-line; `composerSanitize` still folds CRLF,
-  renders tabs as one space, and drops control noise), unlike the
-  terminal, which runs the paste line by line — deliberate, not an
-  inconsistency: a break in a prompt implies no "submit", so nothing
-  here may run anything, and the text stays editable before it's sent.
-- **Selection + copy live in the panel, not the terminal.** The app
-  captures the mouse, so the terminal's own drag-to-select can never
-  reach the transcript — the editor provides it. Selection is a
-  `chatPos` pair in DERIVED-row space (wrapped row index + rune col),
-  which is what the user actually drags across and what scrolling
-  leaves alone; press starts the `"chatsel"` drag mode, Cmd+C lifts it
-  (`chatCopySelection`), Esc drops it, and a transcript trim clears it
-  (row numbers shift). Copy affordances are derived ROWS too
-  (`chatRowAction`), never cells squeezed beside prose: one `⧉ copy`
-  row after each agent response and one `⧉ copy conversation` row at
-  the end, so hit-testing stays "which row was clicked" and geometry
-  goes through the single `chatActionRect` (btnRect rule). A ⧉ button
-  copies the LOGICAL message (original line breaks); a drag-selection
-  copies the wrapped rows the user saw, minus any action-row labels.
-  All chat copies route through `copilotCopyCode`, the stubbable var
-  tests already neuter. The ≡ Copilot "Copy chat transcript" row is the
-  keyboard twin of the trailing button.
-- Tests inject `fakeCopilotConn` (the chat layer shares the sidecar's
-  conn interface on purpose); newTestApp sets `a.chat.dead = true` so
-  nothing ever spawns the real binary.
-
-### Chat permissions + agent fs (app/copilot_chat_perm.go) — phase 4
-The permission UI and the client-side filesystem that turned the panel
-from chat-only into a full ACP client. House rules:
-
-- **The transport contract is per-request goroutines.** `lsp.Client`
-  runs every `onRequest` hook on its OWN goroutine (never the read
-  loop) precisely so these handlers can BLOCK: `chatServe*` post an
-  event carrying a buffered reply channel, wait for the main loop's
-  answer, and hand it back. Only main-loop handlers touch `App` —
-  don't move logic into the serve side.
-- **Every permission request is answered exactly once** (the
-  `answered` flag): a pick answers with the pick, dismissal (Esc /
-  click outside — `openPickerWithCancel`, the palette's cancel hook)
-  answers with the agent's own reject option, and teardown / turn
-  cancellation answers with the cancelled outcome — the ACP-required
-  response for permissions pending when a turn dies
-  (`chatFlushPermissions`, called from disconnect, ⏹, and turn-done).
-  The serve goroutine's `chatTurnTimeout` is the walk-away backstop.
-- **Requests queue; the prompt is polite.** `chat.permQueue` holds
-  arrivals in order; `chatMaybeOpenPermission` never steals the modal
-  slot from an open modal or the menu, and the dispatch-tail hook
-  (`chatPermAfterEvent`) resurfaces the head when the slot frees.
-  Decisions are echoed into the transcript ("✓ allowed" /
-  "⊘ rejected") — the agent's next answer references them.
-- **Read-only chat is the coarse switch above the prompts** (config
-  `"chatwrite"`, default on, `SaveChatWrite`, ≡ Copilot group toggle).
-  Off means three enforcement points, not one: the handshake declares
-  `fs.writeTextFile: false` (`chatInitialize` takes `allowWrite` — an
-  agent that knows it can't write plans differently), `handleChatFSRequest`
-  refuses writes with a readable error, and `handleChatPermRequest`
-  auto-rejects any request whose tool kind is in `chatMutatingKinds`
-  (edit/delete/move/execute — a shell command is a write with extra
-  steps) instead of prompting. UNRECOGNISED and unlabelled kinds still
-  prompt: auto-rejecting everything an agent forgot to label would make
-  the mode useless rather than safe, and ced's own write path is
-  refused regardless. The capability is a handshake artifact, so
-  `setChatWrite` says in the transcript when a re-allow needs a restart.
-- **fs is root-confined and buffer-fresh.** Reads serve the open tab's
-  BUFFER (unsaved edits — the attachment rationale) before disk;
-  writes land on disk, then run `refreshTreeNow()` so the normal
-  three-way reconciliation absorbs the edit (clean tab reloads, dirty
-  tab warns) and the transcript gets a `✎ wrote` receipt. Paths are
-  confined to rootDir lexically (`chatFSResolve`); outside paths get
-  an error the agent can read, not silence.
-
-### Chat context attachments (app/copilot_chat_context.go)
-What the chat panel is allowed to know about your code. Context is
-**pushed, not fetched** — even now that phase 4 lets agents read files:
-an attachment must reach the model in THAT turn, with no fetch round
-trip and no permission prompt in the middle of the user's question, so
-ced ships the bytes itself as embedded `resource` blocks in ACP's
-ContentBlock array. A `resource_link` block still demotes "here is the
-context" to "you could go look"; don't add one. House rules:
-
-- **Per-turn, not sticky.** `chatSendPrompt` (the single dispatch point,
-  so the queued-prompt path gets this too) resolves the attachments,
-  echoes a `▤` note into the transcript, and clears the list. An ACP
-  session keeps history server-side, so a sticky attachment would
-  re-send the whole file on every prompt for the rest of the session —
-  paid for twice (tokens and the premium multiplier) with nothing on
-  screen to explain why.
-- **Auto-context is a TOGGLE, not an entry** (`"chatcontext"` config
-  key, default on, `SaveChatContext`). It's synthesized at send time
-  from the active tab — **selection beats file**, because a highlighted
-  region is a narrower question. The chip's ✕ flips the toggle (the
-  only thing removing a synthesized entry can mean) and persists it
-  through the same `setChatContext` the ≡ row uses, so the setting
-  can't mean different things depending on which surface changed it.
-- **Content comes from the open Tab's BUFFER**, falling back to disk.
-  You attach what you're looking at, including unsaved edits — sending
-  the stale on-disk copy of the file you just changed is the one failure
-  mode that would make the agent's answers quietly wrong.
-- **Attachments are visible and capped.** Chip rows sit between the
-  transcript and the composer (`chatAttachRowsView` is the one source
-  draw and hit-testing share, and it clamps itself so the transcript
-  keeps a row); `chatVisibleRows` subtracts them. Payloads cap at
-  `chatAttachMaxBytes`, cut on a line boundary, and the cut is announced
-  in the note. A failed attachment is announced too — a prompt the user
-  thinks carries a file must never go out pretending it did.
-- **`embeddedContext` gates the wire format.** Captured from
-  initialize's `agentCapabilities.promptCapabilities`; false folds the
-  same text into the prompt as a labelled fenced block. It describes the
-  AGENT, so it dies with the connection — pending attachments don't.
-- Markers stay single-width (`▤`, not 📎): `runeLen` counts runes, and a
-  double-width emoji would overrun the ✕ button.
-- The ≡ Copilot group carries the keyboard/menu twins (toggle, attach
-  current-or-selection, attach-file picker, clear). Attaching opens the
-  panel — context you can't see is context you can't trust.
-
-### Chat archive — New chat + Recent chats
-### (internal/chatstore + app/chatarchive.go)
-Putting a conversation down and picking an old one back up. The panel had
-been a single unbounded transcript that only ever grew — with the model's
-context growing beside it — and no way to end one without losing it.
-House rules:
-
-- **CLEARING RESETS THE AGENT, NOT JUST THE SCREEN.** A clear that emptied
-  the panel while the ACP session kept every prior turn would be a lie in
-  the direction that costs money: the next question is still answered
-  against a conversation the user can no longer see, and still billed for
-  it. So `chatNewChat` archives, empties, and tears the connection down so
-  the next turn opens a fresh `session/new`. That is deliberately the
-  agent switch's own teardown-and-restart — one honest path, already
-  tested — rather than a second "reset" verb reaching into the handshake
-  to re-issue session/new by itself. `chatRestartSession` is a no-op while
-  detached and never clears the `dead` verdict: reconnecting is a side
-  effect here, not the user asking to retry a crashed agent, and quietly
-  borrowing that gesture would turn "new chat" into a spawn attempt on a
-  machine with no binary.
-- **NOTHING IS DESTROYED, WHICH IS WHY NEITHER VERB CONFIRMS.** Clearing
-  archives first, and opening a saved conversation archives the live one
-  on its way past, so every gesture is reversible from the picker. A
-  confirmation in front of a reversible action trains people to dismiss
-  dialogs. Both verbs DO refuse mid-turn — the agent is mid-sentence and
-  the user is watching it arrive.
-- **The live conversation is saved after EVERY TURN**, not only at
-  teardown (`handleChatTurnDone`, on the error path too; `chatShutdown`
-  catches what was appended after the last one). The transcript is the one
-  thing in the panel that cannot be reconstructed, and the write is one
-  small file where the turn already cost seconds of model time. Same split
-  session.go makes by recording a folder VISIT at startup: a run that dies
-  must cost as little as possible of what actually happened. The save is
-  SILENT on failure — it is bookkeeping nobody asked for, and the failure
-  surfaces where it means something, in a picker that lists nothing.
-- **ONE CONVERSATION IS ONE FILE.** `archiveID` is minted on the first
-  save and reused for every later one, so a hundred-turn chat is one row
-  rather than a hundred. A restored conversation CONTINUES its own entry
-  for the same reason — two rows differing only by where the user stopped
-  reading is exactly the list nobody can navigate. Ids carry the full
-  nanosecond field: a clear mints the next id microseconds after saving
-  the previous one, and a coarser tail collides there, which means one
-  conversation silently overwriting the other's file.
-- **A RESTORED CONVERSATION IS A READING SURFACE, NOT A RESUMED ONE, AND
-  THE PANEL SAYS SO.** ced archives the transcript it drew; the agent's
-  memory lived in a session that died with its process. ACP's
-  `session/load` could in principle resume one, but it is optional,
-  agent-side, and replays the whole history back as `session/update`
-  notifications — which would double every message against the transcript
-  ced just restored. So restoring loads text, starts a fresh session, and
-  writes an info line naming the gap. Silence there is the worst outcome:
-  the gap is invisible until a follow-up gets a confidently unrelated
-  answer three messages later.
-- **Reading needs no agent** — `chatOpenArchived` reveals the panel
-  through `chatRevealPanel`, not `chatOpenPanel`. That one means "I want
-  to talk to the agent" and refuses when there is nobody to talk to, which
-  would hide the archive on exactly the machine where it is all that
-  survives of the conversation. The start is still attempted, silently, so
-  a follow-up has somewhere to go.
-- **A clear keeps the prompt history and the pending attachments.**
-  Up-arrow recall is a typing convenience that spans conversations the way
-  a shell's history spans directories, and an attachment describes the
-  message the user has not sent yet — `chatDisconnect`'s own argument. The
-  selection goes, because its row numbers are about to mean nothing.
-- **A promptless panel is not a conversation** (`chatArchiveWorth`): one
-  that opened, printed "starting Copilot chat", and closed would otherwise
-  fill the Recent list with rows nobody can tell apart or remember making.
-- **The archive is USER-scoped, and a row names the project only when it
-  isn't this one.** A conversation is reached for by what was ASKED
-  ("what did I work out about the caret blink?"), which does not always
-  live in the folder you are standing in — and a marker repeating the
-  current project on every row spends width the TITLE needs while
-  distinguishing nothing (the status bar's empty-directory rule).
-- **A directory of documents, not a key in state.json** — the inverse of
-  why state.json is separate from config.json. A transcript is far bigger
-  than anything else ced persists, so folding it in would make every
-  folder switch's rewrite proportional to how much the user has chatted,
-  and one bad write would cost the tab list too. One file per conversation
-  also makes the retention cap a trim of old FILES, and `rm` a working
-  delete. Per-file degradation as everywhere else: one unparseable
-  transcript costs itself, never the picker.
-- The picker is `openPicker` (house rule) and EXCLUDES the live
-  conversation — picking it would reload the panel from a copy of itself
-  (the recent-folders rule). `chatArchiveDirFn` / `chatArchiveNow` are
-  package vars; newTestApp pins the directory at a temp dir, so no test
-  run can write fixture transcripts into the developer's real archive or
-  prune their oldest conversations to make room.
-- Leaders: **Esc-a-x** new (x for cleared, and the namespace's 'c' is the
-  panel itself), **Esc-a-r** recent. Both collide with a top-level
-  binding on purpose — the prefix already said which world you're in. The
-  ≡ rows sit under "Copy chat transcript": all three are about the
-  transcript as a THING rather than about the agent answering into it.
-  "New chat" dims on an empty panel; "Recent chats" stays clickable with
-  an empty archive and says so in a flash (the MCP/Skills rule).
-
-### Summarize with AI (app/summarize.go)
-The AI namespace's one READING verb: what does the selected text — or
-the whole file, when nothing is selected — actually say. Esc-a-z, ≡
-Copilot. House rules:
-
-- **It owns almost nothing, and that is the point.** What text goes out
-  is a `chatAttach`, so the payload comes from the open BUFFER including
-  unsaved edits, is capped with the cut announced, and takes whichever
-  wire shape the agent advertised. Where the answer goes is the chat
-  panel as a normal visible turn (the gitPanelSuggestCommit rule) —
-  **not a modal**: a summary is prose of unknown length the user will
-  read beside the code, scroll, copy and ask a follow-up about, which is
-  a transcript, not a dialog. Whether the agent can answer is
-  `chatUnavailableReason`, surfaced rather than dimmed away. Nothing
-  here claims the answer afterwards; what is left is the target rule and
-  the prompt.
-- **`selectionOrFileTarget` is the SHARED target resolver** — selection
-  beats file, the same narrower-question-wins rule `chatAutoAttachment`
-  follows — and both verbs built on it (this one, the GoNotes capture)
-  go through it, so "the current text" can never mean two things. The
-  verb is a parameter only because the REFUSAL has to name it: "open a
-  saved file" alone reads as a complaint about the editor.
-- **`chatAttachOnce`, not `chatAddAttachment`.** The latter is the
-  user's own attach gesture, so it flashes and opens the panel; here the
-  attachment is machinery serving a verb the user named, and the
-  duplicate case is the COMMON one — with auto-context on (the shipped
-  default) the active file is already synthesized for every turn, so a
-  flash saying so would be noise on the default configuration.
-- **The prompt asks for prose, unlike the commit-message prompt.** That
-  answer had to land in a single-line field, so over-specifying was
-  cheaper than parsing what came back; this one lands in a transcript
-  that word-wraps prose and hard-wraps fenced code. The only real
-  constraints are LENGTH (the panel is a narrow strip) and that the
-  answer DESCRIBE the text rather than review it — "what does this do"
-  is the question, and a list of suggested improvements is a different
-  one the user can now ask as a follow-up, in the panel already open in
-  front of them.
-- Agent-agnostic, like the chat toggle beside it. The ≡ row is in the
-  Copilot section (under ≡ AI) beside the chat rows it feeds, and its
-  label names what it will cover — a selection changes the question
-  completely, and that has to be visible before a click spends a turn.
-  Leader is **Esc-a-z**: summariZe, the letter the word offers once 's'
-  is skills and 'm' is the model picker.
-
-### GoNotes capture (internal/gonotes + app/gonotes.go)
-The selected text — or the whole file — saved as a new note in the
-user's running GoNotes server, with the title typed or agent-drafted.
-Esc-a-n, ≡ Notes. House rules:
-
-- **THE SELECTION IS THE BODY, VERBATIM.** Nothing is prepended to it: a
-  note is a document the user will open and edit later, and a header ced
-  invented is the first thing they would have to delete. Provenance goes
-  in the note's DESCRIPTION (`ced: <project>/<path>:<lines>`), which is
-  where GoNotes shows a subtitle and where it stays out of the text. The
-  project name is part of it — a bare path means nothing in a notes
-  database fed by a dozen repositories. Every capture is tagged `ced` so
-  the set is findable.
-- **The text comes from the BUFFER** (`attachContent`, shared with the
-  chat attachments — `chatAttachContent` is now the 64KB wrapper over
-  it). You capture what you are looking at, unsaved edits included;
-  saving the stale on-disk copy of a file the user just changed is the
-  one failure here nobody would notice until much later. The note cap is
-  far higher than the chat one because the cost model is different: this
-  text goes to a database, not into a prompt turn, so it pays no tokens.
-- **HTTP, not the database.** GoNotes' bytdb files are SINGLE-WRITER —
-  a second writer is not a race to be careful about, it is a file that
-  won't open — so the server that owns them is the only safe path to
-  them. Same conclusion GoNotes' own TUI reached for its cats-hosted
-  mode. Stdlib only, no SDK, no CGO.
-- **Every knob is an ENVIRONMENT VARIABLE, and they are GoNotes' own**
-  (`GONOTES_URL`, `GONOTES_USER` / `GONOTES_SYNC_USERNAME`,
-  `GONOTES_PASSWORD` / `GONOTES_SYNC_PASSWORD_B64`,
-  `GONOTES_TOKEN_FILE`). A ced config key would be a second place to say
-  the same thing and a second place for it to be wrong, and it would put
-  a credential in a file ced writes. The JWT cache is the SHARED
-  `~/.gonotes/.api_token`, so a user who signed in through the GoNotes
-  TUI is already signed in here; writing it back is best-effort, 0600
-  under a 0700 parent.
-- **One login, one retry, never a loop.** The cached token is tried
-  first (the common case costs no extra round trip) and only a 401
-  spends a login. A wrong password re-sent forever is worse than one
-  visible failure. No credentials at all is `ErrNoCredentials`, which
-  names the variables rather than repeating "unauthorized".
-- **AVAILABILITY IS DISCOVERED BY TRYING.** Nothing probes at startup
-  and the ≡ row never dims on the server's state: GoNotes is a separate
-  process the user starts and stops, so a row that vanished whenever it
-  was restarted would be wrong exactly when the user asked. A failure
-  therefore opens the INFO MODAL rather than flashing — those messages
-  carry the address dialed and the server's own words, and "connection
-  refused" is only actionable once you can read which URL refused.
-  Success is a flash; nothing is lost either way, since the text is
-  still in the buffer.
-- **Nothing saves without an Enter, and the agent is a REASON, not a
-  gate.** The ✦ button sits on the prompt whatever state the agent is in
-  and says why when it can't ask (`commitDraftBlockedReason`, the
-  menuCopilotAuth rule); a drafted title only ever pre-fills the field.
-  The suggestion is a normal visible chat turn claimed by generation +
-  transcript mark (`noteTitleReq`) — the same staleness discipline as
-  the commit draft, and it yields the modal slot to a pending permission
-  prompt for the same reason.
-- **The `[private: off]` chip is on EVERY note prompt**, unlike the
-  commit prompt's trailer chip, which appears only on a draft: privacy
-  is a statement about the TEXT being captured, equally true whoever
-  wrote its title. It is per-invocation (no persisted key) and travels
-  with `noteTitleReq`, so a re-draft doesn't re-arm what the user just
-  switched off. `alt+p` is its chord, `alt+a` the ✦ button's, both named
-  in the hint — a modal owns the keyboard, so the ≡ menu is unreachable
-  from inside a prompt.
-- **`agentOneLine` is the shared reduction** behind `commitSubject` and
-  the note title: a single-line input field is about to receive whatever
-  the agent felt like writing, and a fence or a "Title:" prefix would be
-  saved verbatim. Its own ≡ section ("Notes", under Tools, beside
-  Plugins) — a separate system ced talks to, not a feature of any
-  subsystem here. `gonotesCreate` is a package var;
-  newTestApp pins it at a refusal so no test run can write fixture text
-  into a developer's real notes database.
-
-### MCP servers (internal/mcp + app/mcp.go)
-Model Context Protocol support. **One inventory, two consumers** — hold
-onto that and the rest follows:
-
-1. **The chat agent.** Enabled servers are declared in ACP's
-   `session/new` `mcpServers` array (`mcpDeclarations`, called from
-   `chatInitialize`), and the AGENT spawns its own copies. This is the
-   path that makes MCP useful day to day and it needs no connection from
-   ced at all. It is agent-agnostic — not a Copilot feature.
-2. **ced itself**, so a user can verify a server works, read its tool
-   list, and run one by hand from ≡ → MCP.
-
-House rules:
-
-- **The inventory is `~/.config/ced/mcp.json`, in the ecosystem's shape**
-  (`{"mcpServers": {name: {command, args, env, …}}}`, VS Code's
-  `"servers"` accepted too) so a user pastes the block they already have.
-  A separate file from config.json for the actions.json reason: flat
-  toggles the ≡ writes back vs. a nested inventory the user hand-edits,
-  and a syntax error in one must not disable the other. `userconfig`
-  owns only the PATH (`MCPPath`); the parser lives in `internal/mcp`.
-- **Nothing spawns at startup.** `New` reads the inventory; ced connects
-  only on a deliberate ≡ action. "I declared a server" must never mean
-  "the editor launched three node processes while I wasn't looking".
-  Silent degradation is PER SERVER: one that won't start gets a `✕` row
-  with the reason, no modal, and no auto-restart (Reconnect is the retry
-  gesture, same as every other integration).
-- **Same transport, not a new one.** MCP stdio framing IS ndjson, so it
-  rides `lsp.StartNDJSON` (ndjson.go — `StartACP` is now an alias of it).
-  Do NOT add an MCP SDK or a second framing layer. The handshake is
-  three steps, not two: `initialize`, then the
-  `notifications/initialized` NOTIFICATION. ced answers `ping` and
-  `roots/list` (that's how a server scopes itself to the project) and
-  honestly declines `sampling`/`elicitation` — they want an LLM and a
-  prompt surface this client hasn't got.
-- **ced's own client is stdio-only.** http/sse entries still parse and
-  are declared to the agent (gated on the agent's advertised
-  `mcpCapabilities`; an unsupported one is dropped and NAMED in the
-  transcript note, because some agents reject the whole `session/new`
-  over one unreachable entry). ced's picker offers such a server only
-  "Server info", which says why.
-- **Generation-checked, events-only**, like the chat layer: every
-  connection carries a seq, teardown bumps it, and a ready/result event
-  from an older generation is dropped — and a stale ready event CLOSES
-  the client it carried, or a disconnect leaks the process it disowned.
-- Surfaces are all palette pickers (the house rule): servers → per-server
-  actions → tools → a JSON-arguments prompt pre-filled from the tool's
-  schema (`mcpArgSkeleton`; `"{}"` means "just run it"). Bad JSON flashes
-  the parse error and hands the text BACK. Results open in the info
-  modal, which does not scroll — hence the capped preview plus the
-  full text kept on `mcp.lastResult` for the "Copy last result" row.
-- `Describe()` shows env KEYS, never values: picker rows end up in
-  screenshots and bug reports.
-
-### Agent skills (internal/skills + app/skills.go)
-The folders of markdown instructions the coding-agent ecosystem keeps in
-`~/.claude/skills` and `<project>/.claude/skills`. ced reads those
-directories AS THEY ARE (plus `~/.config/ced/skills` for skills written
-for ced itself) — nobody should have to duplicate a folder to use it
-here. House rules:
-
-- **A skill is PUSHED, and only on purpose.** ced is not a model; it
-  can't read a description and decide a skill applies. So there is no
-  auto-selection and no skill index riding along on every prompt — the
-  user picks one from ≡ → Skills, it attaches, and it goes out with the
-  next message. That also keeps the cost visible: the chip is on screen
-  before Enter.
-- **Attachment, not a new mechanism.** A skill IS a `chatAttach`
-  (copilot_chat_context.go) carrying a `skill`/`skillDir` pair: same
-  chips, same ✕, same per-turn consumption, same size cap, same
-  embedded-resource / fenced-block wire formats. The additions are the
-  label (`skill: <name>` — a personal skill's path is outside the
-  project, so `relativePathFor` would render `../../` noise) and
-  `chatSkillDirective`, which leads the TEXT block because that is the
-  one part of the payload the agent reads in BOTH wire shapes. It says
-  the markdown is a procedure to follow and names the skill's DIRECTORY:
-  ced ships only the SKILL.md (a skill folder can run to megabytes), so
-  naming the directory is what keeps its scripts and references reachable
-  by an agent that has fs access.
-- **Agent-agnostic**, like MCP: whatever backend the panel is running
-  gets the skill. Not a Copilot feature, hence its own ≡ section (a
-  sibling of Copilot and MCP under ≡ AI).
-- **Nothing is executed.** A skill is markdown ced hands to an agent,
-  never a script ced runs. That's what keeps these directories on the
-  right side of the no-plugin-system line — same as themes being data.
-- **Precedence is ced < user < project, shadowing by name IN PLACE of a
-  second row** (the theme registry's rule): a checked-in skill overriding
-  a personal one is the whole reason to scan a project directory, and two
-  rows with one name in a picker is a bug report.
-- Frontmatter is parsed by hand (`parseFrontmatter`) — quoted scalars,
-  block scalars, wrapped continuations, nested structures skipped. Do NOT
-  add a YAML dependency for two string keys. A file with no frontmatter
-  still loads, named by its directory; only an unreadable file is an
-  error, and it costs that one skill.
-- Both pickers rescan first, so a skill written moments ago in ced is
-  already there — the theme feature's save-to-preview loop, minus the
-  save hook. `skillsUserDirFn` / `skillsCedDirFn` are package vars;
-  newTestApp pins them at temp dirs so no test reads the developer's real
-  skills.
-- Leader: **Esc-a-s**, in the AI namespace with the rest of the chat
-  surface. (It was briefly a top-level `Esc S` — the flat table having
-  nothing better left is what argued for the namespace.)
-
-### Declarative plugins (internal/plugins + app/plugin*.go)
-`~/.config/ced/plugins/<name>/plugin.json` — shell commands the user
-already had permission to type, bound to menu rows, leader keys, editor
-events, and a decoration overlay. **It is actions.json one octave up**,
-which is the frame to keep: actions.json answered "give me a menu row
-that shells out", and this answers the three things that row could never
-do — put output back in the buffer, run without being clicked, and paint
-over the code. Prompt collection is imported wholesale from
-`customactions` (same schema, same form modal, same env-var contract) so
-there is one dialect, not two. House rules:
-
-- **A plugin is DATA, and ced never becomes a host.** Nothing is loaded,
-  compiled, or interpreted; a manifest can only say WHEN to run a
-  command and WHERE its stdout goes. That is what keeps `plugins/` on
-  the themes-and-skills side of the What-NOT-to-add line rather than
-  making it the plugin system that entry rules out. The test of a
-  proposed field is whether it still reduces to "a command line plus a
-  place to put its output" — `input`/`output`/`on`/`glob` do; a callback
-  into editor internals would not.
-- **Nothing runs at startup.** `New` reads manifests; the first command
-  fires on a file open, a save, or a deliberate pick. The MCP promise,
-  for the same reason — "I wrote a manifest" must never mean "the editor
-  ran three commands while I wasn't looking". The `"plugins"` config key
-  (default on, `SavePlugins`, ≡ toggle) is the kill switch, and it is
-  honoured at EVERY surface — menu, palette, leader, hooks, and the
-  decoration source — not just at load. Off means the marks leave the
-  screen too.
-- **stdout is the answer, stderr is the complaint**, captured separately
-  and never merged on the command path. A formatter that prints a
-  deprecation warning to stderr must not have it spliced into the user's
-  source — which is exactly what one `CombinedOutput` here would do. The
-  DECORATION path deliberately reads both, because `go vet` and half the
-  Go toolchain report findings on stderr, and it ignores exit status
-  because a linter exits non-zero precisely when it has something to say.
-- **Nothing is written back over a buffer that moved.** Every run
-  captures (path, EditRev) and the range it may overwrite BEFORE the
-  goroutine starts; a mismatch discards the output with a flash. Same
-  staleness discipline as ghost text and the chat results, and for the
-  same reason: by the time the command exits, the tab, the selection and
-  the cursor may all be somewhere else. A replace is ONE undo step
-  (`InsertString` over a selection already records exactly one), and a
-  whole-file replace captures and restores the view through
-  `RestoreView` — which is the right primitive because it does NOT set
-  `cursorMoved`.
-- **Decorations are a DecorationSource, keyed by (file, provider)**, so
-  a re-run replaces its own marks and nobody else's, and an EMPTY result
-  still replaces — that's how findings disappear when the user fixes
-  them. Precedence is **git < plugin < LSP**: a plugin mark outranks the
-  ambient git change bar because the user installed it deliberately, and
-  loses to gopls because a compile error is the more urgent thing to say
-  in the one gutter cell. Its glyph is `◆`, deliberately not the LSP's
-  `●` — when both have something to say, telling them apart is the point.
-- **The output format is the compiler/grep convention**
-  (`path:line:col: severity: message`), parsed by hand in diag.go. That
-  choice is the whole reason decorations are worth having: a useful
-  provider is a one-liner the user already knows how to write (`grep -n
-  TODO`, `go vet`, `shellcheck -f gcc`, `eslint -f unix`). A format ced
-  invented would have made the feature theoretical. Unparseable lines
-  are DROPPED, never reported — real tools interleave summaries and
-  progress with their findings. Findings naming a DIFFERENT file are
-  dropped too: the decoration layer is strictly per-file.
-- **Esc-x is the plugin namespace, and the codebase's only DYNAMIC
-  prefix** (`leaderBinding.subFor` / `hintFor`, resolved on every arm
-  because a table baked at startup goes stale the moment the user hits
-  Reload). It clears the second-namespace bar from the opposite
-  direction to Esc-a: that one existed because a fixed surface outgrew
-  the flat table, this one because plugin keys are UNBOUNDED and belong
-  to the user — every letter they took would be one ced could no longer
-  bind, and any letter ced later bound would silently break somebody's
-  plugin. An EMPTY namespace arms nothing (it would otherwise swallow
-  the next keystroke on the overwhelmingly common plugin-free machine).
-  Leader collisions are first-declared-wins over the name-sorted
-  inventory, and the loser is named in the ≡ Plugins report.
-- **The edit event is debounced at 800ms and armed only while something
-  listens** — longer than the LSP's 300ms because this spawns a PROCESS,
-  and gated because a standing timer in an event-driven loop wakes an
-  idle editor forever (the caret-blink constraint).
-- **Degradation is per plugin** (the theme registry's rule): one broken
-  manifest names itself in the ≡ label and costs that plugin only.
-  Startup is silent — load errors are HELD on the state, not flashed,
-  because a startup flash scrolls past before anyone looks.
-- **The inventory is USER-scoped, deliberately.** There is no
-  `<project>/.ced/plugins`: a checked-out repo that could run shell on
-  open would be a supply-chain hole, and the honest version of that
-  feature is format.json's trust store (`format.LoadTrust` /
-  `CheckTrust`, hash-pinned per project). If project plugins are ever
-  added, they go through that gate — not on their own.
-- `pluginsDirFn` / `pluginConfigPathFn` / `pluginShell` are package vars;
-  newTestApp pins the first two at temp dirs and the third at a stub that
-  refuses, so no test can read the developer's real plugins or execute
-  one. This matters more here than anywhere else in the harness, because
-  a plugin IS an arbitrary shell command and open/save fire hooks by
-  themselves. `TestRunPluginShell_RealShell` is the one exception and is
-  restricted to `cat`/`echo`.
-
-### Compare panel (internal/diff + app/compare.go)
-A unified diff of the file you're editing against another file, its own
-saved copy, or text you just pasted — the fourth occupant of the bottom
-strip. House rules:
-
-- **The active buffer is the NEW side, always.** Not cosmetic: it makes
-  the `+` lines the ones that exist in the open file, so `diffTargetLine`
-  — written for the git panel — maps a display row straight to a line in
-  the tab and the double-click jump costs nothing. It also reads the way
-  the question is asked ("what have I got that the saved copy hasn't?").
-- **Pure Go (internal/diff), not `git diff --no-index`.** The sources
-  here are BUFFERS, so shelling out would mean temp files, and neither
-  git nor the repository it wants is guaranteed to be there. Same
-  argument the project search made against ripgrep — and it's why
-  Compare is its own ≡ section (nested under File, since every source it
-  takes is a file or a buffer) rather than rows under Git: none of it
-  needs a repo.
-- **The differ is patience, and that's a correctness choice as much as a
-  performance one.** Anchoring on lines that appear exactly ONCE on each
-  side is what stops "a new function was added" from rendering as "every
-  closing brace moved". A full LCS table is the fallback INSIDE small
-  unanchorable regions only (`lcsCellBudget`); past that the region is
-  reported as a wholesale replace, because an n·m table on two 20k-line
-  files is 400M cells. The common-suffix peel is COUNTED, not collected —
-  prepending each line made a one-line-edit-at-the-top diff quadratic.
-- **`SplitLines` does not invent a trailing empty line.** A file ending
-  in `\n` has as many lines as it has newlines; counting a phantom one
-  would report an edit on every buffer-vs-file comparison.
-- **Both sides come from the BUFFER when the file is open** — you compare
-  what you're looking at, including unsaved edits (the chat-attachment
-  rule). The one exception is a file compared with ITSELF, which only
-  means anything against the saved copy: that side reads from disk and
-  the label says `(saved)`, since "t.txt ↔ t.txt" would look like a bug.
-- **Pasted text is a first-class source** because ced cannot READ the
-  system clipboard (OSC 52 is write-only, and that's correct for an
-  SSH-first editor). "Compare with pasted text" ARMS the panel — visibly,
-  with the instruction in the body, because a mode you can't see is a
-  mode nobody knows they're in — and `comparePasteTarget` then outranks
-  the editor, chat and terminal for the next bracketed paste. It can only
-  be armed deliberately, which is what makes outranking them safe. Cmd+V
-  feeds it from the internal clipboard; Esc disarms it as a side effect,
-  like clearing the ghost.
-- **⟳ re-reads the file side, and re-diffs a pasted one.** A diff is a
-  snapshot and both sides move; `compare.oldPath` is kept for that rather
-  than reconstructing a path from `oldLabel`, which is prose (it carries
-  "(saved)") and wouldn't survive a path outside the project root.
-- Guards mirror fileio's open guards — size checked on the STAT, one NUL
-  in the first 8KB is binary — because a file ced won't open has no lines
-  worth diffing either.
-- It is a TOOL WINDOW (toolwindow.go), bottom by default: single
-  occupancy on whatever edge it is docked to is `claimDock`'s, and
-  `openComparePanel` no longer names the panels it evicts. It is also
-  the one tool whose ≡ show row opens a PICKER rather than the panel
-  — a diff has two named sides, so there is no such thing as opening it
-  empty. No leader key: the three verbs are ≡ / palette rows
-  (the flat table is out of mnemonic letters, and this isn't a namespace's
-  worth of surface).
-
-### Git panel checkboxes + Actions (app/gitpanel.go + gitpanelactions.go)
-The panel's checkbox is a **multi-selection tick, not a stage toggle**.
-It used to stage/unstage on click, which capped the panel at exactly one
-verb; the tick now feeds the header's `Actions ▾` button, and staging is
-one row in that list beside unstage, discard, delete, open, copy path,
-commit, and the two select-all/clear helpers. House rules:
-
-- **Don't put staging back on the checkbox.** Stage state is carried by
-  the porcelain XY code column, drawn VERBATIM (`" M"` unstaged, `"M "`
-  staged, `"MM"` both — exactly `git status -s`) with the index char
-  bolded. Trimming that code collapses staged and unstaged into one
-  glyph and the panel loses its only staged indicator.
-- **The picker, not a dropdown**: `Actions ▾` opens `openPicker`, per
-  the modal house rule that every choose-one-from-a-list UI reuses the
-  palette. Rows are omitted when they'd no-op (no Unstage with an empty
-  index) rather than dimmed.
-- **Targets fall back to the highlighted row** when nothing is ticked
-  (`gitPanelTargets`), so the first click on Actions is already useful.
-  Ticks are keyed by absolute path and **pruned on every refresh** — a
-  tick for a file that left the change list would silently widen the
-  next bulk action.
-- The header rule is still the height-drag handle, so `gitPanelPress`
-  carves out `gitPanelActionsRect` and `gitPanelCloseRect` before
-  starting a drag. Both rects are the single source draw and hit-test
-  share (the btnRect rule).
-- Writes go through `runGitCmd` (one fork for the whole set, failures in
-  the info modal); Discard and Delete confirm first. The ≡ Git group's
-  "Git panel actions" row is the keyboard twin of the button — the panel
-  is mouse-driven, but macOS Terminal can swallow clicks.
-
-### Commit rows + agent-drafted messages (app/gitcommitmsg.go)
-The panel's Actions list can commit the ticked files themselves, and ask
-the CURRENT chat agent (whatever backend is active — this is not a
-Copilot feature) to draft the message for exactly those files. House
-rules:
-
-- **A commit of the selection stages first.** `gitCommitFiles` runs
-  `add --` then `commit -m … --` through `runGitCmdSeq` (one goroutine,
-  stop at the first failure, ONE done-event): the panel's tick is a
-  work-tree statement, so committing only what happened to be staged
-  would silently commit a stale version. The pathspec-limited commit
-  leaves anything else already staged in the index — that's what makes
-  the row safe on a half-staged tree. "Commit staged…" (no targets) is
-  still the plain index commit.
-- **A suggestion is a normal, visible chat turn** — never a hidden
-  second session. `gitPanelSuggestCommit` opens the panel first (a
-  request streaming into a hidden panel reads as a hang), collects the
-  diff off-loop (`gitCommitDiffEvent`), and sends through
-  `chatSendPrompt`, the single dispatch point. The transcript gets a
-  short ask, not the patch; the panel is a narrow strip.
-- **The answer is claimed by generation + transcript mark**
-  (`commitSuggestReq`), the same staleness discipline as every other
-  chat result — never "the last agent message". A cancelled or errored
-  turn drafts nothing, a torn-down connection's answer is dropped
-  (`chatDisconnect` clears the request), and the draft never steals the
-  modal slot from a pending permission prompt.
-- **Nothing commits without an Enter.** The draft only PRE-FILLS the
-  commit prompt. `commitSubject` strips fences, "Commit message:"
-  labels, bullets and quotes and keeps one line, because the prompt
-  field is single-line — an unparsed answer would put a markdown fence
-  in a commit.
-- **The diff is capped and includes untracked contents.** `diff HEAD`
-  so a half-staged file arrives as one change; untracked targets have
-  no diff at all, so their text is appended under a `new file:` marker
-  or a commit of only-new-files would look empty to the agent.
-- The ≡ Git group's "Suggest commit message" row is the keyboard twin
-  and takes the same targets.
-- **A DRAFTED message is attributed; a typed one never is.** Config
-  `"commitmsgtrailer"` (default on, `SaveCommitMsgTrailer`, ≡ Git
-  toggle) appends `Co-Authored-By: <agent name> <noreply@…>` — the
-  address is deliberately non-routing (`chatAgentDef.coAuthorEmail`),
-  because the trailer is a RECORD that a machine wrote the sentence,
-  not a mention of an account ced never verified. `openCommitPrompt`
-  (typed) and `openCommitPromptDraft` (the agent's) are separate entry
-  points for exactly this reason, and the `[trailer: on]` chip beside
-  the ✦ button appears only on the drafted one — a chip over
-  hand-written work would state something the user can't act on. The
-  chip is a PER-INVOCATION copy (the ≡ row is what persists), and it
-  travels with `commitSuggestReq` so a re-draft doesn't re-arm what the
-  user just switched off. `commitMsgWithTrailer` is idempotent.
-- **`promptModal.extras` is the generic button row** behind both the ✦
-  button and the chip: `extras[0]` holds the modal's right edge and the
-  rest lay out leftwards, each with a RESERVED width (a toggle's label
-  changes length; the target must not). The modal WIDENS to carry them
-  (`promptModal.width`) — and refuses to on a terminal too narrow,
-  where `extraRects` sheds extras from the left instead of painting a
-  truncated click target. Each extra carries an **Alt chord**
-  (`promptExtra.key` → `fireExtraKey`: `alt+a` drafts, `alt+t` flips the
-  chip), safe for the find bar's reason — the modal consumes the
-  keystroke, so handleKey's Alt+rune leader branch never sees it, tmux's
-  folded "Esc a" included. It is not optional garnish: the ≡ menu, where
-  every other keyboard twin lives, is unreachable from a surface that
-  owns the keyboard, so without the chord these buttons would be
-  mouse-only on the one terminal that eats clicks. The chord fires even
-  when the button was SHED for width — a key can't lie about its target
-  the way a truncated button can — and `commitPromptHint` names it in
-  the subtitle, the prompt's only discovery surface.
-- **AGENT AVAILABILITY IS A REASON, NOT A GATE.** The ✦ button sits on
-  every commit prompt in a repo, and the Suggest rows on every change,
-  whatever state the agent is in; `commitDraftBlockedReason` (over
-  `chatUnavailableReason`, the one spelling shared with
-  `chatOpenPanel`) is what says no. That's the menuCopilotAuth rule, and
-  three things force it here: a verdict of "not installed" is only
-  DISCOVERED by starting the agent, so hiding the button pre-emptively
-  hides it from the very machine that needs the message most; a user
-  whose configured backend has no binary on PATH (`"chatagent"` naming
-  an agent they never installed) otherwise gets a commit dialog with no
-  AI affordance and nothing at all to explain the absence; and the
-  reason names the binary, which the absence cannot. The refusal is
-  checked BEFORE the modal closes — a no must not cost the user the
-  message they had already typed. `canSuggestCommitMsg` is therefore
-  down to the one question that makes the ACTION meaningless rather than
-  merely unavailable: is this a repository.
-
-### The commit receipt (app/gitcommitreceipt.go)
-For a few seconds after a commit lands, a panel naming the hash git just
-minted and the whole message that went with it. House rules:
-
-- **IT IS PASSIVE, AND THAT IS THE WHOLE DESIGN.** It never takes the
-  modal slot: nobody asked a question, so nothing here may own the
-  keyboard — the hoverdwell argument, and the same reason an arriving
-  `git status` report DECLINES an occupied slot. A modal would spend the
-  user's next keystroke making them dismiss a receipt for something they
-  already know happened. It paints on the passive layer beside the dwell
-  tooltip (above the panels, below the menu and modals), so it opens only
-  when neither of those owns the screen — a receipt drawn underneath one
-  would be invisible for its whole window and then expire unread.
-- **Dismissed by anything, and the keystroke is NOT consumed.** The
-  expiry is a one-shot `time.AfterFunc` posting a seq-stamped event (the
-  events-only rule; the seq is what stops a second commit inside the
-  window being closed early by the first one's timer), and any key or any
-  press closes it sooner. A press INSIDE the box is swallowed — it covers
-  code the user cannot see, the completion popup's contract — but a
-  keystroke never is: this is chrome nobody asked for, so it must not
-  cost a character. Same rule as clearing the ghost text.
-- **The facts are REPORTED, never re-derived.** The panel reads `git log
-  -1`, not the message string ced sent: hooks rewrite messages, cleanup
-  rules trim them, and the hash cannot be known any other way. It is also
-  why this hangs off a SUCCESS hook rather than off the prompt — both
-  facts exist only after git exits.
-- **`gitCmdDoneEvent.onOK` is that hook, and it is onFail's twin** —
-  built on the main loop, carried by the goroutine, called only on the
-  loop, riding the EVENT so two commands in flight can't claim each
-  other's follow-up. `runGitCmdOK` / `runGitCmdSeqOK` are the wrappers;
-  the sequence flavour is safe by construction, since one done-event for
-  the whole set already means a stage that failed never reached the
-  commit. `gitCommitFiles` is the single place that arms it — every
-  commit in the editor comes through there, so a new commit surface gets
-  the receipt for free.
-- **A failed or unreadable `git log` costs the receipt, not the commit**,
-  which already succeeded and already flashed (silent degradation, the
-  LSP/formatter contract). The hash is validated as hex before anything
-  is shown, and NOT pinned to 40 characters — a receipt has no reason to
-  have an opinion about SHA-1 vs SHA-256.
-- **Wrapping runs per SOURCE line and blank lines survive.** A commit
-  message's line structure is authored (the subject stands alone,
-  paragraphs and bullets are separated on purpose), so flowing it as one
-  blob would run the subject into the body and report a message the
-  repository does not hold. The body is capped and the cut is MARKED
-  (`capLines`) — a silently short message reads as one that was silently
-  truncated on the way in, the one wrong thing a receipt could say.
-- No ≡ row and no leader key: it is not a verb, it is what a verb says
-  back.
-
-### Git log panel (app/gitlog.go + gitlogactions.go)
-A JetBrains-style history browser (Esc-L) in the SAME bottom strip as
-the changes panel: commits on the left (● marks ref-decorated rows;
-`--all` so cherry-pick can reach other branches, capped at 400 with a
-"400+" title when truncated), the selected commit's `git show
---pretty=fuller --stat --patch` on the right. It deliberately MIRRORS
-gitpanel.go's shape rather than sharing code — the house patterns are
-the shared part. House rules:
-
-- **It is a TOOL WINDOW** (toolwindow.go), bottom by default, and single
-  occupancy on its edge is `claimDock`'s — the log no longer closes the
-  changes panel, the compare view and the terminal by name. Its rect,
-  height and width are reads of the layer, so the same panel drawn on
-  the right edge runs full height and resizes by that edge's seam.
-- **Verbs live behind `Actions ▾`** (openPicker, the house rule):
-  cherry-pick, revert, reset, detached checkout, branch/tag creation,
-  the two copies. Labels name the branch and hash they'll touch. Reset
-  modes are a SECOND picker; only `--hard` confirms — soft/mixed are a
-  reflog entry away from undone, and cherry-pick/revert CREATE commits.
-  The ≡ "Git log actions" row is the keyboard twin.
-- Header buttons are single-width glyphs through btnRects: `⧉ hash`
-  (one-click full-hash copy), `⟳` (manual refresh), `✕`. The rule
-  outside them is the height handle; the list/detail divider drags too.
-- **Refresh rides refreshGitStatus** (no-op while collapsed), so
-  finished git commands and the 10s tick keep it honest for free.
-  Selection is preserved BY HASH across refreshes; a detail pane
-  already showing the selected hash is never refetched (commits are
-  immutable). Detail fetches post `gitLogShowEvent`s and stale results
-  drop against the current selection.
-- Double-click on a detail row jumps to the file/line that diff row
-  touched (`gitLogDetailTarget` — diffTargetLine generalized to a
-  multi-file patch, paths resolved against the repo toplevel and
-  confined to rootDir). Best-effort: history may have moved on, so a
-  line past EOF clamps.
-
-### Git status report (app/gitstatusreport.go)
-The ≡ Git group's "Git status…" row — and the same row in the changes
-panel's `Actions ▾` picker: git's own long-form report, forked on demand
-and shown in the info modal. House rules:
-
-- **It exists for what the porcelain snapshot DROPS.** gitstatus.go asks
-  `status --porcelain` and keeps two answers — which files changed, and
-  how far HEAD is from its upstream — which is what the tree colors, the
-  changes panel and the status bar are built from. The narrative header is
-  everything else: the sequencer's state (a stopped cherry-pick, a rebase
-  in progress, the still-unmerged paths), what HEAD detached from, whether
-  there is an upstream at all. Re-deriving that would mean parsing four
-  more surfaces. Hence long format, deliberately NOT `--short`: the short
-  form IS the panel's list, so a row producing it would say nothing new.
-- **Two `-c` overrides, both about the surface it lands on.**
-  `color.status=false` because a user with `color.ui = always` would get
-  raw SGR drawn as text in a modal that parses no ANSI;
-  `advice.statusHints=false` because those `(use "git restore …")` lines
-  name shell commands for verbs that are ROWS IN THIS VERY MENU, and the
-  info modal doesn't scroll, so every advice line costs a line of report.
-- **The body is capped to the WINDOW and the cut is named.** openInfo
-  draws every line it is handed and `centeredRect` doesn't clamp, so rows
-  past the bottom would be painted off-screen and lost. The remainder goes
-  in the last surviving row (the project-search rule): a silently short
-  status reads exactly like a clean one, which is the single wrong answer
-  a status can give.
-- **An arriving report DECLINES an occupied modal slot** and flashes
-  instead. The round trip is milliseconds, so what this guards is not a
-  dialog the user opened meanwhile but one that arrived unprompted (a chat
-  permission request, a disk-conflict warning) — openModal replaces rather
-  than refuses, so stealing the slot would silently drop that modal's
-  pending reply. A report is re-runnable; a dropped permission answer
-  leaves an agent stuck.
-- Failures are SURFACED (the write-side contract in gitcmd.go) rather than
-  swallowed the way the background snapshot's are — the user asked for
-  this one. Enabled on any repo, clean included: "nothing to commit" is a
-  real answer, and it is the one a user suspicious of the tree's colors is
-  asking for. No leader key (the flat table is out of letters); the ≡ row
-  gets the command palette for free.
-- **The panel's Actions row reuses `menuGitStatus`**, one spelling of the
-  verb (the menuGitCommit precedent). It is the only row in that picker
-  about the REPOSITORY rather than the selection, which is exactly why it
-  belongs there — the panel draws the change set and structurally cannot
-  draw the rest of git's answer. It is the one row NOT subject to the
-  picker's omit-when-it-would-no-op rule: a clean panel is the case where
-  "nothing to commit, working tree clean" is the answer being asked for,
-  so an otherwise-empty Actions list now offers this instead of flashing.
-
-### Remote open (internal/remote + app/remote.go)
-`ced --remote <file>` hands a file to an instance already running on that
-project; `ced --wait <file>` does the same and blocks until the editor is
-finished with it, which is what makes `EDITOR="ced --wait"` work for
-`git commit`. Without it, `$EDITOR=ced` in another tmux pane starts a
-SECOND full-screen editor nested inside the first one's terminal strip.
-House rules:
-
-- **DISCOVERY IS BY PROJECT ROOT, not "the" instance.** Everything here
-  is rooted — the tree, the finder index, gopls's rootUri, the terminal's
-  cwd — so a file delivered to an instance rooted elsewhere lands in a
-  workspace where none of that applies. A client probes every socket,
-  picks the instance whose root CONTAINS the file (longest root wins),
-  and reports `ErrNoInstance` when none does. `contains` requires a
-  separator at the boundary, or `/a/proj` claims `/a/project-notes`.
-- **ErrNoInstance is a FALLBACK, not a failure.** Both flags start a
-  normal local editor when nothing is listening — a `$EDITOR` that errors
-  out is worse than one that opens the wrong window, and a bare `--wait`
-  then blocks the way any terminal editor does, so git behaves the same
-  either way. A handler REFUSAL is the opposite and must never be
-  confused with it: that returns a real error, because falling back there
-  would silently start a second editor on a file the first one declined.
-- **Sockets are named per PROCESS** (`<root-hash>-<pid>.sock`), not per
-  root. A deterministic per-root name forces every second instance on one
-  project to decide whether to take the socket over, and the honest
-  answer is that it can't — the first one is still running and still
-  wants it. Per-process names let both listen; a client unlinks the ones
-  nobody answers, so a crashed instance needs no reaper. They live under
-  `$XDG_RUNTIME_DIR/ced` (else a per-uid folder in the system temp dir),
-  0700 — **never `~/.config/ced`**: a socket is runtime state that must
-  not survive a reboot. Keep the names short: the kernel caps a unix
-  socket path at ~104 bytes, which is also why the tests can't use
-  `t.TempDir()` on macOS.
-- **Events only, and every waiter is released exactly once.**
-  `serveRemoteOpen` runs on the connection's goroutine, posts an event
-  carrying a buffered reply channel and blocks for the main loop — the
-  ACP permission-request shape, for the same reason (the handler has to
-  block on a decision the loop makes). `releaseRemote` is the single
-  write path and deletes as it closes, so a double release can't panic.
-  Exactly three things release: the tab closing, `Close` (a quit AND a
-  folder switch), and the ≡ toggle going off. A `--wait` client left
-  hanging is a shell prompt in another pane that never comes back.
-- **Closing the tab is the gesture, not saving.** `$EDITOR` callers
-  expect the editor to be FINISHED, not merely to have written once.
-- **The root guard is re-checked on arrival.** A client already refuses a
-  mismatched instance, so `handleRemoteOpen`'s check only fires for a
-  request that didn't come from ced's CLI — and the answer is the chat
-  filesystem's: an error the caller can read, never a file opened outside
-  the workspace.
-- Silent degradation, with one twist: a socket that won't bind costs the
-  handoff, not the editor, and the reason is HELD on the state for the ≡
-  label rather than flashed (a startup flash scrolls past). The label
-  therefore has three states — `on` / `off` / `unavailable` — because a
-  choice and a problem are different answers to "will `ced --remote` find
-  me?", and collapsing them leaves a user toggling a preference that was
-  already on. `"remote"` is the persisted key (default on), the row lives
-  with the workspace rows at the top of ≡ **File**, and there is no
-  leader key (a once-a-day action, and the flat table is out of letters).
-- `remoteListenFn` is a package var; newTestApp leaves `remote.enabled`
-  false and the transport tests stub `socketDirFn`, so no test can bind a
-  socket a real client would then find.
-
-### The cats host integration (internal/cats + app/cats_glue.go)
-ced usually runs inside cats, the terminal multiplexer this editor is named
-after. The integration is a client for three of its surfaces: the control
-socket (unary JSON commands), the event stream that socket upgrades to, and
-the SEPARATE hook socket agents report their state on. Roadmap and phase
-plan: `ai_docs/cats-native-plan.md`. House rules:
-
-- **TWO TIERS, AND TIER 0 IS NOT A DEGRADED MODE — it is ced in any other
-  terminal.** Detection is `CATS_ENV=1` + `CATS_PANE_ID` + a control socket
-  that ANSWERS a ping (a socket file proves nothing; a crashed server leaves
-  one behind, and even a successful dial only proves something is
-  listening). **No feature may exist only at Tier 1 without a Tier-0 path.**
-  Every call site reads `if a.catsTier1() { … } else { fallback }`.
-- **The env sniff is free; the probe is IO.** `DetectEnv` runs inline at
-  startup, `Caps.Probe` runs on a goroutine and posts a `catsEvent` back. A
-  wedged host must never hold up the editor's first frame.
-- **Never import the cats module.** The wire structs in internal/cats are
-  hand-copied minimal mirrors of cats' `internal/app/command_vocab.go` and
-  `events.go`. ced has to stay buildable on a machine that has never heard
-  of cats, and a shared type package would make the editor's build depend on
-  the multiplexer's.
-- **Events only, as everywhere else.** The stream's callbacks run on the
-  reader goroutine and do exactly one thing: PostEvent. One event type
-  (`catsEvent{kind, …}`) so app.go's switch gains one case.
-- **The stream reconnects forever.** A unary call that fails is a feature
-  that didn't happen; a subscription that stays dead is a feature that
-  stopped working and never said so. Capped backoff, indefinitely, until
-  Close — and Close must interrupt a blocked read, which is why the live
-  connection is held under a mutex. **One json.Decoder spans the ack AND the
-  events**: a second decoder for the pump strands any event the server wrote
-  in the same breath as the ack, invisibly and forever.
-- **"Blocked" means a question the user did NOT ask for**, not "a modal is
-  open". They pressed Rename; they know. Blocked is the file that changed
-  underneath them, the agent asking permission, the formatter asking for
-  trust, the cherry-pick that stopped. Those sites call `catsAsking(phrase)`
-  AFTER opening the modal (openModal clears the mark on its way in), and the
-  mark clears itself when the modal slot empties. The phrase is what shows
-  up on a phone, so write it as one.
-- **Report on CHANGE only.** Every report is a potential toast or push, so
-  re-sending "working" per keystroke would get the whole channel muted.
-  `catsAfterEvent` runs LAST in the dispatch tail, after the hooks that can
-  raise the very question that blocks us.
-- **The hook seq is seeded from the clock, not from 1.** The server keeps a
-  per-source high-water mark ON THE PANE, which outlives the process; a
-  counter starting at 1 has every report from a restarted ced (a folder
-  switch alone rebuilds the App) silently dropped as stale. cats' own
-  shipped hooks use a wall-clock seq for the same reason. Seq is stamped at
-  CALL time, on the main loop, because the sends are fire-and-forget
-  goroutines that genuinely do arrive out of order.
-- **Source is `"ced"`, never `"cats:ced"`.** The `cats:` prefix names cats'
-  own built-in agent integrations, whose state is detection-driven and whose
-  hook state reports are deliberately ignored. Verified live: a custom
-  source takes real state authority for its pane, and `pane.release_agent`
-  hands it back.
-- The hook reporter is armed independently of the control client: different
-  sockets, and the attention story is the half that matters when you are not
-  looking at the screen.
-
-### Favorite locations (internal/favorites + app/favorites.go + main.go)
-`ced fav plans` opens the project and reveals `ai_docs/plans` in the file
-tree. A name for a place a project keeps things, and the CLI verb that
-jumps to it. House rules:
-
-- **IT REVEALS; IT DOES NOT RE-ROOT, and that gap IS the feature.**
-  `ced ai_docs/plans` already re-roots — and pays for it by throwing the
-  project away, since git status, gopls's `rootUri`, the finder index,
-  the ACP session cwd and every plugin's working directory are all
-  derived from `rootDir`. A root of `ai_docs/plans` is a workspace where
-  none of them describe the code you are working on. So the verb keeps
-  the project and moves the VIEW, which is the one thing a plain path
-  spelling structurally cannot express. If this ever grows a re-root
-  mode, it is a FLAG on the verb, never its default.
-- **RELATIVE is the whole design.** A favorite is not a bookmark to one
-  absolute directory — the recent-folders list (internal/session) is
-  already that, and it is keyed by root for a reason. This is a name for
-  a CONVENTION, which is exactly why the map is stored once, user-scoped,
-  and applied against whatever project you are standing in. A name that
-  only ever meant one directory would not be worth typing.
-- **RESOLUTION WALKS UP, and the directory that OWNS the favorite becomes
-  the root.** The verb is typed from wherever the user is standing, which
-  for a project of any size is not the project root; a version that only
-  worked from the top would be half a feature. Each candidate directory
-  is asked in FULL (its own project override, then the global default)
-  rather than looking the name up once against the start directory — the
-  override is keyed by the root that owns it, and that root is one of the
-  directories being climbed, so a single lookup would make every override
-  invisible from every subdirectory of its own project.
-- **TWO SCOPES, AND THE PROJECT ONE ONLY SHADOWS.** `projects[<root>]` is
-  a patch of individual NAMES over the defaults, never a replacement — a
-  project that renames one entry must not lose the other five. Shadowing
-  is IN PLACE in a listing (the theme registry's rule): one row per name,
-  carrying the value that will actually be used, because two rows with
-  one name is a bug report. Removing an override usually UNCOVERS a
-  global rather than unbinding the name, and `fav rm` says so — a user
-  who doesn't expect that reads the silence as the removal having failed.
-- **CONFINEMENT IS CHECKED TWICE, and the cheap check is at WRITE time.**
-  `Clean` refuses an absolute path and anything climbing out with "..",
-  so an entry that could never resolve is never written; `Resolve`
-  re-checks after the join because a lexical test alone is escapable
-  through a symlink living inside the root (the workspace-edit rule), and
-  it resolves the ROOT too or a project under /tmp reads as outside
-  itself on macOS. `Clean` runs on READ as well: a text editor will
-  happily write what `fav add` refused.
-- **"UNBOUND" AND "BOUND BUT MISSING" ARE DIFFERENT ANSWERS**, because
-  they have different fixes. A name nobody bound is a typo, so the error
-  lists the names that ARE bound — a bare "no such favorite" sends the
-  user off to read a config file. A bound name whose directory isn't
-  there is a project that doesn't follow the convention, so the error
-  names the path it looked for. Same split in the listing, where a
-  default this project doesn't follow is MARKED rather than hidden.
-- **A path in the name slot is refused AS a path.** `ced fav <name> [dir]`
-  means "no favorite named /home/me/proj" is an error about the wrong
-  thing entirely, and `fav add` refuses its own subcommand words
-  (`add`, `rm`, `list`, `path`, …) — urfave resolves a subcommand before
-  falling through to the open action, so a favorite called "list" would
-  be written happily and then be permanently unreachable. Write time is
-  the only moment the user can still pick another word.
-- **`filetree.Tree.Reveal` expands ANCESTORS, not the target**, and the
-  app expands the target itself. The tree is lazy, so a reveal is
-  genuinely "load each directory on the way down"; leaving the target as
-  it found it is what stops a future scroll-to-a-path springing open a
-  folder somebody deliberately collapsed. Arriving BY NAME is the
-  opposite case, so `RevealPath` opens it — and takes the KEYBOARD,
-  because the selection highlight only renders while the tree is
-  `Focused` and a cursor nobody can see is worse than none. A FILE
-  favorite opens a tab instead and leaves the keyboard in the editor.
-- **The reveal rides main's one-shot seam**, beside `OpenFile`: both
-  describe how this INVOCATION started rather than a property of the
-  workspace, so the folder-switch loop must not repeat either.
-- **THE ≡ ROW RESOLVES STRICTLY IN THE OPEN ROOT; THE CLI WALKS.** That
-  is the one place the two halves of the verb differ, and it is not a
-  simplification: `ced fav` walks because it is still CHOOSING a project,
-  while a running editor already has one and everything is derived from
-  it. A walk there could resolve a favorite in the PARENT of the
-  workspace — a path outside the file tree, which the tree would then
-  refuse, having been handed somewhere the user cannot see.
-  `favorites.ResolveIn` is that half of the resolver, and `Resolve` is
-  the loop around it, so "resolve here" has exactly one implementation.
-- **`fav list` is a REPORT; the ≡ picker is a list of VERBS.** The CLI
-  shows a global default this project doesn't follow, marked "missing
-  here" — hiding it would leave the user asking why a name they bound
-  isn't listed. The picker DROPS it, because the palette has no disabled
-  state to borrow and a row answering Enter with "that isn't here" is
-  worse than one never offered (the code-actions rule). Nothing is lost:
-  when everything was dropped, the flash says so.
-- **The row lives in ≡ Nav and is never dimmed.** Go back and Go
-  forward walk the trail you made; this jumps to the places you named in
-  advance — a browser's pairing, history beside bookmarks. It stays
-  clickable with no favorites.json (the "Recent chats"/MCP rule: a dimmed
-  row is a dead end that cannot explain itself) and the flash names the
-  verb that creates one. Keeping it enabled also keeps `menuLayout` free
-  of a per-frame file read — predicates run every frame the menu is open.
-  The two empty states are different messages because they have different
-  fixes, the CLI's unbound / bound-but-missing split one floor up.
-- **A project key is read tolerantly, written normally.** `Add` writes
-  the normalized key (symlinks resolved) so one directory can't keep two
-  blocks — the session store's rule. But the file is HAND-EDITABLE, and
-  somebody typing a project path types the spelling they use, not what it
-  resolves to once a symlink in the middle is followed (every path under
-  /var and /tmp on macOS). `projectOverrides` tries both, normalized
-  first, and Lookup / List / Remove all go through it — a key that
-  resolves but cannot be deleted would be its own bug.
-- **MANAGEMENT IS A SECOND SURFACE, AND ITS SHAPE IS THE PROJECT'S LIST
-  UNDER A GLOBAL DRILL-IN** (favmanage.go, ≡ File → Manage favorites…).
-  The asymmetry is the layout: the global map is written once and shared
-  by every project, so editing it from inside one of them is the rarer
-  act and belongs a gesture deeper, while the override list for the repo
-  in front of you is what you maintain. It LISTS WHAT DOESN'T RESOLVE,
-  unlike the Go-to picker — the report/verb split one floor down: you
-  cannot go to a folder that isn't there, but a broken entry is exactly
-  the one you came here to fix. A missing marker goes on PROJECT rows
-  only; a global default this project doesn't follow is the normal case,
-  and marking those would put a warning on nearly every row.
-- **EVERY LIST ENDS WITH ITS OWN ADD ROW, SEEDED TO ITS SCOPE**, so where
-  you asked decides what you get rather than a flag you have to remember,
-  and every verb carries a `back` to the list it came from — fixing three
-  entries must not be three trips through the ≡ menu. Path is asked
-  BEFORE name, because the name's default is derived from it; the tree's
-  right-click skips that prompt entirely, since the click WAS the path
-  answer.
-- **THE SCOPE CHIP IS A CLOSURE, NOT AN App FIELD** — the commit prompt's
-  trailer chip exactly (gitcommitmsg.go), for its reason: the value
-  belongs to one invocation of one prompt. `alt+s` is its chord and the
-  hint names it, because a modal owns the keyboard and the ≡ menu is
-  unreachable from inside a prompt. It starts on GLOBAL from the tree (a
-  favorite earns its name by repeating across projects) and on the list's
-  own scope from Manage.
-- **Rename is remove-then-ADD-first.** `Add` is the only path that
-  validates a name, so a rename goes through it; doing the remove first
-  would lose the entry when the new name is refused. Nothing here
-  confirms: a favorite is a name, not data, and re-adding one is the two
-  keystrokes that made it — a dialog in front of a reversible action
-  trains people to dismiss dialogs.
-- **A malformed file REFUSES to be written.** `loadFavoriteSet` flashes
-  and returns failure rather than an empty set, because reading a syntax
-  error as "you have no favorites" on a surface the user is about to
-  write to would save over whatever the file actually held.
-- No leader key: the flat table is out of mnemonic letters, and the ≡ row
-  gets the command palette for free.
-
-### Open in $EDITOR (app/openineditor.go)
-The tree's right-click row and the ≡ File row that hand a file — or a
-folder — to whatever the environment says the user's editor is. Not an
-admission that ced is inadequate: a terminal is a place where several
-tools share one workspace, and `$EDITOR` is the name that workspace
-already agreed on. House rules:
-
-- **$VISUAL beats $EDITOR**, which is the convention's own answer to
-  exactly this question: $VISUAL is what you set when a full-screen
-  program is welcome, $EDITOR the line-editor fallback. Opening a pane is
-  the full-screen case. The value is a COMMAND LINE (`ced --wait`,
-  `emacsclient -nw`), so it goes to a shell and is never split here.
-- **TIER 1 RUNS IT, TIER 0 STAGES IT** — catsRun's own split, and here it
-  is structural rather than merely careful. A cats sibling pane is a REAL
-  pty, so vim, emacs and helix all work; ced's own terminal is a REPL
-  strip and explicitly not a pty (terminal.go), so a full-screen editor
-  cannot run in it. What it CAN do is put the command on the input line
-  where the user sees it, edits it and decides. The flash says which they
-  got. **Side by side, not stacked**: menuCatsTerminal splits vertically
-  because a terminal is a strip under your work; this is a peer editor,
-  and a half-height vim is worse than a half-width one.
-- **The path is written relative to where the command will RUN.** The
-  Tier-1 pane starts in the project root, so the line reads like one the
-  user would have typed; the staged Tier-0 line is ABSOLUTE, because
-  ced's terminal has its own working directory (grsh's `cd` moves it) and
-  a relative path would silently mean somewhere else.
-- **The row NAMES the editor, not the variable** ("Open in nvim") — the
-  theme row's rule. `editorDisplayName` is the base name of the command's
-  FIRST word; the flags a user exported are noise in a popup row.
-- **NO $EDITOR IS A REASON, NOT A GATE** — menuCopilotAuth's rule, and
-  the first cut got this wrong in a way worth recording. Both rows were
-  gated on `editorCommand() != ""` on the Paste row's argument (a popup's
-  fixed vocabulary is something users learn positions in). But the two
-  are not alike: Paste hides over something the user just did and can
-  plainly see, while this hid over a variable they may never have
-  exported — so on a machine with neither set, which is most machines,
-  the row simply never appeared and was indistinguishable from the
-  feature not existing. Both rows are now unconditional and the refusal
-  teaches, naming both variables and an `export` line. **A row nobody can
-  find is worse than a row that explains itself.**
-- **Being unconditional, it joins the FIXED vocabulary**, which is why it
-  sits ABOVE "Run in terminal…" in the tree popup rather than below it.
-  Run is still the conditional row and still last, where its own rule
-  puts it; `TestTreeContextRunRowOnlyForExecutables` pins that, and it is
-  what caught the ordering when this row was first appended.
-- **A directory is a legitimate target**, the project root included —
-  `vim .` and `code .` mean something, and the root is the most useful of
-  them, which is why this row is offered where Rename and Delete are not.
-- `editorEnv` is a package var; newTestApp pins it EMPTY. Not tidiness:
-  the tree row is conditional on there being an editor, so without the
-  seam the context-menu row counts would pass or fail depending on what
-  the developer exported, and openInEditor would compose a command naming
-  their real editor.
-
-### The command line is urfave/cli/v2 (main.go)
-The CLI was a hand-rolled arg walker until `ced fav` needed subcommands.
-House rules for the rewrite:
-
-- **ONE PARSER.** `parseArgs` runs the REAL `cli.App` and fills a
-  `cliResult` rather than acting, which is what lets a test drive actual
-  flag definitions, actual subcommand resolution and actual error strings
-  without a tcell screen. A second "pure" parser kept beside it for
-  testability is the drift this shape exists to prevent — `resolveArgs`
-  in main_test.go is a one-line alias onto the real thing, not a copy.
-- **`actionDone` is the default action.** urfave serves `--help` and
-  `help` itself, without ever calling an Action, so the zero-ish value
-  has to mean "handled, nothing left to do". Were it `actionEdit`, a user
-  asking for help would get an editor.
-- **`helpText` is installed as the app's help TEMPLATE**, not printed by
-  a function beside it, so `--help`, `help` and a usage error all reach
-  the same words. It is a raw string, which means no backticks in it.
-- `HideVersion` plus an explicit `--version/-v/-V` flag, because main
-  owns the exact output (`ced 0.2.0`) and urfave's default spells it
-  differently. `OnUsageError` returns the message alone — urfave's
-  default buries the one line that says what was wrong under the whole
-  help block. `ExitErrHandler` is a no-op: this process decides its own
-  exit code, and a test driving the parser must not be able to kill the
-  test binary.
-- `resolveTarget` stayed a plain function. It is the one piece of the CLI
-  that is about the FILESYSTEM (dir → root, file → root+tab, missing →
-  the vim-style new-file intent) rather than about flags.
-
-### Navigation history (app/nav.go)
-Browser-style Go back / Go forward across files (≡ menu, Esc-o / Esc-O,
-Alt+Left / Alt+Right). Recording happens CENTRALLY: openFile records the
-departure point on its success paths, and tabBarClick (which bypasses
-openFile) records its own switches — new navigation surfaces get history
-for free by calling openFile, so don't add per-surface push calls. The
-`nav.suppress` flag is set while navBack/navForward retrace so the
-retrace itself never records (removing that corrupts the trail into a
-two-entry bounce). Any fresh navigation clears the forward stack, same
-rule as a browser. LSP definition jumps record explicitly with the
-request's origin position (a same-file jump moves only the cursor, which
-path-change-only recording would miss) and open with suppress on.
-
-### Open folder + session restore (internal/session + app/folder.go)
-Switching projects without leaving the editor, a recent-folders list, and
-each folder's tabs and cursors coming back when you return. House rules:
-
-- **A ROOT SWITCH IS A RESTART.** `rootDir` itself is touched in a handful
-  of places; everything DERIVED from it is the cost — the tree, the
-  finder index, git status, both git panels, gopls's `rootUri` (fixed at
-  initialize), the ACP session cwd, MCP's `roots/list`, plugin working
-  directories, the compare panel's two sides. So `requestOpenFolder`
-  parks the new root on `App.nextRoot`, sets `quit`, and **main** tears
-  the App down and calls `New(newRoot)` in a loop. One code path builds a
-  workspace and it's the one that runs on every launch; a second
-  re-derivation path would be exercised by nobody. Close is called
-  EXPLICITLY there, not deferred — a deferred one fires when main
-  returns, leaving the old screen, goroutines and language servers alive
-  under the new App. The screen blinks once; that is the whole price.
-- **The state file is `~/.config/ced/state.json`, and it is separate from
-  config.json for the INVERSE of mcp.json's reason.** mcp.json is
-  separate because the user hand-writes it; this one is separate because
-  ced rewrites it on every folder switch and every exit. Machine churn
-  has no business in a file somebody hand-edits, and a corrupt state file
-  must cost a tab list rather than a settings file. `userconfig` owns
-  only the PATH (`StatePath`); the schema lives in `internal/session`.
-- **Order IS the recency** — the entry list is stored most-recent-first
-  rather than carrying timestamps that would have to be sorted on load.
-  Nothing shows "opened 2 hours ago", so a timestamp would be a field
-  with no reader and one more thing to get wrong across clock skew.
-- **The visit is recorded at STARTUP, the tabs at Close.** That split is
-  what makes `--last` and the recent list correct after a crash: a run
-  that dies costs its tab list, never the fact that you were there.
-- **`session.Normalize` resolves symlinks, and the app compares through
-  it.** `ced /tmp/proj` roots at the path as typed; `cd /tmp/proj && ced`
-  roots at what the kernel reports, which on macOS is `/private/tmp/proj`.
-  Without it one directory keeps two half-sessions that overwrite each
-  other in turn. Best-effort: a path that no longer exists keeps its
-  absolute form, or `Remove` could never prune it.
-- **Restore checks the file EXISTS itself** rather than leaning on
-  `editor.NewTab`, which deliberately succeeds on a missing path — that's
-  the `ced foo.go` new-file intent, right for an explicit open and wrong
-  here. Nobody asked to resurrect a file they deleted, and an empty
-  buffer wearing its name is the worst way to say it's gone. Everything
-  else degrades in silence too (too big, binary, unreadable): the user
-  asked to open a FOLDER, so a wall of messages about files they may not
-  remember having open is noise. Cursor and scroll come back through
-  `Tab.RestoreView` — the stored scroll is part of what's being put back,
-  so this must NOT set `cursorMoved` (the Find-all Esc argument).
-- **Tabs are wired by `wireTab` / `announceTab`, shared with openFile.**
-  Restore is the second way a tab is born; a second copy of the wiring
-  would drift and a restored tab would quietly lack the git gutter, the
-  word highlight, or a plugin's marks.
-- **Bare `ced` opens the CURRENT directory** and deliberately does not
-  reopen the last folder — `cd myproj && ced` is the gesture this editor
-  is launched with, and landing somewhere else would make that reflex a
-  lie. You get the folder's TABS back instead, and `ced --last` for the
-  times you really did mean "wherever I was".
-- **A folder switch owes the same unsaved-changes modal an exit does**
-  (it discards the whole workspace), and a Save that FAILS must not
-  switch — same short-circuit as `menuQuit`.
-- The recent picker is `openPicker` (house rule) and EXCLUDES the current
-  root rather than annotating it, unlike the theme picker: re-picking a
-  theme is how you revert a preview, but re-picking your own folder
-  rebuilds an identical workspace. Deleted folders are PRUNED during the
-  walk — a row you can't open is worse than a shorter list.
-- Rows live at the top of the ≡ **File** group (the File>Open Folder
-  convention) with **no leader key**: the flat table is out of mnemonic
-  letters and this is a once-an-hour action. `"session"` is the persisted
-  toggle; folders are recorded with it off, because the recent list is a
-  different feature reading the same file.
-- `sessionStatePathFn` / `sessionConfigPathFn` are package vars;
-  newTestApp pins both at temp dirs so no test can rewrite the
-  developer's real recent-folders list or their restore preference.
-
-### Recent locations + per-repo history (internal/history + app/recentlocations.go)
-≡ Nav → "Recent locations…": THIS repository's folders, in two sections at
-every level — the 5 most recent, a thin spacer (`paletteSpacer`), the 10
-most frequent the first section didn't name. A row with used subfolders
-drills (`›`) into the same picker one level down, under a row revealing
-the folder itself; a leaf is REVEALED in the tree. Switching projects is
-still ≡ File → Recent folders…, deliberately untouched. House rules:
-
-- **HISTORY LIVES IN THE REPO, not ~/.config** (owner's call):
-  `<repo>/.ced/history.bytdb` holds the folder usage AND the recent-file
-  ring (which moved out of state.json's `Entry.Recent`; that field is now
-  only READ, once, to migrate a repo with no ring, and recordSession stops
-  writing it). Paths inside the repo are stored RELATIVE, so a moved
-  checkout keeps its history; a recent file outside it stays absolute.
-  The first write appends `history.bytdb*` to `.ced/.gitignore` —
-  `.ced/format.json` beside it is committed config, the database is not.
-  **Loading creates nothing**: no `.ced/` appears until a write has
-  something to say. `historyPathFn` is pinned by newTestApp.
-- **Reveal, never re-root** (the favorites rule): every row is inside the
-  workspace. A use is a file opened in a NEW tab (openFile's new-tab
-  branch — tab switching would let churn outvote where files get opened)
-  or a folder picked here; only folders strictly inside the root count.
-- **The index is a path trie whose nodes carry the MAX of their subtree's
-  stats**, and top-k is a best-first search on those bounds: a subtree
-  whose bound loses is never opened, so a query costs roughly
-  k·depth·fanout·log, not the size of the index, and "subfolders of X" is
-  the same search started at X. Max, not sum: the tightest bound a record
-  can maintain in O(depth); removal recomputes the ancestors. Frequency
-  ties break on recency — (hits, last) is still a valid lexicographic
-  bound. `TestIndex_SearchMatchesBruteForce` is the proof — keep it.
-  Recency is a persisted SEQUENCE NUMBER, not a clock.
-- **Bounded by eviction with hysteresis**: past `MaxFolders` (400) it
-  drops to 90% in one pass, protecting the most recent quarter, least-used
-  first among the rest. The file ring keeps the newest `MaxRecentFiles`.
-- **The database is opened BRIEFLY — load on first use, write on Close —
-  never held.** bytdb locks its file per engine and two ced windows on
-  one repo are ordinary. A contended open retries 10×25ms, then gives up
-  with the changes still pending (ErrLocked is not flashed). Recording is
-  memory only.
-- **A write ADDS, never overwrites**: the index tracks per-node `delta`
-  hits, a `dirty` set and pending `deletes`; the ring tracks touched and
-  removed paths. Sequence numbers minted since the load are re-issued in
-  order from the stored counters inside the transaction, so two windows'
-  histories merge instead of the last to close erasing the other's
-  (`TestWrite_TwoInstancesAdd`). Deletes run before upserts, and a subtree
-  delete is the range `(p/, p0)` ('0' follows '/'), so `proj2` survives
-  pruning `proj`.
-- **Vetoes don't shorten a section**: `locationPick.accept` skips folders
-  already listed or gone from disk and the search keeps popping; gone
-  folders are pruned AFTER the search (removing nodes mid-search pulls
-  them out from under the heap).
-- **Spacers belong to the unfiltered view**: never selected, run, counted
-  or clicked, and dropped once a query ranks by score. The palette now
-  SCROLLS to the selection (it used to draw only the first rows), and
-  `openPickerRows` asks for a taller frame so both sections fit.
-- No leader key (the flat table is out of letters); the ≡ row gets the
-  palette for free.
-
-### The which-key band (app/whichkey.go)
-The bottom band listing the leader table is summoned by **`Esc ?`**, not
-by pausing after a lone Esc. A lone Esc is the editor's "drop that"
-gesture (ghost text, carets, the tree search…), so the old hesitation
-trigger threw a half-screen band over the code whenever Esc was used to
-dismiss something. Don't bring the lone-Esc timer back. The hesitation
-survives for NAMESPACE CHORDS only (`Esc a` / `x` / `C`): two deliberate
-keys whose only purpose is reaching a sub-table, so a pause there really
-means "which letter?". `handleWhichKeyTick` therefore opens only while
-`leaderChord` is set, which is also what stops "Esc a, Esc" turning the
-chord's pending tick into a top-level band. A visible band holds the
-leader live by itself, so `menuWhichKey` needs no re-arm.
-
-### Menu shortcut hints
-`menuItemDef.shortcut` is a display-only accelerator column rendered
-right-aligned and muted in the ≡ menu ("esc s", "alt+←"). Dispatch
-still lives in the leader table / handleKey — when adding or rebinding
-a key, update both or the menu lies. Rows without a binding leave it
-empty; drawMenu skips the hint when a long label would collide.
-
-### The Esc-a AI namespace (leader.go)
-The leader table is flat with TWO exceptions: a `leaderBinding` carrying
-a `sub` table (or a `subFor` resolver) is a PREFIX. Firing it runs no
-action — it stores the sub-table on `App.leaderChord`, stamps
-`leaderChordAt` and `leaderChordName`, and flashes the binding's `hint`;
-the next rune resolves against that table in `handleChordKey`, which
-handleKey calls before everything else. House rules:
-
-- **It exists because the AI surface outgrew the flat table.** Fifteen
-  menu rows, and the letters had run out — skills briefly lived on a
-  shifted `Esc S` for exactly that reason. That's the bar for a new
-  namespace; don't add one without it. A chord is a real cost, paid by
-  everyone who has to remember which letters are prefixes. `Esc x`
-  (plugins) is the only other one that has cleared it, and it did so
-  from the opposite direction — see the plugin section: its keys belong
-  to the USER and are unbounded, so they can't live in the flat table at
-  all. That entry is also the only DYNAMIC prefix (`subFor`/`hintFor`),
-  and the only one allowed to arm nothing when its table is empty.
-- **`Esc a` took the palette's alias.** The palette is `Esc k` (plus the
-  ≡ menu's pinned headline row) — owner's call, on the grounds that the
-  namespace is the higher-traffic use of the letter.
-- **One level only.** A sub-binding with its own `sub` is a bug the
-  binding-table test rejects. Sub-bindings collide with the top-level
-  table on purpose (`a`, `f`, `m`, `t`) — the prefix already said which
-  world you're in.
-- **A miss inside a live chord is SWALLOWED with a flash**, deliberately
-  unlike the flat table's fall-through. A lone Esc can be a stray tap, so
-  the flat table stays harmless to mash; `Esc a` is two deliberate keys,
-  and falling through would answer a mistyped chord by dropping a
-  character into the user's code.
-- **The window is `leaderChordFor` (2s), not `doubleEscMs`.** A chord is
-  composed, not reflexive — 500ms isn't long enough to remember which
-  letter the model picker is. Esc drops a pending chord (handleChordKey
-  disarms on any non-rune and reports false, so the normal Esc handling
-  still runs and `Esc a Esc s` saves).
-- **tmux comes free.** Both leader entry paths — bare Esc + rune, and the
-  folded `Alt+<rune>` tmux delivers — funnel through `fireLeader`, so the
-  prefix arms identically either way and the second rune arrives bare.
-  `TestLeaderChord_TmuxAltPath` pins it.
-- The flashed hint is the namespace's ONLY keyboard discovery surface
-  (the flat table gets that from the ≡ hint column), so a test asserts
-  every sub-binding appears in it.
-
-### Data formats: formatting and validation
-### (internal/format/kinds.go, inprocess.go, validate.go, app/validate.go)
-JSON is formatted on save and syntax-checked as you type, with no
-language server, no linter binary and no project config. It is the
-first data format on this path; YAML and TOML slot into the same seam.
-House rules:
-
-- **ONE TABLE DECIDES WHAT A FILE IS** (`format.kindFor`), and all three
-  verbs route through it: the external-tool list, the in-process
-  formatter and the validator. They must never disagree — a file the
-  validator calls JSON but the formatter does not would be flagged as
-  broken and then left alone, which reads as the editor refusing to fix
-  what it just complained about, and the inverse is worse: rewriting a
-  file nobody vetted the syntax of. `TestKindFor_AgreesWithTheThreeVerbs`
-  is what fails when a fourth verb forgets to ask.
-- **JSONC IS CARVED OUT BY NAME, not by parsing.** `tsconfig.json`,
-  `jsconfig.json`, `.eslintrc.json` and everything under `.vscode/` are
-  JSON WITH COMMENTS, and `encoding/json` rejects `//` — correctly.
-  Treating them as strict JSON would underline the first comment of a
-  file doing exactly what its ecosystem intends. So they are `kindNone`:
-  ced has nothing to say about them. The `.vscode` rule is per-FOLDER
-  because the convention is — naming settings.json and launch.json
-  individually would leave the next one ced has not heard of getting
-  underlined on sight. A project that really does want prettier on its
-  tsconfig says so in `.ced/format.json`, which overrides all of this.
-- **THE BUILTIN PATH IS A LADDER, and the order is the design.** An
-  installed external tool goes FIRST, repo-local (`node_modules/.bin`)
-  before global, because a prettier the repo pinned is a statement by
-  THAT REPO about how it formats while one on `$PATH` is a statement
-  about the developer's laptop. ced's own pass is the floor underneath.
-  Without the floor this would be a feature that is inert on the
-  majority of machines it ships to — Go got builtin formatting free
-  because gofmt comes with the toolchain, and JSON has no equivalent —
-  which is the decoration-format trap: a capability nobody can observe
-  is indistinguishable from one that was never built.
-- **EVERY EXTERNAL COMMAND MUST REWRITE IN PLACE.** `execFormatterChain`
-  runs an explicit argv with no shell, which is exactly why a malicious
-  format.json cannot chain commands — so a stdout-only formatter has
-  nowhere to put its output. That disqualifies the tool most users would
-  name first: `jq` has no in-place flag, and `jq . f > f` truncates `f`
-  before jq reads it. Suggested additions must pass the same test.
-  Unlike the Go pipeline, the JSON tools never CHAIN — each formats
-  completely, so running two would just mean the second reformatting
-  the first to a different house style.
-- **`json.Indent`, NEVER a Marshal round trip.** Marshalling through a
-  map reorders every object (Go randomises map iteration, so two saves
-  could differ), pushes every number through a float64 — `1e3` becomes
-  `1000`, big integers lose precision — and re-escapes strings to its
-  own taste. Indent is a pure whitespace pass: key order, number
-  spelling, escapes and unicode all survive. The only thing that changes
-  is layout, which is the only thing a formatter was asked to change.
-  It is fed TRIMMED bytes, or it indents the document one level deeper
-  every save; a formatter that is not idempotent fights the file.
-- **A FILE THAT DOES NOT PARSE IS NOT REWRITTEN.** The formatter returns
-  the error and writes nothing — the validator has already underlined
-  the reason, and rewriting unparseable text is how a formatter destroys
-  work. An UNCHANGED file is not rewritten either: a write bumps the
-  mtime, which every other layer reads as "somebody changed this", so a
-  save of an already-formatted file must be indistinguishable from a
-  save with no formatter at all.
-- **AN EMPTY FILE IS MID-THOUGHT, NOT BROKEN.** `encoding/json` calls it
-  "unexpected end of JSON input"; a file someone just created is not an
-  error to flash at them. The formatter and the validator make the same
-  call, so the two halves can never disagree about it.
-- **The in-process pass goes through `formatDoneEvent` like the external
-  one.** One adoption path (`handleFormatDone` → `ReloadAsEdit`, one
-  structural undo step on top of the user's history), bracketed by
-  `formatRunBegin`/`End` so the reconcile tick cannot mistake ced's own
-  write for somebody else's. It re-reads from DISK, not from the buffer,
-  so both rungs start from the same bytes. The write is
-  `editor.WriteFileAtomic` — exported for this, rather than copied, so
-  the symlink resolution and the mode copy cannot be forgotten by the
-  second writer (the `wireTab` rule).
-- **VALIDATION READS THE BUFFER; FORMATTING READS THE DISK.** Marks
-  follow what is on screen, unsaved edits included — a checker reading
-  the disk copy would underline text the user had already fixed, and
-  would say nothing at all about a file never yet saved.
-- **THE FINDINGS DIE WITH THE REVISION** (symbolhl's rule). A Problem's
-  column is a coordinate into the text that was parsed; one keystroke
-  later it may point at a perfectly good character, and a stale
-  underline on the wrong rune is indistinguishable from a correct
-  answer. `liveProblems` is the SINGLE read path so no future consumer
-  can skip the check.
-- **THE DEBOUNCE IS NOT ABOUT COST.** The LSP debounces to spare a round
-  trip and the plugin layer to spare a process; this parse is
-  microseconds. It waits (400ms) because JSON is transiently broken on
-  almost every keystroke — the instant after you type `{` it does not
-  parse — and a mark flashing red through every edit is noise the eye
-  learns to ignore. Armed only while the ACTIVE tab is a validated kind,
-  or an editor full of Go would wake itself every 400ms forever (the
-  caret-blink constraint). `wireTab` parses ONCE at open, because the
-  timer only ever fires after an EDIT and a file that is already
-  malformed when you open it is the case the feature exists for.
-- **Only ONE problem is reported.** `encoding/json` stops at the first
-  syntax error and cannot meaningfully resume — everything after a
-  missing brace is unparseable in a way that says nothing about the
-  text. One honest position beats an invented cascade pointing at
-  correct code.
-- **Columns are RUNES, and the offset is `Offset-1`.** `encoding/json`
-  counts BYTES and reports the byte just AFTER the offending one
-  (verified across every error shape it produces, the unterminated
-  document included). Both corrections are load-bearing and each is
-  pinned by its own test: without the rune count any non-ASCII above the
-  error pushes the underline right one cell per extra byte, and without
-  the `-1` every underline sits one column past the character it blames.
-- **Go is deliberately absent from the validator.** gopls reports parse
-  errors with far better messages than a bare `go/parser` pass, and two
-  producers underlining one broken line would only argue with each other
-  in the single gutter cell. Nor is there an in-process Go FORMATTER —
-  gofmt is the answer and it ships with the toolchain.
-- Glyph is `◇`, deliberately not the LSP's `●` or the plugin layer's
-  `◆`; precedence in the one gutter cell is **git < validate < plugin <
-  LSP** (a syntax error outranks the ambient change bar, and loses to
-  two more specific producers). No config key and no toggle: the
-  overflow markers' rule — there is nothing a preference could usefully
-  say no to about "this file does not parse".
-
-### Every diagnostic producer, one question (app/diagmerge.go)
-`a.diagsFor(path)` is the single answer to "what is wrong with this
-file?", merging the LSP's diagnostics, the plugin layer's and ced's own.
-House rules:
-
-- **IT EXISTS BECAUSE THE SPLIT WAS REAL.** Three producers arrived at
-  three different times and each wired itself to whatever surface its
-  author needed. An LSP diagnostic reached the gutter, the tooltip, the
-  Problems panel, next/previous-problem and the status counts; a PLUGIN
-  diagnostic reached the gutter and NOTHING ELSE — a user could see a
-  mark, hover it, and be told nothing, because those surfaces read
-  `a.lsp.diags` directly and were typed to `[]lsp.Diagnostic`. That was
-  a bad bargain for any producer and fatal for the validator: a syntax
-  error whose MESSAGE cannot be read is half an answer.
-- **`lsp.Diagnostic` IS THE CURRENCY**, so adopting it changed the
-  consumers' types not at all. Its own doc comment anticipated this —
-  "Raw is nil for a diagnostic this client built itself" — and `Source`
-  names which producer spoke, which is what lets the tooltip print
-  `(ced)` after a message.
-- **`diagsForRange` (lspcodeaction.go) MUST NOT ASK HERE**, and that is
-  pinned by `TestDiagsForRange_StaysOnLSPOnly`. A code-action request
-  echoes diagnostics back to the server VERBATIM, because their
-  server-private `data` and `code` fields are how a quick fix finds the
-  problem it fixes. A synthetic diagnostic has no `Raw`, means nothing
-  to gopls, and could only confuse that matching.
-- **SYNTHETIC COLUMNS ARE RE-ENCODED TO UTF-16** (`lspPosFor`). Every
-  consumer runs `editorPosFor` on the way back out, which decodes
-  `Character` as UTF-16 code units — so a fabricated diagnostic carrying
-  a raw rune column is silently shifted on any line holding an
-  astral-plane rune (an emoji, which a JSON string may perfectly well
-  contain). A confident wrong answer, not a missing one.
-- **ORDER IS STABLE: LSP, then plugins, then ced's own.** The Problems
-  panel lists these and next/previous walks them, so an order varying
-  between two identical frames would make a row jump under the cursor.
-  Plugin findings live in a map keyed by provider, so its keys are
-  SORTED before the walk — Go randomises map iteration, which is exactly
-  how that would happen. `diagPathsWithFindings` sorts for the same
-  reason.
-- **The plugin kill switch is honoured HERE too**, not just at load: a
-  mark that left the gutter must leave the tooltip and the panel with
-  it.
-- **`Esc-i` answers with diagnostics alone when there is no server.** It
-  used to return silently whenever `hasLSPActions` was false, which was
-  right while the LSP was the only producer. It no longer is — .json has
-  no server ced ships a mapping for — so without the fallback the
-  validator's message would be reachable by mouse and from the Problems
-  panel but by no key at all.
-
-### Format-on-save precedence + the builtin ladder (app/format.go)
-`runFormatOnSave(idx, quiet)` routes: project `format.json` entry
-(trust-gated) → an installed external tool (`format.BuiltinCommandsFor`,
-NO trust prompt — the argvs are hardcoded, not repo-supplied) → ced's
-own in-process pass (`format.InProcessFormat`) → global-defaults
-install offer. The builtin pass is a command PIPELINE: goimports alone
-if installed, else `gopls imports -w` chained with `gofmt -w` (a
-machine with gopls but no goimports must not lose auto-imports), else
-gofmt alone. `BuiltinCommandsFor` takes the project ROOT as well as the
-path, so a tool the repo pinned in its own `node_modules/.bin` outranks
-one that merely happens to be on the developer's `$PATH` — see the JSON
-section below for the rest of that ladder. `quiet=true` (auto-save)
-never opens a modal and never flashes; an untrusted config is silently skipped until the next
-explicit Save. Tests stub the app-level `builtinCommandsFor` var
-(newTestApp sets it nil) so saves never exec the dev machine's Go
-tools — keep that in place.
-
-Two rules about the formatter's output coming back:
-
-- **CED'S OWN WRITE COMING BACK IS AN EDIT, NEVER A NEW BASELINE.**
-  `handleFormatDone` adopts it through `Tab.ReloadAsEdit` — ONE
-  structural undo step on top of the preserved history, and *nothing at
-  all* when the bytes match. `Tab.Reload` re-seeds the baseline
-  (`initUndo` nils both stacks) and is reached from the app only via
-  `ReloadUndoable`, which is what an EXTERNAL writer earns. That
-  distinction is the whole reason there are three Reload methods; do not
-  collapse them. It is also not a style point: with a plain `Reload`
-  here, auto-save destroyed the user's entire undo history on every idle
-  pause in a Go file, which reads as undo simply being broken. Plugin
-  in-place rewrites (`reloadPluginTarget`) go the same way.
-- **A run in flight suppresses the reconcile tick for that path**
-  (`formatRunBegin`/`formatRunEnd`/`formatRunning`, a per-path COUNT
-  because a chain and a re-save overlap). The formatter writes from a
-  goroutine, so the tick can stat the file in the window before
-  `formatDoneEvent` adopts its mtime — where a write WE caused reads as
-  somebody else's, costing the history on a clean tab and raising a ⚠
-  conflict about ced's own write on a dirty one. The save guards are
-  deliberately NOT taught about this: same window, but hitting it needs
-  a keypress inside ~100ms and the failure mode is a prompt, not lost
-  work.
+- Don't ask for commit-message approval — commit directly when asked.
+
+## Cross-cutting rules
+
+- **Events only.** Goroutines never mutate UI state; they post custom
+  tcell events handled on the main loop. Blocking server→client requests
+  post an event with a buffered reply channel and wait.
+- **Generation-check async results** (seq/gen counters) for anything
+  that opens a panel or writes files; drop stale answers. Anything that
+  merely moves a cursor checks path/EditRev.
+- **Silent degradation** for every integration (LSP, formatters,
+  Copilot, MCP, plugins, cats, themes): missing binary / crash → the
+  editor works, no nagging, no auto-restart; a ≡ row is the retry.
+  Startup errors are HELD for a ≡ label, not flashed.
+- **Nothing spawns or runs at startup** that the user didn't trigger.
+- **A menu row that is unavailable explains itself** (flash the reason)
+  rather than dimming or hiding, when the fix is something the user can
+  do (install a binary, export $EDITOR, create favorites.json).
+- **Choose-one-from-a-list UIs reuse `openPicker`** (palette). Only
+  exception: the Find-all list (a live-preview peek).
+- **Single modal slot** (`App.modal`, `openModal`). Implement the
+  `modal` interface; button geometry in ONE method returning `btnRect`s
+  used by both draw and hit-test; single-line input = `textField`. Don't
+  add per-modal fields to App. `openModal` replaces rather than refuses,
+  so unprompted arrivals must DECLINE an occupied slot.
+- After any workspace mutation call `a.workspaceChanged()`.
+- **Read the open tab's BUFFER before disk** whenever text is sent
+  somewhere (chat, notes, compare, reference context, workspace edits).
+- **Tab mutations must bump `EditRev`** and should go through
+  `InvalidateStyles` (see syntax below).
+- **Standing timers only while something needs them** (caret blink,
+  syntax settle, validate, plugin edit debounce) — the loop is
+  event-driven; never wake an idle editor forever.
+- **Esc side effects never consume the key** (ghost text, carets, tree
+  filter, compare-paste arm, project-find tints) so `Esc s` still saves.
+- **Leader keys**: the flat table is out of mnemonic letters — new verbs
+  get a ≡ row (palette comes free), no leader. `Esc [`, `Esc ]`, `P`,
+  `N`, `\`, `^`, `_`, `#` CANNOT be bound (terminal escape introducers).
+  Menu `shortcut` hints are display-only — rebinding a key means updating
+  both leader table and hint.
+- **Caps are announced** (in the title / last row): a silently short list
+  reads as "that's all".
+- **Paths**: absolute everywhere (grsh's `cd` moves the process cwd);
+  confinement checks run after `EvalSymlinks` on both sides
+  (`resolveInRoot`, `pathInside`).
+
+## Design rules by feature
+
+### Editor core
+- **`cursorMoved` (tab.go)**: every cursor mutator sets it; Render
+  consumes it. Never call `EnsureVisible` unconditionally. Restores
+  (`RestoreView`, `CenterOnCursor`) must CLEAR it.
+- **Deferred syntax (editor/syntax.go, app/syntax.go)**: intra-line edits
+  (typing, backspace, delete, same-line replace) DEFER and patch the grid
+  (`stylesAfterInsert/Delete`); structural edits (Enter, multi-line paste,
+  undo, line ops, reload, theme switch) call `InvalidateStyles`.
+  `InvalidateStyles` is the DEFAULT for any new mutation path. Over
+  `MaxHighlightBytes` (512KB) → `SyntaxOff`. `SyntaxSettle` is a package
+  var for tests only.
+- **Undo (undo.go)**: capped by BYTES (`maxUndoBytes` 32MB, both stacks);
+  `snapshotCost` = headers + changed lines, measured against the entry
+  below, stamped once. Trimming never empties the stack. `pushUndoEntry`
+  is the single write path; keep the running sums exact. Only the
+  multi-caret fan-out may set `undoSuppress`. One-step multi-range edits
+  use `pushUndo(undoGroupStructural)` + direct Buffer edits (ReplaceAll,
+  ApplyMultiEdit, workspace edits, `ReloadAsEdit`).
+- **Three Reload methods, don't collapse them**: `Reload` resets history
+  (external writer, via `ReloadUndoable`); `ReloadAsEdit` adopts ced's
+  own rewrite (formatter, plugin) as one undo step.
+- **File IO (fileio.go)**: guards (size on stat, NUL in first 8KB)
+  BEFORE reading. Buffer is always bare LF; LineEnding/BOM re-emitted on
+  write. Saves: temp file in TARGET dir + rename, symlinks resolved,
+  mode copied; read-only dir falls back to in-place. `WriteFileAtomic`
+  is exported for other writers — don't copy it.
+- **Scroll clamp** allows overscroll (`max(viewH/2, 3)`) — intentional.
+- **One frame per input burst (inputburst.go)**: wheel/motion bursts
+  defer frames only while more input is queued, capped at ~30fps. Don't
+  restore the unconditional per-event draw.
+- **Decoration layer**: anything painted over code is a
+  `DecorationSource` (Spans + GutterMarks), never a new branch in
+  Render's paint loop. Precedence: syntax < external < word-hl <
+  bracket < selection < find. Gutter precedence: git < validate < plugin
+  < LSP (glyphs: validate `◇`, plugin `◆`, LSP `●`). Exceptions that are
+  PAINTED not decorated: ghost text, secondary carets, end-of-line notes.
+- **Identity-preserving tree refresh**: `reload` keeps survivor `*Node`s
+  and their `Expanded` state.
+- **External-change reconcile** (each tree tick): clean + changed →
+  silent reload; dirty + changed → warn; deleted → `DiskGone`.
+  A formatter run in flight suppresses it (`formatRunBegin/End`, per-path
+  count).
+
+### Tabs, labels, status bar
+- `tabScroll` is DERIVED each frame (`ensureActiveTabVisible`, including
+  pull-back). A tab that doesn't fit gets no rect (only the active tab on
+  a too-narrow strip). `switchToTab` is the single place a switch records
+  nav history and flushes auto-save. `+N` button opens the switcher.
+- Tab switching leaders: `Esc ,` / `Esc .` / `Esc b`.
+- Labels are the basename until another OPEN tab collides, then grow by
+  directory segments per colliding group; cache keyed by the list of
+  open paths. `tabWidth` measures the label; icon keys off the real name.
+- Status bar path: project-relative (absolute outside root), truncated
+  from the FRONT, budgeted so Ln/Col survive; `⧉` copies the absolute
+  path and is drawn even for root-level files.
+
+### Multi-caret (editor/multicaret.go, app/multicaret.go)
+- Primary is `Tab.Cursor/Anchor`; secondaries in `Tab.Carets`. Don't
+  merge into one slice.
+- Fan-out (`applyAtCarets`) swaps each caret in and runs the unexported
+  single-caret core; a core must never call an exported sibling.
+  Bottom-up order always. One structural undo snapshot + `undoSuppress`.
+  Undo/redo drop carets.
+- Explicit jumps drop carets; arrows/Home/End move all. Alt+click adds a
+  caret, no drag. New carets are promoted to primary; `caretGoalCol`
+  prevents column drift.
+- Secondary carets are painted (`paintCarets`) and blink on ced's own
+  ticker, armed only while carets exist; `stopCaretBlink` restores
+  the on-phase. Not SGR blink.
+- Whole-line ops collapse the set (`dropCaretsForLineOp`).
+- Leaders: Esc-m / Esc-M / Esc-* / Esc-&.
+
+### Ambient highlights
+- **Word highlight (wordhl.go)**: DecorationSource running first;
+  `word-highlight` is a NEUTRAL box (26% fg over bg) + bold — the blue
+  fill belongs to selection only. Window-scoped scan by design.
+  Case-sensitive whole-word; `caretQuery` decides whole-word from the
+  range. Quiet for lone matches, punctuation, one-rune selections,
+  multi-caret. `applyWordHighlight` is the single write path.
+- **Symbol uses (symbolhl.go, lsphighlight.go)**: a VERB (≡ Code), never
+  on caret move; replaces the word highlight while live; dies with
+  `EditRev`; writes underlined; Esc clears.
+- **Brace matching (bracket.go)**: always on, no toggle. Skips brackets
+  whose grid color is syn-string/syn-comment (degrades to "code" with no
+  grid, uncovered row, or theme where syn-string == fg). Scan is budgeted
+  (`bracketScanLines`); running out is `Conclusive=false` and paints
+  nothing — distinct from unmatched. `bracket-match` 42% neutral + bold;
+  unmatched = `err` FOREGROUND. Only `()[]{}`. Caret ON or just after;
+  ON wins. Quiet in multi-caret. Leader `Esc %` (≡ Nav).
+  `TestStyleForToken_LiteralFamilySplitsStringsFromNumbers` pins the
+  Literal SubCategory fix it depends on.
+- **Inlay hints (linenote.go, lspinlay.go)**: END OF LINE ONLY, never
+  mid-line (`TestLineNote_CostsNoGeometry`). Note restates its anchor
+  (`inlayNote`); dropped not squeezed; one cell short of the pane; dies
+  with the revision. No own timer: `inlayAfterEvent` asks once per
+  (path, rev), recorded BEFORE the answer. Error → `noInlay`; progress
+  end clears the record. gopls needs `initOptions`
+  (`TestInlay_EndToEndWithRealGopls`). ≡ View toggle `"inlayhints"`.
+
+### Markdown preview (editor/markdown*.go, app/markdown.go)
+- A VIEW flag (`Tab.mdView`), not a Mode: buffer, undo, dirty, LSP etc.
+  keep running (`TestSetMarkdownView_LeavesTheBufferAlone`).
+- `MDScroll` is its own counter. Rows derived + memoized on
+  (EditRev, width); theme switch must `InvalidateMarkdown` (via
+  `restyleTabs`). `MarkdownRows` is shared by draw and hit-test; every
+  row names its source line (-1 = nearest above).
+- Keys swallowed except navigation. Prose word-wraps, code hard-wraps
+  with tabs expanded; fences highlighted via one `HighlightLang` pass.
+  `md-code-bg` is a derived key (`TestDerive_MDCodeBGIsVisiblyOffTheBackground`).
+- No config key. Leader Esc-v; ≡ View row below the terminal rows.
+  Each context menu carries only ONE of Preview/Stop Preview (tree:
+  keyed by the clicked file via `previewingPath`; previewed editor pane
+  gets `openPreviewContext`).
+
+### Soft wrap (editor/softwrap.go, app/softwrap.go)
+- Per-tab view flag, rides the session (`TabState.Wrap`); restore calls
+  `SetSoftWrap` BEFORE `RestoreView`.
+- `ScrollY` stays a LINE index. ONE layout (`wrapLayout`) feeds Render,
+  HitTest, PosScreenCell, EnsureVisible, Up/Down, etc. **Any screen-row →
+  line mapping must ask `HitTest`**, never `ScrollY + row`.
+- `wrapW` cached from last render. Rows wrap one cell short of the pane.
+  Up/Down step by screen row when wrapped. No leader.
+
+### Find, replace, go to line (editor/find.go, replace.go, app/find.go, goto.go)
+- ONE scanner (`matchCols`); case folding per rune (`foldRunes`).
+- Options live on App (`findCase`/`findWord`), pushed via
+  `applyFindOptions`, not persisted.
+- Bar height: always ask `findBarRows()`. Inputs are `textField`. In-bar
+  Alt chords + clickable `Aa` / `|W|` + ≡ rows.
+- Replace = one undo step; ReplaceAll re-scans and goes bottom-up via
+  `ApplyMultiEdit`; ReplaceCurrent advances past what it wrote.
+- Go to line clamps and parses `file:line:col`. Leaders: Esc-j goto,
+  Esc-e replace.
+
+### Find-all list + project search (app/findall.go, projectsearch.go, internal/search)
+- A PEEK, not a picker: moving the highlight moves the cursor live, Esc
+  restores via `RestoreView`, other dismissals accept.
+- Takes rows/columns OUT of the editor (`editorBandRows` → `editorRect`),
+  never floats. TOP dock (default) or RIGHT dock (`"findalldock"`,
+  switched by title button, `d`, or ≡ View). **No call site may assume
+  the editor starts at row 1 or runs to its band's right edge.**
+- Bottom border is its resize handle; `findAllRows` not persisted;
+  drag continued in two places (`findAllDragMode`).
+- Preview CENTERS an off-screen hit, leaves an on-screen one alone.
+  Borrowed find state returned on exit. Rows compacted at open
+  (indent trimmed, tabs → one space).
+- Filter box seeded with the query; the seed is INERT until edited.
+- Opening: only a single-line selection searches silently; otherwise
+  prompt pre-filled (`findAllPromptSeed`), seed read BEFORE `openPrompt`.
+- Project search: pure Go over the finder index, capped with the cap in
+  the title, matcher = `editor.FindAll`. Project mode does NOT preview on
+  keyboard walk; a single click jumps and keeps the list; tints recorded
+  in `projFindTints` and removed by `clearProjectFindTints`. Always
+  prompts (seeded). Labels truncate from the front. Leader Esc-P.
+- Non-search producers (references, locations, workspace-edit receipt)
+  may change ONLY `findAllModal.heading`.
+
+### LSP (internal/lsp, app/lsp*.go)
+- Hand-rolled JSON-RPC; no LSP framework dependency.
+- Several servers, ONE PER FILE by extension (lspservers.go; extensions
+  disjoint). Installing the binary is the opt-in. Every verb gets its
+  connection from `a.lspClientFor(path)`. Degradation is per server;
+  `lspState.dead` is the global switch.
+- ≡ Code "Restart language server" is the retry; `lspServer.gen` drops
+  stale ready/exit events; `lspDropServer` is the shared teardown.
+- Sync via `EditRev` vs `syncedRev`, 300ms debounce; saves flush before
+  didSave. Absolute paths only (root and tab paths).
+- Handshake declares workspaceEdit with `documentChanges: true` and EMPTY
+  `resourceOperations`, `workDoneProgress`, `codeActionLiteralSupport`;
+  deliberately NOT `resolveSupport`, `prepareSupport`, `linkSupport`.
+- `onRequest` hook is narrow: return `lsp.ErrRequestUnhandled` for
+  methods it doesn't own (gopls blocks on `workspace/configuration`).
+  `StartWithRequests` installs the hook before the read loop.
+- Go to definition at the declaration flips to references
+  (`definitionIsHere`). ⌘+click = definition (`isMetaClick`: cats sends
+  ⌘ on mouse as CTRL+ALT); plain Ctrl+click left unbound.
+- Protocol shape unions collapse in `internal/lsp`, discriminated by a
+  FIELD/JSON type, never by a failed unmarshal.
+- Leaders: Esc-d definition, Esc-i hover, Esc-I signature, Esc-D
+  symbols, Esc-R references, Esc-c code actions, Esc-E rename.
+  Implementation / type definition / incoming calls / workspace symbols
+  are ≡ Code rows only.
+- Tests: `a.lsp.dead = true` + `lspLookPath` pinned; inject
+  `fakeLSPConn` via `a.lspInstall(lspGoServerID, fake)`;
+  `useRealLSPBinaries` for the two real-gopls tests.
+- Verb specifics:
+  - Symbols (Esc-D): a picker, not a palette source; kind word LAST in
+    the label; jump to `selectionRange`.
+  - Workspace symbols: prompts first; asks every READY server, never
+    spawns; gated on `lspAnyReady`.
+  - Implementation/type def/incoming calls share `Locations(method)`;
+    one result jumps (`lspJumpTo`), several list
+    (`openLocationsPanel`); incoming calls always list.
+  - References: generation-checked (`refSeq`); context read off-loop,
+    reconciled on-loop preferring open buffers; sorted before capped;
+    `includeDeclaration` true; 30s timeout.
+  - Signature help: MANUAL only (a modal would eat keystrokes); label
+    hard-wrapped for exact offsets; active param's doc first.
+  - Progress: status-bar segment, token SET, `lspLoadingNote` on empty
+    answers; only error/warning `showMessage` flashes.
+  - Rename: `startRename` captures position at prompt open, re-checks
+    EditRev at submit, `captureWSRequest` AFTER the flush; old name never
+    sent; only refuses unchanged name / whitespace.
+  - Code actions: range = selection or cursor; diagnostics echoed
+    VERBATIM (raw JSON round-trip); disabled actions dropped; edit before
+    command, refused edit skips command. Server `workspace/applyEdit`
+    refuses while a dialog owns the screen; handler blocks
+    (`wsApplyTimeout` 90s < `executeCommandTimeout` 2m).
+
+### Workspace edits (lsp/workspaceedit.go, editor/multiedit.go, app/workspaceedit.go)
+- Opens NO tabs: non-open files go through a detached `editor.Tab` +
+  `Tab.Save`; open files are edited in their buffer and NOT saved.
+  Receipt = Find-all project mode (`reportWorkspaceEdit`).
+- Validate everything (`planWorkspaceEdit`, on the main loop), then
+  apply: buffers first, then disk in path order, rollback on failure.
+- Undo journal: one slot above per-tab stacks, validated by `EditRev`
+  AND `UndoDepth` (+ mtime for detached). Plain undo claims the group,
+  or degrades loudly and clears the slot; `closeTab` drops it.
+- `documentChanges` wins over `changes`; `changes` sorted by path.
+  Resource ops refused by name. `ClampEnd` for exclusive ends;
+  overlapping edits refuse.
+- `applyServerEdit` = acceptance; `applyServerEditWith` = outcome,
+  `done` fires exactly once on every path.
+
+### Diagnostics (app/diagmerge.go, diagtip.go)
+- `a.diagsFor(path)` merges LSP → plugins (sorted keys) → ced's own, as
+  `lsp.Diagnostic`; synthetic columns re-encoded to UTF-16 (`lspPosFor`).
+  Plugin kill switch honoured here. `diagsForRange` stays LSP-only
+  (`TestDiagsForRange_StaysOnLSPOnly`). Esc-i answers with diagnostics
+  alone when there is no server.
+- Tooltip: passive, reads the cache, arms only on a real diagnostic;
+  gutter answers by line, code by rune (PosScreenCell round-trip).
+  Gutter click toggles it (`diagGutterPress`, after `blameColumnPress`).
+  Messages wrapped, capped.
+
+### Data formats (internal/format/kinds.go, inprocess.go, validate.go, app/validate.go)
+- `format.kindFor` is the ONE table for formatter + in-process pass +
+  validator (`TestKindFor_AgreesWithTheThreeVerbs`). JSONC carved out by
+  name (tsconfig, jsconfig, .eslintrc.json, `.vscode/`).
+- Builtin ladder: repo-local tool → global tool → in-process pass.
+  External commands must rewrite IN PLACE (no jq). JSON tools don't chain.
+- In-process JSON: `json.Indent` on trimmed bytes, never Marshal.
+  Unparseable → not rewritten; unchanged → not rewritten; empty file is
+  not an error. Adopted via `formatDoneEvent` → `ReloadAsEdit`.
+- Validation reads the BUFFER; formatting reads DISK. Findings die with
+  the revision (`liveProblems`). 400ms debounce armed only for validated
+  kinds; parse once at open. One problem reported; columns in runes,
+  offset-1. Go deliberately not validated (gopls does it).
+- Format-on-save order: project `format.json` (trust-gated) → builtin
+  external (`BuiltinCommandsFor(root, path)`) → in-process → install
+  offer. Go: goimports, else `gopls imports -w` + `gofmt -w`, else gofmt.
+  `quiet=true` (auto-save) never prompts or flashes.
 
 ### Auto-save (app/autosave.go)
-Debounce mirrors the LSP didChange pattern: `autoSaveAfterEvent` runs
-after every dispatch, compares the sum of all tabs' EditRevs, and
-(re)arms a `time.AfterFunc` that posts `autoSaveEvent`. Saves are
-silent (no flash), run format-on-save in quiet mode, defer while any
-modal/menu is open, and skip tabs whose disk file changed after load
-(explicit Save remains the overwrite path). The ≡ toggle persists via
-`userconfig.SaveAutoSave`, which round-trips unknown JSON keys — don't
-replace that with a struct marshal. Default is ON.
+- Debounce on the sum of EditRevs; default ON; silent; quiet format;
+  defers while a modal/menu is open; skips tabs changed on disk.
+- `"autosavedelay"` (default 5s, clamped [500ms, 5m]), no ≡ row; read
+  via `autoSaveInterval()`.
+- Focus-out and tab switch flush through `autoSaveTabIfEligible`. Focus
+  is best-effort; the timer is the backstop. Never call `When()` on
+  `*tcell.EventFocus`.
+- `userconfig.Save*` round-trips unknown keys — never replace with a
+  struct marshal.
 
-- **The idle window is 5s and configurable** (`"autosavedelay"`, a
-  duration string or bare seconds, clamped to `[500ms, 5m]`). It has NO
-  ≡ row — the menu is for verbs, and a duration would need a picker of
-  canned values to have any menu shape at all. A typo is reported (the
-  rule every other key follows: a silently ignored value is one the user
-  believes is in effect); a value merely out of range is clamped in
-  silence. All reads go through `autoSaveInterval()`, which maps the zero
-  value to the default — tests build `App` as a struct literal, and
-  `time.AfterFunc(0, …)` fires immediately.
-- **LEAVING FLUSHES, which is what lets the window be that long.** The
-  terminal losing focus (`autoSaveOnFocusChange`, off `scr.EnableFocus`
-  + `*tcell.EventFocus`) and switching tabs (`autoSaveDepartingTab`, in
-  `switchToTab` because it is the single funnel) both write immediately.
-  Neither owns any save logic — both go through `autoSaveTabIfEligible`
-  / `handleAutoSave`, so there is exactly one answer to "is this tab safe
-  to write in the background", including the modal deferral. Both are
-  gated on the ≡ toggle: a focus-out write IS an auto-save. Focus-IN
-  deliberately does nothing (the countdown is armed by edits, not by
-  attention). **Focus reporting is best-effort and must never be the only
-  path to disk** — macOS Terminal.app never reports it, tmux needs
-  `focus-events on` — so the timer stays the backstop. Never call
-  `When()` on a `*tcell.EventFocus`: tcell's constructor leaves the
-  embedded `*EventTime` nil and it panics.
+### AI: Copilot, chat, context (app/copilot*.go, chat*.go, lsp/acp.go)
+- Copilot sidecar = `copilot-language-server` over the same `internal/lsp`
+  client; `"copilot"` opt-out; device-flow sign-in via
+  `CallWithTimeout`; `editorInfo`/`editorPluginInfo` required. Host side
+  effects via `copilotCopyCode`/`copilotOpenBrowser`. Menu rows stay
+  clickable and flash why.
+- Ghost text: NOT a DecorationSource — spliced into the cursor row after
+  decoration merge; first line inline, `⋯+N` for the rest. Lazy doc
+  sync; only EditRev movement arms the 300ms debounce; responses
+  validated on (path, EditRev, cursor, reqSeq). Accept = select +
+  InsertString of full InsertText. `"suggestions"` separate opt-out.
+- Chat = ACP over `internal/lsp` (ndjson); no ACP SDK. Agent registry
+  (chatagent.go: Copilot, Claude Code, Gemini), ONE panel, switchable;
+  re-picking the agent is the retry. `"chatagent"`, `"chatmodel"`
+  persisted, stale ids skipped silently. `connSeq` on every teardown.
+- Chat is a TOOL WINDOW, docked RIGHT by default. Turns via
+  `session/prompt` with `CallWithTimeout`; queued first prompt.
+- Transcript is the model, rows derived (`chatRows`). Composer is the
+  multi-line `chatComposer` (chat only; everything else uses
+  `textField`): Enter sends, Alt/Shift+Enter breaks; the legacy
+  ESC-CR fold ('m' + ModAlt|ModCtrl) is rewritten to Alt+Enter in
+  handleKey BEFORE leaders. Composer hard-wraps.
+- Focused chat owns paste (`chatPasteTarget` vs `editorPasteTarget`,
+  mutually exclusive). Selection/copy in derived-row space; copy buttons
+  are derived rows (`chatActionRect`).
+- Permissions: hooks run per-request goroutines and block; every request
+  answered exactly once (pick / reject / cancelled via
+  `chatFlushPermissions`); queued, never steals the modal slot.
+  `"chatwrite"` read-only mode enforced at handshake, fs handler, and
+  auto-rejecting mutating kinds. fs is root-confined, reads buffers
+  first, writes then `refreshTreeNow()`.
+- Context attachments: PUSHED as embedded resources (no
+  `resource_link`), per-turn not sticky, auto-context toggle
+  `"chatcontext"` (selection beats file), buffer content, capped with the
+  cut announced, fenced fallback when `embeddedContext` is false.
+  Single-width markers.
+- Archive (chatstore, chatarchive.go): New chat archives, empties AND
+  restarts the session (`chatRestartSession`, never clears `dead`). No
+  confirmations; both refuse mid-turn. Saved after every turn; one file
+  per conversation (`archiveID`, nanosecond ids). Restored chats say the
+  agent memory is gone. `chatRevealPanel` for reading. Leaders Esc-a-x /
+  Esc-a-r.
+- Summarize (Esc-a-z): `selectionOrFileTarget` (shared), `chatAttachOnce`,
+  visible chat turn, prose prompt.
+- Tests: `fakeCopilotConn`; `a.copilot.dead` / `a.chat.dead` true.
 
-### Terminal panel (app/terminal.go)
-An embedded grsh session (github.com/rohanthewiz/grsh — the module's
-only public package; the embedding contract lives in that repo's
-docs/EMBEDDING.md), hosted as a REPL strip. NOT a PTY — do not add
-one, or a VT emulator; full-screen child apps (vim, htop) are out of
-scope by design. House rules:
+### MCP, skills, plugins, GoNotes
+- **MCP** (internal/mcp, app/mcp.go): `~/.config/ced/mcp.json` in the
+  Claude-Desktop shape. Declared to the agent in `session/new`; ced's own
+  client (stdio only, over `lsp.StartNDJSON`) connects only on a ≡
+  action. Generation-checked; stale ready events close their client.
+  All pickers. `Describe()` shows env KEYS only.
+- **Skills** (internal/skills, app/skills.go): read `~/.claude/skills`,
+  `<project>/.claude/skills`, `~/.config/ced/skills`; precedence ced <
+  user < project, shadowing in place. Pushed only on purpose as a
+  `chatAttach` + `chatSkillDirective`. Never executed. Hand-parsed
+  frontmatter — no YAML dep. Leader Esc-a-s.
+- **Plugins** (internal/plugins, app/plugin*.go): JSON manifests of SHELL
+  COMMANDS — ced never hosts code. Nothing runs at startup; `"plugins"`
+  kill switch honoured at every surface. stdout = answer, stderr kept
+  separate (decorations read both, ignore exit status). Output discarded
+  if (path, EditRev) moved. Decorations keyed by (file, provider); empty
+  result replaces. Compiler/grep output format. Esc-x = dynamic
+  namespace (arms nothing when empty). Edit debounce 800ms. User-scoped
+  only — project plugins would need format.json's trust store.
+- **GoNotes** (internal/gonotes, app/gonotes.go, Esc-a-n): body is the
+  selection VERBATIM; provenance in the description; tagged `ced`. HTTP
+  only (bytdb is single-writer). Config via GoNotes' own env vars and
+  shared token cache. One login retry. Failures open the info modal.
+  Privacy chip on every note prompt (`alt+p`); ✦ draft (`alt+a`).
+  `agentOneLine` shared with `commitSubject`.
 
-- **It is a TOOL WINDOW** (toolwindow.go), so its edge, its size and its
-  exclusivity are not its own business any more: `termPanelRect` is a
-  read of `toolRect`, `termPanelHeight`/`termPanelWidth` read the
-  layout, and `claimDock` decides who yields. It defaults to the bottom
-  edge; the ≡ "Dock terminal left" row survives as a named PRESET over
-  `moveTool`, and it still OPENS a closed terminal — moving something
-  invisible reads as the row doing nothing. Keep the Show/Hide terminal
-  and dock rows near the TOP of the ≡ View section — the menu scrolls on
-  short windows and these rows must stay above the fold once View is
-  unfolded (pinned by `TestMenuLayout_TerminalRowsAboveTheFold`).
-- **Bottom mode resizes by header-rule drag (rows); a vertical edge by
-  its seam (columns).** `termPanelPress` refuses the header-rule drag on
-  a vertical edge, where a height would mean nothing.
-- **Focus flag, not a modal**: `term.focused` routes plain editing
-  keys to the input line; Esc stays global so leaders and the
-  double-Esc menu keep working from inside the terminal. Any click
-  outside the panel unfocuses. Esc-` is focus-or-toggle.
-- **Coalescing writer**: grsh output lands in `termWriter`'s buffer
-  with at most one `termOutputEvent` in flight — never post
-  per-chunk events (heavy output would overflow tcell's queue).
-- **Paste is real-shell paste: a line break means Enter.**
-  `termPasteTarget` (textpaste.go) claims bracketed pastes for the panel
-  and `termInsertPaste` runs the complete lines in order, parking an
-  unterminated tail at the prompt — owner's call, chosen over
-  flattening. The paste's first line joins what's already on the input
-  line, at the caret. Three invariants hold it together:
-  - **One at a time.** Eval is async, so lines can't be looped over:
-    `term.pasteQueue` holds the tail and `termRunPasteQueue` submits the
-    next line only when the previous Eval reports done (re-entered from
-    `handleTermDone`). A loop here would interleave commands or trip
-    `submitTermCommand`'s busy guard.
-  - **Through `submitTermCommand`, always.** That's what makes a pasted
-    block feed grsh's `NeedsMore` continuation as ONE unit and echo each
-    line into the scrollback, so a batch reads back as what it ran.
-  - **⏹ aborts the remainder**, and drops the queue whether or not
-    there's a process to signal — "stop" has to mean the rest never
-    runs. `exit` drops it too (that shell is gone). Hiding the panel does
-    NOT: a running command already survives hide/show.
+### Git
+- **Panel checkbox is a multi-selection tick, NOT staging.** Stage state
+  is the XY porcelain code drawn verbatim. Verbs behind `Actions ▾`
+  (openPicker); targets fall back to the highlighted row; ticks pruned on
+  refresh; no-op rows omitted. Writes via `runGitCmd`; Discard/Delete
+  confirm.
+- Commit of a selection stages first (`gitCommitFiles`, `runGitCmdSeq`);
+  every commit goes through `gitCommitFiles`.
+- Agent-drafted messages: a visible chat turn claimed by generation +
+  transcript mark (`commitSuggestReq`); draft only pre-fills. Diff is
+  `diff HEAD`, capped, includes untracked contents.
+  `"commitmsgtrailer"` adds `Co-Authored-By` ONLY to drafted messages
+  (`openCommitPromptDraft` vs `openCommitPrompt`). `promptModal.extras`
+  = button row with Alt chords. Agent unavailability is a reason
+  (`commitDraftBlockedReason`), not a hidden button.
+- Commit receipt: passive layer, never takes the modal slot; dismissed by
+  anything without consuming the key; reads `git log -1` via
+  `gitCmdDoneEvent.onOK`.
+- Git log (Esc-L): tool window; `--all`, capped 400; Actions picker
+  (only `reset --hard` confirms); selection kept by hash; refresh rides
+  `refreshGitStatus`.
+- Git status report (≡ Git + panel Actions): long format with
+  `color.status=false`, `advice.statusHints=false`; capped to the window
+  with the cut named; declines an occupied modal slot.
 
-  What NOT to do: don't restore per-rune replay (that ran every line but
-  the last, through `handleKey`'s shortcut machinery), and don't join
-  lines with `; ` (invents separators the user never typed, and a pasted
-  `#` comment then swallows the rest of the line).
-- **Stop button, not Ctrl+C**: ⏹ sends Interrupt (SIGINT to the
-  child's own process group), a second press escalates to Kill.
-  grsh's embedded mode guarantees the signal cannot hit the editor.
-- Evals run on goroutines; only main-loop handlers mutate term state.
-  Each completed command calls `refreshTreeNow()` — shell commands
-  create files.
-- **POSIX only — this panel is why.** grsh reaches for job-control
-  syscalls (`SIGTSTP`, `SIGUSR1/2`, `Setpgid`, `Getpgrp`) that Go's
-  `syscall` package doesn't define on Windows, so embedding it makes the
-  whole binary POSIX-only and `.goreleaser.yml` ships linux/darwin only.
-  Restoring a Windows target means build-tagging this panel out behind
-  stubs, NOT adding `windows` back to the goos list — that just breaks
-  the release again (it broke ced's first one).
-- grsh's `cd` chdirs the whole editor process (grsh's deliberate
-  design) — keep ced's own file operations absolute-path based.
-- **rc file, the grsh analog of ~/.zshrc**: `ensureTermSession` sources
-  `~/.config/ced/rc.grsh` (`userconfig.RcPath`) into each fresh session
-  via `sourceTermRc`, so a user's aliases/functions load before the first
-  prompt. It embeds grsh, NOT zsh — it never reads any zsh startup file,
-  which is the whole reason this file exists, and it must be grsh syntax.
-  Same silent-degradation contract as the LSP/formatters: absent rc → no
-  eval, broken rc → one termErr scrollback line, never a modal. Sourced
-  SYNCHRONOUSLY (a real shell blocks on its rc; this also beats the race
-  where a typed command could outrun an async source). `termRcPath` is a
-  package var so tests point it at a temp file — newTestApp disables it
-  (returns "") so the dev machine's real rc.grsh never enters `evals`.
-- Tests inject `fakeTermEval` via the `newTermEvaluator` stub in
-  newTestApp. Only TestTermRealGrshIntegration may execute a real
-  command, and it is restricted to `echo`.
+### Compare panel (internal/diff, app/compare.go)
+- Active buffer is always the NEW side. Pure-Go patience diff; LCS only
+  within `lcsCellBudget`. `SplitLines` adds no phantom line. Buffers over
+  disk, except a file vs. itself (saved copy). Pasted text is a source
+  (armed paste target). ⟳ re-reads via `compare.oldPath`. Tool window;
+  its ≡ show row opens a picker. No leader.
 
-### Clickable terminal output (app/termdiag.go)
-Any scrollback row naming a file and a line — a compiler error, a
-`go vet` finding, a `grep -n` hit — is a jump into the editor. It
-closes the build→fix loop inside one pane, which is the whole reason
-the panel exists. House rules:
+### Tool windows + layout (app/toolwindow.go, tool*.go, splitter.go)
+- Every panel (tree, git panels, problems, compare, terminal, chat) is a
+  tool window on one of three edges; ONE visible per edge
+  (`claimDock`). The bottom edge spans the whole width; side docks stop
+  above it (`dockSplitterHit` is row-aware).
+- No button rail. Find bar hugs the editor, above the bottom dock.
+- Tools lacking their own header get the generic one (`toolDef.ownHeader`);
+  the tree hides its EXPLORER row (`HideLabel` moves the ROW MAP too).
+  `toolRect` = whole dock, `toolBodyRect` = content. Header checked
+  before the seam.
+- Sizes per tool per axis, 0 = auto; width includes the splitter. Tree
+  width reads through to `App.sidebarWidth`. `rawDockCols` avoids clamp
+  recursion (`TestOppositeDocksDoNotRecurse`). Hidden tool → zero rect.
+  `showTool` can refuse; callers read the answer.
+- Nothing about layouts confirms. ≡ Tool windows = three rows + pickers.
+  Find-all list and find bar are NOT tool windows.
+- Layout persisted per project in `session.Entry.Layout`, sparse;
+  restored through `showTool` silently; `clampToolSizes` refuses on a
+  zero-size window (`TestApplyToolLayout_SurvivesAnUnsizedWindow`);
+  `toolLayoutLoading` latch stops write-back during restore.
+- `termDockLeft`, the tree flip, `"termdock"`, `"toolstripes"` are
+  retired (still parse, ignored).
+- Seams: grab zone = divider + column on its PANEL side (mirrors for
+  right docks); drags carry `dragSplitOffset`; grip glyph on middle rows.
+  Ceilings are the neighbour's reserve. `minSidebarWidth = 18`,
+  `minEditorAfterDrag = 40`. A drag that moves the seam calls
+  `lockTreeAutoFit`.
 
-- **ONE parser decides what a location is.** `plugins.ParseDiagnostic`
-  (the exported single-line twin of `ParseDiagnostics`) already speaks
-  the compiler/grep convention the decoration layer is built on; a
-  second implementation here would drift and the user would have no
-  way to tell which one decided a row wasn't a link.
-- **A LOCATION IS ONLY REAL IF THE FILE IS.** That parser is
-  deliberately permissive — it has to be, since its usual caller
-  already knows which file the output describes — so a bare "12:30"
-  parses fine. Terminal output belongs to nobody, so the guard here is
-  stricter: the row must name a PATH, that path must resolve to a
-  regular file, and the file must sit inside rootDir (the git-log
-  jump's confinement rule).
-- **Relative paths resolve against the SHELL's cwd**, not the project
-  root: `go build` prints relative to where it ran, and grsh's `cd`
-  moves that. Output that no longer resolves after a `cd` is inherent
-  to a scrollback, and is what a real terminal's file links do too.
-- **Resolution is CACHED, keyed by cwd + the path as printed.**
-  Drawing asks per visible row per frame; uncached that is a stat
-  syscall per row of output on every repaint. The cwd in the key means
-  a `cd` invalidates exactly the answers that changed.
-- **`termLocSpan` measures the underline, it does not re-parse.** The
-  parse is lossy on purpose (a printed column of 0 clamps to
-  zero-based 0), so rebuilding "path:line:col" from parsed values
-  would match nothing. Measuring the raw text can't disagree with
-  itself. The underline IS the affordance — without it the feature is
-  invisible — so a row is a link only when both agree.
-- **The list is NEWEST COMMAND FIRST, printed order within each.**
-  Plain document order buries the build you just ran; plain reverse
-  order shows one build's three errors backwards. The echoed command
-  rows (`termCmd`) already mark the boundaries, so grouping by them
-  costs nothing and gets both halves right. Capped, with the cap named
-  in the title (the project-search rule).
-- **Double-click is primary, the picker is the twin.** macOS Terminal
-  swallows clicks, so `Esc ~` / ≡ opens the same locations through
-  `openPicker`. `~` is the shifted twin of the terminal's own Esc-`.
-  The menu predicate (`hasTermOutput`) is deliberately approximate —
-  menuLayout runs every frame the menu is open, and the honest
-  question is a scrollback walk with a stat behind it, so it's a cheap
-  gate plus an honest flash.
-- The row lives in the **Nav** group, beside Go to matching bracket, not
-  with the terminal's View toggles: it is a jump ("take me to the
-  problem") that needs no language server — `go build` and `grep -n` are
-  the providers — so it does not belong among Code's server-backed rows.
+### File tree
+- **Auto-fit (treeautofit.go)**: `autoFitSidebar` runs at the top of
+  `draw` before any rect is read; grows only, floor
+  `defaultSidebarWidth`, cap `autoFitMinEditor` (80) and a share of the
+  band. Measurement shares `nodeRowSegments` with the renderer; measures
+  all expanded rows. `"treeautofit"` default on (off in newTestApp).
+- **Type-to-find (filter.go, treefilter.go)**: substring match per rune
+  fold; no timeout; clears on Backspace-to-empty, Esc (side effect),
+  focus loss. **No bare letter is a command in the focused tree** —
+  only Space and `*` on an empty pattern. Tab/Shift-Tab cycle. Scope =
+  expanded active folder else project, captured on first rune. Visible
+  rows only. Paint = `FindMatch` + bold after the row.
+- **Marks (treemarks.go)**: the tick borrows the row's leading blank cell
+  (`TestMarks_TickCostsNoWidth`); keyed by PATH; `MarkedNodes` walks the
+  loaded tree in order. Bulk marking only over visible rows;
+  `MarkRange` only adds. Verbs reuse single-file paths
+  (`doDeletePaths`, `createZipMulti`, file clipboard); archive entries
+  relative to the common parent (`commonParentDir` by segment); paste
+  plans reserve names (`uniquePastePathExcept`). Partial sets reported.
+  No Discard row. Delete clears the set.
 
-### Run an executable (app/runexec.go)
-The tree's `*` marker (execmarks.go) and the terminal panel, joined: right-
-click an executable → "Run in terminal…", pick a working directory, and the
-command lands on the panel's input line. Also the ≡ **File** row (the
-right-click-swallowed rule), no leader key. House rules:
+### Overflow markers (app/overflow.go)
+- `▴`/`▾` in the LAST column of a viewport's first/last row on every
+  scrolling surface; reserves no column; always drawn, no toggle
+  (`"scrollbar"` retired, `TestLoadRetiredScrollbarKey`).
+- Color = loudest thing off-screen: caret > find > error > warn > info;
+  only OFF-screen items count; read from caches, not DecorationSources.
+- `overflowMarkers()` is the ONE enumerator for draw, hit-test, popup.
+  Keeps the cell's background. Drawn after all surfaces render; the
+  unpinned Find-all list paints via `drawOverflowMarkersOverlay`.
+- Click pages that way, double-click runs to the end
+  (`overflowMarkerPress`; distances counted from `off.lines`;
+  `App.overflowClick` claims the second press); gated on
+  `dragMode == ""`. Counts floor at zero.
+- Popup is passive (`overflowTipState`, not folded into
+  `hoverDwellState`), 250ms delay, reuses the tooltip helpers. Units
+  follow the surface. Auto-fit does not compensate for it.
 
-- **IT STAGES, IT DOES NOT SUBMIT.** Same rule as catsRunInPanel and as
-  handing a selection to an agent — the editor may COMPOSE a command, the
-  user presses Enter. Here it is structural rather than merely careful: an
-  execute bit says how to START a program and nothing about what to pass
-  it, so a row that fired immediately could never run a script that takes
-  a flag. Re-running is the panel's own history (Up), which keeps the
-  edited line, arguments and all — hence no per-file command memory.
-- **THE `cd` IS PART OF THE STAGED LINE, because grsh has no subshell.**
-  v1's language has no `( … )` grouping ("there is no subshell to run them
-  in") and its `cd` builtin chdirs the WHOLE editor process by design, so a
-  scoped cd is not available; wrapping in `sh -c '…'` would bury the
-  command inside quotes where arguments cannot be typed. So the cd leads
-  the line — visible, editable, and FIRST, which is also what makes typed
-  arguments land after the command. Joined with `&&` (catsRunScript's
-  argument) and omitted entirely when the shell is already there
-  (menuCatsTerminal's pointless-cd rule), which is what stops a second run
-  stacking a redundant one.
-- **The directory picker widens into the frecency list, it does not build
-  one** (the findall-reuse rule). Rows run most-specific-first — the file's
-  own directory, the project root, wherever the shell currently is — then
-  ced's own recent folders and the host's cdx-ranked history through
-  `catsRecentFolders`, so this picker and "Open project" can never disagree
-  about which directories exist. Deduped on `session.Normalize` (the folder
-  store's key) and pruned to what still exists. ONE candidate is not a
-  choice, so a workspace with nothing else to offer stages straight away.
-- **The command is relative to the chosen directory when it sits inside
-  it**, absolute when it does not (catsRelPath's rule) — and the `./` is
-  load-bearing, since a bare `tool.sh` is a PATH lookup. `shellArg` quotes
-  only what needs it, unlike `catsShellQuote`'s unconditional form: this
-  line is read and edited by a person.
-- **The execute bit is re-checked live**, never trusted from the tree node
-  (stamped at the last reload) — a `chmod -x` in the very panel this row
-  feeds must refuse rather than stage something that only fails oddly.
+### Terminal (app/terminal.go, termdiag.go, runexec.go)
+- Embedded grsh REPL strip — NOT a PTY, no VT emulator. POSIX-only;
+  don't add `windows` back to goreleaser (build-tag it out instead).
+- Tool window, bottom by default; ≡ "Dock terminal left" is a preset
+  that also opens it. Keep terminal rows near the top of ≡ View
+  (`TestMenuLayout_TerminalRowsAboveTheFold`).
+- Focus flag, not a modal; Esc stays global. Coalescing writer (one
+  `termOutputEvent` in flight). ⏹ = SIGINT then Kill; aborts the paste
+  queue.
+- Paste: line break = Enter; lines submitted one at a time through
+  `submitTermCommand` via `term.pasteQueue`. No per-rune replay, no `; `
+  joining.
+- `~/.config/ced/rc.grsh` sourced synchronously (`termRcPath`).
+  Tests: `fakeTermEval`; only `TestTermRealGrshIntegration` runs `echo`.
+- Clickable output: parsed by `plugins.ParseDiagnostic`; must name an
+  existing regular file inside rootDir; relative to the SHELL's cwd;
+  cached by cwd+path; `termLocSpan` measures the raw text; list newest
+  command first. Esc-~ / ≡ Nav picker twin.
+- Run executable: STAGES, never submits; `cd … &&` leads the line (grsh
+  has no subshell), omitted when already there; directory picker reuses
+  frecency sources; execute bit re-checked live.
 
-### Named themes (internal/theme + app/theme.go)
-Ten shipped palettes plus `~/.config/ced/themes/*.json`, switchable live
-from ≡ → Theme. House rules:
+### Workspace, sessions, navigation
+- **Nav history (nav.go)**: recorded centrally by openFile / switchToTab;
+  `nav.suppress` during retrace; fresh navigation clears forward. LSP
+  jumps record explicitly. Esc-o/O, Alt+←/→.
+- **Open folder = restart** (folder.go): `nextRoot` + quit, main loops
+  `New(newRoot)`; Close called explicitly. state.json (separate from
+  config.json), order = recency, visit recorded at startup, tabs at
+  Close, `session.Normalize` resolves symlinks. Restore checks file
+  existence itself, degrades silently, uses `RestoreView`. Tabs wired by
+  `wireTab`/`announceTab`. Bare `ced` opens cwd; `--last` for the last
+  folder. Folder switch owes the unsaved-changes modal. Recent picker
+  excludes the current root and prunes gone folders. `"session"` toggle.
+- **Recent locations (internal/history, recentlocations.go)**:
+  `<repo>/.ced/history.bytdb` (gitignored on first write, loading creates
+  nothing), relative paths. Trie with max-of-subtree bounds, best-first
+  top-k (`TestIndex_SearchMatchesBruteForce`). Eviction with hysteresis.
+  DB opened briefly (load on first use, write on Close), retries on lock;
+  writes ADD via deltas and re-issued sequences
+  (`TestWrite_TwoInstancesAdd`). Spacers only in the unfiltered view.
+- **Favorites (internal/favorites, favorites.go, favmanage.go)**:
+  `ced fav <name>` REVEALS in the tree, never re-roots. Relative names;
+  CLI walks up (each dir asked in full), the ≡ row resolves strictly in
+  the open root (`ResolveIn`). Project scope shadows globals per name.
+  `Clean` at write and read; `Resolve` re-checks after symlinks.
+  Unbound vs bound-but-missing are different errors. Subcommand words
+  refused as names. `Tree.Reveal` expands ancestors only; `RevealPath`
+  opens the target and focuses the tree. Manage favorites: project list
+  with a global drill-in, each list ends with its scoped Add row; scope
+  chip is a closure (`alt+s`); rename is add-first; malformed file
+  refuses writes.
+- **Remote open (internal/remote, remote.go)**: discovery by project root
+  (longest containing root wins); `ErrNoInstance` falls back to a local
+  editor, a handler refusal is an error. Sockets per process under
+  `$XDG_RUNTIME_DIR/ced` (never ~/.config), short paths. Waiters released
+  exactly once (`releaseRemote`: tab close, Close, toggle off). Root
+  re-checked on arrival. `"remote"` on/off/unavailable.
+- **Open in $EDITOR (openineditor.go)**: $VISUAL beats $EDITOR, passed to
+  a shell. Tier 1 runs it in a side-by-side cats pane (relative path);
+  Tier 0 stages it in the terminal (absolute path). Row names the editor;
+  always shown, refusal teaches. Sits above "Run in terminal…"
+  (`TestTreeContextRunRowOnlyForExecutables`).
+- **CLI (main.go)**: ONE parser — `parseArgs` runs the real `cli.App`
+  into a `cliResult`. `actionDone` default. `helpText` is the help
+  template (no backticks). Explicit `--version/-v/-V`; `OnUsageError`
+  returns the message alone; no-op `ExitErrHandler`.
 
-- **Eight core keys, twenty-nine derived.** A theme states `bg fg muted
-  line accent ok warn err`; `Normalize` fills the rest from the ordered
-  derivation table in palette.go (`selection ← 32% accent over bg`,
-  `syn-string ← ok`, `git-deleted ← err`, …). That's what keeps a
-  hand-written theme eight lines long, and it means **adding a new color
-  key never invalidates a theme file somebody already wrote** — give it a
-  derivation and every existing theme gains it. A stated key always wins,
-  and later rules see the stated value (syn-operator lightens whatever
-  syn-type ended up being), so order the table by dependency.
-- **Palettes are `map[string]string`, not a struct of colors.** "Was this
-  key stated?" has to be answerable and zero is a real color. Specs hold
-  the SPARSE palette — what the author literally wrote — so re-saving an
-  eight-line theme can't balloon it to thirty-five.
-- **`theme.Default()` stays a hardcoded literal.** It's the floor when a
-  file is broken or a saved name is gone, so it must not be able to fail;
-  `TestBuiltin_TokyoNightMatchesDefault` pins it against the built-in of
-  the same name so the two can't drift.
-- **A switch is a live restyle.** `setTheme` assigns `App.theme`,
-  repaints the screen default style, and marks every tab `StyleStale`.
-  `Tab.Styles` is the ONE cache of theme-derived colors in the editor —
-  everything else builds its styles inside its own draw call. Anything
-  that starts caching colors must join `restyleTabs` or it keeps painting
-  the old palette until the buffer is edited.
-- **Same silent-degradation contract as LSP/formatters.** Unknown name,
-  broken file, unwritable config → one flash, editor keeps running on the
-  default. Per-file degradation in the registry: one bad theme costs that
-  theme, never its neighbours. A missing themes directory says nothing at
-  all (it's the common case).
-- **A user theme shadows a built-in IN PLACE** (same name → same list
-  position), so tweaking a shipped theme doesn't produce two identical
-  picker rows.
-- **The editing loop is the customization UI.** "Customize theme…" writes
-  the active palette out FULLY EXPANDED under a `-custom` name (so the
-  original stays reachable), switches to it, and opens it as a tab;
-  `themeAfterSave` re-reads the registry on any save under the themes
-  directory. Don't replace that with a color-picker modal — ced has no
-  settings dialog by design.
-- The picker is `openPicker` (house rule) and KEEPS the current theme in
-  the list, annotated — unlike the chat-model picker — because re-picking
-  is how a user reverts after previewing. Rows are in the ≡ **View**
-  group for the same above-the-fold reason the terminal rows are.
+### cats host integration (internal/cats, app/cats_glue.go)
+- Tier 0 is ced in any other terminal, not a degraded mode. **No feature
+  may exist only at Tier 1** (`if a.catsTier1() { … } else { … }`).
+- Tier 1 = `CATS_ENV=1` + `CATS_PANE_ID` + a socket that answers ping.
+  Env sniff inline, probe on a goroutine.
+- Never import the cats module — hand-copied wire structs.
+- Stream reconnects forever with capped backoff; ONE json.Decoder for
+  ack and events; Close interrupts a blocked read.
+- "Blocked" = a question the user didn't ask for (`catsAsking(phrase)`
+  after opening the modal). Report on CHANGE only; `catsAfterEvent` runs
+  last. Hook seq seeded from the clock. Source is `"ced"`, never
+  `"cats:ced"`.
 
-### Three-way external-change reconciliation (app.go)
-On each tree-refresh tick, `reconcileOpenTabsWithDisk` checks each open
-tab's mtime: clean buffer + changed file → silent reload; dirty buffer
-+ changed file → warning; file deleted → set `DiskGone` once.
+### Themes (internal/theme, app/theme.go)
+- Eight core keys; the rest derived via the ordered table in palette.go
+  (new keys get a derivation). Palettes are `map[string]string`; specs
+  keep the sparse palette.
+- `theme.Default()` is a hardcoded literal
+  (`TestBuiltin_TokyoNightMatchesDefault`).
+- Switch = live restyle; `Tab.Styles` (and markdown rows) are the only
+  color caches — anything new that caches colors must join
+  `restyleTabs`.
+- User themes shadow built-ins in place; "Customize theme…" writes a
+  fully expanded `-custom` file and opens it — no color-picker modal.
+  Picker keeps the current theme. ≡ View rows.
+- When adding a color, check it against the background AND its
+  neighbours — "ambient, keep it quiet" ships invisible colors.
 
-### Single-slot modal interface (modal.go)
-Every secondary overlay (prompt, confirm, dirty-close, form, tree
-context, finder) is a struct implementing the `modal` interface
-(`handleKey` / `handleMouse` / `draw`) held in the single `App.modal`
-slot — nil means none. `openModal` enforces mutual exclusivity. When
-adding a modal: implement the interface, compute button geometry in ONE
-method returning `btnRect`s that both draw and mouse hit-testing
-consume, and reuse `textField` for any single-line input. For any
-"choose one from a list" UI, reuse the palette as a fuzzy picker via
-`a.openPicker(title, items)` (the branch switcher does this) — don't
-write a new list modal. Do NOT add
-per-modal fields back onto App or new branches to handleKey/handleMouse.
-After any workspace mutation call `a.workspaceChanged()` — never the
-individual tree/git/finder refreshes.
-
-### Modal layout via `relY` and dynamic `labelFor`
-The action menu uses named struct literals with an optional `labelFor`
-hook so labels like "Show Sidebar" / "Hide Sidebar" toggle in place.
-`menuLayout` recomputes every row's `relY`, the divider offsets, and
-the modal height on each call — adding a menu item is just adding it
-to its group in `builtinMenuGroups` (then updating the geometry pins
-in `TestMenuLayout_NoCustomActions`). When the layout is taller than
-the window, the modal clamps to the window and scrolls: frame + title
-stay pinned, wheel / keyboard selection move the rows, ▲/▼ mark
-clipped content. All scrolled geometry flows through
-`menuItemIndexAt` / `menuScrollOffset` — don't hand-compute row
-positions anywhere else.
-
-**Collapsible sections.** `builtinMenuGroups` returns `[]menuGroup`
-(title + `collapsible` + items), and `menuLayout` stamps a fold-header
-row (`menuItemDef.header`) above every collapsible group whose action
-toggles `App.menuCollapsed[title]`; a collapsed section keeps its header
-but drops its item rows from the layout entirely (so they're neither
-drawn, hit-tested, nor keyboard-reachable). Headers ARE selectable
-(fold via keyboard), but `openMenu` deliberately skips them for the
-initial highlight so a reflex Enter runs an action, not a fold. Fold
-state is session-only (map on `App`, nil = all expanded, survives
-close/reopen — not persisted to config). Quit is the one
-non-collapsible group: it renders headerless behind a divider, because
-a one-row section you could fold the exit away into reads as a bug.
-Folding re-centers the (now shorter) modal — expected, same as any
-resize.
-
-**The top level is a menu bar turned on its side**: File · Edit · View
-· Find · Nav · Code · Git · AI · Tools, then Quit — the order and the
-names a desktop app teaches, so a row is where a user who has never
-opened this menu already looks for it. Save / Close tab / Revert live in
-File, Undo / Redo head Edit, and tab switching, recent files, go to line,
-favorites, matching bracket and terminal locations are Nav (the
-language-server jumps stay in Code, where they dim together).
-
-**Sub-sections nest ONE level, through `menuGroup.parent`.** Compare
-folds inside File; Copilot, MCP and Skills inside AI; Notes, Plugins and
-the spliced Cats / Plugin commands / Custom inside Tools. It is a field
-on a FLAT list, not a tree of groups, so the palette and every test that
-finds a row by its section keep walking one slice. The rules:
-a child names a TOP-LEVEL parent and follows it directly in the table
-(`TestBuiltinMenuGroups_ChildrenFollowParent`); a folded parent hides its
-children's HEADERS too, so the collapsed default is just the bar; nested
-rows are stamped `depth` 1 and draw two cells to the right; and every
-label is `elide`d to the fixed modal width, since the indent takes two
-cells a top-level row had. `openMenuAtSection` unfolds the parent before
-the child — Copilot's status-bar door would otherwise open onto a folded
-AI. Tools must stay the LAST parent before Quit, because
-`visibleMenuGroups` appends its spliced children at the end.
-
-**Pinned top zone + collapse-by-default.** `menuLayout` prepends two
-rows OUTSIDE every group, above the first section: the **command
-palette** (the menu's headline — the fuzzy gateway to every action, so
-it must never hide behind a fold) and the **expand/collapse-all toggle**
-(`menuToggleAllSections` / `expandAllToggleLabel`, which leaves the menu
-open like a header does). A divider sets this zone off from the section
-list. On first run `New` calls `seedMenuFoldDefault`, which contracts
-every section (via `setAllMenuSections`) UNLESS `menuCollapsed` is
-already populated — so the menu opens as a compact index of headers, not
-a long scroll, and the palette/expand-all zone keeps everything one click
-away. A section that appears AFTER that (Cats, spliced
-in once the async cats probe lands; plugin commands after a reload) has
-no map entry, so `sectionCollapsed` answers `menuFoldDefault` — the last
-bulk choice — and it matches its siblings instead of arriving expanded.
-`toggleMenuSection` flips the EFFECTIVE state for the same reason. Tests build the App struct directly (not through `New`), so they
-still start expanded; opt into the collapsed default with
-`seedMenuFoldDefault`. Since headers and the top-zone rows are all rows,
-the geometry pins count them: `TestMenuLayout_NoCustomActions` expects
-2 top-zone rows + 147 group actions + 15 headers (164), height 170,
-dividers `[2, 5, 167]`. **Adding a menu row means updating those pins**
-(and `TestMenuLayout_WithCustomActions` / the two tall-window heights in
-`TestMenuModalRect_*`). `TestMenuLayout_TerminalRowsAboveTheFold` pins
-the short-window budget against that collapsed default: every top-level
-header fits on a 24-row window, and so do the terminal rows with only
-View unfolded.
-
-### Tool windows (app/toolwindow.go + tooladapt/toollayout/toolmenu)
-Every auxiliary panel — the file tree, both git panels, the problems
-list, the compare view, the terminal, the chat — is the same KIND of
-thing: a named window that lives on one of three edges, can be moved to
-another, and is remembered per project. It replaced six files that each
-owned their own geometry AND their own exclusivity rules. House rules:
-
-- **AN EDGE SHOWS ONE TOOL AT A TIME**; the rest are collapsed and the ≡
-  **Tool windows** group brings one back. That is JetBrains' rule and it
-  was also ced's, spelled out six times: the bottom strip was
-  single-occupancy, so was the left edge, and every panel closed the
-  others BY NAME. It is now stated once in `claimDock`, and the panels
-  keep only what is theirs. Two resizable panels on one edge would need
-  circular clamp math on a small window.
-- **THE BOTTOM EDGE WINS THE CORNERS.** It spans the WHOLE window and
-  the side docks stop above it (`toolRect`'s bottom case takes `x=0,
-  w=a.width`; `sideDockRows` is `bottomDockTop`). So a git panel gets the
-  full width for a file list and a diff side by side, and the file tree
-  keeps the columns it needs above. The other way round — side docks full
-  height, the bottom squeezed between them — is what ced did while the
-  only vertical strip WAS the file tree, and it reads wrong the moment
-  the bottom panel is the one being worked in: the widest surface in the
-  editor was the one getting narrowed. **A consequence worth knowing:
-  the side seam's hit test is ROW-AWARE** (`dockSplitterHit` takes y),
-  because below that line the seam's column is the bottom panel's own
-  content — a column-only test claimed a press inside the git panel as a
-  sidebar drag.
-- **THERE IS NO BUTTON RAIL.** A stripe of tool buttons on each populated
-  edge was built and then removed on the owner's verdict: the editor is
-  the whole window minus what you asked for, and a reserved column on
-  three edges is a price you go on paying for every tool you are NOT
-  looking at. Reach is the ≡ menu — the Tool windows group plus the
-  per-panel Show/Hide rows each panel already had. `"toolstripes"` went
-  with it; an entry left in a config.json is ignored, the way any key
-  this version does not model is.
-- **THE FIND BAR HUGS THE EDITOR**, not the window: it stops where the
-  side docks stop and sits ABOVE the bottom dock rather than under it.
-  It is about the file in front of you, and a bar pinned below a git
-  panel would be a long way from the line it is searching.
-- **EVERY TOOL WINDOW HAS A HEADER, and the tool layer supplies one for
-  the panel that paints none** (toolheader.go). Six of the seven were
-  BORN as bottom strips and arrived with a rule, a title and a ✕; the
-  file tree was a sidebar for the editor's whole life, so it had a ✕ on
-  no dock at all, and once it could sit at the bottom it had no resize
-  handle either. `toolDef.ownHeader` says who brings their own; anything
-  that does not gets the generic one, on EVERY edge.
-- **THE HEADER COSTS NO ROWS**, because the tree gives up its own
-  EXPLORER row for it (`filetree.Tree.HideLabel`) — so it replaces a row
-  rather than adding one, and the mark count moves into it, that row
-  having been the mark set's only always-visible surface. HideLabel
-  moves the ROW MAP and not just the paint: `Render`, `ListRows`,
-  `HitTest` and `ContentWidth` all read `headerRows()`, because a click
-  map one row off its picture opens the neighbour of whatever was
-  clicked — the worst bug that file could have, and one that shows up
-  only as "the tree opens the wrong folder".
-- **THE SPLIT IT INTRODUCES IS THE LOAD-BEARING PART: `toolRect` is the
-  whole dock and `toolBodyRect` is the content**, and `sidebarRect`
-  returns the BODY — which is why the tree's hit-testing, marks and
-  overflow markers needed no changes at all. A panel that paints its own
-  header gets that row BACK from `toolBodyRect`, since for it the header
-  is part of what it draws.
-- **WHAT THE HEADER'S RULE DOES DEPENDS ON THE EDGE.** On the bottom it
-  is the height-drag handle, because there is no seam down there; on a
-  vertical edge the seam already resizes the panel, so the rule is inert
-  — but a press on it is still SWALLOWED, exactly as the EXPLORER row it
-  replaced was. **The header is also checked BEFORE the seam**: its last
-  cells sit inside the seam's two-column grab zone, and a ✕ that started
-  a resize would be a button that does not work.
-- **`termDockLeft` AND THE TREE FLIP ARE GONE.** The tree used to be
-  teleported to the right edge whenever the chat or a left-docked
-  terminal wanted the left one — the workaround for having no right edge
-  at all. Now the chat DEFAULTS to the right, the tree is just a tool
-  docked left, and an edge that is claimed simply hands the slot over.
-  `treeOnRight()` survives as a question about where the user put the
-  Project tool, not as a layout rule. The `"termdock"` config key is
-  retired: it still PARSES (a key ced wrote itself must never become a
-  startup error — the retired `"scrollbar"` treatment) and nothing reads
-  it. The ≡ "Dock terminal left" row survives as a named PRESET over
-  `moveTool`, because it is the move people were already making daily.
-- **SIZES ARE PER TOOL, PER AXIS.** A tree wants ~30 columns and a
-  terminal ~60, so an edge-wide width would make every switch a resize;
-  and a terminal dragged tall at the bottom keeps that height when it
-  comes back from the left. Zero means auto and the tool derives it from
-  the window, which is what a tool nobody has resized keeps forever — so
-  a differently shaped screen re-derives instead of restoring a number
-  chosen for another one. **A width is the whole BLOCK, splitter
-  included** — the convention every width in this editor already used,
-  which is what let stored numbers keep meaning the same thing.
-- **THE FILE TREE'S WIDTH IS THE ONE SPECIAL CASE, and it has a
-  reason**: auto-fit re-derives `App.sidebarWidth` on every frame, so
-  that field is the LIVE number and a copy in the layout's size map
-  would be a second one that could disagree with the screen. So
-  `storedToolWidth` reads through to it. One honest special case beats
-  two numbers that can drift.
-- **THE OPPOSITE EDGE IS MEASURED RAW.** Each vertical edge's clamp asks
-  what the other spends; asking through the OTHER's clamp is a stack
-  overflow rather than a layout, so `rawDockCols` answers with the
-  stored/auto width before clamping. `TestOppositeDocksDoNotRecurse` is
-  what fails if somebody tidies it away.
-- **A HIDDEN TOOL HAS A ZERO RECT.** `toolRect` returns nothing for a
-  tool that is not showing, which is what makes every `xxxContains`
-  helper correct by construction instead of by remembering to check a
-  flag first. It also means a panel's rect must be read AFTER it is
-  opened.
-- **A SHOW CAN REFUSE, and every caller reads the answer.** A chat with
-  no agent binary, a compare with nothing to compare: `showTool` reports
-  whether the tool actually came up, so no caller reports a panel as
-  shown when it never opened. Compare is the one tool whose "show"
-  is a QUESTION — a diff has two named sides, so an unprimed panel opens
-  the source picker instead.
-- **RESIZING IS THE EDGE'S, not the panel's.** One seam per vertical
-  edge (splitter.go), one drag mode per edge, and the bottom edge keeps
-  each panel's own header rule. **The pointer coordinate follows the
-  axis** — a vertical seam tracks the COLUMN, the bottom header rule
-  tracks the ROW. Passing x for all three was silently harmless until
-  the generic dock header started using the bottom edge's own drag mode;
-  before that, every bottom panel dragged through a mode of its own. `growBottomPanel` / `shrinkBottomPanel`
-  (Esc-= / Esc--) aim at `resizeTargetDock`: the edge holding the tool
-  that owns the keyboard, else the bottom — which is what they did
-  before, when the bottom was the only place a resizable panel could be.
-- **THE SEAM'S BORROWED COLUMN MIRRORS.** splitter.go's rule is that the
-  extra grab cell comes from the PANEL side, never the editor band. On a
-  left dock the panel is to the seam's left; on a right dock it is to
-  its right, so the zone flips with it.
-- **NOTHING ABOUT A LAYOUT IS DESTRUCTIVE, so nothing confirms.** Moving,
-  hiding and resetting all leave the tabs, the shell session, the chat
-  transcript and the panels' own state exactly where they were — a
-  layout is where things are DRAWN. A dialog in front of a reversible
-  action trains people to dismiss dialogs.
-- **THE ≡ GROUP IS THREE ROWS, and the branching lives in pickers**
-  (toolmenu.go): pick a tool, then pick an edge. Seven tools times three
-  edges is twenty-one moves, and the ≡ menu already scrolls on a short
-  window where every row above the fold is contested. It also means a
-  tool added to the registry appears there with no menu change at all.
-- The Find-all list is deliberately NOT a tool window: its own file
-  explains why it is not even a picker (a live preview, an Esc that puts
-  the view back), and it docks TOP, an axis no tool window has. The find
-  bar is not one either — it owns the keyboard and belongs to the tab.
-
-### Per-project layouts (app/toollayout.go + internal/session)
-`session.Entry.Layout`, beside that folder's tabs. House rules:
-
-- **PER PROJECT, NOT PER USER, and there is no global half at all.** A
-  layout answers "what am I doing in this repository" — a Go service
-  wants the terminal and the problems list, a docs repo wants neither. It
-  is machine churn rewritten on every folder switch, which is the split
-  state.json exists to make. Nothing about tool windows lives in
-  config.json.
-- **A PROJECT WITH NO RECORD GETS THE DEFAULT**: the file tree on the
-  left, the editor taking the rest. `newToolLayout` IS that default, so
-  there is one definition of it rather than a restore path with opinions.
-- **THE STORED DOCK MAP IS SPARSE.** An entry exists only for a tool the
-  user actually moved, so an unarranged project writes almost nothing
-  and a default changed in a later version reaches everyone who never
-  touched that tool.
-- **RESTORING GOES THROUGH `showTool`, and is silent per entry.** A tool
-  can refuse on this machine; an unknown id or edge costs that entry and
-  nothing else (the theme registry's rule). The user asked to open a
-  FOLDER — a wall of messages about panels is noise.
-- **THE LAYOUT IS RESTORED BEFORE THE WINDOW HAS A SIZE**, during New.
-  So `clampToolSizes` REFUSES to clamp a zero-size window: doing so
-  floored every remembered extent to its minimum, which read as the
-  editor forgetting the layout it had just promised to remember. Reads
-  clamp anyway, which is what makes skipping the write-back safe.
-  `TestApplyToolLayout_SurvivesAnUnsizedWindow` pins it.
-- **A RESTORE MUST NOT WRITE BACK.** Restoring shows each tool through
-  the ordinary verb, and those verbs persist — so `toolLayoutLoading`
-  latches for the duration, or reading a layout would rewrite it once
-  per tool, each time recording a half-restored arrangement.
-
-### The resizable seams (app/splitter.go)
-Every vertical rule the user drags to re-apportion columns. There is now
-exactly ONE per EDGE rather than one per panel — the seam belongs to the
-left or right dock and resizes whichever tool window is showing there
-(toolwindow.go) — plus the list/diff seams inside both git panels, which
-share the grip helpers. House rules:
-
-- **A ONE-COLUMN GRAB ZONE IS A COIN FLIP WITH A MOUSE**, which is what
-  the git seam's fix established and what every other splitter had too.
-  A window seam's zone is the divider PLUS THE COLUMN ON ITS LEFT.
-- **The asymmetry is load-bearing, not a shortcut.** Left of a window
-  seam is the panel it resizes, and every one of them stops a column
-  short of the rule — a strip's right margin, the file tree's row tail.
-  Right of it is the EDITOR BAND, whose first column belongs to whatever
-  is docked there, and two of those put a deliberate one-cell control in
-  exactly that cell: the git panel's review column, and (flipped) the
-  file tree's own mark gutter. Trading a hard-to-hit seam for a control
-  with no second mouse path is not a trade. The git panels' INTERNAL
-  seams take both neighbours because both were verifiably blank there;
-  a window seam cannot make that claim, so it doesn't.
-- **A drag carries `App.dragSplitOffset`**, the distance between the
-  press and the seam's own column, so the rule tracks the pointer from
-  where it was seized instead of jumping under it. Gluing to the cursor
-  was fine at one column wide; at two it shifts the seam the instant the
-  mouse twitches — which for the sidebar also trips `lockTreeAutoFit`,
-  the guard that stops a press with jitter stating a width and writing
-  it to disk. All five seams carry it, so they all feel the same.
-- **A plain rule reads as a border, not as something you can seize**, so
-  the middle three rows carry a heavier glyph a step up in color
-  (`splitterGrip` / `splitterIsGrip`) — the difference is in WEIGHT
-  rather than only in hue, because a border and a handle have to be told
-  apart on a terminal whose contrast ced cannot vouch for. A live drag
-  lights the whole rule Accent, at which point the grip has nothing left
-  to say and steps back down to the plain glyph.
-- **A pane's ceiling is stated as its NEIGHBOUR's reserve, never as a
-  constant of its own** (`a.width - minEditorAfterDrag`, minus whatever
-  strip owns the other edge). A fixed cap makes a pane unable to grow on
-  the very wide terminal where a drag is reached for — the bug
-  `gitPanelMaxListW` was.
-- Min widths: `minSidebarWidth = 18`, `minEditorAfterDrag = 40`. Don't
-  let the editor shrink below that. A drag that MOVES the splitter also
-  turns auto-fit off — see the next section for why.
-- The horizontal seams (each bottom panel's header rule) are deliberately
-  untouched: a row is a much easier target than a column, and both
-  neighbours there are content rather than margin.
-
-### Tree type-to-find (filetree/filter.go + app/treefilter.go)
-Typing in the focused tree builds a PATTERN; every visible row in scope
-whose name CONTAINS it (anywhere, but contiguous — a substring, not a
-fuzzy subsequence) has the matched letters lit, and the cursor jumps to
-the first match in display order (scrolling to it). It replaced a
-one-rune typeahead that cycled on repeated letters. Matching folds case
-PER RUNE (`foldRunes`, find.go's rule) so the lit span's rune column
-can't drift off the letters. House rules:
-
-- **No timeout — the highlight IS the visible state.** The old design
-  refused a multi-rune buffer because a timeout needs something on
-  screen; the lit letters are that. It clears on Backspace-to-empty, Esc
-  (a SIDE EFFECT in the Esc block, never consuming it, so `Esc s` still
-  saves) and focus loss (synced in draw beside `tree.Focused`, not at
-  every place `treeFocus` flips).
-- **NO LETTER IS A COMMAND IN THE FOCUSED TREE.** It used to bind
-  n/N/d/r (New file/folder, Delete, Rename) and `A` (marks picker) as
-  bare keys; once typing became a search, "readme" opened a Rename
-  prompt at its first keystroke and a search could never start with
-  five letters. All of those verbs live in the right-click menu and ≡
-  File (hence the palette), so the keys were removed — don't add bare
-  letter verbs back. Only Space and `*` (the mark keys) survive, and only
-  on an EMPTY pattern; mid-search they extend it like any rune. Repeated
-  letters EXTEND, so the cycle is Tab / Shift-Tab (inert with no
-  pattern).
-- **Scope is the tree's active folder when it is expanded and visible,
-  else the project**, captured on the first rune (so Enter on a matched
-  folder doesn't re-scope mid-typing), held as a PATH (the Marked rule),
-  tested with a trailing separator (`app` must not claim `apps/`). The
-  scope folder itself isn't a match.
-- **Visible rows only.** A deep match would be a directory walk per
-  keystroke in a lazy tree, and a highlight inside a folded folder is one
-  nobody can see. The finder is for names nobody expanded towards.
-- **The paint borrows `FindMatch` + bold**, applied after the row like
-  `paintMark`, so `nodeRowSegments` / ContentWidth / auto-fit never see
-  it. Same question as the find bar ("where is what I typed"), already
-  tuned against every theme's bg and Selection — the cursor row sits on
-  Selection, so a new accent key there would read as "selected".
-- A miss leaves the cursor where it was and flashes; a hit flashes
-  `n/total` plus the Tab/Esc hint — the feature's discovery surface.
-
-### Tree multi-selection (filetree's marks + app/treemarks.go)
-Tick several rows in the file tree, then run one verb over all of them.
-The tree could only ever act on ONE thing — the row you right-clicked or
-the row the cursor sat on — which made "delete these six generated
-files" six confirmations and "zip this handful" impossible. House rules:
-
-- **IT IS THE GIT PANEL'S CHECKBOX, ONE CELL WIDE.** That tick is a
-  multi-selection feeding an `Actions ▾` picker rather than a stage
-  toggle, and everything that follows from it applies here: targets fall
-  back to the row under the cursor when nothing is ticked
-  (`treeMarkTargets`, so the picker is useful on its first open), the
-  verbs live behind a picker rather than a bespoke dropdown, rows that
-  would no-op are omitted rather than dimmed, and the set is pruned on
-  every refresh — a mark for a file that left the tree would silently
-  widen the next bulk action.
-- **THE TICK BORROWS A CELL; IT RESERVES NOTHING.** Every row already
-  opens with a blank column (`nodeRowSegments` starts with a space), so
-  `paintMark` stamps the `✓` there AFTER the row's own text. That is the
-  overflow markers' shared-column argument, and here it is load-bearing
-  twice over: `nodeRowSegments` is also ContentWidth's measurer, so a
-  wider prefix would tie the sidebar's auto-fit width to the
-  multi-selection and shift the EDITOR's columns every time a file was
-  ticked. `TestMarks_TickCostsNoWidth` is what pins it. The glyph is the
-  git panel's review `✓` rather than its `[x]` checkbox because one cell
-  is all there is, and the tree has no competing "I have read this"
-  notion for it to collide with.
-- **The set is keyed by PATH, not by `*Node`.** The identity-preserving
-  refresh only preserves identity for SURVIVORS; a folder rewritten on
-  disk hands its rows fresh pointers, and a set keyed on the old ones
-  would empty itself silently. `Marked` is nil in the common case, so
-  every reader tolerates a nil map.
-- **`MarkedNodes` walks the LOADED tree, in tree order.** Order matters
-  because it is what confirm bodies, flashes and archive entries read in,
-  and a Go map's iteration order would give two runs of one delete two
-  different bodies. Walking the loaded tree rather than the visible rows
-  is what makes a mark survive FOLDING: the rows are hidden, but the user
-  placed those ticks deliberately.
-- **Bulk marking is scoped to what the user can SEE.** `MarkVisible`
-  covers the current flattening and `MarkChildren` one folder's immediate
-  entries; neither recurses, and the "select contents of…" row refuses an
-  unexpanded folder. A set nobody can see is a set nobody can check
-  before deleting it — which is also why the delete confirmation LISTS
-  the names instead of only counting them (the one place this differs
-  from the single-file dialog it grew out of), and why the count is
-  annotated on the EXPLORER header, the set's only always-visible
-  surface.
-- **The range gesture is a BONUS LAYER**, in metakeys.go's sense: several
-  terminals keep shift-click for their own text selection, so an
-  unreported shift degrades to a plain toggle and every set reachable
-  with it is reachable without it (`*`, the picker's select-all row,
-  one gutter click per row). `MarkRange` only ever ADDS — a second
-  extension that unmarked what it swept over would destroy the set the
-  first one built — and the anchor stays at the range's fixed end.
-- **Four surfaces, and each earns its place.** The gutter click is
-  primary (mouse-first); `Space` / `*` are its keyboard twins in the
-  focused tree; the right-click **Select** row is the DISCOVERY
-  surface, because a one-cell tick is close to invisible as an
-  affordance and without a named row a mouse user could never learn the
-  gutter is clickable; the ≡ **File** row is the path that survives a
-  terminal which swallows right-click, and its label carries the count
-  because the header's is invisible while the sidebar is hidden. No
-  leader key — the flat table is out of mnemonic letters. (`A` in the
-  focused tree was the accelerator until letters there became a name
-  search; see type-to-find.)
-- **The verbs REUSE the single-file paths, widened.** Nothing here owns
-  an implementation: `doDeletePaths` is deletePath plus one collected
-  report (a loop over `doDeletePath` would spend a workspace re-sync per
-  file and leave the user reading whichever flash landed last),
-  `createZipMulti` is `addZipSource` — the spine factored out of
-  `createZip` — over several sources, and Copy arms the SAME file
-  clipboard the ≡ Paste row and Cmd+V already read, which is why there
-  is no paste verb in the picker at all.
-- **A multi-source archive's entries are relative to the set's common
-  parent**, not to each source's basename: a set can hold
-  `app/main.go` beside `cmd/main.go`, and rooted at basenames both
-  would be stored as `main.go` and extraction would clobber one with
-  the other. `commonParentDir` works on path SEGMENTS, because a common
-  string prefix is not a common directory (`/a/foo` and `/a/foobar`).
-  The archive lands INSIDE that parent rather than beside it — zipDest's
-  sibling rule breaks down when the parent is the project root, whose
-  sibling is outside the tree.
-- **A set paste is PLANNED before it copies**, and the plan RESERVES
-  names (`uniquePastePathExcept`). "Is this name free?" is answered
-  against the filesystem and nothing is written until the plan is
-  complete, so two sources called `same.txt` would each find the
-  destination unoccupied and both claim it — the second copy then
-  failing on O_EXCL after the first had landed.
-- **Partial sets are reported, never silently narrowed.** A set ticked
-  minutes ago can legitimately have lost a file to a git checkout, so
-  Copy drops the missing and says how many, Delete says which names
-  failed, and Open counts what actually landed from the TAB LIST rather
-  than from the loop (openFile refuses a binary or oversized file with
-  its own flash). The one refusal that is all-or-nothing is the archive:
-  a zip quietly missing a file it was asked to hold is the single wrong
-  answer a backup can give.
-- **Discard is deliberately NOT a row.** Staging from the tree is two
-  lines through `runGitCmd` and genuinely useful; reverting a file's
-  contents is a loss the git panel shows you the diff of first, and
-  offering it from a surface that cannot render what would be lost is
-  the one git verb this picker should not carry.
-- **A delete clears the set explicitly** rather than leaving it to
-  Refresh's pruning: a path that FAILED to delete is still in the tree,
-  so it would stay ticked and ride along into the next action.
-
-### File-tree auto-fit (app/treeautofit.go + filetree's ContentWidth)
-The sidebar sizes itself to the tree's longest row, so expanding
-`internal/app/` stops truncating the names inside it. House rules:
-
-- **`sidebarWidth` is a preference OR derived, never both.** That's the
-  tension the whole feature turns on: auto-fit re-derives the width every
-  frame (`autoFitSidebar`, called at the top of `draw` **before any rect
-  helper is read** — a width derived afterwards paints the row the user
-  just expanded truncated and leaves it that way until the next event),
-  and a splitter drag states one. So a drag that actually MOVES the
-  splitter calls `lockTreeAutoFit`: auto-fit off, persisted, with the
-  flash naming the ≡ row that undoes it. Without that handoff the next
-  expanded folder silently overwrites the drag, which reads as the
-  splitter being broken rather than as a feature. The lock is gated on
-  the width actually changing — a press with a pixel of jitter is not a
-  statement about anything, and this writes to disk.
-- **Grows only, and only into room the editor won't miss.** The floor is
-  `defaultSidebarWidth` (a panel that also shrink-wrapped a shallow tree
-  would move the editor twice per expand/collapse, and 30 columns is the
-  width ced ships with — nobody wants it back); the cap is
-  `autoFitMinEditor` (80 — deliberately far above `minEditorAfterDrag`'s
-  40, because a DRAG is the user asking for a narrow editor while this
-  happens on its own), further capped to `1/autoFitMaxShareDen` of the
-  band, since the editor's floor alone would hand a 240-column terminal's
-  tree 160 columns. Too narrow for the editor's floor at the DEFAULT
-  sidebar width → auto-fit does nothing at all. That last clause is the
-  "if there is reasonable room" half of the feature.
-- **The measurement shares the renderer's row construction.**
-  `nodeRowSegments` is the ONE place a row's text is built, read by both
-  `drawNodeRow` and `Tree.ContentWidth`; a second copy would drift and the
-  fitted width would be a column or two wrong in exactly the cases that
-  matter (deep nesting, icons on, an executable's `*`). It counts RUNES
-  because `drawString` advances one column per rune, so measure and paint
-  make the same assumption about glyph width.
-- **It measures every expanded row, NOT the scroll window** — the one
-  place the word-highlighter's window-scoping rule is deliberately not
-  followed. A window-scoped measure makes the panel breathe as the user
-  wheels past a long filename, shifting the editor's columns for a gesture
-  that changed nothing about the tree. Expanding is deliberate; scrolling
-  isn't. The walk is bounded in practice because the tree is lazy — rows
-  exist only for folders somebody opened by hand.
-- `"treeautofit"` is the persisted key (default on) with a ≡ **View** row
-  under the tree rows it governs, and no leader key (a once-a-session
-  action, and the flat table is out of letters). `newTestApp` leaves it
-  OFF: on, every draw would re-derive `sidebarWidth` under the tests that
-  pin sidebar geometry, and a splitter-drag test would persist the lock
-  into the developer's real config.json.
-
-### The overflow markers (app/overflow.go)
-
-A `▴` or `▾` in the LAST column of a viewport's first and last row, on
-every surface that scrolls — the editor body, both panes of each git
-panel, the file tree, and the Find-all list — plus a hover popup saying
-how many lines lie that way. It replaced a real scrollbar (a reserved column, a rail and a
-draggable thumb) on the owner's verdict that the rail was not pleasing
-to look at, and the tree's own marker is where the shape came from.
-House rules:
-
-- **THE MARKER SHARES THE LAST COLUMN; IT RESERVES NOTHING.** That is
-  what lets it come and go with the content, which the bar structurally
-  could not do: a marker that cost layout would move the editor's right
-  edge — re-flowing everything the user was reading — on an edit that had
-  nothing to do with layout, which is exactly why the bar had to keep its
-  column even in a file that fit on screen. `editorRect` therefore
-  subtracts nothing, and `findAllModal.rect`'s right dock is back to a
-  plain `ex + ew`. In the editor the glyph covers one cell of code on two
-  rows; in a git panel's right-hand pane it lands in the blank margin
-  those panes leave (`drawGitPanelDiffRow`, `drawGitLogDetailRow` and the
-  hunk chips all stop a column short) and covers nothing at all; in the
-  left-hand LIST of either panel, which has no such margin, it takes the
-  last cell of a row — the tree's trade, and why those labels were
-  already ellipsised rather than run to the edge. The Find-all list is
-  the diff pane's case again: `mx+mw-3` is the blank cell `drawRow`
-  already leaves between the text and the row's `✕`, so the marker
-  covers nothing — but that cell is inside the three-cell DISMISS zone,
-  so `handleMouse` carves a drawn marker out of it. Striking a row off
-  because the user pointed at "12 results below" is the one way this
-  annotation could cost them something; the `✕` keeps its own cell, so
-  those two rows are still dismissable, and the press goes to the
-  marker's own gesture instead (below).
-- **IT IS DRAWN UNCONDITIONALLY.** No preference gates it, for the reason
-  the ≡ menu's clipped-content arrows aren't gated either: content the
-  user cannot see and has not been told about is the one thing a viewport
-  must never do. The `"scrollbar"` config key and its ≡ View row are
-  GONE — that key bought exactly one thing, "give me the column back",
-  and there is no column to give back. A stale `"scrollbar"` entry in a
-  user's config.json is ignored rather than rejected
-  (`TestLoadRetiredScrollbarKey`).
-- **THE COLOR IS WHAT IS OUT THERE.** The retired rail plotted every
-  off-screen diagnostic and find hit as its own cell, a minimap of
-  positions. With no rail to plot on, that information folds into the
-  marker: it takes the color of the loudest thing that way, and the popup
-  names the counts. `offscreenKind` is that ranking and its order is the
-  design — **caret > find > error > warn > info**. A marker stands for
-  the whole rest of the document in its direction, so collisions are the
-  normal case; the caret wins outright because it is the only UNIQUE mark
-  (lose it and the feature has silently failed), while a diagnostic is
-  redundantly carried by the status bar's counts, the Problems panel and
-  its own gutter dot. Find outranks the diagnostics for the reason
-  `collectDecorations` puts `findSource` last.
-- **Only what is OFF SCREEN counts.** On screen the gutter dot, the
-  underline and the find tint are already there against the code, saying
-  it better and in place; repeating them would make the marker loudest
-  exactly when it has least to add. Same argument for the caret — while
-  the cursor is visible the hardware cursor IS the answer.
-- **Sources are read from their CACHES, not through `DecorationSource`.**
-  Sources are asked per visible window by contract, and this feature's
-  whole subject is the rest of the file; asking each for the entire
-  buffer would turn a per-frame read into a whole-file walk for the word
-  highlighter and the git differ, neither of which has anything to say
-  here. So: `lsp.diags`, `plugins.decos` (gated on the kill switch at the
-  READ, like every other plugin surface), and `Tab.FindMatches`, which is
-  already whole-buffer.
-- **`overflowMarkers()` is the ONE enumerator** draw, hit-testing and the
-  popup all read (the btnRect rule), which is also why the tree no longer
-  paints its own: `filetree.drawMoreMarker` is gone, and the app derives
-  the sidebar's pair from `RowCount` / `ScrollY` / `ListRows`, all already
-  exported. One mechanism, so a marker means the same thing wherever it
-  appears, and one place for the popup to read its counts from.
-- **The marker keeps its cell's BACKGROUND** (`GetContent` +
-  `Decompose`). It is an annotation on a row somebody else drew, so only
-  the foreground is its own — setting a background would punch a hole in
-  the editor's current-line highlight, the tree's selection bar or the
-  panel's fill.
-- **Drawn after every surface has rendered.** `Tab.Render` is where
-  `EnsureVisible` and `clampScroll` settle `ScrollY`, so a marker placed
-  before it would report the previous frame's viewport — the same reason
-  `drawScrollbar` ran last.
-- **The Find-all list is the one surface with TWO homes, so the paint
-  has two halves.** Pinned it is furniture and draws with the panels, so
-  the body pass (`drawOverflowMarkers`) annotates it like everything
-  else. Unpinned it owns the modal slot and is drawn on the OVERLAY
-  layer — after that pass — so a marker stamped there would be covered
-  by the very panel it describes; `findAllModal.draw` ends by calling
-  `drawOverflowMarkersOverlay`, which paints exactly the markers the
-  enumerator flagged `overlay`. Two call sites, but still ONE enumerator
-  and one `paintOverflowMarker`, so a marker can never appear where
-  `overflowMarkerAt` would not find it. The POPUP does not follow it up
-  there: it is passive, so it paints below the modals, and an unpinned
-  list's markers therefore say "there is more" without being able to say
-  how much. That is the honest half to keep — the yes/no is what a
-  viewport owes its reader — and pinning (◇) restores the rest.
-- **THE MARKER IS ALSO A TARGET: a click PAGES that way, a double-click
-  RUNS TO THAT END.** It is the one thing a rail could do that a glyph
-  could not — you could click a scrollbar's trough — and it is worth
-  more here, because the marker is drawn at the very edge the reader is
-  already looking at. That does not make it a verb in the sense the
-  Find-all rule means: the only state a press may change is which part
-  of the surface is on screen, never the document, the selection or the
-  worklist. `overflowMarkerPress` is the one gesture, and it takes the
-  surface's own mover — `scrollAt` for everything the router reaches, and
-  `scrollList` for an UNPINNED Find-all list, which owns the modal slot
-  and so is dispatched from `findAllModal.handleMouse` instead. **Both
-  distances are COUNTED, not assumed**: a page is the viewport less one
-  row of overlap and never more than `off.lines`, so a click on an arrow
-  that said "3 lines below" moves three lines rather than scrolling into
-  `clampScroll`'s overscroll pad, and the end is `off.lines` exactly, so
-  the last line lands on the last row. **A press is claimed even when the
-  marker has just gone** (`App.overflowClick` remembers the cell AND the
-  direction, which is why it is not `lastClick`): the first click of a
-  double can reach the edge, and the second one falling through would
-  drop the caret into the code — or open the file — under the glyph. The
-  gesture runs BEFORE handleMouse's drag branches, so it is gated on
-  `dragMode == ""` or a splitter drag sweeping the editor's last column
-  would page the file it passed over.
-- **Line counts floor at zero.** `clampScroll`'s overscroll pad lets the
-  last line come up to the middle of the viewport, so `total - (last+1)`
-  goes negative there; a marker for lines that do not exist is worse than
-  none.
-- **THE POPUP IS PASSIVE AND ITS OWN LAYER.** It never takes the modal
-  slot (nobody asked a question — the hoverdwell/commit-receipt rule),
-  draws beside the dwell tooltip and the receipt, and reuses
-  `tooltipSize` / `tooltipPlace` / `drawTooltipBox` so there is one
-  tooltip look in the editor rather than three. A press inside the drawn
-  box is swallowed (it covers content the user cannot see, the completion
-  popup's contract); a press anywhere else is not.
-- **`overflowTipState` is deliberately NOT folded into
-  `hoverDwellState`.** That layer is armed only inside cats
-  (`hoverDwellArmed` → Tier 1) because its answer costs a round trip to a
-  language server over a link ced cannot vouch for. This answer is a
-  count the draw already had in hand, so it is free and runs on every
-  host. `armOverflowTip` also arms NOTHING unless the cell really carries
-  a marker — unlike the dwell layer, which has to ask before it knows.
-  The 250ms delay exists only to stop a pointer sweeping along the
-  window's edge flashing a box on its way past.
-- **The units follow the surface**: "lines" for a body of text, "rows"
-  for the tree (a list of names and folders), "files" for the changes
-  panel's list (the unit somebody about to commit is asking in),
-  "commits" for the log's, and "results" for the Find-all list — whose
-  total is `len(view)`, the DISPLAYED rows, so the filter and the
-  dismissals narrow it the way the log's search narrows its own count.
-  That list's marker is also a PLAIN count on purpose: every row in it
-  is a find hit, so coloring it `offFind` would repeat the title in a
-  place that is supposed to mean "something unusual is out there". Each panel's two panes scroll independently,
-  so each carries its own pair — built by the `pane` helper rather than
-  spelled out four times, which is how one of them ends up off by a row.
-  The log's pair rides `gitLogBodyTop` / `gitLogBodyRows` rather than the
-  panel rect, because the search bar takes a row off the body's TOP and
-  those two are the single spelling of that. Its commit count is the
-  LOADED list (capped at 400, narrowed by any search) — the panel is a
-  viewport onto that, and the title carries the "+" that says the
-  repository holds more.
-- **Position is what tells `▾` apart from the tree's expand chevrons**,
-  which are the same glyph: a chevron sits at the HEAD of a row against
-  the indent, this at the row's tail. Same distinction in the editor,
-  where the only other thing in that column is the horizontal-overflow
-  `›` — and on the one row where both would land, this wins, because "the
-  file runs on" outranks "this line runs on" (the line's own arrow is
-  repeated on every other long row; the marker has exactly one place to
-  be). Single-width per the marker rule.
-- **Auto-fit does not compensate for it.** `autoFitSidebar` asks for
-  `ContentWidth() + 1` (the splitter) and nothing more: an allowance for
-  a two-row marker would be a column of blank air on every other row of
-  the tree. That is the trade a shared-column scrollbar could not make,
-  and the reason the tree stopped having one.
-- No leader key and no ≡ row: there is nothing to toggle, and the click
-  gesture is on the thing itself — a keyboard twin of "page down" is
-  already PgDn.
+### Menu (≡) and leaders
+- Groups in `builtinMenuGroups`; `menuLayout` recomputes geometry every
+  call; scrolled geometry only via `menuItemIndexAt` /
+  `menuScrollOffset`.
+- Top level: File · Edit · View · Find · Nav · Code · Git · AI · Tools,
+  then headerless Quit. Sub-sections nest ONE level via
+  `menuGroup.parent` (children follow the parent,
+  `TestBuiltinMenuGroups_ChildrenFollowParent`); Tools stays the last
+  parent before Quit. `openMenuAtSection` unfolds the parent first.
+- Pinned top zone: command palette + expand/collapse-all. Sections
+  collapse by default via `seedMenuFoldDefault` (not in tests); new
+  sections follow `menuFoldDefault`. Fold state is session-only.
+  Headers are selectable but not the initial highlight.
+- **Adding a menu row means updating the pins**:
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 147 group
+  actions + 15 headers (164), height 170, dividers `[2, 5, 167]`; also
+  `TestMenuLayout_WithCustomActions`, the two tall-window heights in
+  `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
+- Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,
+  dynamic via `subFor`/`hintFor`). One level only; sub-bindings may
+  collide with top-level ones; a miss inside a live chord is swallowed
+  with a flash; chord window `leaderChordFor` (2s); both entry paths go
+  through `fireLeader` (`TestLeaderChord_TmuxAltPath`); the flashed hint
+  must list every sub-binding. Palette is `Esc k`. Don't add a namespace
+  without a real need.
+- Which-key band opens on `Esc ?`; the hesitation timer only applies to
+  namespace chords. Don't bring back the lone-Esc timer.
 
 ## Build / run
 
 ```sh
-make run          # go run . in current dir
-make build        # build to ./bin/ced
-make build-linux  # cross-compile linux/amd64
-make install      # build, then copy ./bin/ced to /usr/local/bin (may need sudo)
-make tidy         # go mod tidy
-make clean        # rm -rf bin
+make run / build / build-linux / install / tidy / clean
+make test          # go test ./... -race
 ```
-
-There's no `dev server` to run for this project — it's a TUI. To test
-UI behavior, build and run it against a real directory.
+No dev server — it's a TUI; use the `run-ced` skill to drive the real
+binary.
 
 ## Releases (don't break this)
 
-**A release is a hand bump and a tag on `main`** — that is the whole
-flow as of 0.3.3 (2026-09-21). The cats plugin installs from source, so
-a tag is all it needs; the GitHub Release pipeline below is PARKED on the
-owner's call (next-list N-001, Roadmap), not broken. To cut one:
+A release is a hand bump and a tag on `main`:
 
 1. Bump `internal/version/version.go` AND `cats-plugin.toml`'s top-level
-   `version =` line to the same `x.y.z` —
-   `TestVersion_MatchesCatsManifest` fails until they agree.
-2. `make test`, then commit (`Release ced x.y.z`) on `main`.
-3. `git tag -a vx.y.z -m "ced x.y.z"` and
-   `git push origin main vx.y.z`.
+   `version =` to the same `x.y.z` (`TestVersion_MatchesCatsManifest`).
+2. `make test`, commit `Release ced x.y.z` on `main`.
+3. `git tag -a vx.y.z -m "ced x.y.z"` and `git push origin main vx.y.z`.
 
-Pick a number past the LATEST TAG, not past `version.go` alone — tags
-have been pushed that `main` never recorded (v0.3.2 was one). Don't
-touch the `release` branch or dispatch `release.yml` as part of this:
-that is the parked pipeline, and it would publish a GitHub Release.
+Pick a number past the LATEST TAG, not just `version.go`. Don't touch the
+`release` branch or dispatch `release.yml` — that's the parked
+goreleaser pipeline (it publishes a GitHub Release). install.sh and the
+Releases page still serve 0.2.0 (next-list N-001).
 
-What the hand flow does NOT update: `install.sh` and the GitHub Releases
-page, which still serve 0.2.0 — tags from v0.3.0 on carry no archives.
-That gap is exactly what N-001 parks.
+Parked pipeline notes, if revived: this repo is a FORK, so Actions
+triggers (release.yml AND test.yml) don't fire until enabled in the
+Actions tab — dispatch by hand with
+`gh workflow run release.yml --repo rohanthewiz/ced --ref release`.
+The workflow auto-bumps unless the TIP commit edits version.go — amend
+the version commit, don't stack on it; delete a stale remote tag before
+re-dispatching. The version auto-commit must keep `[skip ci]`.
 
-### The parked pipeline (release branch + goreleaser)
-
-Kept working in case it is revived. When it was the release path:
-push to the **`release` branch** (cut it from main) and
-`.github/workflows/release.yml` runs. Ordinary pushes to `main` ship
-nothing; `workflow_dispatch` is the manual escape hatch.
-
-> **⚠️ This repo is a FORK, so pushing does NOT trigger anything.**
-> `rohanthewiz/ced` is a fork of `cloudmanic/spice-edit`, and GitHub
-> suppresses *automatic* workflow triggers on forks until someone opens
-> the repo's Actions tab and clicks **"I understand my workflows, go
-> ahead and enable them."** Until that happens:
->
-> - `git push origin release` cuts **no** release. Dispatch it by hand:
->   `gh workflow run release.yml --repo rohanthewiz/ced --ref release`
-> - `test.yml` never runs either — CI is silent on every push to `main`,
->   so a green PR check means nothing yet. Run `make test` locally and
->   don't trust the absence of a red X.
->
-> Nothing in the API surface exposes this gate: the repo reports
-> `actions/permissions` → `enabled: true`, and both workflows report
-> `state: active`. The only symptom is zero runs. Don't go hunting
-> through permissions or the workflow YAML — check `.fork` on the repo
-> first. Delete this block once Actions are enabled on the fork.
-
-The fork is also why the repo inherited **no tags, releases, or CI
-history** — v0.2.0 was the first tag it has ever had.
-
-Once a run does start (pushed or dispatched), the workflow:
-
-1. Reads `internal/version/version.go`.
-2. **If that file was edited in the pushed commit**, the version is used
-   as-is (manual major/minor bump). **Otherwise** the patch is
-   auto-bumped, committed back to `release` with `[skip ci]`, and pushed.
-   The auto-bump rewrites `cats-plugin.toml`'s `version` in the same
-   commit; a MANUAL bump must edit both files, and
-   `TestVersion_MatchesCatsManifest` fails until they agree.
-3. Tags `v<x.y.z>`.
-4. GoReleaser cross-compiles and attaches the archives and
-   `checksums.txt` to a GitHub Release. **Nothing else** — the Homebrew
-   formula step (`brews:` writing `Formula/ced.rb` back into this repo)
-   was removed on 2026-09-14, so a release run makes no commit after the
-   version bump.
-
-**Step 2 inspects the TIP commit only** (`git diff HEAD~1..HEAD`), which
-makes pinning a version fragile in a non-obvious way: stack a follow-up
-commit on top of your version bump and the tip no longer touches
-`version.go`, so CI silently auto-bumps past the number you chose.
-**Amend the version commit, don't stack onto it.** Same trap with a merge
-commit — its first-parent diff drags in whatever `main` changed. And if a
-run already tagged before failing, delete the remote tag
-(`git push origin :refs/tags/vX.Y.Z`) before re-dispatching, or GoReleaser
-releases the old tagged tree instead of your fix.
-
-There is no site deploy step and no site. The inherited SpiceEdit
-marketing site (`website/`) was deleted on 2026-08-25; its `pages.yml`
-workflow, the spice-edit.com `CNAME` binding, and the Makefile `site-*`
-targets had gone with the rebrand before it, which left 5MB of Hugo
-templates and SpiceEdit screenshots that nothing built and nobody could
-trust. **Don't restore it to document a ced feature** — a page that is
-wrong about the editor is worse than no page, which is what the tree had
-already become. README.md is the documentation; a ced site, if one is
-ever wanted, starts fresh. Git history has the old tree.
-
-`main` is left untouched by a release run — merge `release` back into
-main yourself to bring its `version.go` current.
-
-If you're touching the workflow or `.goreleaser.yml`, make sure the
-version-bump auto-commit keeps its `[skip ci]` marker — without it the
-workflow loops forever. (It is the only auto-commit left since the
-Homebrew formula commit went away; don't add a goreleaser step that
-commits back without the same marker.)
+There is no website; README.md is the documentation. Don't restore the
+old SpiceEdit `website/`.
 
 ## What NOT to add
 
-- `Ctrl+` editor shortcuts (they fight tmux/terminals — that's the
-  whole reason the action menu exists).
-- A config file / dotfile. ced is opinionated. (`"termdock"` is the one
-  key that has been RETIRED: tool windows made every panel's edge a
-  per-project fact in state.json, so a global "where does the terminal
-  go" answer no longer means anything. A stale entry still parses and is
-  ignored, like `"scrollbar"` before it. The files under
-  `~/.config/ced/` are the deliberate exceptions, and each earned it by
-  being something ced cannot know for you: which shell aliases you use,
-  which formatters your repo trusts, which MCP servers and credentials
-  you have, which colors you can actually read. Themes in particular are
-  DATA, not code: a theme file can only set colors from a fixed key
-  list. Skills sit on the same side of that line for a different reason:
-  ced never runs one. A SKILL.md is markdown handed to the chat agent,
-  so the skills directories — including the `~/.claude/skills` and
-  `<project>/.claude/skills` ced reads but doesn't own — extend the
-  AGENT, not the editor. The `chats/` archive is not a
-  preference either — it is the conversations themselves, the one thing in
-  the chat panel ced cannot reconstruct. `<repo>/.ced/history.bytdb`
-  is not under `~/.config/ced` at all: it is what the editor did IN that
-  repository (the folders and files you worked in), kept with it and
-  gitignored. `favorites.json` earns
-  its place the way mcp.json does: a small map somebody writes by hand
-  ("plans" → "ai_docs/plans"), naming a convention ced cannot guess.
-  `state.json` is the odd one out
-  and earns its place differently again: it holds no preferences at all, only what the
-  editor did — which folders you opened and where your cursor was — so
-  deleting it costs convenience and changes no behavior.)
-- **A HOST plugin system** — anything ced loads and runs *as code*: Go
-  `plugin` .so files (they'd cost the static binary and CGO), an
-  embedded interpreter, or an editor API that has to stay stable across
-  releases. That line held even when `plugins/` landed, because a ced
-  plugin is a JSON manifest of SHELL COMMANDS the user already had
-  permission to type — the editor's contribution is *when* to run one
-  and where the output goes, not a runtime to run it in. See the plugin
-  section below; the moment a manifest can express something that isn't
-  "a command line plus a place to put its stdout", that line has moved.
-- CGO dependencies. The whole point is one static binary.
-- Tree-sitter. We use Chroma intentionally — pure Go, no setup.
-- A Homebrew formula or tap — in this repo or a separate `homebrew-tap`
-  repo. The in-repo `Formula/` and goreleaser's `brews:` block were
-  removed on 2026-09-14: ced's official install is the cats plugin, which
-  builds from source and links `~/.cats/bin/ced`. A second channel means a
-  second `ced` on PATH drifting behind the plugin build — the exact
-  problem that removal fixed. Release archives stay for install.sh.
+- `Ctrl+` editor shortcuts.
+- A config file / dotfile beyond the existing `~/.config/ced/` files
+  (config.json, mcp.json, state.json, favorites.json, themes/, skills/,
+  plugins/, chats/, rc.grsh) and `<repo>/.ced/`. Each exists because it
+  holds something ced cannot know for you.
+- A HOST plugin system (Go .so plugins, embedded interpreter, stable
+  editor API). Plugins stay "a command line plus where its stdout goes".
+- CGO dependencies. Tree-sitter (Chroma is intentional).
+- A Homebrew formula or tap.
+- A PTY / VT emulator in the terminal panel.

@@ -128,7 +128,7 @@ Wanted, but not next. Parked, not declined.
   are a hand bump of `version.go` + `cats-plugin.toml` and a pushed tag,
   which is all the cats plugin needs. What stays unshipped: `origin/release`
   is still at `0409317 Release ced 0.2.0`, so `install.sh` and the GitHub
-  Releases page still say 0.2.0, and tags `v0.3.0`–`v0.3.3` have no
+  Releases page still say 0.2.0, and tags `v0.3.0`–`v0.3.7` have no
   artifacts. If revived: the fork suppresses push triggers, so fast-forward
   `release` and `gh workflow run release.yml --repo rohanthewiz/ced --ref
   release`; bump past the latest tag first. The `cats-plugin.toml` sed in

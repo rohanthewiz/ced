@@ -3511,6 +3511,10 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// editor catch-all, which already excluded it.
 		case y == a.height-1:
 			a.statusBarClick(x, y)
+		// The "No file open" placeholder's links (emptyeditor.go). Ahead
+		// of the editor catch-all, which would otherwise start a drag on
+		// a screen with no document; answers nothing while a tab is open.
+		case a.emptyEditorPress(x, y):
 		case y > 0 && y < a.height-1:
 			// ⌘+click goes to the definition of the symbol under the
 			// pointer — or to its usages, when the pointer is already ON
@@ -5061,6 +5065,9 @@ func (a *App) drawEmptyEditor() {
 	// one thing a "nothing here" screen must not do.
 	a.drawCentered("No file open", ex, cy-1, ew, bold)
 	a.drawCentered("Click a file in the tree, or  ≡  for the menu", ex, cy+1, ew, muted)
+	// Recent files · Recent locations — clickable, laid out by the same
+	// emptyEditorLinks the click routing asks (emptyeditor.go).
+	a.drawEmptyEditorLinks()
 	a.screen.HideCursor()
 }
 

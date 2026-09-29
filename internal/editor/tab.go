@@ -136,8 +136,8 @@ type Tab struct {
 	// anything else is a hit. mdPendingSync is the toggle asking the
 	// next draw to open on the passage the cursor was in — it can only
 	// be resolved once a width is known, which is the draw's to know.
-	mdView        bool
-	MDScroll      int
+	mdView   bool
+	MDScroll int
 
 	// Soft wrap (softwrap.go). softWrap is a view flag like mdView: the
 	// buffer is untouched, only the drawing changes. wrapW is the row width

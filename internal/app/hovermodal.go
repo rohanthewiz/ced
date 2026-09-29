@@ -266,9 +266,9 @@ func wrapTooltipLine(r []rune, w int) []tooltipSeg {
 // the cut. The returned hh is therefore authoritative — callers paint
 // and hit-test with it, not with the h they asked for.
 //
-//	    room above = cy rows         ┐
-//	  ── anchor row cy ──            │ a.height-1 (status bar excluded)
-//	    room below = height-2-cy     ┘
+//	  room above = cy rows         ┐
+//	── anchor row cy ──            │ a.height-1 (status bar excluded)
+//	  room below = height-2-cy     ┘
 func tooltipPlace(a *App, w, h, cx, cy int) (x, y, ww, hh int) {
 	x = cx
 	if x+w > a.width {

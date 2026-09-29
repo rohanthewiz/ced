@@ -115,12 +115,6 @@ plus the LSP work done in the seeding session itself
   continuation. Requesting markdown would give real structure (fences,
   blank-line sections) at the cost of rendering its escapes and links.
 
-- **N-034** · raised `2026-0929-1538-git-blame-dated-bands` · value low
-  gofmt drift predating this session: `internal/app/hovermodal.go`,
-  `internal/editor/tab.go` (the `mdView`/`MDScroll` field alignment) and
-  `internal/lsp/inlayhint_test.go` are not gofmt-clean. A one-line
-  `gofmt -w` commit; left alone so feature diffs stay focused.
-
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.
@@ -171,6 +165,12 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, no session doc (commit "gofmt drift (N-034)") —
+  **N-034** `gofmt -w` on `internal/app/hovermodal.go` (the
+  `tooltipPlace` diagram's leading indent), `internal/editor/tab.go`
+  (`mdView`/`MDScroll` alignment) and `internal/lsp/inlayhint_test.go`
+  (a long one-line goroutine split). Formatting only; `gofmt -l` is now
+  empty.
 - closed 2026-09-29, `2026-0929-1855-find-options-reach-the-lists` — **N-035** the bar's `Aa` / `|W|` now reach both
   lists. `App.findOptions()` is the one conversion; `showFindAll`
   snapshots it onto `findAllModal.opts` (⟳, the stale check and the

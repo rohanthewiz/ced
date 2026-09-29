@@ -67,7 +67,9 @@ func TestInitializeWithOptions_SendsThem(t *testing.T) {
 	c, srv, done := pipeClient(t, nil, nil)
 	defer done()
 
-	go func() { _ = c.InitializeWithOptions("/p", map[string]any{"hints": map[string]any{"parameterNames": true}}) }()
+	go func() {
+		_ = c.InitializeWithOptions("/p", map[string]any{"hints": map[string]any{"parameterNames": true}})
+	}()
 	m := srv.read(t)
 	var p struct {
 		Opts struct {

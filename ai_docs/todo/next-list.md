@@ -55,10 +55,6 @@ plus the LSP work done in the seeding session itself
   cats-side decision: should a BLOCKED editor count toward the AGENTS
   attention tally? Currently it does not.
 
-- **N-008** · raised `2026-0913-2142-select-all` · value low
-  Optional: a "Select all" row in ≡ **File** too, if "File | Edit" meant
-  both groups. Today it is in Edit only. One line plus the menu pins.
-
 - **N-009** · raised `2026-0914-1114-homebrew-removed` · value low
   `.claude/commands/summary-of-downloads.md` says download counts include
   Homebrew installs. True up to v0.3.0, false for anything released after
@@ -198,6 +194,14 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, `2026-0929-1710-select-all-file-row` — **N-008** ≡ **File** now carries a "Select all"
+  row too (under the Copy-path rows), same action and predicate as the
+  Edit row. It is flagged `paletteTwin` so the command palette still
+  lists the verb once — an explicit flag, not dedupe by label + func
+  pointer, because plugin/custom-action rows are closures from one func
+  literal and would merge. Pinned by `TestMenuSelectAll_InFileAndEdit`
+  and `TestPalette_TwinRowListedOnce`; menu pins now 150 actions / 167
+  rows / height 173.
 - closed 2026-09-29, `2026-0929-1617-history-only-in-repos` — **N-027** `.ced/history.bytdb` is written only when
   `history.Persists(root)`: the root is inside a git work tree (walks up,
   so a repo subfolder counts; a `.git` FILE counts, for worktrees and

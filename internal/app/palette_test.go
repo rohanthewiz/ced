@@ -238,6 +238,30 @@ func TestPalette_CustomActionsListed(t *testing.T) {
 	}
 }
 
+// TestPalette_TwinRowListedOnce pins that a verb living in two ≡
+// sections on purpose (Select all in File and Edit) shows up once in the
+// palette — two identical rows would read as a bug.
+func TestPalette_TwinRowListedOnce(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(p, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, root)
+	a.openFile(p)
+	a.openPalette()
+
+	n := 0
+	for _, it := range paletteOf(a).items {
+		if it.label == "Select all" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("palette lists %d 'Select all' rows, want 1", n)
+	}
+}
+
 // TestPalette_FoldedSectionActionsStillListed pins that the ≡-menu fold
 // state is a display concern only: collapsing a section in the menu must
 // NOT remove its actions from the command palette, and the palette must

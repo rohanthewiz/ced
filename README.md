@@ -512,7 +512,7 @@ half-typed chord.
 Everything reachable by hotkey is also reachable from the `≡` menu —
 the hotkeys are just a faster path for the actions you reach for most.
 The reverse is not true: some verbs have no `Esc` key at all — **Select all**
-is ≡ **Edit ▸ Select all** (and `⌘A`, where `Cmd` arrives), for instance — and the command palette
+is ≡ **Edit ▸ Select all** (also under ≡ **File**, and `⌘A`, where `Cmd` arrives), for instance — and the command palette
 (`Esc k`) finds any of them by name.
 
 **Command-key accelerators.** If your terminal forwards the `Cmd` key —

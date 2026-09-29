@@ -111,7 +111,9 @@ func paletteActionItems(a *App) []paletteItem {
 			if it.labelFor != nil {
 				label = it.labelFor(a)
 			}
-			if label == paletteMenuLabel {
+			// A ≡ twin (the File copy of Edit's Select all) repeats a row
+			// listed elsewhere; two identical palette rows read as a bug.
+			if label == paletteMenuLabel || it.paletteTwin {
 				continue
 			}
 			out = append(out, paletteItem{label: label, run: it.action})

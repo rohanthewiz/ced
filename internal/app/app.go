@@ -200,6 +200,14 @@ type menuItemDef struct {
 	// indents by it so a nested section reads as belonging to the one
 	// above it.
 	depth int
+	// paletteTwin marks a row that deliberately repeats another ≡ row
+	// in a second section (Select all in File as well as Edit). The
+	// menu draws it; the command palette skips it so the verb is listed
+	// once. An explicit flag rather than dedupe-by-label-and-func: plugin
+	// and custom-action rows are closures from one func literal, so
+	// comparing code pointers would merge distinct commands that share
+	// a label.
+	paletteTwin bool
 }
 
 // menuGroup is a titled block of action rows in the ≡ menu. Collapsible
@@ -286,6 +294,12 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuZipFolder, enabled: alwaysTrue, labelFor: (*App).zipFolderLabel},
 			{label: "Copy relative path", action: (*App).menuCopyRelativePath, enabled: (*App).hasFileTab},
 			{label: "Copy absolute path", action: (*App).menuCopyAbsolutePath, enabled: (*App).hasFileTab},
+			// A twin of the ≡ Edit row, for the user who reads "select the
+			// whole FILE" as a file verb and looks here first. Same action
+			// and predicate as the Edit row, so the two can't drift; it sits
+			// under the Copy-path rows because, like them, it exists to feed
+			// the clipboard. paletteTwin keeps the palette to one entry.
+			{label: "Select all", action: (*App).menuSelectAll, enabled: (*App).hasSelectableTab, paletteTwin: true},
 			// Maintaining the favorites file (favmanage.go). A File row
 			// rather than a Nav one: Nav carries "Go to
 			// favorite…", which is about USING one, while this is about
@@ -4758,8 +4772,8 @@ func (a *App) menuSelectAll() {
 }
 
 // selectAllInFile selects the entire buffer of the active tab. It is the
-// one implementation behind the ≡ Edit row, the palette entry and the
-// editor's right-click row, so the three can never disagree about what
+// one implementation behind the ≡ Edit and File rows, the palette entry
+// and the editor's right-click row, so they can never disagree about what
 // "all" covers. Tab.SelectAll drops secondary carets itself.
 //
 // Refuses the same tabs hasSelectableTab dims: an image has no buffer, and

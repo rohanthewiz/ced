@@ -2022,7 +2022,7 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 // every section expanded: the pinned top zone contributes two rows (the
 // command palette + the expand/collapse-all toggle), fifteen collapsible
 // groups each contribute a header row (15) plus their action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 149 total. The
+// Quit renders headerless behind a divider (its 1 row) — 150 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -2030,16 +2030,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 172 {
-		t.Errorf("modalHeight = %d, want 172", h)
+	if h != 173 {
+		t.Errorf("modalHeight = %d, want 173", h)
 	}
-	if got := len(items); got != 166 {
-		t.Errorf("row count = %d, want 166 (2 top-zone + 149 group actions + 15 headers)", got)
+	if got := len(items); got != 167 {
+		t.Errorf("row count = %d, want 167 (2 top-zone + 150 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (169) — headers separate the
+	// one setting off the headerless Quit group (170) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 169}
+	wantDiv := []int{2, 5, 170}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2084,6 +2084,45 @@ func TestMenuSelectAll(t *testing.T) {
 	a.selectAllInFile()
 	if tab.HasSelection() {
 		t.Fatal("selectAllInFile must not select inside a preview")
+	}
+}
+
+// TestMenuSelectAll_InFileAndEdit pins N-008: ≡ File carries a twin of
+// the Edit "Select all" row, wired to the same action and predicate so
+// the two can never disagree, and only the File copy is the palette twin
+// (the Edit row stays the palette's one entry).
+func TestMenuSelectAll_InFileAndEdit(t *testing.T) {
+	var rows = map[string]menuItemDef{}
+	for _, g := range builtinMenuGroups() {
+		for _, it := range g.items {
+			if it.label == "Select all" {
+				rows[g.title] = it
+			}
+		}
+	}
+	file, okF := rows["File"]
+	edit, okE := rows["Edit"]
+	if !okF || !okE {
+		t.Fatalf("Select all should be in both File and Edit, found in %v", rows)
+	}
+	if !file.paletteTwin || edit.paletteTwin {
+		t.Fatalf("paletteTwin: File=%v Edit=%v, want File only", file.paletteTwin, edit.paletteTwin)
+	}
+
+	// Same behaviour through the File row: it selects the whole buffer.
+	root := t.TempDir()
+	p := writeStatusTestFile(t, root, "a.txt", "one\ntwo\n")
+	a := newTestApp(t, root)
+	if file.enabled(a) {
+		t.Fatal("File > Select all should be dimmed with no tab open")
+	}
+	a.openFile(p)
+	if !file.enabled(a) {
+		t.Fatal("File > Select all should be enabled on a text tab")
+	}
+	file.action(a)
+	if got := a.activeTabPtr().SelectionText(); got != "one\ntwo\n" {
+		t.Fatalf("selection = %q, want the whole buffer", got)
 	}
 }
 
@@ -2584,8 +2623,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 175 { // 172 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 175", h)
+	if h != 176 { // 173 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 176", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

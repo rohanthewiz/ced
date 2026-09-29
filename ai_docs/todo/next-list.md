@@ -121,7 +121,7 @@ plus the LSP work done in the seeding session itself
   `internal/lsp/inlayhint_test.go` are not gofmt-clean. A one-line
   `gofmt -w` commit; left alone so feature diffs stay focused.
 
-- **N-035** · raised `2026-0929-1726-readme-find-section` · value low
+- **N-035** · raised `2026-0929-1808-find-docs-blame-names-replace-history` · value low
   The bar's `Aa` / `|W|` options stop at the bar: ↓ list-all
   (`showFindAll` calls `editor.FindAll`, zero options) and Find in project
   (`search.Options` has no case/word fields) always match a
@@ -179,7 +179,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-09-29, `2026-0929-1750-findall-replace-history` — **N-031** the Find-all list's replace
+- closed 2026-09-29, `2026-0929-1808-find-docs-blame-names-replace-history` — **N-031** the Find-all list's replace
   box has its own dropdown on the replacement list it already recorded
   into: `Up` in the box or a click on its `⇄▾` label, opens below, fills
   and never runs "Replace in N". Unpinned it rides the modal slot;
@@ -197,7 +197,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `TestCloseAllModals_ClosesThePinnedReplaceHist`,
   `TestFindBar_SecondLabelClickClosesTheList`,
   `TestSearchPrompt_SecondButtonClickClosesTheList`.
-- closed 2026-09-29, `2026-0929-1740-blame-name-disambiguation` — **N-033** neither switch nor choice:
+- closed 2026-09-29, `2026-0929-1808-find-docs-blame-names-replace-history` — **N-033** neither switch nor choice:
   blame keeps the given name and adds surname letters only where two
   different authors in the same file share it —
   `disambiguateBlameAuthors`, run at the end of `parseBlamePorcelain`
@@ -207,7 +207,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   the dot, the given name is what gets elided to fit `blameAuthorMax`.
   No config key, no ≡ row. Pinned by `TestDisambiguateBlameAuthors_*`
   and `TestParseBlamePorcelain_DisambiguatesSharedGivenNames`.
-- closed 2026-09-29, `2026-0929-1726-readme-find-section` — **N-032** README `### Find in file`
+- closed 2026-09-29, `2026-0929-1808-find-docs-blame-names-replace-history` — **N-032** README `### Find in file`
   rewritten against the code: `Aa` / `|W|` (click, `Alt+c` / `Alt+w`, the
   ≡ Find rows), selection seeding, the replace row (`Esc e`, Tab, `Enter`
   / `Alt+a`, one undo step), the Find-all list (`Esc F` / ↓: preview,

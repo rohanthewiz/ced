@@ -102,12 +102,6 @@ plus the LSP work done in the seeding session itself
   (`ed4962c`). Worth checking first that forwarding it does not cost
   other panes (a shell) a select-all they relied on.
 
-- **N-027** · raised `2026-0928-1408-recent-locations-per-repo-history` · value low
-  `.ced/history.bytdb` is created in ANY folder ced opened a file in, not
-  only git repositories (`ced ~` leaves `~/.ced/`). Option: persist only
-  when the root holds `.git` (or already has `.ced/`), at the cost of no
-  history elsewhere. Owner's call.
-
 - **N-028** · raised `2026-0928-1408-recent-locations-per-repo-history` · value low
   A read-only checkout (or unwritable `.ced/`) silently loses that
   session's folder + recent-file history — `writeHistory` is silent by
@@ -204,6 +198,15 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, `2026-0929-1617-history-only-in-repos` — **N-027** `.ced/history.bytdb` is written only when
+  `history.Persists(root)`: the root is inside a git work tree (walks up,
+  so a repo subfolder counts; a `.git` FILE counts, for worktrees and
+  submodules) or already holds a `.ced/` (earlier history, format.json).
+  Anywhere else the history is memory-only for the session — `ced ~` no
+  longer leaves `~/.ced/`. Checked at write time, so a mid-session
+  `git init` persists. Filesystem walk, not `git rev-parse`, so Close
+  never waits on a process. Pinned by `TestPersists_*` and
+  `TestWriteHistory_OnlyInARepository`.
 - closed 2026-09-29, `2026-0929-1552-overflow-markers-panels` — **N-018** overflow markers on the compare panel
   (lines), Problems (problems, over the filtered view), chat (wrapped
   transcript rows, band stops above chips/composer) and terminal

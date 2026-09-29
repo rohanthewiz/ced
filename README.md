@@ -646,7 +646,10 @@ above the status bar:
   its `×` forgets it. The replace row's `Repl▾` does the same for recent
   replacements, and the **Find all in file**, **Find in project** and
   **Go to symbol in project** prompts offer theirs under a `▾`. The
-  lists live in the project's `.ced/history.bytdb`.
+  lists live in the project's `.ced/history.bytdb` — written only for a
+  git repository (or a folder that already has a `.ced/`); anywhere
+  else, e.g. `ced ~`, they last for the session and leave nothing
+  behind.
 
 There's no regex, whole-word, or case-sensitive toggle in v1 — the
 common case is "I know roughly what I'm looking for, take me there."

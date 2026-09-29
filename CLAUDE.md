@@ -690,7 +690,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   excludes the current root and prunes gone folders. `"session"` toggle.
 - **Recent locations (internal/history, recentlocations.go)**:
   `<repo>/.ced/history.bytdb` (gitignored on first write, loading creates
-  nothing), relative paths. Trie with max-of-subtree bounds, best-first
+  nothing), relative paths. Written only when `history.Persists(root)`:
+  inside a git work tree (walks up; .git dir or file) or `.ced/` already
+  there — else memory-only (`ced ~` leaves no `~/.ced/`). Gate asked at
+  write time via `historyPersistsFn` (pinned true in newTestApp). Trie with max-of-subtree bounds, best-first
   top-k (`TestIndex_SearchMatchesBruteForce`). Eviction with hysteresis.
   DB opened briefly (load on first use, write on Close), retries on lock;
   writes ADD via deltas and re-issued sequences

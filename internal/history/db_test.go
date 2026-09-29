@@ -398,3 +398,72 @@ func TestWrite_CompactsPastTheCeiling(t *testing.T) {
 		t.Errorf("hits after compaction = %d, want 41", got)
 	}
 }
+
+// outsideAnyRepo skips when the temp dir itself sits inside a git work
+// tree (a TMPDIR under a repository) — the "no repository" half of the
+// Persists tests cannot be staged there.
+func outsideAnyRepo(t *testing.T, root string) {
+	t.Helper()
+	if Persists(root) {
+		t.Skipf("temp dir %s is inside a git work tree; cannot stage a non-repository", root)
+	}
+}
+
+// TestPersists_OnlyRepositoriesAndExistingCed pins N-027's gate: a bare
+// folder is memory-only, while a .git directory, a .git FILE (worktrees,
+// submodules), a .git in an ancestor, or an already-present .ced/ each
+// make it persist.
+func TestPersists_OnlyRepositoriesAndExistingCed(t *testing.T) {
+	root := repo(t)
+	outsideAnyRepo(t, root)
+	if Persists("") {
+		t.Error("an empty root persists")
+	}
+
+	bare := filepath.Join(root, "bare")
+	withGitDir := filepath.Join(root, "gitdir")
+	withGitFile := filepath.Join(root, "worktree")
+	withCed := filepath.Join(root, "ced")
+	for _, d := range []string{bare, filepath.Join(withGitDir, ".git"), withGitFile, filepath.Join(withCed, ".ced")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(withGitFile, ".git"), []byte("gitdir: ../x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(withGitDir, "internal", "app")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name, root string
+		want       bool
+	}{
+		{"bare folder", bare, false},
+		{".git directory", withGitDir, true},
+		{".git file", withGitFile, true},
+		{"subfolder of a repository", sub, true},
+		{"existing .ced/", withCed, true},
+	}
+	for _, c := range cases {
+		if got := Persists(c.root); got != c.want {
+			t.Errorf("%s: Persists = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestPersists_CedFileIsNotADirectory pins that only a .ced DIRECTORY
+// counts: a stray file of that name is not ced's furniture, and writing
+// there would fail anyway.
+func TestPersists_CedFileIsNotADirectory(t *testing.T) {
+	root := repo(t)
+	outsideAnyRepo(t, root)
+	if err := os.WriteFile(filepath.Join(root, ".ced"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if Persists(root) {
+		t.Fatal("a .ced FILE made a bare folder persist")
+	}
+}

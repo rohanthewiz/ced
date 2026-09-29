@@ -38,6 +38,19 @@
 // a .ced/ behind by itself; the directory, the database and the ignore
 // entry appear with the first write that has something to say.
 //
+// AND ONLY IN A REPOSITORY (Persists). A .ced/ is project furniture, and a
+// folder that is not a project — `ced ~`, `ced ~/Downloads` — should not
+// grow one just because a file was opened there. Persists is the caller's
+// gate, checked at write time so a `git init` mid-session counts:
+//
+//	root inside a git work tree (.git at root or any ancestor) → persist
+//	root already holding .ced/ (earlier history, format.json)  → persist
+//	anything else                                              → memory only
+//
+// The cost is that such folders keep history for the session only. That
+// is the trade: the history is per-repository by design, and a folder with
+// no repository has nothing for it to be per.
+//
 // COMPACTION IS OURS TO ASK FOR. bytdb's storage is an append-only log:
 // every UPDATE and DELETE leaves the old record behind until a compaction
 // rewrites the file. btypedb compacts on its own only past 32MB, and only
@@ -137,6 +150,32 @@ var schema = []string{
 // DBPath is where a repository's history lives.
 func DBPath(root string) string {
 	return filepath.Join(root, ".ced", DBName)
+}
+
+// Persists reports whether history for root may be written to disk: root
+// sits inside a git work tree, or already has a .ced/ directory (see the
+// header). The .git test walks up because opening a subfolder of a
+// repository is still working in that repository, and accepts a .git FILE
+// as well as a directory — that is what worktrees and submodules have.
+// A filesystem walk rather than `git rev-parse`: it runs on Close, and
+// spawning git there would make quitting wait on a process.
+func Persists(root string) bool {
+	if root == "" {
+		return false
+	}
+	if fi, err := os.Stat(filepath.Join(root, ".ced")); err == nil && fi.IsDir() {
+		return true
+	}
+	for dir := filepath.Clean(root); ; {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }
 
 // open opens the database at path, creating its directory and schema,

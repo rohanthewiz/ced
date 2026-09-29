@@ -91,6 +91,13 @@ func newTestApp(t *testing.T, root string) *App {
 	prevHistory := historyPathFn
 	historyPathFn = func(string) string { return filepath.Join(sessionHome, "history.bytdb") }
 	t.Cleanup(func() { historyPathFn = prevHistory })
+	// Temp roots hold no .git, so the real persistence gate would turn
+	// every history write into a no-op; the path above already keeps the
+	// database out of the root. TestWriteHistory_OnlyInARepository
+	// restores the real gate.
+	prevPersists := historyPersistsFn
+	historyPersistsFn = func(string) bool { return true }
+	t.Cleanup(func() { historyPersistsFn = prevPersists })
 	// Same seam for favorites.json, and load-bearing for the same
 	// reason: "Go to favorite" reads the file and REVEALS what it names,
 	// so without this a test run would open one of the developer's own

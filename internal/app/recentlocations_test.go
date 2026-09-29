@@ -188,3 +188,42 @@ func TestWriteHistory_ReachesTheRepoDatabase(t *testing.T) {
 		t.Fatal("the recorded folder never reached the database")
 	}
 }
+
+// TestWriteHistory_OnlyInARepository pins N-027 end to end: with the real
+// persistence gate, an App rooted at a bare folder writes nothing — no
+// database, no .ced/ — and the same history reaches disk once the root
+// becomes a repository (the gate is asked at write time, so a `git init`
+// mid-session counts).
+func TestWriteHistory_OnlyInARepository(t *testing.T) {
+	root := t.TempDir()
+	if history.Persists(root) {
+		t.Skipf("temp dir %s is inside a git work tree; cannot stage a non-repository", root)
+	}
+	sub := mkdirs(t, root, "pkg")[0]
+	a := newTestApp(t, root)
+	historyPersistsFn = history.Persists // newTestApp's Cleanup restores it
+	useFolder(a, sub, 1)
+
+	a.writeHistory()
+	if _, err := os.Stat(historyPathFn(root)); !os.IsNotExist(err) {
+		t.Fatalf("a bare folder's history reached disk: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".ced")); !os.IsNotExist(err) {
+		t.Fatalf("a bare folder grew a .ced/: %v", err)
+	}
+	if !a.repoHistory().Folders.HasUsesBelow(root) {
+		t.Fatal("the session's history was lost along with the write")
+	}
+
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a.writeHistory()
+	back, err := history.Load(root, historyPathFn(root))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !back.Folders.HasUsesBelow(root) {
+		t.Fatal("once a repository, the pending history never reached the database")
+	}
+}

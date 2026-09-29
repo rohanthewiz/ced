@@ -66,6 +66,13 @@ const (
 // happened to root an App at.
 var historyPathFn = history.DBPath
 
+// historyPersistsFn decides whether a root's history reaches disk at all
+// (history.Persists: a git work tree, or a .ced/ already there). A seam
+// because newTestApp roots Apps at bare temp dirs with no .git — it pins
+// this to "yes" so the round-trip tests still exercise the database, and
+// the gate's own test restores the real one.
+var historyPersistsFn = history.Persists
+
 // repoHistory returns this workspace's history, loading it on first use.
 // Never nil: a failed load is an empty history (and a flash, unless the
 // file was merely locked by a sibling for longer than the retry window —
@@ -84,9 +91,12 @@ func (a *App) repoHistory() *history.History {
 // writeHistory adds the pending history to the repository's database.
 // Silent on failure: the changes stay pending for the next write, and the
 // one guaranteed write (Close) has no screen left to flash on. Nothing is
-// written — and no .ced/ created — while nothing is pending.
+// written — and no .ced/ created — while nothing is pending, nor for a
+// root that is not a repository (`ced ~` must not leave a ~/.ced/): there
+// the history lives for the session and the pending changes are simply
+// dropped with the App.
 func (a *App) writeHistory() {
-	if a.history == nil {
+	if a.history == nil || !historyPersistsFn(a.rootDir) {
 		return
 	}
 	_ = a.history.Write(historyPathFn(a.rootDir), a.recentFiles)

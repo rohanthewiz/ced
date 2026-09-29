@@ -1265,6 +1265,68 @@ func TestSaveFindAllDock_RoundTripsUnknownKeys(t *testing.T) {
 	}
 }
 
+// TestLoad_BlameStyle covers the blame-look key: absent keeps the
+// banded default, either spelling selects its style, and an unknown
+// value is an error rather than a silent fallback, like every other
+// enumerated key here.
+func TestLoad_BlameStyle(t *testing.T) {
+	cases := []struct {
+		name    string
+		json    string
+		want    BlameStyle
+		wantErr bool
+	}{
+		{"absent", `{}`, BlameStyleBands, false},
+		{"bands", `{"blamestyle": "bands"}`, BlameStyleBands, false},
+		{"compact", `{"blamestyle": "compact"}`, BlameStyleCompact, false},
+		{"cased", `{"blamestyle": " Compact "}`, BlameStyleCompact, false},
+		{"bogus", `{"blamestyle": "rainbow"}`, BlameStyleBands, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(c.json), 0644); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			cfg, err := Load(path)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, c.wantErr)
+			}
+			if cfg.BlameStyle != c.want {
+				t.Errorf("BlameStyle = %q, want %q", cfg.BlameStyle, c.want)
+			}
+		})
+	}
+}
+
+// TestSaveBlameStyle_RoundTripsUnknownKeys pins the saveKey contract for
+// the new key: hand-set keys survive, and the value reloads.
+func TestSaveBlameStyle_RoundTripsUnknownKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"icons": "off", "somethingnew": "keep me"}`), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveBlameStyle(path, BlameStyleCompact); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	for _, want := range []string{`"blamestyle": "compact"`, `"somethingnew": "keep me"`, `"icons": "off"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("config = %s, want it to contain %s", data, want)
+		}
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if cfg.BlameStyle != BlameStyleCompact {
+		t.Errorf("reloaded BlameStyle = %q, want compact", cfg.BlameStyle)
+	}
+}
+
 // TestSession_LoadAndSave pins the session key: default on (an editor
 // pointed at a project should give the project back), "off" honoured,
 // an unknown value reported rather than silently ignored, and SaveSession

@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-033**
+**Next ID: N-035**
 
 ## Open
 
@@ -141,6 +141,18 @@ plus the LSP work done in the seeding session itself
   still says there is no whole-word or case-sensitive toggle (the bar has
   `Aa` / `|W|`) and never mentions the replace row, ↓ list-all, or Find
   in project. An instance of N-003.
+
+- **N-033** · raised `2026-0929-1538-git-blame-dated-bands` · value low
+  Blame shows the author's GIVEN name (`blameGivenName`) in both styles;
+  the IDE look the bands style copies shows the surname ("Allison").
+  Switch, or make it a choice, if the first names prove ambiguous on a
+  team.
+
+- **N-034** · raised `2026-0929-1538-git-blame-dated-bands` · value low
+  gofmt drift predating this session: `internal/app/hovermodal.go`,
+  `internal/editor/tab.go` (the `mdView`/`MDScroll` field alignment) and
+  `internal/lsp/inlayhint_test.go` are not gofmt-clean. A one-line
+  `gofmt -w` commit; left alone so feature diffs stay focused.
 
 ## Roadmap
 

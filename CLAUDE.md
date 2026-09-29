@@ -567,6 +567,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Commit receipt: passive layer, never takes the modal slot; dismissed by
   anything without consuming the key; reads `git log -1` via
   `gitCmdDoneEvent.onOK`.
+- Blame (gitblame.go, Esc-A): blames the BUFFER (`--contents -`). Two
+  styles, `"blamestyle"` + ≡ Git row, both measured on every
+  `fileBlame` (`newFileBlame`) so a switch never forks git: `bands`
+  (default) = date + author on EVERY line over a per-commit
+  `LineAnnotation.BG` band, hue keyed by hash, adjacent runs never share
+  a hue, text lifted to 4.5:1 by `blameBandFG`; `compact` = hash · name ·
+  age once per run. Switching style never turns the layer on.
 - Git log (Esc-L): tool window; `--all`, capped 400; Actions picker
   (only `reset --hard` confirms); selection kept by hash; refresh rides
   `refreshGitStatus`.
@@ -759,8 +766,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 148 group
-  actions + 15 headers (165), height 171, dividers `[2, 5, 168]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 149 group
+  actions + 15 headers (166), height 172, dividers `[2, 5, 169]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

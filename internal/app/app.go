@@ -600,6 +600,10 @@ func builtinMenuGroups() []menuGroup {
 			// clicks.
 			{shortcut: "esc A", action: (*App).menuToggleBlame, enabled: (*App).hasGitRepo, labelFor: (*App).blameToggleLabel},
 			{label: "Blame this line…", action: (*App).menuBlameCommit, enabled: (*App).hasGitRepo},
+			// The column's look (gitblame.go): dated bands, the IDE
+			// style, or the compact once-per-run stamp. Beside the
+			// toggle it restyles; persisted as "blamestyle".
+			{action: (*App).menuToggleBlameStyle, enabled: (*App).hasGitRepo, labelFor: (*App).blameStyleToggleLabel},
 			// git's own report (gitstatusreport.go). It opens the
 			// repo-level block because it is the read those verbs act on
 			// — and it is the only surface that carries what the tree
@@ -1467,7 +1471,10 @@ type App struct {
 	// newer one; blameTimer/blameStale are the settle debounce that
 	// re-blames a buffer after the typing stops. All written from the
 	// main loop only.
-	blameOn    bool
+	blameOn bool
+	// blameBands picks the column's look: true = dated bands (the
+	// default via userconfig), false = compact. See gitblame.go.
+	blameBands bool
 	fileBlames map[string]*fileBlame
 	blameSeq   map[string]int
 	blameTimer *time.Timer
@@ -1813,6 +1820,7 @@ func (a *App) loadUserConfig() {
 	a.inlayEnabled = cfg.InlayHints
 	a.applyWordHighlight() // no-op at startup; matters when the config is re-read
 	a.findAllDockRight = cfg.FindAllDock == userconfig.FindAllDockRight
+	a.blameBands = cfg.BlameStyle != userconfig.BlameStyleCompact
 	a.copilot.enabled = cfg.Copilot
 	a.copilot.suggest = cfg.Suggestions
 	a.chat.modelPref = cfg.ChatModel

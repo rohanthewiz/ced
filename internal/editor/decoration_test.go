@@ -8,6 +8,7 @@
 package editor
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -347,6 +348,68 @@ func TestRender_AnnotationColumnMovesTheCodeAndTheGeometryTogether(t *testing.T)
 	// give the column its own verb overrides before asking.
 	if pos, ok := tab.HitTest(start+1, 2, 60, 5); !ok || pos.Line != 2 || pos.Col != 0 {
 		t.Fatalf("HitTest inside the column = %+v (ok=%v)", pos, ok)
+	}
+}
+
+// TestRender_AnnotationBandFillsTheColumnOnEveryRow pins the BG field:
+// a band covers the WHOLE column, text or not, on every row of its line
+// — soft-wrapped continuations included — while an annotation with no
+// band leaves the column on the line's own background. A band with a
+// hole at a wrap would read as a commit boundary that isn't there.
+func TestRender_AnnotationBandFillsTheColumnOnEveryRow(t *testing.T) {
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer scr.Fini()
+	scr.SetSize(50, 6)
+
+	tab, _ := NewTab("")
+	// Line 0 is long enough to wrap in the ~33 cells of code left over.
+	tab.Buffer = NewBuffer(strings.Repeat("x", 50) + "\nshort")
+	tab.SetSoftWrap(true)
+	const annW = 10
+	band := tcell.NewRGBColor(0x40, 0x20, 0x60)
+	tab.DecoSources = []DecorationSource{stubAnnotator{
+		width: annW,
+		anns: map[int]LineAnnotation{
+			0: {Text: " 9/23/26", FG: tcell.ColorWhite, BG: band},
+			1: {Text: " plain", FG: tcell.ColorWhite},
+		},
+	}}
+
+	th := theme.Default()
+	tab.Render(scr, th, 0, 0, 50, 6)
+	scr.Show()
+	cells, w, _ := scr.GetContents()
+	start, end := tab.AnnotationCols()
+	if end-start != annW {
+		t.Fatalf("annotation column = [%d,%d), want %d cells", start, end, annW)
+	}
+	bgAt := func(row, col int) tcell.Color {
+		_, bg, _ := cells[row*w+col].Style.Decompose()
+		return bg
+	}
+	// Rows 0 and 1 are line 0 (the wrap); every cell of the column —
+	// under the text, past it, and on the continuation — wears the band.
+	for row := 0; row < 2; row++ {
+		for col := start; col < end; col++ {
+			if got := bgAt(row, col); got != band {
+				t.Fatalf("row %d col %d bg = %v, want the band %v", row, col, got, band)
+			}
+		}
+	}
+	// The continuation carries the band but not the text.
+	if got := cells[1*w+start+1].Runes; len(got) > 0 && got[0] != ' ' {
+		t.Fatalf("continuation row repeated the text: %q", got[0])
+	}
+	// The mark cell right after the column is NOT part of the band.
+	if got := bgAt(0, end); got == band {
+		t.Fatal("the band leaked into the mark cell")
+	}
+	// Line 1 has no band, so its column is on the line's background.
+	if got := bgAt(2, start); got == band {
+		t.Fatal("an annotation without BG must not borrow a band")
 	}
 }
 

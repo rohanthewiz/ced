@@ -123,6 +123,13 @@ type GutterMark struct {
 type LineAnnotation struct {
 	Text string
 	FG   tcell.Color
+	// BG, when set, fills the WHOLE column on every row of the line —
+	// wrapped continuations included — so a run of lines sharing one
+	// color reads as a single band (blame's "dated bands" style). The
+	// zero value is tcell.ColorDefault, meaning "no band": the column
+	// keeps the line's own background, which is what every annotation
+	// written before this field existed expects.
+	BG tcell.Color
 }
 
 // AnnotationSource is a DecorationSource that also owns an annotation

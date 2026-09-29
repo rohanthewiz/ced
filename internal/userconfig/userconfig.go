@@ -32,6 +32,11 @@
 //	                        // strip under the tab bar
 //	{"findalldock": "right"}// the list docks as a tall column on the
 //	                        // right of the editor instead
+//	{"blamestyle": "bands"} // default; the blame column (esc A) shows a
+//	                        // date and author on every line, on a
+//	                        // tinted band per commit
+//	{"blamestyle": "compact"}// hash · name · age, once per run of lines
+//	                        // from one commit, no background
 //	{"execmarks": "on"}     // default; append an ls -F '*' to executables
 //	{"execmarks": "off"}    // hide the executable marker in the file tree
 //	{"treeautofit": "on"}   // default; the file tree widens itself to fit
@@ -132,6 +137,19 @@ const (
 	FindAllDockRight FindAllDock = "right"
 )
 
+// BlameStyle is how the blame column draws itself. Two because they
+// answer the "where does authorship change?" question two ways: bands
+// mark the boundary with COLOR and so can afford to label every line
+// (date + author, the IDE look), while compact marks it by labelling
+// only the first line of each run and leaves the rest blank — narrower,
+// quieter, and legible on a theme or terminal with few colors.
+type BlameStyle string
+
+const (
+	BlameStyleBands   BlameStyle = "bands"
+	BlameStyleCompact BlameStyle = "compact"
+)
+
 // Auto-save timing. The default is the idle pause the feature is tuned
 // for; the floor and the ceiling are the range a hand-edited value is
 // clamped into.
@@ -215,6 +233,9 @@ type Config struct {
 	// strip. Persisted by the popup's own ◨ button and the ≡ view
 	// toggle — a layout preference the user sets once, like TermDock.
 	FindAllDock FindAllDock
+
+	// BlameStyle is the blame column's look. Defaults to bands.
+	BlameStyle BlameStyle
 
 	// ExecMarks controls whether the file tree appends an ls -F style
 	// '*' to executable regular files. Defaults to on. Persisted by the
@@ -354,7 +375,7 @@ type Config struct {
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
+	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -373,6 +394,7 @@ type fileFormat struct {
 	AutoSaveDelay string `json:"autosavedelay,omitempty"`
 	TermDock      string `json:"termdock,omitempty"`
 	FindAllDock   string `json:"findalldock,omitempty"`
+	BlameStyle    string `json:"blamestyle,omitempty"`
 	ExecMarks     string `json:"execmarks,omitempty"`
 	TreeAutoFit   string `json:"treeautofit,omitempty"`
 	WordHL        string `json:"wordhl,omitempty"`
@@ -619,6 +641,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch BlameStyle(strings.ToLower(strings.TrimSpace(ff.BlameStyle))) {
+	case "":
+		// field omitted — keep default
+	case BlameStyleBands:
+		cfg.BlameStyle = BlameStyleBands
+	case BlameStyleCompact:
+		cfg.BlameStyle = BlameStyleCompact
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: blamestyle must be %q or %q (got %q)",
+			path, BlameStyleBands, BlameStyleCompact, ff.BlameStyle,
+		)
+	}
+
 	switch strings.ToLower(strings.TrimSpace(ff.ExecMarks)) {
 	case "":
 		// field omitted — keep default
@@ -833,6 +869,12 @@ func SaveTermDock(path string, dock TermDock) error {
 // file at path. See saveKey for the round-trip guarantees.
 func SaveFindAllDock(path string, dock FindAllDock) error {
 	return saveKey(path, "findalldock", string(dock))
+}
+
+// SaveBlameStyle persists the blame column's look into the config file
+// at path. See saveKey for the round-trip guarantees.
+func SaveBlameStyle(path string, style BlameStyle) error {
+	return saveKey(path, "blamestyle", string(style))
 }
 
 // SaveExecMarks persists the executable-marker preference into the

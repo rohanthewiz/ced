@@ -14,12 +14,17 @@
 package app
 
 import (
+	"fmt"
+	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // blamePorcelain is one `git blame --porcelain` transcript: two commits
@@ -220,9 +225,7 @@ func blameFixture(t *testing.T) (*App, *editor.Tab) {
 
 	lines := parseBlamePorcelain([]byte(blamePorcelain), blameNow)
 	a.blameOn = true
-	a.fileBlames = map[string]*fileBlame{
-		path: {lines: lines, width: blameColumnWidth(lines)},
-	}
+	a.fileBlames = map[string]*fileBlame{path: newFileBlame(lines)}
 	// The source is what wireTab installs on a real open; the test
 	// helper builds tabs directly, so it registers the one source these
 	// cases are about rather than the whole set.
@@ -625,5 +628,272 @@ func TestLoadFileBlame_BestEffort(t *testing.T) {
 	}
 	if fb := loadFileBlame("", "", "", time.Now()); fb != nil {
 		t.Fatal("no root, no blame")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// The bands style
+// -----------------------------------------------------------------------------
+
+// hashFor builds a 40-hex-digit object id from a small number, so a
+// test can make as many distinct commits as it needs.
+func hashFor(n int) string { return fmt.Sprintf("%040x", n) }
+
+// TestParseBlamePorcelain_CarriesTheDate pins the bands style's input:
+// every committed line gets its commit's absolute date, repeated groups
+// included, and an uncommitted line gets none — with --contents git
+// stamps it with the moment it was asked, which would read as a commit
+// date for a commit that does not exist.
+func TestParseBlamePorcelain_CarriesTheDate(t *testing.T) {
+	lines := parseBlamePorcelain([]byte(blamePorcelain), blameNow)
+	want := blameDate(time.Unix(1000000000, 0))
+	if lines[0].Date != want || lines[3].Date != want {
+		t.Fatalf("dates = %q / %q, want %q on both lines of the first commit", lines[0].Date, lines[3].Date, want)
+	}
+	wire := uncommittedHash + " 1 1 1\nauthor External file (--contents)\nauthor-time 1000172700\n\tx\n"
+	if got := parseBlamePorcelain([]byte(wire), blameNow)[0].Date; got != "" {
+		t.Fatalf("uncommitted date = %q, want none", got)
+	}
+}
+
+// TestBlameDate_IsTheShortUnpaddedForm checks the format against the
+// look being matched: month/day/two-digit year, no leading zeros.
+func TestBlameDate_IsTheShortUnpaddedForm(t *testing.T) {
+	when := time.Date(2026, 8, 9, 12, 0, 0, 0, time.Local)
+	if got := blameDate(when); got != "8/9/26" {
+		t.Fatalf("blameDate = %q, want 8/9/26", got)
+	}
+	if got := blameDate(time.Time{}); got != "" {
+		t.Fatalf("zero time = %q, want empty", got)
+	}
+}
+
+// TestBlameBandText_AuthorsLineUp: the date slot is padded to the
+// file's widest date, so authors form one straight column, and the text
+// never reaches the trailing pad cell (that cell is band, not ink).
+func TestBlameBandText_AuthorsLineUp(t *testing.T) {
+	lines := []blameLine{
+		{Hash: hashFor(1), Author: "Rohan", Date: "10/21/25"},
+		{Hash: hashFor(2), Author: "Ada", Date: "8/9/26"},
+	}
+	fb := newFileBlame(lines)
+	a := blameBandText(lines[0], fb.bandDateW, fb.bandWidth)
+	b := blameBandText(lines[1], fb.bandDateW, fb.bandWidth)
+	if strings.Index(a, "Rohan") != strings.Index(b, "Ada") {
+		t.Fatalf("authors misaligned: %q vs %q", a, b)
+	}
+	if runeLen(a) > fb.bandWidth-1 {
+		t.Fatalf("%q overran into the trailing pad (width %d)", a, fb.bandWidth)
+	}
+	if !strings.HasPrefix(a, " 10/21/25 ") {
+		t.Fatalf("row = %q, want a leading pad then the date", a)
+	}
+	// An uncommitted line shows the dash in the date slot.
+	u := blameBandText(blameLine{Hash: uncommittedHash, Author: "you"}, fb.bandDateW, fb.bandWidth)
+	if !strings.HasPrefix(u, " —") {
+		t.Fatalf("uncommitted row = %q, want the dash", u)
+	}
+}
+
+// TestAssignBlameBands_AdjacentRunsNeverShareAHue is the rule the color
+// exists for: a band boundary IS the authorship boundary, so two
+// adjacent runs on one hue would erase it. The hashes are chosen to
+// collide on the wheel, forcing the bump.
+func TestAssignBlameBands_AdjacentRunsNeverShareAHue(t *testing.T) {
+	first := hashFor(1)
+	target := assignBlameBands([]blameLine{{Hash: first}})[0]
+	collider := ""
+	for n := 2; n < 1000 && collider == ""; n++ {
+		if assignBlameBands([]blameLine{{Hash: hashFor(n)}})[0] == target {
+			collider = hashFor(n)
+		}
+	}
+	if collider == "" {
+		t.Fatal("no colliding hash found in 1000 tries")
+	}
+	bands := assignBlameBands([]blameLine{{Hash: first}, {Hash: first}, {Hash: collider}})
+	if bands[0] != bands[1] {
+		t.Fatalf("one run, two hues: %v", bands)
+	}
+	if bands[1] == bands[2] {
+		t.Fatalf("adjacent runs share hue %d: %v", bands[2], bands)
+	}
+}
+
+// TestAssignBlameBands_HuesSurviveAReblame: the hue is keyed by the
+// hash, so an edit that inserts a new commit's run near the top does
+// not recolor the untouched runs further down — assigning by order of
+// appearance would repaint half the file on every re-blame.
+func TestAssignBlameBands_HuesSurviveAReblame(t *testing.T) {
+	a, b := hashFor(10), hashFor(20)
+	before := assignBlameBands([]blameLine{{Hash: a}, {Hash: b}})
+	// A new first line, from a commit that does not collide with a.
+	var fresh string
+	for n := 30; n < 1000; n++ {
+		h := hashFor(n)
+		if bb := assignBlameBands([]blameLine{{Hash: h}}); bb[0] != before[0] {
+			fresh = h
+			break
+		}
+	}
+	after := assignBlameBands([]blameLine{{Hash: fresh}, {Hash: a}, {Hash: b}})
+	if after[1] != before[0] || after[2] != before[1] {
+		t.Fatalf("re-blame recolored existing runs: before %v, after %v", before, after)
+	}
+	// And an uncommitted line has no band.
+	if got := assignBlameBands([]blameLine{{Hash: uncommittedHash}})[0]; got != -1 {
+		t.Fatalf("uncommitted band = %d, want -1", got)
+	}
+}
+
+// TestBlameBandAnnotations_EveryLineOnItsCommitsBand: unlike compact,
+// the bands style labels every line (the color marks the boundary, so
+// blank rows would only hide who wrote the line), lines of one run
+// share a band, and a new commit starts a different one.
+func TestBlameBandAnnotations_EveryLineOnItsCommitsBand(t *testing.T) {
+	a, tab := blameFixture(t)
+	a.blameBands = true
+	src := gitBlameSource{app: a}
+
+	w, anns := src.Annotations(tab, a.theme, 0, 3)
+
+	if w != a.fileBlames[tab.Path].bandWidth {
+		t.Fatalf("width = %d, want the bands width %d", w, a.fileBlames[tab.Path].bandWidth)
+	}
+	if len(anns) != 4 {
+		t.Fatalf("%d annotations, want one per line (4)", len(anns))
+	}
+	if anns[1].Text == "" || !strings.Contains(anns[1].Text, "Rohan") {
+		t.Fatalf("the second line of a run is labelled too, got %q", anns[1].Text)
+	}
+	if anns[0].BG != anns[1].BG {
+		t.Fatal("two lines of one commit must share a band")
+	}
+	if anns[1].BG == anns[2].BG {
+		t.Fatal("a new commit must start a different band")
+	}
+	if anns[0].BG == tcell.ColorDefault {
+		t.Fatal("a committed line should be on a band")
+	}
+	if anns[0].FG != blameBandFG(a.theme, anns[0].BG) {
+		t.Fatalf("band text fg = %v, want the band's readable text color", anns[0].FG)
+	}
+}
+
+// TestBlameBandAnnotations_UncommittedHasNoBand: your own unsaved work
+// is in no commit, so it gets no band — and the added green, the same
+// signal the compact style gives it.
+func TestBlameBandAnnotations_UncommittedHasNoBand(t *testing.T) {
+	a, tab := blameFixture(t)
+	a.blameBands = true
+	fb := a.fileBlames[tab.Path]
+	fb.lines[0] = blameLine{Hash: uncommittedHash, Author: "you"}
+	fb.bands = assignBlameBands(fb.lines)
+
+	_, anns := gitBlameSource{app: a}.Annotations(tab, a.theme, 0, 3)
+
+	if anns[0].BG != tcell.ColorDefault {
+		t.Fatalf("uncommitted line has band %v, want none", anns[0].BG)
+	}
+	if anns[0].FG != a.theme.GitAdded {
+		t.Fatalf("uncommitted fg = %v, want the added color", anns[0].FG)
+	}
+}
+
+// rgbDist is the plain Euclidean distance between two colors — a crude
+// "can the eye tell these apart" that is enough to catch a band that
+// melted into the background.
+func rgbDist(a, b tcell.Color) float64 {
+	ar, ag, ab := a.RGB()
+	br, bg, bb := b.RGB()
+	dr, dg, db := float64(ar-br), float64(ag-bg), float64(ab-bb)
+	return math.Sqrt(dr*dr + dg*dg + db*db)
+}
+
+// TestBlameBandColor_VisibleInEveryBuiltinTheme is the "check a new
+// color against the background AND its neighbours" rule, run over every
+// built-in theme: each band must stand off the background, each pair
+// of wheel neighbours (the bump's target) must differ from each other,
+// and the band text must stay readable on every band — which on
+// Solarized, whose own Text barely clears 4.5:1, is blameBandFG's
+// correction at work.
+func TestBlameBandColor_VisibleInEveryBuiltinTheme(t *testing.T) {
+	for _, spec := range theme.Builtins() {
+		th, err := spec.Resolve()
+		if err != nil {
+			t.Fatalf("%s: %v", spec.Name, err)
+		}
+		n := len(blameBandHues)
+		for i := 0; i < n; i++ {
+			band := blameBandColor(th, i)
+			if d := rgbDist(band, th.BG); d < 20 {
+				t.Errorf("%s: band %d is %.1f from the background — invisible", spec.Name, i, d)
+			}
+			if d := rgbDist(band, blameBandColor(th, (i+1)%n)); d < 12 {
+				t.Errorf("%s: bands %d and %d are only %.1f apart", spec.Name, i, (i+1)%n, d)
+			}
+			if c := contrastRatio(blameBandFG(th, band), band); c < 4.5 {
+				t.Errorf("%s: text on band %d has contrast %.2f, want ≥ 4.5", spec.Name, i, c)
+			}
+		}
+	}
+	if got := blameBandColor(theme.Default(), -1); got != tcell.ColorDefault {
+		t.Fatalf("no-band index = %v, want ColorDefault", got)
+	}
+}
+
+// TestSetBlameStyle_PersistsAndRestylesWithoutGit: the ≡ row flips the
+// look, writes "blamestyle", and the very next paint uses the other
+// style's width — both are measured on every fileBlame, so there is no
+// git fork and no empty frame in between.
+func TestSetBlameStyle_PersistsAndRestylesWithoutGit(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a, tab := blameFixture(t)
+	a.blameBands = true
+	src := gitBlameSource{app: a}
+	bandW, _ := src.Annotations(tab, a.theme, 0, 3)
+
+	a.menuToggleBlameStyle()
+
+	if a.blameBands {
+		t.Fatal("the row should have switched to compact")
+	}
+	compactW, anns := src.Annotations(tab, a.theme, 0, 3)
+	if compactW != a.fileBlames[tab.Path].width || compactW == bandW {
+		t.Fatalf("compact width = %d (bands %d), want the compact measure %d", compactW, bandW, a.fileBlames[tab.Path].width)
+	}
+	if _, ok := anns[1]; ok {
+		t.Fatal("compact suppresses the second line of a run")
+	}
+	data, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "ced", "config.json"))
+	if err != nil {
+		t.Fatalf("config not written: %v", err)
+	}
+	if !strings.Contains(string(data), `"blamestyle": "compact"`) {
+		t.Fatalf("config = %s, want blamestyle compact", data)
+	}
+	if got := a.blameStyleToggleLabel(); got != "Blame style: dated bands" {
+		t.Fatalf("label = %q, want the style the row switches TO", got)
+	}
+	// Switching with the column hidden does not show it.
+	a.blameOn = false
+	a.menuToggleBlameStyle()
+	if a.blameOn {
+		t.Fatal("changing the style must not switch the layer on")
+	}
+}
+
+// TestBlameBandFG_KeepsTheThemesTextWhenItReads: the correction is a
+// fallback, not a restyle — on a theme whose Text already reads on the
+// band, the band text IS the theme's Text, and no band means no change.
+func TestBlameBandFG_KeepsTheThemesTextWhenItReads(t *testing.T) {
+	th := theme.Default()
+	for i := range blameBandHues {
+		if got := blameBandFG(th, blameBandColor(th, i)); got != th.Text {
+			t.Errorf("band %d: fg = %v, want the theme's own Text %v", i, got, th.Text)
+		}
+	}
+	if got := blameBandFG(th, tcell.ColorDefault); got != th.Text {
+		t.Fatalf("no band: fg = %v, want Text", got)
 	}
 }

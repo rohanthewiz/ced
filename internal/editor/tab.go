@@ -1190,6 +1190,21 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 				scr.SetContent(cx, cy, ' ', nil, lineBgStyle)
 			}
 
+			// An annotation band fills the whole column on EVERY row of
+			// its line, continuations included, before any text lands on
+			// it. The text below is first-row-only like the rest of the
+			// gutter, but the band is the run's identity: a wrapped line
+			// with a hole in its band would read as a commit boundary
+			// that isn't there.
+			if annW > 0 {
+				if ann, ok := annByLine[lineIdx]; ok && ann.BG != tcell.ColorDefault {
+					bandStyle := tcell.StyleDefault.Background(ann.BG)
+					for i := 0; i < annW; i++ {
+						scr.SetContent(x+gutterWidth+i, cy, ' ', nil, bandStyle)
+					}
+				}
+			}
+
 			// The gutter — number, annotation, mark — is about the LINE, so
 			// only its first row carries it. A blank number on the rows
 			// below is what tells a wrapped continuation from a real line,
@@ -1226,6 +1241,13 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 					annStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
 					if ann, ok := annByLine[lineIdx]; ok {
 						st := annStyle.Foreground(ann.FG)
+						if ann.BG != tcell.ColorDefault {
+							// On a band the text sits on the band's color,
+							// not the line's — including the caret line,
+							// whose wash would otherwise cut a stripe
+							// through the middle of a commit's run.
+							st = st.Background(ann.BG)
+						}
 						col := 0
 						for _, r := range ann.Text {
 							if col >= annW {

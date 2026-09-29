@@ -45,6 +45,22 @@
 //     on screen meanwhile — blanking the column between keystrokes
 //     would be a flicker the user cannot switch off.
 //
+// Two looks (userconfig "blamestyle", ≡ Git "Blame style" row), and
+// decision 3 only binds the compact one:
+//
+//	compact                     bands (default)
+//	│ 1 │ a3f2c1 rohan  3d │    │ 1 │▒10/21/25 Rohan ▒│   ← orange band
+//	│ 2 │                  │    │ 2 │▒ 8/9/26  Ada   ▒│   ← blue band
+//	│ 3 │                  │    │ 3 │▒ 8/9/26  Ada   ▒│
+//	│ 4 │ 9c01d2 ada   8mo │    │ 4 │▒ 9/23/26 Rohan ▒│   ← magenta band
+//
+// Bands draw the boundary in COLOR instead of in blank space, which
+// frees every row to say who and when — the IDE blame look. Each commit
+// gets a hue from a fixed wheel (hash-keyed, so it survives re-blames),
+// and two adjacent runs are never allowed the same hue, because the
+// boundary is the thing the color is FOR. The hues are blended over the
+// theme's own background so they sit in any theme, dark or light.
+//
 // The click is the other half of the feature and it goes through the
 // git log panel: reveal the commit there and its `git show` — metadata,
 // stat and patch — is already the panel's detail pane. A blamed commit
@@ -53,13 +69,17 @@
 package app
 
 import (
+	"hash/fnv"
+	"math"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/theme"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // blameSettle is the pause after typing that re-blames the buffer.
@@ -87,6 +107,7 @@ type blameLine struct {
 	Author  string // given name, for the column
 	Full    string // the author name as git spells it, for the flash
 	Age     string // "3d", "8mo", "now"
+	Date    string // "9/23/26" — the bands style's absolute date
 	Summary string // the commit subject
 }
 
@@ -101,6 +122,28 @@ type fileBlame struct {
 	lines []blameLine
 	width int
 	rev   int // the tab's EditRev when the blame was asked for.
+
+	// The bands style's own geometry, measured alongside the compact one
+	// so a style switch is a repaint and never a fork of git. bands is a
+	// hue index per line (-1 = no band), computed over the whole file for
+	// the same reason width is: a hue that depended on the window would
+	// recolor a commit as it scrolled past the top.
+	bandWidth int
+	bandDateW int
+	bands     []int
+}
+
+// newFileBlame wraps parsed lines with everything both styles measure
+// over the whole file — the one constructor, so no caller can build a
+// blame that knows one style's width but not the other's.
+func newFileBlame(lines []blameLine) *fileBlame {
+	return &fileBlame{
+		lines:     lines,
+		width:     blameColumnWidth(lines),
+		bandWidth: blameBandColumnWidth(lines),
+		bandDateW: blameBandDateWidth(lines),
+		bands:     assignBlameBands(lines),
+	}
 }
 
 // at returns the blame for a 0-based buffer line, ok=false past the end
@@ -162,6 +205,7 @@ func parseBlamePorcelain(out []byte, now time.Time) []blameLine {
 					Author:  blameGivenName(cur.author),
 					Full:    cur.author,
 					Age:     relativeAge(cur.when, now),
+					Date:    blameDate(cur.when),
 					Summary: cur.summary,
 				}
 				// Who a not-yet-committed line belongs to is decided by
@@ -172,7 +216,10 @@ func parseBlamePorcelain(out []byte, now time.Time) []blameLine {
 				// leaking into the margin — the user did not hand git a
 				// file, they typed a line.
 				if !b.committed() {
-					b.Author, b.Full, b.Summary = "you", "you", "not committed yet"
+					// The date goes too: with --contents git stamps the
+					// line with the moment it was ASKED, which reads as
+					// a commit date for a commit that doesn't exist.
+					b.Author, b.Full, b.Summary, b.Date = "you", "you", "not committed yet", ""
 				}
 				set(curLine, b)
 			}
@@ -281,6 +328,17 @@ func relativeAge(when, now time.Time) string {
 	}
 }
 
+// blameDate is the bands style's absolute date, month/day/two-digit
+// year without zero padding ("9/23/26") — the IDE format, and the
+// narrowest spelling that still pins a line to a release. Local time,
+// because "what day was this" is asked in the reader's calendar.
+func blameDate(when time.Time) string {
+	if when.IsZero() {
+		return ""
+	}
+	return when.Local().Format("1/2/06")
+}
+
 // blameColumnWidth measures the column one file's annotations need:
 // the widest of each part, assembled the way blameText assembles them.
 // Measured over EVERY line rather than the visible ones so the column
@@ -337,6 +395,200 @@ func blameText(b blameLine, width int) string {
 	return head + strings.Repeat(" ", pad) + b.Age
 }
 
+// blameBandDateSlot is the date as the bands column shows it — a dash
+// for a line with no commit, the same "nothing to look up" signal the
+// compact column's hash slot gives.
+func blameBandDateSlot(b blameLine) string {
+	if !b.committed() || b.Date == "" {
+		return "—"
+	}
+	return b.Date
+}
+
+// blameBandColumnWidth measures the bands column over the whole file:
+// a leading pad, the widest date, a gap, the widest author, and a
+// trailing pad. The pads are band, not text — they are what makes the
+// color read as a strip rather than as highlighted words.
+func blameBandColumnWidth(lines []blameLine) int {
+	dateW, authorW := 0, 0
+	for _, b := range lines {
+		if b.Hash == "" {
+			continue
+		}
+		dateW = max(dateW, runeLen(blameBandDateSlot(b)))
+		authorW = max(authorW, runeLen(b.Author))
+	}
+	if dateW == 0 && authorW == 0 {
+		return 0
+	}
+	return 1 + dateW + 1 + authorW + 1
+}
+
+// blameBandText renders one bands-style row. The date is left-aligned
+// in a slot dateW wide (the file's widest date), so the authors form one
+// straight column down the page:
+//
+//	10/21/25 Rohan
+//	8/9/26   Ada
+//
+// The result is the TEXT only; the band behind it (and the trailing
+// pad) is the renderer's fill, so the string may be shorter than width.
+func blameBandText(b blameLine, dateW, width int) string {
+	if width <= 0 || b.Hash == "" {
+		return ""
+	}
+	date := blameBandDateSlot(b)
+	if pad := dateW - runeLen(date); pad > 0 {
+		date += strings.Repeat(" ", pad)
+	}
+	// -1 keeps the trailing pad cell as band, never as ink.
+	return elide(" "+date+" "+b.Author, width-1)
+}
+
+// blameBandDateWidth is the widest date slot in the file — the one
+// number blameBandText needs that a single line can't know.
+func blameBandDateWidth(lines []blameLine) int {
+	w := 0
+	for _, b := range lines {
+		if b.Hash != "" {
+			w = max(w, runeLen(blameBandDateSlot(b)))
+		}
+	}
+	return w
+}
+
+// blameBandHues is the band color wheel. Fixed hues rather than theme
+// keys: the bands only need to be DIFFERENT from one another and from
+// the background, and six named-by-hue colors guarantee that where a
+// theme's syntax colors (two of which are often near-identical) would
+// not. Ordered so neighbours on the wheel are far apart in hue, since a
+// collision bump moves a run to the next entry.
+var blameBandHues = []tcell.Color{
+	tcell.NewRGBColor(0xe0, 0x91, 0x3a), // orange
+	tcell.NewRGBColor(0x4d, 0x8f, 0xe0), // blue
+	tcell.NewRGBColor(0xc0, 0x50, 0x9f), // magenta
+	tcell.NewRGBColor(0x4f, 0xb0, 0x6a), // green
+	tcell.NewRGBColor(0x8a, 0x6e, 0xe0), // violet
+	tcell.NewRGBColor(0x3a, 0xa9, 0xb0), // teal
+}
+
+// assignBlameBands gives each line a hue index, -1 for lines with no
+// band (uncommitted, or beyond git's answer).
+//
+// The index is keyed by the commit HASH so a re-blame after typing
+// keeps every commit's color — assigning by order of appearance would
+// recolor half the file whenever a new run appeared above it. A hash
+// alone can put two adjacent runs on one hue, which would erase the
+// boundary the color exists to draw, so a run that lands on its
+// predecessor's hue steps to the next one. Only the PREVIOUS run is
+// checked: the next run checks against this one when it is reached.
+func assignBlameBands(lines []blameLine) []int {
+	bands := make([]int, len(lines))
+	prevHash, prevBand := "", -1
+	for i, b := range lines {
+		if !b.committed() {
+			bands[i] = -1
+			prevHash, prevBand = "", -1
+			continue
+		}
+		if b.Hash == prevHash {
+			bands[i] = prevBand // same run, same band.
+			continue
+		}
+		h := fnv.New32a()
+		_, _ = h.Write([]byte(b.Hash))
+		band := int(h.Sum32() % uint32(len(blameBandHues)))
+		if band == prevBand {
+			band = (band + 1) % len(blameBandHues)
+		}
+		bands[i] = band
+		prevHash, prevBand = b.Hash, band
+	}
+	return bands
+}
+
+// blameBandColor is hue number idx blended over the theme background:
+// about a quarter of the hue on a dark theme, a little more on a light
+// one, where the same fraction over near-white washes out. Enough that
+// adjacent bands are unmistakably different, little enough that the
+// theme's Text color stays readable on every one of them.
+func blameBandColor(th theme.Theme, idx int) tcell.Color {
+	if idx < 0 || idx >= len(blameBandHues) {
+		return tcell.ColorDefault
+	}
+	br, bg, bb := th.BG.RGB()
+	if br < 0 {
+		br, bg, bb = 0, 0, 0 // a non-RGB background: blend over black.
+	}
+	alpha := 0.24
+	if (0.2126*float64(br)+0.7152*float64(bg)+0.0722*float64(bb))/255 >= 0.5 {
+		alpha = 0.32
+	}
+	hr, hg, hb := blameBandHues[idx].RGB()
+	mix := func(bgc, hue int32) int32 {
+		return int32(float64(bgc)*(1-alpha) + float64(hue)*alpha + 0.5)
+	}
+	return tcell.NewRGBColor(mix(br, hr), mix(bg, hg), mix(bb, hb))
+}
+
+// blameBandFG is the text color for one band: the theme's Text when it
+// reads well there, otherwise Text pushed toward white (dark theme) or
+// black (light theme) just far enough to reach a readable 4.5:1. Most
+// themes never take the second branch; Solarized does, because its own
+// Text sits barely above 4.5:1 on its background and any tint drops it
+// under. A band nobody can read is the one way this feature can fail
+// quietly, so the fix is computed rather than tuned per theme.
+func blameBandFG(th theme.Theme, band tcell.Color) tcell.Color {
+	if band == tcell.ColorDefault || contrastRatio(th.Text, band) >= 4.5 {
+		return th.Text
+	}
+	tr, tg, tb := th.Text.RGB()
+	if tr < 0 {
+		return th.Text
+	}
+	var target int32 // toward black on a light band…
+	if relLuminance(band) < 0.5 {
+		target = 255 // …toward white on a dark one.
+	}
+	fg := th.Text
+	for step := 1; step <= 10; step++ {
+		f := float64(step) / 10
+		mix := func(c int32) int32 { return int32(float64(c)*(1-f) + float64(target)*f + 0.5) }
+		fg = tcell.NewRGBColor(mix(tr), mix(tg), mix(tb))
+		if contrastRatio(fg, band) >= 4.5 {
+			break
+		}
+	}
+	return fg
+}
+
+// relLuminance is the WCAG relative luminance of an RGB color, 0..1.
+// Non-RGB colors (palette indexes) count as black: blame only ever asks
+// about colors it blended itself or a theme's hex-defined ones.
+func relLuminance(c tcell.Color) float64 {
+	r, g, b := c.RGB()
+	if r < 0 {
+		return 0
+	}
+	lin := func(v int32) float64 {
+		x := float64(v) / 255
+		if x <= 0.03928 {
+			return x / 12.92
+		}
+		return math.Pow((x+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
+}
+
+// contrastRatio is the WCAG contrast ratio between two colors, 1..21.
+func contrastRatio(a, b tcell.Color) float64 {
+	la, lb := relLuminance(a), relLuminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
 // -----------------------------------------------------------------------------
 // Loading — goroutine side
 // -----------------------------------------------------------------------------
@@ -365,7 +617,7 @@ func loadFileBlame(rootDir, path, contents string, now time.Time) *fileBlame {
 	if len(lines) == 0 {
 		return nil
 	}
-	return &fileBlame{lines: lines, width: blameColumnWidth(lines)}
+	return newFileBlame(lines)
 }
 
 // gitBlameEvent carries one finished blame back to the main loop,
@@ -611,6 +863,9 @@ func (s gitBlameSource) Annotations(t *editor.Tab, th theme.Theme, firstLine, la
 		return 0, nil
 	}
 	fb := s.app.fileBlames[t.Path]
+	if s.app.blameBands {
+		return blameBandAnnotations(fb, th, firstLine, lastLine)
+	}
 	if fb == nil || fb.width == 0 {
 		return 0, nil
 	}
@@ -634,6 +889,80 @@ func (s gitBlameSource) Annotations(t *editor.Tab, th theme.Theme, firstLine, la
 		out[line] = editor.LineAnnotation{Text: blameText(b, fb.width), FG: fg}
 	}
 	return fb.width, out
+}
+
+// blameBandAnnotations is the bands style's column: EVERY line labelled
+// with its date and author, on its commit's band. There is no run
+// suppression here — the band color is what marks the boundary, so the
+// blank rows compact needs to make boundaries visible would only hide
+// who wrote the line the reader is looking at.
+func blameBandAnnotations(fb *fileBlame, th theme.Theme, firstLine, lastLine int) (int, map[int]editor.LineAnnotation) {
+	if fb == nil || fb.bandWidth == 0 {
+		return 0, nil
+	}
+	out := make(map[int]editor.LineAnnotation, lastLine-firstLine+1)
+	for line := max(firstLine, 0); line <= lastLine; line++ {
+		b, ok := fb.at(line)
+		if !ok || b.Hash == "" {
+			continue
+		}
+		ann := editor.LineAnnotation{Text: blameBandText(b, fb.bandDateW, fb.bandWidth), FG: th.Text}
+		if !b.committed() {
+			// No band for work that is in no commit — the absence of
+			// color is itself the answer — and the added green, the
+			// same signal the compact style gives it.
+			ann.FG = th.GitAdded
+		} else if line < len(fb.bands) {
+			ann.BG = blameBandColor(th, fb.bands[line])
+			ann.FG = blameBandFG(th, ann.BG)
+		}
+		out[line] = ann
+	}
+	return fb.bandWidth, out
+}
+
+// -----------------------------------------------------------------------------
+// The style switch
+// -----------------------------------------------------------------------------
+
+// setBlameStyle installs the blame look and persists it. Both styles'
+// geometry is already measured on every fileBlame, so this is a repaint
+// — no git. Same silent-degradation contract as every other ≡ toggle:
+// an unwritable config flashes and the session keeps the new look.
+func (a *App) setBlameStyle(bands bool) {
+	a.blameBands = bands
+	style := userconfig.BlameStyleCompact
+	msg := "Blame style: compact — hash, name and age once per commit"
+	if bands {
+		style = userconfig.BlameStyleBands
+		msg = "Blame style: dated bands — date and author on a band per commit"
+	}
+	// The style is a preference, not the layer: switching it with the
+	// column hidden does not show it (that would be the row answering a
+	// question it wasn't asked), so the flash says where the column is.
+	if !a.blameOn {
+		msg += " (esc A shows it)"
+	}
+	a.flash(msg)
+	if err := userconfig.SaveBlameStyle(userconfig.DefaultPath(), style); err != nil {
+		a.flash("config: " + err.Error())
+	}
+}
+
+// menuToggleBlameStyle is the ≡ Git row. No leader: the flat table is
+// out of letters, and a look chosen once and kept does not need one.
+func (a *App) menuToggleBlameStyle() {
+	a.closeMenu()
+	a.setBlameStyle(!a.blameBands)
+}
+
+// blameStyleToggleLabel names the style the row will switch TO, the
+// convention every toggle row follows.
+func (a *App) blameStyleToggleLabel() string {
+	if a.blameBands {
+		return "Blame style: compact"
+	}
+	return "Blame style: dated bands"
 }
 
 // -----------------------------------------------------------------------------

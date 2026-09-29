@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-035**
+**Next ID: N-036**
 
 ## Open
 
@@ -121,12 +121,6 @@ plus the LSP work done in the seeding session itself
   or not). The list's filter box, the git log filter and the references
   filter have no history either — filters, not searches. Add if asked.
 
-- **N-032** · raised `2026-0929-1318-search-history-dropdown` · value low
-  README `### Find in file` is stale beyond this session's bullet: it
-  still says there is no whole-word or case-sensitive toggle (the bar has
-  `Aa` / `|W|`) and never mentions the replace row, ↓ list-all, or Find
-  in project. An instance of N-003.
-
 - **N-033** · raised `2026-0929-1538-git-blame-dated-bands` · value low
   Blame shows the author's GIVEN name (`blameGivenName`) in both styles;
   the IDE look the bands style copies shows the surname ("Allison").
@@ -138,6 +132,14 @@ plus the LSP work done in the seeding session itself
   `internal/editor/tab.go` (the `mdView`/`MDScroll` field alignment) and
   `internal/lsp/inlayhint_test.go` are not gofmt-clean. A one-line
   `gofmt -w` commit; left alone so feature diffs stay focused.
+
+- **N-035** · raised `2026-0929-1726-readme-find-section` · value low
+  The bar's `Aa` / `|W|` options stop at the bar: ↓ list-all
+  (`showFindAll` calls `editor.FindAll`, zero options) and Find in project
+  (`search.Options` has no case/word fields) always match a
+  case-insensitive substring, so a `Aa`-on search turned into a list
+  quietly widens. The README now says so. Carry the options through if
+  anyone trips on it.
 
 ## Roadmap
 
@@ -189,6 +191,14 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, `2026-0929-1726-readme-find-section` — **N-032** README `### Find in file`
+  rewritten against the code: `Aa` / `|W|` (click, `Alt+c` / `Alt+w`, the
+  ≡ Find rows), selection seeding, the replace row (`Esc e`, Tab, `Enter`
+  / `Alt+a`, one undo step), the Find-all list (`Esc F` / ↓: preview,
+  Esc restores, `d` dock, `p` pin with filter / dismiss / ⟳ / replace),
+  Find in project (`Esc P`, click keeps the list, 10,000 cap) and Go to
+  line. The hotkey table gains `Esc F` / `Esc e` / `Esc P` / `Esc j`.
+  Raised N-035 for the toggles not reaching the lists.
 - closed 2026-09-29, `2026-0929-1722-history-not-saved-notice` — **N-028** neither option as written: no
   fallback location (a new dotfile, which CLAUDE.md rules out) and no
   startup flash (startup errors are HELD for a ≡ label). Instead

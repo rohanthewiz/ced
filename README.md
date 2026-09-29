@@ -455,6 +455,10 @@ within half a second tap one of the letters below.
 | `Esc -`     | Shrink panel         |
 | `Esc /`     | Toggle line comment  |
 | `Esc f`     | Find in file         |
+| `Esc F`     | Find all in file (list every match) |
+| `Esc e`     | Replace in file      |
+| `Esc P`     | Find in project      |
+| `Esc j`     | Go to line           |
 | `Esc p`     | Find file in project |
 | `Esc k`     | Command palette      |
 | `Esc m`     | Add caret below      |
@@ -626,21 +630,26 @@ as `"wordhl": "off"` in `~/.config/ced/config.json`.
 
 ### Find in file
 
-`Esc f` (or **Find in file** from the `≡` menu) opens a search bar
-above the status bar:
+`Esc f` (or **Find in file** from the `≡` menu, or `⌘F`) opens a search
+bar directly under the editor, above the status bar:
 
 ```
- Find▾ foo█                       3 of 12   Enter: next · Shift+Enter: prev · Esc: close
+ Find▾ foo█        Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: close   3 of 12   Aa  |W|
 ```
 
-- Type to search — matching is **case-insensitive substring**, results
-  highlight live as you type.
-- `Enter` jumps to the next match (wraps at the end), `Shift+Enter`
-  jumps to the previous one.
-- `Esc` closes the bar and clears the highlights — each `Esc f` opens
-  a fresh search.
-- The active match is painted a brighter color than the rest, so you
-  can pick out where you are in the result set.
+- Type to search — results highlight live as you type. Matching is a
+  **case-insensitive substring** until you say otherwise.
+- `Aa` turns on **match case**, `|W|` **whole word** (the bars are the
+  word boundaries). Click them, press `Alt+c` / `Alt+w` in the bar, or
+  use the **Match case** / **Whole word** rows under `≡` → **Find**. A
+  lit button is on. The options last for the session.
+- `Enter` jumps to the next match (wraps at the end), `Shift+Enter` to
+  the previous one. The active match is painted brighter than the rest,
+  and the counter turns red when nothing matches.
+- A single-line selection seeds the bar: `Esc f` with a word selected
+  searches for it straight away.
+- `Esc` closes the bar and clears the highlights — each `Esc f` is a
+  fresh search.
 - `↑` (or a click on the `Find▾` label) drops down your recent searches
   in this project; `Enter` or a click puts one in the box, `Delete` or
   its `×` forgets it. The replace row's `Repl▾` does the same for recent
@@ -650,9 +659,46 @@ above the status bar:
   git repository (or a folder that already has a `.ced/`); anywhere
   else, e.g. `ced ~`, they last for the session and leave nothing
   behind.
+- `↓` turns the query into the **list of every match** (below).
 
-There's no regex, whole-word, or case-sensitive toggle in v1 — the
-common case is "I know roughly what I'm looking for, take me there."
+**Replace.** `Esc e` (or `≡` → **Replace in file**, or `Tab` from the
+query) opens a second row under the first:
+
+```
+ Find▾ foo         Enter: replace · alt+a: all · ↑: recent · tab: field · Esc: close   3 of 12   Aa  |W|
+ Repl▾ bar█                                                                             Replace   All
+```
+
+`Tab` moves between the two boxes. `Enter` in the replace box (or
+**Replace**) swaps the highlighted match and moves to the next one;
+`Alt+a` (or **All**) swaps every match. Either way it is one undo step.
+
+**Every match at once.** `Esc F` (or `≡` → **Find all in file**, or `↓`
+in the bar) lists each hit as a row — line number, then the line with the
+match lit — in a strip that pushes the editor down rather than covering
+it. Moving the highlight previews that line in the editor; `Enter` keeps
+the position, `Esc` puts the cursor back where it was. `d` (or the title
+button) moves the list to a column on the right, and dragging its bottom
+border resizes it. `p` (or `◇`) **pins** it into a panel that stays open
+while you edit: a filter box (`/`) narrows the rows, `Delete` or a row's
+`✕` strikes one off, `⟳` re-runs the search, and a replace box rewrites
+the rows that are left as one undo step. Opening it with a single-line
+selection searches for that; otherwise it asks, pre-filled.
+
+**Across the project.** `Esc P` (or `≡` → **Find in project**, or `⌘⇧F`)
+searches the contents of every file the project finder indexes — so
+`.gitignore` applies — and lists the hits in the same panel, one row per
+match with its path. Walking the rows with the arrow keys doesn't open
+anything (it would leave a tab behind for every row). A click opens the
+file at the match and keeps the list up so you can click the next one;
+`Enter` opens it and closes the list. Results stop at 10,000, and the
+title then reads "first 10000".
+
+The list and project search match case-insensitive substrings; the `Aa`
+and `|W|` toggles belong to the bar. There's no regex. `Esc j` (or
+`≡` → **Go to line…**, or `⌘G`) jumps to a line, and accepts
+`line:col` — or a whole `app.go:314:22` pasted from a compiler message
+(the filename is ignored; it stays in the current file).
 
 ### Find file in project
 

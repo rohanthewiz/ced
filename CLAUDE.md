@@ -330,8 +330,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   the ▾ opens; arrows move visually; Enter/Tab/click FILLS, never
   submits; Delete/× forgets; any other key closes and is typed. Find bar
   = `Find▾`/`Repl▾` labels, list above the whole bar; prompts =
-  `openSearchPrompt`. A pick must be told its field — the drop has
-  already zeroed itself.
+  `openSearchPrompt`; Find-all replace box = `⇄▾` (`replHist`, list
+  below, pinned route via `findAllPinHistMouse` / overlay draw). FILTER
+  boxes get no history. A pick must be told its field — the drop has
+  already zeroed itself. A press on the owner's button is the toggle
+  (`histDropMouse`'s `toggle`, consumed) — handed on, it would reopen.
 
 ### Find-all list + project search (app/findall.go, projectsearch.go, internal/search)
 - A PEEK, not a picker: moving the highlight moves the cursor live, Esc

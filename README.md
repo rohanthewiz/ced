@@ -653,8 +653,9 @@ bar directly under the editor, above the status bar:
 - `↑` (or a click on the `Find▾` label) drops down your recent searches
   in this project; `Enter` or a click puts one in the box, `Delete` or
   its `×` forgets it. The replace row's `Repl▾` does the same for recent
-  replacements, and the **Find all in file**, **Find in project** and
-  **Go to symbol in project** prompts offer theirs under a `▾`. The
+  replacements (so does the list's replace box, under its `⇄▾`), and the
+  **Find all in file**, **Find in project** and **Go to symbol in
+  project** prompts offer theirs under a `▾`. The
   lists live in the project's `.ced/history.bytdb` — written only for a
   git repository (or a folder that already has a `.ced/`); anywhere
   else, e.g. `ced ~`, they last for the session and leave nothing

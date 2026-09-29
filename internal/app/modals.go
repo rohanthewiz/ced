@@ -48,6 +48,11 @@ func (a *App) closeAllModals() {
 	// the same record closeFind makes (see rememberFindBar).
 	a.rememberFindBar()
 	a.findHist = histDrop{}
+	// The pinned find-all panel stays (it is furniture), but its
+	// replacement dropdown is a popup like the bar's and goes with them.
+	if a.findAllPin != nil {
+		a.findAllPin.replHist = histDrop{}
+	}
 	a.findOpen = false
 	a.findReplaceOpen = false
 	a.findFocus = findFocusQuery
@@ -366,7 +371,7 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	// prompt for a click on one of its rows. A click it hands back has
 	// closed it and is then routed as if it had never been open.
 	if m.hist.open {
-		consumed, v, picked := a.histDropMouse(&m.hist, m.histGeom(a), x, y, btn)
+		consumed, v, picked := a.histDropMouse(&m.hist, m.histGeom(a), m.histBtnRect(a), x, y, btn)
 		if picked {
 			m.field = newTextField(v)
 		}

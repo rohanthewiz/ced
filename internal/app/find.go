@@ -500,7 +500,7 @@ func (a *App) findHistMouse(x, y int, btn tcell.ButtonMask) bool {
 	}
 	g := a.findHistGeom()
 	field := a.findHistField()
-	consumed, v, picked := a.histDropMouse(&a.findHist, g, x, y, btn)
+	consumed, v, picked := a.histDropMouse(&a.findHist, g, a.findHistBtnRect(field), x, y, btn)
 	if picked {
 		a.findHistPick(field, v)
 	}
@@ -648,12 +648,10 @@ func (a *App) findBarPress(x, y int) bool {
 			continue
 		}
 		if a.findHistBtnRect(field).contains(x, y) {
-			// A second click on the same label puts the list away, the
-			// way a dropdown's own button does.
-			if a.findHist.open && a.findHistField() == field {
-				a.findHist = histDrop{}
-				return true
-			}
+			// A second click on the same label (the list's own toggle)
+			// never gets here — findHistMouse closes the list and claims
+			// the press. Reaching this means the list is shut, or open
+			// on the OTHER row, which this click switches to.
 			a.openFindHist(field)
 			return true
 		}

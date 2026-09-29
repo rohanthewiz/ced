@@ -115,12 +115,6 @@ plus the LSP work done in the seeding session itself
   continuation. Requesting markdown would give real structure (fences,
   blank-line sections) at the cost of rendering its escapes and links.
 
-- **N-031** · raised `2026-0929-1318-search-history-dropdown` · value low
-  The Find-all list's replace box RECORDS into the replacement history
-  but has no dropdown of its own (it sits in a narrow shared row, pinned
-  or not). The list's filter box, the git log filter and the references
-  filter have no history either — filters, not searches. Add if asked.
-
 - **N-034** · raised `2026-0929-1538-git-blame-dated-bands` · value low
   gofmt drift predating this session: `internal/app/hovermodal.go`,
   `internal/editor/tab.go` (the `mdView`/`MDScroll` field alignment) and
@@ -185,6 +179,24 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, `2026-0929-1750-findall-replace-history` — **N-031** the Find-all list's replace
+  box has its own dropdown on the replacement list it already recorded
+  into: `Up` in the box or a click on its `⇄▾` label, opens below, fills
+  and never runs "Replace in N". Unpinned it rides the modal slot;
+  pinned, `findAllPinHistMouse` asks it before the router's panel
+  dispatch (rows hang over the editor) and `drawFindAllPinHist` paints it
+  from the overlay pass; `closeAllModals` shuts it. The filter boxes
+  (Find-all, git log, references) stay history-less — filters, not
+  searches. Found on the way: a dropdown's own button could never close
+  it (the outside-press rule closed it and handed the press to the button,
+  which reopened it) — the find bar's promised second-click close and the
+  prompt `▾` both; `histDropMouse` now takes the owner's `toggle` rect and
+  consumes a press on it. Pinned by `TestFindAll_Replace*`,
+  `TestFindAll_FilterBoxHasNoHistory`,
+  `TestFindAll_PinnedReplaceHistHangsOverTheEditor`,
+  `TestCloseAllModals_ClosesThePinnedReplaceHist`,
+  `TestFindBar_SecondLabelClickClosesTheList`,
+  `TestSearchPrompt_SecondButtonClickClosesTheList`.
 - closed 2026-09-29, `2026-0929-1740-blame-name-disambiguation` — **N-033** neither switch nor choice:
   blame keeps the given name and adds surname letters only where two
   different authors in the same file share it —

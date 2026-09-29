@@ -184,6 +184,11 @@ type findAllModal struct {
 	seed string
 	// replace holds the replacement text for "Replace in N results".
 	replace textField
+	// replHist is the replace box's history dropdown (searchhistory.go):
+	// the same replacement list the find bar's Repl▾ row offers, since
+	// the confirmed replace already records into it. The filter box has
+	// none on purpose — it narrows results in hand, it doesn't search.
+	replHist histDrop
 
 	// Origin view state, restored verbatim by abort. Cursor and Anchor
 	// are written back as plain fields (not MoveCursorTo) precisely so
@@ -1153,6 +1158,10 @@ func (m *findAllModal) handleKey(a *App, ev *tcell.EventKey) {
 		m.handleFieldKey(a, ev)
 		return
 	}
+	// The dropdown belongs to the replace box; with the list holding the
+	// keyboard it has nothing to fill, so it goes (belt and braces — every
+	// path that moves focus off the box already closes it).
+	m.replHist = histDrop{}
 	switch ev.Key() {
 	case tcell.KeyRune:
 		switch r := ev.Rune(); r {
@@ -1191,7 +1200,27 @@ func (m *findAllModal) handleKey(a *App, ev *tcell.EventKey) {
 // re-narrows the view live — that immediacy is the whole point of a
 // filter over a re-search.
 func (m *findAllModal) handleFieldKey(a *App, ev *tcell.EventKey) {
+	// An open replacement dropdown hears the key first; one it hands
+	// back (it has closed) carries on through the box as if it never
+	// opened — the find bar's contract.
+	if m.replHist.open {
+		consumed, v, picked := a.histDropKey(&m.replHist, m.replHistGeom(a), ev)
+		if picked {
+			m.replHistPick(v)
+		}
+		if consumed {
+			return
+		}
+	}
 	switch ev.Key() {
+	case tcell.KeyUp:
+		// Up in the replace box recalls earlier replacements, as it does
+		// on the find bar's Repl▾ row. The filter box has no history, so
+		// Up there stays the no-op it always was.
+		if m.focus == findAllFocusReplace {
+			m.openReplHist(a)
+		}
+		return
 	case tcell.KeyEsc:
 		m.focus = findAllFocusList
 		return
@@ -1243,6 +1272,13 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		} else {
 			a.dragMode = ""
 		}
+		return
+	}
+	// The replacement dropdown can hang past the frame, so it is asked
+	// before the outside-click-accepts rule below would settle the whole
+	// list for a click on one of its rows. Pinned, the router has already
+	// asked (findAllPinHistMouse) and this is a no-op.
+	if m.replHistMouse(a, x, y, btn) {
 		return
 	}
 	mx, my, mw, mh := m.rect(a)
@@ -1316,7 +1352,14 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		case f.filter.w > 0 && x >= f.filter.x-2 && x < f.filter.x+f.filter.w:
 			m.focus = findAllFocusFilter
 			m.filter.clickAt(f.filter.x, f.filter.x+f.filter.w, x)
-		case f.replace.w > 0 && x >= f.replace.x-2 && x < f.replace.x+f.replace.w:
+		case m.replHistBtnRect(a).contains(x, y):
+			// The ⇄▾ label is the box's history button — the find bar's
+			// Repl▾ rule: the label is the one cell run that isn't already
+			// something else. A second click (the list's own toggle) is
+			// claimed by replHistMouse above and never reaches here.
+			m.focus = findAllFocusReplace
+			m.openReplHist(a)
+		case f.replace.w > 0 && x >= f.replace.x && x < f.replace.x+f.replace.w:
 			m.focus = findAllFocusReplace
 			m.replace.clickAt(f.replace.x, f.replace.x+f.replace.w, x)
 		case f.button.contains(x, y):
@@ -1484,6 +1527,103 @@ func (m *findAllModal) draw(a *App) {
 	// call finds nothing to do and the body pass has already done it.
 	// See overflow.go.
 	a.drawOverflowMarkersOverlay()
+
+	// The replacement dropdown, very last so it covers the rows it hangs
+	// over. Only unpinned: the modal layer is already the top of the
+	// frame. A pinned panel draws with the body, under the editor's
+	// passive popups, so its dropdown is painted from the overlay pass
+	// instead (drawFindAllPinHist).
+	if !m.pinned {
+		m.drawReplHist(a)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Replacement history (the replace box's ▾)
+// -----------------------------------------------------------------------------
+
+// replHistGeom lays the replace box's dropdown out under the box — the
+// one geometry the draw, the keys and the mouse all read. It prefers
+// DOWN: the fields row sits near the top of the strip (top dock) or the
+// column (right dock), with the tab bar just above, so down is the side
+// with room; histDropGeom flips it if not. A row too narrow to show the
+// replace box has no dropdown either.
+func (m *findAllModal) replHistGeom(a *App) histGeom {
+	f := m.fieldsLayout(a)
+	if f.replace.w <= 0 {
+		return histGeom{}
+	}
+	return a.histDropGeom(&m.replHist, btnRect{x: f.replace.x, y: f.y, w: f.replace.w})
+}
+
+// replHistBtnRect is the ⇄▾ label left of the replace box: the
+// dropdown's button, both cells so the target is more than the ▾. Zero
+// when the row is too narrow to show the box.
+func (m *findAllModal) replHistBtnRect(a *App) btnRect {
+	f := m.fieldsLayout(a)
+	if f.replace.w <= 0 {
+		return btnRect{}
+	}
+	return btnRect{x: f.replace.x - 2, y: f.y, w: 2}
+}
+
+// openReplHist opens the dropdown on the replacement history, with the
+// box's current text highlighted when it is already an entry. A row too
+// narrow for the box opens nothing (it has nowhere to put a pick).
+func (m *findAllModal) openReplHist(a *App) {
+	if m.fieldsLayout(a).replace.w <= 0 {
+		return
+	}
+	a.openHistDrop(&m.replHist, history.SearchReplace, m.replace.String(), false)
+}
+
+// replHistPick puts a picked replacement in the box and leaves the box
+// focused. It FILLS, never runs the replace — the dropdown's rule: a
+// recalled entry is as often the start of the next one as the thing
+// itself, and "Replace in N" is too big a verb to fire on a pick.
+func (m *findAllModal) replHistPick(v string) {
+	m.replace = newTextField(v)
+	m.focus = findAllFocusReplace
+}
+
+// replHistMouse routes a mouse event to the open dropdown, reporting
+// whether it claimed it. A pick fills the box; a press outside closes the
+// list and is handed back (false) to whatever it was aimed at.
+func (m *findAllModal) replHistMouse(a *App, x, y int, btn tcell.ButtonMask) bool {
+	if !m.replHist.open {
+		return false
+	}
+	consumed, v, picked := a.histDropMouse(&m.replHist, m.replHistGeom(a), m.replHistBtnRect(a), x, y, btn)
+	if picked {
+		m.replHistPick(v)
+	}
+	return consumed
+}
+
+// drawReplHist paints the dropdown when it is open.
+func (m *findAllModal) drawReplHist(a *App) {
+	if m.replHist.open {
+		a.drawHistDrop(&m.replHist, m.replHistGeom(a))
+	}
+}
+
+// findAllPinHistMouse is the router's hook for the PINNED panel's
+// dropdown. The list can hang past the panel over the editor, and the
+// router only hands the panel clicks inside its frame, so the dropdown
+// has to be asked first — the find bar's findHistMouse, one panel over.
+func (a *App) findAllPinHistMouse(x, y int, btn tcell.ButtonMask) bool {
+	if a.findAllPin == nil {
+		return false
+	}
+	return a.findAllPin.replHistMouse(a, x, y, btn)
+}
+
+// drawFindAllPinHist paints the pinned panel's dropdown from the overlay
+// pass, above the editor and panels drawn after the panel itself.
+func (a *App) drawFindAllPinHist() {
+	if a.findAllPin != nil {
+		a.findAllPin.drawReplHist(a)
+	}
 }
 
 // drawResizeGrip marks the bottom rule as a handle: a heavier glyph a
@@ -1553,7 +1693,9 @@ func (m *findAllModal) drawFields(a *App, c modalChrome) {
 		drawAt(a.screen, f.filter.x, f.y, "filter…", tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Muted))
 	}
 	if f.replace.w > 0 {
-		drawAt(a.screen, f.replace.x-2, f.y, "⇄ ", c.muted)
+		// ⇄▾: the ▾ marks the label as the replacement-history button,
+		// the same mark the find bar's Repl▾ and the search prompts carry.
+		drawAt(a.screen, f.replace.x-2, f.y, "⇄▾", c.muted)
 		m.replace.draw(a.screen, f.y, f.replace.x, f.replace.x+f.replace.w, fieldSt, m.focus == findAllFocusReplace)
 		if m.replace.String() == "" && m.focus != findAllFocusReplace {
 			drawAt(a.screen, f.replace.x, f.y, "replace…", tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Muted))

@@ -17,6 +17,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/history"
 )
 
 // findAllFixture is a small Go-shaped file with the token "count" on
@@ -1300,5 +1301,198 @@ func TestFindAllResize_GripMarksTheRule(t *testing.T) {
 	}
 	if found != findAllResizeGrip {
 		t.Errorf("grip cells on the bottom rule = %d, want %d", found, findAllResizeGrip)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Replacement history (N-031)
+// -----------------------------------------------------------------------------
+
+// TestFindAll_ReplaceBoxUpRecallsWithoutReplacing pins the key path: Up
+// in the replace box opens the replacement history (the list the
+// confirmed replace records into), and Enter FILLS the box — it never
+// runs "Replace in N", which would rewrite the file on a recall.
+func TestFindAll_ReplaceBoxUpRecallsWithoutReplacing(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	seedSearches(a, history.SearchReplace, "tally", "total")
+	m := openFindAllT(t, a, "count")
+	before := tab.Buffer.String()
+
+	m.focus = findAllFocusReplace
+	m.handleKey(a, keyEv(tcell.KeyUp, 0))
+	if !m.replHist.open || m.replHist.kind != history.SearchReplace {
+		t.Fatalf("Up in the replace box: open=%v kind=%q", m.replHist.open, m.replHist.kind)
+	}
+	if !m.replHistGeom(a).ok() {
+		t.Fatal("the dropdown has no room in the default window")
+	}
+	// Newest first, and the list opens below the box, so Down is older.
+	m.handleKey(a, keyEv(tcell.KeyDown, 0))
+	m.handleKey(a, keyEv(tcell.KeyEnter, 0))
+	if m.replHist.open || m.replace.String() != "tally" {
+		t.Fatalf("after pick: open=%v replace=%q", m.replHist.open, m.replace.String())
+	}
+	if m.focus != findAllFocusReplace {
+		t.Fatalf("a pick should leave the replace box focused, focus=%d", m.focus)
+	}
+	if tab.Buffer.String() != before {
+		t.Fatal("a pick ran the replace")
+	}
+	if a.modal != m {
+		t.Fatal("the list closed on a pick")
+	}
+}
+
+// TestFindAll_ReplaceHistEscClosesOnlyTheList pins that Esc with the
+// dropdown open drops the dropdown and nothing else: the box keeps the
+// keyboard and the list keeps the modal slot.
+func TestFindAll_ReplaceHistEscClosesOnlyTheList(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	seedSearches(a, history.SearchReplace, "tally")
+	m := openFindAllT(t, a, "count")
+	m.focus = findAllFocusReplace
+	m.handleKey(a, keyEv(tcell.KeyUp, 0))
+	m.handleKey(a, keyEv(tcell.KeyEsc, 0))
+	if m.replHist.open || m.focus != findAllFocusReplace || a.modal != m {
+		t.Fatalf("after Esc: open=%v focus=%d modal=%T", m.replHist.open, m.focus, a.modal)
+	}
+}
+
+// TestFindAll_FilterBoxHasNoHistory pins the half of N-031 that was
+// declined: the filter narrows results already in hand, it does not
+// search, so Up there opens nothing and says nothing.
+func TestFindAll_FilterBoxHasNoHistory(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	seedSearches(a, history.SearchFind, "count")
+	seedSearches(a, history.SearchReplace, "tally")
+	m := openFindAllT(t, a, "count")
+	m.focus = findAllFocusFilter
+	a.statusMsg = ""
+	m.handleKey(a, keyEv(tcell.KeyUp, 0))
+	if m.replHist.open {
+		t.Fatal("Up in the filter box opened a history")
+	}
+	if a.statusMsg != "" {
+		t.Fatalf("Up in the filter box flashed %q", a.statusMsg)
+	}
+}
+
+// TestFindAll_ReplaceHistEmptyExplains pins the unavailable-control
+// rule on this box too: no box opens, and the status bar says why.
+func TestFindAll_ReplaceHistEmptyExplains(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	m.focus = findAllFocusReplace
+	m.handleKey(a, keyEv(tcell.KeyUp, 0))
+	if m.replHist.open {
+		t.Fatal("an empty history opened a box")
+	}
+	if !strings.Contains(a.statusMsg, "No recent replacements") {
+		t.Fatalf("flash = %q", a.statusMsg)
+	}
+}
+
+// TestFindAll_ReplaceLabelClickTogglesAndRowClickFills pins the mouse
+// path on the unpinned list: the ⇄▾ label opens the dropdown and focuses
+// the box, a second click puts it away, and a click on a row fills the
+// box without replacing — even though the row hangs over result rows
+// the click would otherwise have previewed.
+func TestFindAll_ReplaceLabelClickTogglesAndRowClickFills(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	seedSearches(a, history.SearchReplace, "tally")
+	m := openFindAllT(t, a, "count")
+	before := tab.Buffer.String()
+	f := m.fieldsLayout(a)
+	if f.replace.w <= 0 {
+		t.Fatal("precondition: the replace box fits the default window")
+	}
+
+	clickAt(a, f.replace.x-2, f.y)
+	if !m.replHist.open || m.focus != findAllFocusReplace {
+		t.Fatalf("label click: open=%v focus=%d", m.replHist.open, m.focus)
+	}
+	clickAt(a, f.replace.x-1, f.y)
+	if m.replHist.open {
+		t.Fatal("a second label click left the list open")
+	}
+
+	m.openReplHist(a)
+	g := m.replHistGeom(a)
+	if g.up || g.y != f.y+1 {
+		t.Fatalf("the dropdown should hang below the box: %+v (box row %d)", g, f.y)
+	}
+	pressAt(a, g.x+2, g.y+1) // the newest row, nearest the box
+	if m.replHist.open || m.replace.String() != "tally" {
+		t.Fatalf("row click: open=%v replace=%q", m.replHist.open, m.replace.String())
+	}
+	if a.modal != m || tab.Buffer.String() != before {
+		t.Fatal("a row click must fill the box, not accept the list or replace")
+	}
+}
+
+// TestFindAll_PinnedReplaceHistHangsOverTheEditor pins the pinned route.
+// The router only sends the panel clicks inside its frame, so a dropdown
+// row hanging below the panel must be claimed first
+// (findAllPinHistMouse) — or the click would land in the editor and move
+// the cursor instead of filling the box. It is painted from the overlay
+// pass, above the editor.
+func TestFindAll_PinnedReplaceHistHangsOverTheEditor(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	seedSearches(a, history.SearchReplace, "a", "b", "c", "d", "e", "f")
+	// A short strip (the user dragged it down to three rows), so the
+	// six-entry list reaches past the panel's bottom border.
+	a.findAllRows = 3
+	m := openFindAllT(t, a, "count")
+	m.togglePin(a)
+	if a.findAllPin != m {
+		t.Fatal("precondition: pinned")
+	}
+	m.focus = findAllFocusReplace
+	a.handleKey(keyEv(tcell.KeyUp, 0)) // the router's pinned-field branch
+	if !m.replHist.open {
+		t.Fatal("Up in the pinned replace box did not open the dropdown")
+	}
+	g := m.replHistGeom(a)
+	_, my, _, mh := m.rect(a)
+	lastY := g.y + g.rows // the oldest visible row, just above the bottom border
+	if lastY < my+mh {
+		t.Fatalf("precondition: dropdown %+v should reach past the panel (rows %d-%d)", g, my, my+mh-1)
+	}
+
+	a.draw()
+	a.screen.Show()
+	if got := screenRow(t, a, lastY, g.x, g.w); !strings.Contains(got, "a") || !strings.Contains(got, "×") {
+		t.Fatalf("dropdown row below the panel not painted over the editor: %q", got)
+	}
+	if got := screenRow(t, a, g.y, g.x, g.w); !strings.Contains(got, "recent replacements") {
+		t.Fatalf("dropdown title not painted over the frame: %q", got)
+	}
+
+	cursor := tab.Cursor
+	pressAt(a, g.x+2, lastY)
+	if m.replHist.open || m.replace.String() != "a" {
+		t.Fatalf("click below the panel: open=%v replace=%q", m.replHist.open, m.replace.String())
+	}
+	if tab.Cursor != cursor {
+		t.Fatal("the click fell through to the editor")
+	}
+}
+
+// TestCloseAllModals_ClosesThePinnedReplaceHist pins that a modal
+// opening over the pinned panel takes the panel's dropdown with it, the
+// way it takes the find bar's — the panel itself stays.
+func TestCloseAllModals_ClosesThePinnedReplaceHist(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	seedSearches(a, history.SearchReplace, "tally")
+	m := openFindAllT(t, a, "count")
+	m.togglePin(a)
+	m.focus = findAllFocusReplace
+	m.openReplHist(a)
+	a.closeAllModals()
+	if m.replHist.open {
+		t.Fatal("closeAllModals left the pinned panel's dropdown open")
+	}
+	if a.findAllPin != m {
+		t.Fatal("closeAllModals must not close the pinned panel")
 	}
 }

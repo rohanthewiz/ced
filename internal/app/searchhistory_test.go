@@ -377,6 +377,50 @@ func TestSearchPrompt_ButtonAndRowClick(t *testing.T) {
 	}
 }
 
+// TestFindBar_SecondLabelClickClosesTheList is the toggle's regression
+// test. The label sits outside the list, so the list's outside-press rule
+// used to close it and hand the press on — to the same label, which then
+// found the list shut and opened it again. The label could never put its
+// own list away. A click on the OTHER row's label still switches lists.
+func TestFindBar_SecondLabelClickClosesTheList(t *testing.T) {
+	a := seedFindApp(t, "x")
+	seedSearches(a, history.SearchFind, "find-me")
+	seedSearches(a, history.SearchReplace, "with-this")
+	a.openReplace()
+	find, repl := a.findHistBtnRect(findFocusQuery), a.findHistBtnRect(findFocusReplace)
+
+	clickAt(a, find.x+1, find.y)
+	if !a.findHist.open {
+		t.Fatal("first click did not open the list")
+	}
+	clickAt(a, repl.x+1, repl.y)
+	if !a.findHist.open || a.findHist.kind != history.SearchReplace {
+		t.Fatalf("the other row's label should switch lists: open=%v kind=%q", a.findHist.open, a.findHist.kind)
+	}
+	clickAt(a, repl.x+1, repl.y)
+	if a.findHist.open {
+		t.Fatal("a second click on the same label left the list open")
+	}
+}
+
+// TestSearchPrompt_SecondButtonClickClosesTheList is the same toggle on
+// a prompt's ▾, and the prompt itself stays up.
+func TestSearchPrompt_SecondButtonClickClosesTheList(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	seedSearches(a, history.SearchSymbol, "Handler")
+	a.openSearchPrompt("Sym", "h", "", history.SearchSymbol, func(*App, string) {})
+	m := a.modal.(*promptModal)
+	b := m.histBtnRect(a)
+	clickAt(a, b.x, b.y)
+	clickAt(a, b.x, b.y)
+	if m.hist.open {
+		t.Fatal("a second click on ▾ left the list open")
+	}
+	if a.modal != m {
+		t.Fatal("closing the list closed the prompt")
+	}
+}
+
 // TestPlainPrompt_HasNoHistory pins that an ordinary prompt is unchanged:
 // no ▾, and Up is not a history key.
 func TestPlainPrompt_HasNoHistory(t *testing.T) {

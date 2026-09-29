@@ -3214,6 +3214,11 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	if a.dragMode == "" && a.findHistMouse(x, y, btn) {
 		return
 	}
+	// The pinned find-all panel's replacement dropdown, for the same
+	// reason: it hangs over the editor below the panel.
+	if a.dragMode == "" && a.findAllPinHistMouse(x, y, btn) {
+		return
+	}
 
 	// Dwell bookkeeping runs before any routing below, because it is
 	// about the POINTER rather than about what the pointer is over: a
@@ -5057,6 +5062,7 @@ func (a *App) draw() {
 	// the bar; still below the menu and modals, whose opening closes the
 	// bar and the list with it.
 	a.drawFindHist()
+	a.drawFindAllPinHist()
 
 	// Overlay layer. The menu and the active modal are mutually
 	// exclusive (closeAllModals enforces it), so at most one of these

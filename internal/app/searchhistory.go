@@ -6,9 +6,12 @@
 // =============================================================================
 
 // searchhistory.go is the history dropdown every find input carries: the
-// find bar's Find and Repl rows, and the Find all in file, Find in project
-// and Go to symbol in project prompts. It lists what was searched here
-// before, most recent first, and picking a row puts it in the field.
+// find bar's Find and Repl rows, the Find all in file, Find in project
+// and Go to symbol in project prompts, and the Find-all list's replace
+// box. It lists what was searched here before, most recent first, and
+// picking a row puts it in the field. FILTER boxes (the Find-all list's,
+// the git log's, the references list's) have none: they narrow results
+// already in hand rather than asking a question worth recalling.
 //
 // WHERE THE LISTS COME FROM. The repository's history database
 // (internal/history/searches.go) — one list per kind of question, so the
@@ -311,9 +314,20 @@ func (a *App) histDropKey(d *histDrop, g histGeom, ev *tcell.EventKey) (consumed
 // on its × forgets it, a press elsewhere inside is swallowed, and a press
 // outside closes the list and falls through (consumed=false) to whatever
 // it was aimed at — the completion popup's contract.
-func (a *App) histDropMouse(d *histDrop, g histGeom, x, y int, btn tcell.ButtonMask) (consumed bool, pick string, picked bool) {
+//
+// toggle is the owner's button that opened the list (the find bar's
+// Find▾ / Repl▾ label, a prompt's ▾, the Find-all replace box's ⇄▾). A
+// press there closes the list and is CONSUMED: handed back as an ordinary
+// outside press it would reach that same button with the list already
+// closed, and the button would open it again — a dropdown its own button
+// could never put away. Zero-width means none.
+func (a *App) histDropMouse(d *histDrop, g histGeom, toggle btnRect, x, y int, btn tcell.ButtonMask) (consumed bool, pick string, picked bool) {
 	if !g.ok() {
 		return false, "", false
+	}
+	if btn&tcell.Button1 != 0 && toggle.w > 0 && toggle.contains(x, y) {
+		*d = histDrop{}
+		return true, "", false
 	}
 	inside := g.contains(x, y)
 	if btn&(tcell.WheelUp|tcell.WheelDown) != 0 {

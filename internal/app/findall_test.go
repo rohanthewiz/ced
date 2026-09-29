@@ -1496,3 +1496,155 @@ func TestCloseAllModals_ClosesThePinnedReplaceHist(t *testing.T) {
 		t.Fatal("closeAllModals must not close the pinned panel")
 	}
 }
+
+// seedFindAllCaseApp opens a tab whose one line holds "count" in three
+// shapes the two toggles tell apart: a capitalized variant, the exact
+// word, and the word inside a longer identifier.
+func seedFindAllCaseApp(t *testing.T) (*App, *editor.Tab) {
+	t.Helper()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "case.go")
+	if err := os.WriteFile(target, []byte("Count count counter\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	tab := a.activeTabPtr()
+	if tab == nil {
+		t.Fatal("fixture did not open")
+	}
+	return a, tab
+}
+
+// TestFindAll_HonoursTheBarsOptions pins N-035: the list used to call
+// editor.FindAll and match a case-insensitive substring whatever the
+// bar's Aa / |W| said, so a narrowed search turned into a list quietly
+// widened. It must now list only what the toggles allow, tint the same
+// set in the editor, and say which options it ran under in the title.
+func TestFindAll_HonoursTheBarsOptions(t *testing.T) {
+	a, tab := seedFindAllCaseApp(t)
+	a.findCase, a.findWord = true, true
+	m := openFindAllT(t, a, "count")
+
+	if len(m.rows) != 1 || m.rows[0].col != 6 {
+		t.Fatalf("rows = %+v, want only the exact word at col 6", m.rows)
+	}
+	// The borrowed tint must be the same set, or the "current" hit the
+	// preview paints (FindIndex = row index) lands on another match.
+	if len(tab.FindMatches) != 1 {
+		t.Errorf("editor tint = %d matches, want 1 (the list's set)", len(tab.FindMatches))
+	}
+	if got := m.titleText(); !strings.Contains(got, "(match case, whole word)") {
+		t.Errorf("title %q should name the options it searched under", got)
+	}
+}
+
+// TestFindAll_DefaultTitleHasNoOptionsNote keeps the common case quiet:
+// the parenthetical appears only when an option narrows the search.
+func TestFindAll_DefaultTitleHasNoOptionsNote(t *testing.T) {
+	a, _ := seedFindAllCaseApp(t)
+	m := openFindAllT(t, a, "count")
+	if len(m.rows) != 3 {
+		t.Fatalf("default search should list all 3 substrings, got %d", len(m.rows))
+	}
+	if got := m.titleText(); got != `Find all "count"` {
+		t.Errorf("title = %q, want no options note", got)
+	}
+}
+
+// TestFindAll_MissNamesTheOptions: "no occurrences" of a word the user
+// can see on screen is baffling unless the flash says the search was
+// case-sensitive.
+func TestFindAll_MissNamesTheOptions(t *testing.T) {
+	a, _ := seedFindAllCaseApp(t)
+	a.findCase = true
+	a.showFindAll("COUNT")
+	if a.modal != nil {
+		t.Fatalf("a case-sensitive miss should not open the list, got %T", a.modal)
+	}
+	if !strings.Contains(a.statusMsg, "(match case)") {
+		t.Errorf("statusMsg = %q, want the options named", a.statusMsg)
+	}
+}
+
+// TestFindAll_CaseVariantRowsAreNotStale is the bug the options work
+// exposed: the stale check compared the row's text to the query byte for
+// byte, so in a case-insensitive list the "Count" hit for "count" was
+// dimmed as stale and Replace silently skipped it. Fails before the fix.
+func TestFindAll_CaseVariantRowsAreNotStale(t *testing.T) {
+	a, _ := seedFindAllCaseApp(t)
+	m := openFindAllT(t, a, "count")
+	for _, r := range m.rows {
+		if m.rowStale(a, r) {
+			t.Errorf("fresh row at col %d reads as stale", r.col)
+		}
+	}
+	plan, skipped, err := m.buildReplacePlan(a, "n")
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if skipped != 0 || plan.count != 3 {
+		t.Errorf("replace plan = %d edits, %d skipped; want 3 and 0", plan.count, skipped)
+	}
+}
+
+// TestFindAll_StaleCheckUsesTheListsOptions: under whole word, text that
+// grows into a longer identifier is no longer a hit, so the row must go
+// stale even though the query's letters are still there.
+func TestFindAll_StaleCheckUsesTheListsOptions(t *testing.T) {
+	a, tab := seedFindAllCaseApp(t)
+	a.findWord = true
+	m := openFindAllT(t, a, "count")
+	if len(m.rows) != 2 {
+		t.Fatalf("whole-word rows = %d, want 2", len(m.rows))
+	}
+	tab.Buffer.Lines[0] = "Count counts counter"
+	if !m.rowStale(a, m.rows[1]) {
+		t.Error("\"counts\" is not a whole-word hit — the row should be stale")
+	}
+	if m.rowStale(a, m.rows[0]) {
+		t.Error("the untouched \"Count\" row should stay live")
+	}
+}
+
+// TestFindAll_RerunKeepsTheSnapshotOptions: ⟳ is "the same question
+// again", so a toggle flipped after the list opened must not change what
+// the re-run matches.
+func TestFindAll_RerunKeepsTheSnapshotOptions(t *testing.T) {
+	a, tab := seedFindAllCaseApp(t)
+	a.findCase = true
+	m := openFindAllT(t, a, "count")
+	a.findCase = false
+
+	m.rerun(a)
+
+	if len(m.rows) != 2 {
+		t.Fatalf("re-run rows = %d, want the 2 case-sensitive hits", len(m.rows))
+	}
+	if len(tab.FindMatches) != 2 {
+		t.Errorf("re-run tint = %d matches, want 2", len(tab.FindMatches))
+	}
+}
+
+// TestFindAll_RestoreGivesBackTheTabsOptions: the list borrows the tab's
+// options along with its query, so closing it must return both — else
+// the tab's own search would silently re-run under the list's options
+// the next time anything re-scans it.
+func TestFindAll_RestoreGivesBackTheTabsOptions(t *testing.T) {
+	a, tab := seedFindAllCaseApp(t)
+	tab.SetFindQuery("counter")
+	a.findCase = true
+	m := openFindAllT(t, a, "count")
+	if !tab.FindOpts.CaseSensitive {
+		t.Fatal("while the list is up the tab should carry its options")
+	}
+
+	m.abort(a)
+
+	if tab.FindOpts != (editor.FindOptions{}) {
+		t.Errorf("tab options after close = %+v, want the prior zero value", tab.FindOpts)
+	}
+	if tab.FindQuery != "counter" || len(tab.FindMatches) != 1 {
+		t.Errorf("tab find state = %q/%d, want its own \"counter\" search back", tab.FindQuery, len(tab.FindMatches))
+	}
+}

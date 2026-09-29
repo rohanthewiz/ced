@@ -285,3 +285,41 @@ func TestMatchOccurrences_MatchesFindScanner(t *testing.T) {
 		t.Fatalf("scanners disagree:\n wordhl=%v\n   find=%v", viaWordHL, viaFind)
 	}
 }
+
+// TestMatchesAt_AgreesWithTheScanner pins MatchesAt to FindAllOpts under
+// every combination of the two toggles: each hit the scan reports must
+// answer true at its column, and every other column false. A check that
+// drifted from the scan is exactly how a fresh hit reads as "stale".
+func TestMatchesAt_AgreesWithTheScanner(t *testing.T) {
+	const text = "Count count counter recount COUNT"
+	line := []rune(text)
+	buf := NewBuffer(text)
+	for _, opts := range []FindOptions{
+		{}, {CaseSensitive: true}, {WholeWord: true}, {CaseSensitive: true, WholeWord: true},
+	} {
+		hitAt := map[int]bool{}
+		for _, m := range FindAllOpts(buf, "count", opts) {
+			hitAt[m.Col] = true
+		}
+		for col := range line {
+			if got := MatchesAt(line, col, "count", opts); got != hitAt[col] {
+				t.Errorf("opts %+v col %d: MatchesAt = %v, scan says %v", opts, col, got, hitAt[col])
+			}
+		}
+	}
+}
+
+// TestMatchesAt_RejectsOutOfRangeAndEmpty covers the guards: a range
+// running off either end of the line, and an empty query, are never a
+// match (and never a panic).
+func TestMatchesAt_RejectsOutOfRangeAndEmpty(t *testing.T) {
+	line := []rune("count")
+	for _, col := range []int{-1, 1, 5, 99} {
+		if MatchesAt(line, col, "count", FindOptions{}) {
+			t.Errorf("col %d should not match", col)
+		}
+	}
+	if MatchesAt(line, 0, "", FindOptions{}) {
+		t.Error("an empty query should never match")
+	}
+}

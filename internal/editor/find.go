@@ -54,9 +54,10 @@ type FindOptions struct {
 
 // FindAll returns every case-insensitive substring match of query inside
 // buf, in document order — FindAllOpts under the default options. Kept as
-// its own entry point because most callers (project search, the find-all
-// list's seeding) genuinely want the plain reading-tool behavior and
-// shouldn't have to name a zero struct to say so.
+// its own entry point for callers that genuinely want the plain
+// reading-tool behavior (tests, one-off scans) and shouldn't have to name
+// a zero struct to say so. Anything the find bar's Aa / |W| toggles
+// should reach — the Find-all list, project search — calls FindAllOpts.
 func FindAll(buf *Buffer, query string) []Match {
 	return FindAllOpts(buf, query, FindOptions{})
 }
@@ -103,18 +104,50 @@ func matchCols(hay, needle []rune, wholeWord bool) []int {
 		if !runesEqual(hay[col:col+len(needle)], needle) {
 			continue
 		}
-		if wholeWord {
-			if col > 0 && IsWordRune(hay[col-1]) {
-				continue
-			}
-			if end := col + len(needle); end < len(hay) && IsWordRune(hay[end]) {
-				continue
-			}
+		if wholeWord && !wordBounded(hay, col, len(needle)) {
+			continue
 		}
 		cols = append(cols, col)
 		col += len(needle) - 1 // the loop's ++ carries us past the hit
 	}
 	return cols
+}
+
+// wordBounded reports whether the run hay[col:col+n] stands alone as a
+// word: no word rune immediately before or after it. Split out of
+// matchCols so MatchesAt applies the SAME boundary rule to one range
+// that the scanner applies to every candidate.
+func wordBounded(hay []rune, col, n int) bool {
+	if col > 0 && IsWordRune(hay[col-1]) {
+		return false
+	}
+	if end := col + n; end < len(hay) && IsWordRune(hay[end]) {
+		return false
+	}
+	return true
+}
+
+// MatchesAt reports whether line holds a hit of query starting at col
+// under opts — the one-range question "is this still a match?", asked by
+// callers that hold a hit's coordinates from an earlier scan (the
+// Find-all list's stale-row check and its replace plan) and need to know
+// whether the text under them has moved.
+//
+// It must agree with FindAllOpts exactly: a check stricter than the scan
+// (say, a byte compare after a case-insensitive scan) would call a fresh
+// "Count" hit for "count" stale, dim it, and skip it on replace. So it
+// folds and bounds through the same helpers matchCols uses. The one thing
+// it does not re-check is overlap with an earlier hit on the line; a
+// caller asking about a single range has no earlier hit to overlap.
+func MatchesAt(line []rune, col int, query string, opts FindOptions) bool {
+	needle := foldRunes([]rune(query), opts.CaseSensitive)
+	if len(needle) == 0 || col < 0 || col+len(needle) > len(line) {
+		return false
+	}
+	if !runesEqual(foldRunes(line[col:col+len(needle)], opts.CaseSensitive), needle) {
+		return false
+	}
+	return !opts.WholeWord || wordBounded(line, col, len(needle))
 }
 
 // foldRunes lowercases rs for a case-insensitive compare, or returns it

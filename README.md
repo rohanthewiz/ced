@@ -695,8 +695,9 @@ file at the match and keeps the list up so you can click the next one;
 `Enter` opens it and closes the list. Results stop at 10,000, and the
 title then reads "first 10000".
 
-The list and project search match case-insensitive substrings; the `Aa`
-and `|W|` toggles belong to the bar. There's no regex. `Esc j` (or
+The list and project search match the way the bar's `Aa` and `|W|` are
+set when they run — the title says "(match case)" / "(whole word)" when
+either is on, and `⟳` re-runs under the same options. There's no regex. `Esc j` (or
 `≡` → **Go to line…**, or `⌘G`) jumps to a line, and accepts
 `line:col` — or a whole `app.go:314:22` pasted from a compiler message
 (the filename is ignored; it stays in the current file).

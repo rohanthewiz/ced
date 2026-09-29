@@ -95,11 +95,18 @@ func projectSearchApp(t *testing.T) (*App, string) {
 // waiting on the index or the event queue.
 func runProjectSearch(t *testing.T, a *App, root, query string, paths []string) {
 	t.Helper()
-	hits, truncated := search.Project(root, paths, search.Options{Query: query})
+	runProjectSearchOpts(t, a, root, query, paths, editor.FindOptions{})
+}
+
+// runProjectSearchOpts is runProjectSearch under explicit match options,
+// carried on the event the way startProjectSearch carries them.
+func runProjectSearchOpts(t *testing.T, a *App, root, query string, paths []string, opts editor.FindOptions) {
+	t.Helper()
+	hits, truncated := search.Project(root, paths, search.Options{Query: query, FindOptions: opts})
 	a.projectSearchSeq++
 	a.handleProjectSearch(&projectSearchEvent{
 		when: time.Now(), seq: a.projectSearchSeq,
-		query: query, hits: hits, truncated: truncated,
+		query: query, opts: opts, hits: hits, truncated: truncated,
 	})
 }
 
@@ -349,7 +356,7 @@ func TestProjectSearchLabel_TruncatesFromTheFront(t *testing.T) {
 func TestStartProjectSearch_WithoutAnIndexSaysSo(t *testing.T) {
 	a, _ := projectSearchApp(t)
 	a.finder = nil
-	a.startProjectSearch("needle")
+	a.startProjectSearch("needle", editor.FindOptions{})
 	if a.modal != nil {
 		t.Fatalf("expected no list, got %T", a.modal)
 	}
@@ -427,5 +434,56 @@ func TestProjectSearch_TintClearLeavesAUsersNewSearchAlone(t *testing.T) {
 
 	if tab.FindQuery != "package" {
 		t.Fatalf("a user's own query was clobbered: %q", tab.FindQuery)
+	}
+}
+
+// TestProjectSearch_CarriesTheOptionsThrough pins N-035 at project
+// scope: a match-case search lists only exact-case hits, says so in the
+// title, tints the opened file under the same options (a tint lighting
+// every case variant would contradict the row just clicked), and hands
+// the tab its own options back when the list goes.
+func TestProjectSearch_CarriesTheOptionsThrough(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "mixed.go")
+	if err := os.WriteFile(target, []byte("Needle needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, dir)
+	runProjectSearchOpts(t, a, dir, "needle", []string{"mixed.go"}, editor.FindOptions{CaseSensitive: true})
+
+	m, ok := a.modal.(*findAllModal)
+	if !ok {
+		t.Fatalf("expected the find-all panel, got %T", a.modal)
+	}
+	if len(m.rows) != 1 || m.rows[0].col != 7 {
+		t.Fatalf("rows = %+v, want only the lowercase hit at col 7", m.rows)
+	}
+	if got := m.titleText(); !strings.Contains(got, "(match case)") {
+		t.Errorf("title %q should name the option", got)
+	}
+
+	m.selectRow(a, 0)
+	m.jumpToSelected(a)
+	tab := a.activeTabPtr()
+	if tab == nil || len(tab.FindMatches) != 1 || !tab.FindOpts.CaseSensitive {
+		t.Fatalf("tint should be the list's case-sensitive set, got %+v", tab)
+	}
+
+	m.abort(a)
+	if tab.FindOpts != (editor.FindOptions{}) {
+		t.Errorf("tab options after the list = %+v, want its prior zero value", tab.FindOpts)
+	}
+}
+
+// TestProjectSearch_ReferencesTitleHasNoOptionsNote: a heading producer
+// is not a text match, so even if options were somehow set on it the
+// title must not claim it searched "(match case)".
+func TestProjectSearch_ReferencesTitleHasNoOptionsNote(t *testing.T) {
+	m := &findAllModal{
+		query: "needle", project: true, heading: "References to",
+		opts: editor.FindOptions{CaseSensitive: true},
+	}
+	if got := m.titleText(); got != `References to "needle"` {
+		t.Errorf("title = %q, want no options note", got)
 	}
 }

@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // seedTree writes files (name → contents) under a fresh temp dir and
@@ -68,12 +70,36 @@ func TestProject_FindsEveryOccurrenceInDocumentOrder(t *testing.T) {
 }
 
 // TestProject_CaseInsensitiveLikeTheInFileSearch: the two scopes share
-// editor.FindAll precisely so they can't disagree about what a hit is.
+// editor.FindAllOpts precisely so they can't disagree about what a hit is.
 func TestProject_CaseInsensitiveLikeTheInFileSearch(t *testing.T) {
 	root, paths := seedTree(t, map[string]string{"a.txt": "Hello HELLO hello\n"})
 	hits, _ := Project(root, paths, Options{Query: "hello"})
 	if len(hits) != 3 {
 		t.Fatalf("expected 3 case-insensitive hits, got %d", len(hits))
+	}
+}
+
+// TestProject_HonoursMatchCaseAndWholeWord pins the options reaching
+// the matcher: the find bar's Aa / |W| used to stop at the bar, so a
+// narrowed search turned into a project search quietly widened back to
+// a case-insensitive substring.
+func TestProject_HonoursMatchCaseAndWholeWord(t *testing.T) {
+	root, paths := seedTree(t, map[string]string{"a.txt": "Hello HELLO hello helloWorld\n"})
+	cases := []struct {
+		name string
+		opts editor.FindOptions
+		want int
+	}{
+		{"default", editor.FindOptions{}, 4},
+		{"match case", editor.FindOptions{CaseSensitive: true}, 2},
+		{"whole word", editor.FindOptions{WholeWord: true}, 3},
+		{"both", editor.FindOptions{CaseSensitive: true, WholeWord: true}, 1},
+	}
+	for _, c := range cases {
+		hits, _ := Project(root, paths, Options{Query: "hello", FindOptions: c.opts})
+		if len(hits) != c.want {
+			t.Errorf("%s: %d hits, want %d: %+v", c.name, len(hits), c.want, hits)
+		}
 	}
 }
 

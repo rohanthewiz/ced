@@ -121,14 +121,6 @@ plus the LSP work done in the seeding session itself
   `internal/lsp/inlayhint_test.go` are not gofmt-clean. A one-line
   `gofmt -w` commit; left alone so feature diffs stay focused.
 
-- **N-035** · raised `2026-0929-1808-find-docs-blame-names-replace-history` · value low
-  The bar's `Aa` / `|W|` options stop at the bar: ↓ list-all
-  (`showFindAll` calls `editor.FindAll`, zero options) and Find in project
-  (`search.Options` has no case/word fields) always match a
-  case-insensitive substring, so a `Aa`-on search turned into a list
-  quietly widens. The README now says so. Carry the options through if
-  anyone trips on it.
-
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.
@@ -179,6 +171,24 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, `2026-0929-1855-find-options-reach-the-lists` — **N-035** the bar's `Aa` / `|W|` now reach both
+  lists. `App.findOptions()` is the one conversion; `showFindAll`
+  snapshots it onto `findAllModal.opts` (⟳, the stale check and the
+  replace plan keep asking that question if a toggle flips under a pinned
+  list), and borrows/returns the tab's `FindOpts` with its query.
+  `search.Options` embeds `editor.FindOptions`; the event carries them;
+  `startProjectSearch(query, opts)`; project tints install the list's
+  options and restore the tab's. Titles and "no occurrences" flashes name
+  non-default options ("(match case, whole word)", `findOptionsNote`).
+  Found on the way: `rowStale` / `buildReplacePlan` compared the row to
+  the query byte-for-byte, so a case-insensitive list dimmed its
+  "Count" hit for "count" as stale and Replace skipped it — now
+  `editor.MatchesAt`, which shares `matchCols`' fold and boundary rule.
+  Pinned by `TestFindAll_HonoursTheBarsOptions`,
+  `TestFindAll_CaseVariantRowsAreNotStale`,
+  `TestProjectSearch_CarriesTheOptionsThrough`,
+  `TestProject_HonoursMatchCaseAndWholeWord`,
+  `TestMatchesAt_AgreesWithTheScanner`.
 - closed 2026-09-29, `2026-0929-1808-find-docs-blame-names-replace-history` — **N-031** the Find-all list's replace
   box has its own dropdown on the replacement list it already recorded
   into: `Up` in the box or a click on its `⇄▾` label, opens below, fills

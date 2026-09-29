@@ -55,6 +55,7 @@ type projectSearchEvent struct {
 	when      time.Time
 	seq       int
 	query     string
+	opts      editor.FindOptions
 	hits      []search.Hit
 	truncated bool
 }
@@ -83,7 +84,9 @@ func (a *App) menuFindInProject() {
 	// opening a modal clears the find bar that may be seeding this.
 	seed := a.projectSearchSeed()
 	a.openSearchPrompt("Find in project", "searches every file", seed, history.SearchFind, func(app *App, v string) {
-		app.startProjectSearch(v)
+		// The toggles are read when the search RUNS, not when the prompt
+		// opened — the same moment the query itself is final.
+		app.startProjectSearch(v, app.findOptions())
 	})
 }
 
@@ -111,7 +114,11 @@ func (a *App) hasProjectSearch() bool {
 // result. Off-loop because a cold cache over a large tree is hundreds of
 // milliseconds of IO, and the editor must stay responsive through it —
 // the same contract git status, diffs, and plugin commands all keep.
-func (a *App) startProjectSearch(query string) {
+//
+// opts is a parameter rather than read from the App here because ⟳ on a
+// finished list must re-ask ITS question (the snapshot on the modal),
+// while fresh searches pass a.findOptions().
+func (a *App) startProjectSearch(query string, opts editor.FindOptions) {
 	if query == "" || a.screen == nil {
 		return
 	}
@@ -137,11 +144,11 @@ func (a *App) startProjectSearch(query string) {
 	// covers the whole scan rather than the instant it started.
 	a.projectSearchActive++
 	scr, root := a.screen, a.rootDir
-	a.flash(fmt.Sprintf("Searching %d files for %q…", len(paths), query))
+	a.flash(fmt.Sprintf("Searching %d files for %q%s…", len(paths), query, findOptionsNote(opts)))
 	go func() {
-		hits, truncated := search.Project(root, paths, search.Options{Query: query})
+		hits, truncated := search.Project(root, paths, search.Options{Query: query, FindOptions: opts})
 		_ = scr.PostEvent(&projectSearchEvent{
-			when: time.Now(), seq: seq, query: query,
+			when: time.Now(), seq: seq, query: query, opts: opts,
 			hits: hits, truncated: truncated,
 		})
 	}()
@@ -164,7 +171,7 @@ func (a *App) handleProjectSearch(e *projectSearchEvent) {
 		return
 	}
 	if len(e.hits) == 0 {
-		a.flash(fmt.Sprintf("Find in project: no occurrences of %q", e.query))
+		a.flash(fmt.Sprintf("Find in project: no occurrences of %q%s", e.query, findOptionsNote(e.opts)))
 		return
 	}
 	if a.modal != nil || a.menuOpen {
@@ -176,6 +183,7 @@ func (a *App) handleProjectSearch(e *projectSearchEvent) {
 		tabIdx:    -1, // no single tab behind this list
 		project:   true,
 		truncated: e.truncated,
+		opts:      e.opts,
 		rows:      a.projectSearchRows(e.hits),
 		// Same pre-fill as the in-file list: the box arrives holding the
 		// expression, inert until edited (findall.go's seed rule). It
@@ -288,31 +296,39 @@ func (m *findAllModal) jumpToSelected(a *App) {
 	// The hit is left selected so it is visible the instant the file
 	// opens — the same courtesy the find bar's current match gets. The
 	// tint is recorded so the list's dismissal (or Esc) can take it back.
-	a.tintForProjectFind(tab, m.query)
+	a.tintForProjectFind(tab, m.query, m.opts)
 }
 
 // projFindTint is one file's entry in App.projFindTints: the query a
-// project-mode list lit, and the find query the tab held BEFORE the
-// first tint, so taking the tint back restores rather than blanks.
+// project-mode list lit, and the find query (and the options it ran
+// under) the tab held BEFORE the first tint, so taking the tint back
+// restores rather than blanks.
 type projFindTint struct {
-	query string
-	prior string
+	query     string
+	prior     string
+	priorOpts editor.FindOptions
 }
 
-// tintForProjectFind installs query as tab's find tint and records it.
-// The prior query is captured only on the FIRST tint of a path — a
-// second click into the same file must not record the list's own tint
-// as the thing to restore.
-func (a *App) tintForProjectFind(tab *editor.Tab, query string) {
+// tintForProjectFind installs query as tab's find tint, under the list's
+// options, and records it. The prior query is captured only on the FIRST
+// tint of a path — a second click into the same file must not record the
+// list's own tint as the thing to restore.
+//
+// The options go on the tab because the tint is the list's answer drawn
+// in the file: a match-case list that lit every case variant on arrival
+// would contradict the row the user just clicked.
+func (a *App) tintForProjectFind(tab *editor.Tab, query string, opts editor.FindOptions) {
 	if a.projFindTints == nil {
 		a.projFindTints = map[string]projFindTint{}
 	}
 	rec, seen := a.projFindTints[tab.Path]
 	if !seen {
 		rec.prior = tab.FindQuery
+		rec.priorOpts = tab.FindOpts
 	}
 	rec.query = query
 	a.projFindTints[tab.Path] = rec
+	tab.SetFindOptions(opts)
 	tab.SetFindQuery(query)
 }
 
@@ -334,6 +350,9 @@ func (a *App) clearProjectFindTints() {
 		if !ok || tab.FindQuery != rec.query {
 			continue
 		}
+		// Options first, so a restored prior query is re-scanned under
+		// the options it originally ran under.
+		tab.SetFindOptions(rec.priorOpts)
 		if rec.prior != "" {
 			tab.SetFindQuery(rec.prior)
 		} else {
@@ -352,18 +371,28 @@ func (a *App) clearProjectFindTints() {
 // (lspreferences.go). The truncation clause stays shared rather than
 // duplicated per producer, because the honesty it buys is the part
 // neither of them may skip.
+//
+// Text searches also name any non-default match options: the list is
+// often opened with no find bar on screen, and a match-case list that
+// didn't say so would read as "these are all the occurrences". Heading
+// producers never carry options (their rows aren't a text match), so
+// they get no note.
 func (m *findAllModal) titleText() string {
+	note := ""
+	if m.heading == "" {
+		note = findOptionsNote(m.opts)
+	}
 	if !m.project {
-		return fmt.Sprintf("Find all %q", m.query)
+		return fmt.Sprintf("Find all %q%s", m.query, note)
 	}
 	verb := "Find in project"
 	if m.heading != "" {
 		verb = m.heading
 	}
 	if m.truncated {
-		return fmt.Sprintf("%s %q — first %d", verb, m.query, len(m.rows))
+		return fmt.Sprintf("%s %q%s — first %d", verb, m.query, note, len(m.rows))
 	}
-	return fmt.Sprintf("%s %q", verb, m.query)
+	return fmt.Sprintf("%s %q%s", verb, m.query, note)
 }
 
 // footerHints returns the key hints in decreasing width; draw takes the

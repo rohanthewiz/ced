@@ -205,6 +205,15 @@ type findAllModal struct {
 	priorQuery   string
 	priorMatches []editor.Match
 	priorIndex   int
+	priorOpts    editor.FindOptions
+
+	// opts are the find bar's Aa / |W| toggles as they stood when the
+	// list opened. SNAPSHOTTED rather than read live: the list is the
+	// answer to one question, and ⟳, the stale check and the replace
+	// plan must keep asking that question even if a toggle flips while a
+	// pinned list is still up. The title names them (findOptionsNote),
+	// since the bar that shows them lit is usually not on screen.
+	opts editor.FindOptions
 
 	// previewed records whether we ever moved the cursor. Nothing to
 	// put back if we didn't, and restoring anyway would fight a
@@ -347,9 +356,13 @@ func (a *App) showFindAll(query string) {
 	// file is often the one wanted in the next file, or across the
 	// project a moment later (searchhistory.go).
 	a.recordSearch(history.SearchFind, query)
-	matches := editor.FindAll(tab.Buffer, query)
+	opts := a.findOptions()
+	matches := editor.FindAllOpts(tab.Buffer, query, opts)
 	if len(matches) == 0 {
-		a.flash(fmt.Sprintf("Find all: no occurrences of %q in this file", query))
+		// The options are named in the miss too: "no occurrences" of a
+		// word the user can see on screen is baffling unless it says it
+		// was looking case-sensitively.
+		a.flash(fmt.Sprintf("Find all: no occurrences of %q in this file%s", query, findOptionsNote(opts)))
 		return
 	}
 
@@ -369,11 +382,20 @@ func (a *App) showFindAll(query string) {
 		priorQuery:    tab.FindQuery,
 		priorMatches:  tab.FindMatches,
 		priorIndex:    tab.FindIndex,
+		priorOpts:     tab.FindOpts,
+		opts:          opts,
 	}
 	// Borrow the tab's find state so the editor tints every occurrence
 	// while the list is up: the popup and the code behind it then agree
 	// about what "all of them" means, and the previewed row paints as
 	// the current match for free (findSource reads FindIndex).
+	//
+	// The options go on first, and they must be the list's: preview
+	// indexes tab.FindMatches by ROW, so a tint scanned under different
+	// options (the tab's last pushed copy can lag the App's toggles)
+	// would be a different-length list and the lit "current" hit would
+	// land on some other row's match.
+	tab.SetFindOptions(opts)
 	tab.SetFindQuery(query)
 	m.rebuildView()
 	// Start on the hit at or after the cursor — the same "nearest, not
@@ -633,9 +655,13 @@ func (m *findAllModal) restoreFind(a *App) {
 	if tab == nil {
 		return
 	}
+	// Written as plain fields, options included, rather than through
+	// SetFindOptions: this is a verbatim restore of a match list that was
+	// produced under priorOpts, and the setter would re-scan it.
 	tab.FindQuery = m.priorQuery
 	tab.FindMatches = m.priorMatches
 	tab.FindIndex = m.priorIndex
+	tab.FindOpts = m.priorOpts
 }
 
 // -----------------------------------------------------------------------------
@@ -1860,16 +1886,18 @@ func (m *findAllModal) rerun(a *App) {
 			a.flash("This list came from the language server — re-run it from the menu")
 			return
 		}
-		a.startProjectSearch(m.query)
+		a.startProjectSearch(m.query, m.opts)
 		return
 	}
 	tab := m.tab(a)
 	if tab == nil || tab.Buffer == nil {
 		return
 	}
-	matches := editor.FindAll(tab.Buffer, m.query)
+	// Under the list's own snapshot, not the toggles as they are now —
+	// "the same question again" (see opts).
+	matches := editor.FindAllOpts(tab.Buffer, m.query, m.opts)
 	if len(matches) == 0 {
-		a.flash(fmt.Sprintf("Find all: no occurrences of %q anymore", m.query))
+		a.flash(fmt.Sprintf("Find all: no occurrences of %q anymore%s", m.query, findOptionsNote(m.opts)))
 		if m.pinned {
 			m.closePin(a)
 		} else {
@@ -1878,6 +1906,7 @@ func (m *findAllModal) rerun(a *App) {
 		return
 	}
 	m.rows = findAllRowsFor(tab.Buffer, matches)
+	tab.SetFindOptions(m.opts)
 	tab.SetFindQuery(m.query)
 	m.rebuildView()
 	m.scroll = 0
@@ -1902,11 +1931,11 @@ func (m *findAllModal) rowStale(a *App, r findAllRow) bool {
 	if r.line < 0 || r.line >= tab.Buffer.LineCount() {
 		return true
 	}
-	line := tab.Buffer.LineRunes(r.line)
-	if r.col < 0 || r.col+r.width > len(line) {
-		return true
-	}
-	return string(line[r.col:r.col+r.width]) != m.query
+	// "Still a hit under the options the list was built with", not "the
+	// same bytes as the query": a case-insensitive list legitimately
+	// holds "Count" for "count", and a byte compare dimmed that row as
+	// stale and made replace skip it.
+	return !editor.MatchesAt(tab.Buffer.LineRunes(r.line), r.col, m.query, m.opts)
 }
 
 // confirmReplace is the "Replace in N results" gesture: plan the edit
@@ -2026,8 +2055,7 @@ func (m *findAllModal) buildReplacePlan(a *App, replacement string) (*wsEditPlan
 		if r.line >= 0 && r.line < fe.tab.Buffer.LineCount() {
 			line = fe.tab.Buffer.LineRunes(r.line)
 		}
-		if r.col < 0 || r.col+r.width > len(line) ||
-			string(line[r.col:r.col+r.width]) != m.query {
+		if !editor.MatchesAt(line, r.col, m.query, m.opts) {
 			skipped++
 			continue
 		}

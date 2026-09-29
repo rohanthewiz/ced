@@ -31,6 +31,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/ced/internal/editor"
@@ -202,10 +203,38 @@ func (a *App) applyFindOptions() {
 	if tab == nil {
 		return
 	}
-	tab.SetFindOptions(editor.FindOptions{
-		CaseSensitive: a.findCase,
-		WholeWord:     a.findWord,
-	})
+	tab.SetFindOptions(a.findOptions())
+}
+
+// findOptions is the App's toggles as the matcher's struct — the ONE
+// place Aa / |W| turn into editor.FindOptions. The find bar, the Find-all
+// list and Find in project all read it, so a search narrowed in the bar
+// stays narrowed when it becomes a list; before they shared it, the
+// lists quietly matched a case-insensitive substring whatever the
+// toggles said.
+func (a *App) findOptions() editor.FindOptions {
+	return editor.FindOptions{CaseSensitive: a.findCase, WholeWord: a.findWord}
+}
+
+// findOptionsNote names the non-default options as a parenthetical —
+// " (match case, whole word)" — or "" under the defaults. The lists and
+// their "no occurrences" flashes carry it because they are the surfaces
+// that show a search WITHOUT the bar's lit toggles beside it: a list
+// opened from Esc-F, the ≡ menu or a right-click would otherwise be
+// narrower than the user thinks, with nothing on screen saying why.
+// Words rather than the Aa / |W| glyphs because it sits in prose.
+func findOptionsNote(opts editor.FindOptions) string {
+	var parts []string
+	if opts.CaseSensitive {
+		parts = append(parts, "match case")
+	}
+	if opts.WholeWord {
+		parts = append(parts, "whole word")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 // toggleFindCase flips case sensitivity and re-runs the search.

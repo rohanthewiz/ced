@@ -192,7 +192,7 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	if word := a.contextSearchWord(tab); word != "" {
 		items = append(items, editorContextItem{
 			label:   "Search project for \"" + word + "\"",
-			action:  func(app *App) { app.startProjectSearch(word) },
+			action:  func(app *App) { app.startProjectSearch(word, app.findOptions()) },
 			enabled: (*App).hasProjectSearch,
 		})
 	}

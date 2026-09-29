@@ -588,3 +588,36 @@ func TestDrawFindBar_ShowsToggleStates(t *testing.T) {
 		t.Error("bar does not show the Replace button")
 	}
 }
+
+// TestFindOptionsNote pins the parenthetical the lists and their miss
+// flashes carry: empty under the defaults, the options in toggle order
+// otherwise.
+func TestFindOptionsNote(t *testing.T) {
+	cases := []struct {
+		opts editor.FindOptions
+		want string
+	}{
+		{editor.FindOptions{}, ""},
+		{editor.FindOptions{CaseSensitive: true}, " (match case)"},
+		{editor.FindOptions{WholeWord: true}, " (whole word)"},
+		{editor.FindOptions{CaseSensitive: true, WholeWord: true}, " (match case, whole word)"},
+	}
+	for _, c := range cases {
+		if got := findOptionsNote(c.opts); got != c.want {
+			t.Errorf("findOptionsNote(%+v) = %q, want %q", c.opts, got, c.want)
+		}
+	}
+}
+
+// TestFindOptions_MirrorsTheToggles: findOptions is the one conversion
+// from the App's toggles to the matcher's struct.
+func TestFindOptions_MirrorsTheToggles(t *testing.T) {
+	a := &App{findCase: true}
+	if got := a.findOptions(); got != (editor.FindOptions{CaseSensitive: true}) {
+		t.Errorf("findOptions = %+v", got)
+	}
+	a.findCase, a.findWord = false, true
+	if got := a.findOptions(); got != (editor.FindOptions{WholeWord: true}) {
+		t.Errorf("findOptions = %+v", got)
+	}
+}

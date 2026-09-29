@@ -25,10 +25,11 @@
 //     reads as "that's all of them", which is the one wrong answer a
 //     search tool can give.
 //
-// Matching itself is delegated to editor.FindAll, so a project search and
-// an in-file search agree on what counts as a hit — case-insensitive
-// substring, every occurrence on a line, no overlaps. One matcher, two
-// callers; a second implementation here would drift.
+// Matching itself is delegated to editor.FindAllOpts, so a project search
+// and an in-file search agree on what counts as a hit — every occurrence
+// on a line, no overlaps, case-insensitive substring unless the caller
+// passes the find bar's match-case / whole-word options through. One
+// matcher, two callers; a second implementation here would drift.
 package search
 
 import (
@@ -67,11 +68,18 @@ type Hit struct {
 }
 
 // Options configures one search. The zero value is usable except for
-// Query: Limit and MaxFileBytes fall back to the defaults above.
+// Query: Limit and MaxFileBytes fall back to the defaults above, and the
+// zero FindOptions is the plain case-insensitive substring match.
+//
+// FindOptions is embedded rather than copied field by field so the
+// modifiers a project search understands can never be a subset of the
+// ones the in-file search understands: a new toggle added to the editor's
+// struct arrives here, and at the matcher, without this package changing.
 type Options struct {
 	Query        string
 	Limit        int
 	MaxFileBytes int64
+	editor.FindOptions
 }
 
 // Project searches every file in paths (relative to rootDir) and returns
@@ -111,7 +119,7 @@ func Project(rootDir string, paths []string, opts Options) (hits []Hit, truncate
 		go func() {
 			defer wg.Done()
 			for rel := range jobs {
-				found := searchFile(filepath.Join(rootDir, rel), opts.Query, maxBytes)
+				found := searchFile(filepath.Join(rootDir, rel), opts.Query, opts.FindOptions, maxBytes)
 				if len(found) == 0 {
 					continue
 				}
@@ -145,9 +153,9 @@ func Project(rootDir string, paths []string, opts Options) (hits []Hit, truncate
 	return out, false
 }
 
-// searchFile returns every hit in one file, or nothing if the file can't
-// or shouldn't be searched.
-func searchFile(path, query string, maxBytes int64) []Hit {
+// searchFile returns every hit in one file under match, or nothing if
+// the file can't or shouldn't be searched.
+func searchFile(path, query string, match editor.FindOptions, maxBytes int64) []Hit {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() || info.Size() > maxBytes {
 		return nil
@@ -157,7 +165,7 @@ func searchFile(path, query string, maxBytes int64) []Hit {
 		return nil
 	}
 	buf := editor.NewBuffer(string(data))
-	matches := editor.FindAll(buf, query)
+	matches := editor.FindAllOpts(buf, query, match)
 	if len(matches) == 0 {
 		return nil
 	}

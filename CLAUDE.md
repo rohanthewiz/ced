@@ -351,8 +351,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Filter box seeded with the query; the seed is INERT until edited.
 - Opening: only a single-line selection searches silently; otherwise
   prompt pre-filled (`findAllPromptSeed`), seed read BEFORE `openPrompt`.
+- Both lists match under the bar's `Aa`/`|W|` (`a.findOptions()`),
+  SNAPSHOTTED on `findAllModal.opts` at open (⟳, stale check, replace
+  plan, tints reuse it); non-default options named in the title
+  (`findOptionsNote`). Staleness = `editor.MatchesAt`, never a byte compare.
 - Project search: pure Go over the finder index, capped with the cap in
-  the title, matcher = `editor.FindAll`. Project mode does NOT preview on
+  the title, matcher = `editor.FindAllOpts` (`search.Options` embeds
+  `editor.FindOptions`). Project mode does NOT preview on
   keyboard walk; a single click jumps and keeps the list; tints recorded
   in `projFindTints` and removed by `clearProjectFindTints`. Always
   prompts (seeded). Labels truncate from the front. Leader Esc-P.

@@ -104,7 +104,7 @@ const blameAuthorMax = 10
 type blameLine struct {
 	Hash    string
 	Short   string
-	Author  string // given name, for the column
+	Author  string // given name (+ surname initial when shared), for the column
 	Full    string // the author name as git spells it, for the flash
 	Age     string // "3d", "8mo", "now"
 	Date    string // "9/23/26" — the bands style's absolute date
@@ -253,6 +253,7 @@ func parseBlamePorcelain(out []byte, now time.Time) []blameLine {
 			cur.summary = strings.TrimPrefix(raw, "summary ")
 		}
 	}
+	disambiguateBlameAuthors(lines)
 	return lines
 }
 
@@ -290,8 +291,9 @@ func shortHash(hash string) string {
 
 // blameGivenName trims an author to what the column can hold: the first
 // word of the name, elided if even that is too long. "Rohan Allison" is
-// "Rohan"; a team where that is ambiguous still has the full name one
-// click away.
+// "Rohan". It is the label for an author whose given name is theirs
+// alone in the file; disambiguateBlameAuthors re-labels the ones that
+// share it.
 func blameGivenName(author string) string {
 	author = strings.TrimSpace(author)
 	if author == "" {
@@ -301,6 +303,148 @@ func blameGivenName(author string) string {
 		author = author[:i]
 	}
 	return elide(author, blameAuthorMax)
+}
+
+// disambiguateBlameAuthors re-labels the authors whose column label
+// (their given name) collides with a DIFFERENT author's in the same
+// file, adding as much of the surname as tells them apart: "Rohan
+// Allison" and "Rohan Baker" become "Rohan A." and "Rohan B.".
+//
+// Why this rather than a surname-first column or a setting: a given
+// name is what a team calls itself, and it is unambiguous in most files
+// — so it stays the label, and the extra letters appear exactly where
+// the plain given name would have been a lie by omission. No knob, and
+// nothing to configure on the day a second Rohan joins.
+//
+// The scope is the WHOLE FILE, for decision 2's reason: labels that
+// depended on which lines were visible would re-letter an author as they
+// scrolled, and the column width (measured after this runs) would drift
+// with them. Uncommitted lines ("you") are never part of a collision.
+//
+// Two authors git spells identically are one name as far as this can
+// tell — there is nothing in the text to split them by — and stay alike.
+func disambiguateBlameAuthors(lines []blameLine) {
+	// label → the distinct full names wearing it, in first-seen order so
+	// the result never depends on map iteration.
+	byLabel := map[string][]string{}
+	var order []string
+	seen := map[string]bool{}
+	for _, b := range lines {
+		if !b.committed() || seen[b.Full] {
+			continue
+		}
+		seen[b.Full] = true
+		if byLabel[b.Author] == nil {
+			order = append(order, b.Author)
+		}
+		byLabel[b.Author] = append(byLabel[b.Author], b.Full)
+	}
+	relabel := map[string]string{} // full name → its new label
+	for _, label := range order {
+		fulls := byLabel[label]
+		if len(fulls) < 2 {
+			continue
+		}
+		for full, l := range blameSurnamedLabels(fulls) {
+			relabel[full] = l
+		}
+	}
+	if len(relabel) == 0 {
+		return
+	}
+	for i := range lines {
+		if !lines[i].committed() {
+			continue
+		}
+		if l, ok := relabel[lines[i].Full]; ok {
+			lines[i].Author = l
+		}
+	}
+}
+
+// blameSurnamedLabels labels a group of authors who share a given name,
+// growing the surname prefix one letter at a time until every label in
+// the group is distinct (or no longer prefix could help):
+//
+//	Rohan Allison, Rohan Baker   → "Rohan A.",  "Rohan B."
+//	Rohan Allison, Rohan Adams   → "Rohan Al.", "Rohan Ad."
+//	Rohan, Rohan Allison         → "Rohan",     "Rohan A."
+//	Ada Ng, Ada Nguyen           → "Ada Ng",    "Ada Ngu."
+//
+// A surname shown whole drops the dot — the dot says "abbreviated".
+// Every label fits blameAuthorMax: the given name is what gets elided to
+// make room, because the surname letters are the part doing the work.
+// The prefix stops growing once the given name would be squeezed below
+// two cells ("R…"), so a pathological pair ends up alike rather than
+// unreadable.
+func blameSurnamedLabels(fulls []string) map[string]string {
+	longest := 0
+	for _, full := range fulls {
+		if n := len([]rune(blameSurname(full))); n > longest {
+			longest = n
+		}
+	}
+	var out map[string]string
+	for k := 1; ; k++ {
+		out = make(map[string]string, len(fulls))
+		count := map[string]int{}
+		for _, full := range fulls {
+			l := blameSurnamedLabel(full, k)
+			out[full] = l
+			// Compared without the abbreviation dot: "Ada Ng" and "Ada
+			// Ng." are different strings but read as the same person.
+			count[strings.TrimSuffix(l, ".")]++
+		}
+		unique := true
+		for _, n := range count {
+			if n > 1 {
+				unique = false
+				break
+			}
+		}
+		// The next round's suffix is at most k+3 cells (space, k+1
+		// letters, dot); stop before that would squeeze the given name
+		// under two.
+		if unique || k >= longest || blameAuthorMax-(k+3) < 2 {
+			return out
+		}
+	}
+}
+
+// blameSurnamedLabel is one author's label with the first k letters of
+// their surname: the given name, a space, the letters, and a dot unless
+// the whole surname fit. A one-word name has no surname and keeps its
+// plain label.
+func blameSurnamedLabel(full string, k int) string {
+	sn := []rune(blameSurname(full))
+	if len(sn) == 0 {
+		return blameGivenName(full)
+	}
+	take := k
+	if take > len(sn) {
+		take = len(sn)
+	}
+	suffix := " " + string(sn[:take])
+	if take < len(sn) {
+		suffix += "."
+	}
+	budget := blameAuthorMax - runeLen(suffix)
+	if budget < 2 {
+		budget = 2
+	}
+	given := strings.Fields(full)[0]
+	return elide(given, budget) + suffix
+}
+
+// blameSurname is the LAST word of a multi-word name ("Rohan Allison" →
+// "Allison"), or "" for a one-word one. Last rather than second so a
+// middle name never stands in for the family name.
+func blameSurname(full string) string {
+	f := strings.Fields(full)
+	if len(f) < 2 {
+		return ""
+	}
+	return f[len(f)-1]
 }
 
 // relativeAge is a compact "how long ago": the column has room for a

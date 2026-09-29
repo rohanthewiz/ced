@@ -897,3 +897,107 @@ func TestBlameBandFG_KeepsTheThemesTextWhenItReads(t *testing.T) {
 		t.Fatalf("no band: fg = %v, want Text", got)
 	}
 }
+
+// blameAuthorsLines builds one committed line per full name, labelled
+// the way the parser labels them before disambiguation runs.
+func blameAuthorsLines(fulls ...string) []blameLine {
+	lines := make([]blameLine, len(fulls))
+	for i, full := range fulls {
+		lines[i] = blameLine{Hash: hashFor(i + 1), Author: blameGivenName(full), Full: full}
+	}
+	return lines
+}
+
+// blameLabels reads the column labels back out, in line order.
+func blameLabels(lines []blameLine) []string {
+	out := make([]string, len(lines))
+	for i, b := range lines {
+		out[i] = b.Author
+	}
+	return out
+}
+
+// TestDisambiguateBlameAuthors_SharedGivenNameGetsTheSurnameInitial is
+// N-033: two Rohans in one file were both "Rohan", which reads as one
+// person. Each now carries its surname initial, and an author whose
+// given name is theirs alone keeps the bare given name.
+func TestDisambiguateBlameAuthors_SharedGivenNameGetsTheSurnameInitial(t *testing.T) {
+	lines := blameAuthorsLines("Rohan Allison", "Ada Lovelace", "Rohan Baker", "Rohan Allison")
+	disambiguateBlameAuthors(lines)
+	want := []string{"Rohan A.", "Ada", "Rohan B.", "Rohan A."}
+	if got := blameLabels(lines); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("labels = %q, want %q", got, want)
+	}
+}
+
+// TestDisambiguateBlameAuthors_GrowsThePrefixUntilDistinct: a shared
+// initial is not a disambiguation, so the prefix grows; a surname shown
+// whole drops the dot, and "Ng" vs "Ng." is not allowed to count as
+// telling two people apart.
+func TestDisambiguateBlameAuthors_GrowsThePrefixUntilDistinct(t *testing.T) {
+	cases := []struct {
+		fulls []string
+		want  []string
+	}{
+		{[]string{"Rohan Allison", "Rohan Adams"}, []string{"Rohan Al.", "Rohan Ad."}},
+		{[]string{"Ada Ng", "Ada Nguyen"}, []string{"Ada Ng", "Ada Ngu."}},
+		// A one-word name has no surname to show; the other one moves.
+		{[]string{"Rohan", "Rohan Allison"}, []string{"Rohan", "Rohan A."}},
+		// Middle names are skipped: the LAST word is the family name.
+		{[]string{"Rohan J Allison", "Rohan Baker"}, []string{"Rohan A.", "Rohan B."}},
+	}
+	for _, c := range cases {
+		lines := blameAuthorsLines(c.fulls...)
+		disambiguateBlameAuthors(lines)
+		if got := blameLabels(lines); fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("%q → %q, want %q", c.fulls, got, c.want)
+		}
+	}
+}
+
+// TestDisambiguateBlameAuthors_LabelsFitTheColumn: the given name is
+// what gets elided to make room, so a long shared given name still
+// yields distinct labels no wider than the author slot.
+func TestDisambiguateBlameAuthors_LabelsFitTheColumn(t *testing.T) {
+	lines := blameAuthorsLines("Bartholomew Smith", "Bartholomew Jones")
+	disambiguateBlameAuthors(lines)
+	a, b := lines[0].Author, lines[1].Author
+	if a == b {
+		t.Fatalf("both labelled %q", a)
+	}
+	for _, l := range []string{a, b} {
+		if runeLen(l) > blameAuthorMax {
+			t.Errorf("%q is %d cells, over blameAuthorMax %d", l, runeLen(l), blameAuthorMax)
+		}
+	}
+	if !strings.HasSuffix(a, " S.") || !strings.HasSuffix(b, " J.") {
+		t.Errorf("labels %q / %q should end in the surname initials", a, b)
+	}
+}
+
+// TestDisambiguateBlameAuthors_LeavesUncommittedAndLoneNamesAlone: the
+// pass only touches real collisions — "you" (uncommitted) is never part
+// of one, and a file with no shared given name is returned unchanged.
+func TestDisambiguateBlameAuthors_LeavesUncommittedAndLoneNamesAlone(t *testing.T) {
+	lines := blameAuthorsLines("Rohan Allison", "Ada Lovelace")
+	lines = append(lines, blameLine{Hash: uncommittedHash, Author: "you", Full: "you"})
+	disambiguateBlameAuthors(lines)
+	want := []string{"Rohan", "Ada", "you"}
+	if got := blameLabels(lines); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("labels = %q, want %q", got, want)
+	}
+}
+
+// TestParseBlamePorcelain_DisambiguatesSharedGivenNames: the parser runs
+// the pass itself, so every caller (and newFileBlame's width, measured
+// afterwards) sees the final labels.
+func TestParseBlamePorcelain_DisambiguatesSharedGivenNames(t *testing.T) {
+	out := strings.Replace(blamePorcelain, "author Ada Lovelace", "author Rohan Baker", 1)
+	lines := parseBlamePorcelain([]byte(out), blameNow)
+	if lines[0].Author != "Rohan A." || lines[2].Author != "Rohan B." || lines[3].Author != "Rohan A." {
+		t.Fatalf("labels = %q", blameLabels(lines))
+	}
+	if lines[2].Full != "Rohan Baker" {
+		t.Fatalf("the full name must survive for the click flash, got %q", lines[2].Full)
+	}
+}

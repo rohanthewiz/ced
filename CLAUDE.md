@@ -573,7 +573,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (default) = date + author on EVERY line over a per-commit
   `LineAnnotation.BG` band, hue keyed by hash, adjacent runs never share
   a hue, text lifted to 4.5:1 by `blameBandFG`; `compact` = hash · name ·
-  age once per run. Switching style never turns the layer on.
+  age once per run. Switching style never turns the layer on. Author
+  label = given name; surname letters only where two authors in the
+  FILE share it (`disambiguateBlameAuthors`, in the parser) — no knob.
 - Git log (Esc-L): tool window; `--all`, capped 400; Actions picker
   (only `reset --hard` confirms); selection kept by hash; refresh rides
   `refreshGitStatus`.

@@ -121,12 +121,6 @@ plus the LSP work done in the seeding session itself
   or not). The list's filter box, the git log filter and the references
   filter have no history either — filters, not searches. Add if asked.
 
-- **N-033** · raised `2026-0929-1538-git-blame-dated-bands` · value low
-  Blame shows the author's GIVEN name (`blameGivenName`) in both styles;
-  the IDE look the bands style copies shows the surname ("Allison").
-  Switch, or make it a choice, if the first names prove ambiguous on a
-  team.
-
 - **N-034** · raised `2026-0929-1538-git-blame-dated-bands` · value low
   gofmt drift predating this session: `internal/app/hovermodal.go`,
   `internal/editor/tab.go` (the `mdView`/`MDScroll` field alignment) and
@@ -191,6 +185,16 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, `2026-0929-1740-blame-name-disambiguation` — **N-033** neither switch nor choice:
+  blame keeps the given name and adds surname letters only where two
+  different authors in the same file share it —
+  `disambiguateBlameAuthors`, run at the end of `parseBlamePorcelain`
+  over the whole file so labels (and the column width) never depend on
+  what is scrolled into view. "Rohan A." / "Rohan B.", the prefix grows
+  on a shared initial ("Rohan Al." / "Rohan Ad."), a whole surname drops
+  the dot, the given name is what gets elided to fit `blameAuthorMax`.
+  No config key, no ≡ row. Pinned by `TestDisambiguateBlameAuthors_*`
+  and `TestParseBlamePorcelain_DisambiguatesSharedGivenNames`.
 - closed 2026-09-29, `2026-0929-1726-readme-find-section` — **N-032** README `### Find in file`
   rewritten against the code: `Aa` / `|W|` (click, `Alt+c` / `Alt+w`, the
   ≡ Find rows), selection seeding, the replace row (`Esc e`, Tab, `Enter`

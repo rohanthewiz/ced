@@ -820,7 +820,7 @@ func TestHoverOpensModal(t *testing.T) {
 }
 
 // TestHoverLines pins the text flattening: fences stripped, blank
-// edges trimmed, and the cap with its ellipsis marker.
+// edges trimmed, and the row cap with its ellipsis marker.
 func TestHoverLines(t *testing.T) {
 	got := hoverLines("```go\nfunc F()\n```\n\ndocs here\n")
 	want := []string{"func F()", "", "docs here"}
@@ -833,17 +833,76 @@ func TestHoverLines(t *testing.T) {
 		}
 	}
 
+	// Blank-separated so each stays its own paragraph: 20 one-row lines
+	// plus 19 blanks is well past the row cap.
 	long := ""
 	for i := 0; i < 20; i++ {
-		long += fmt.Sprintf("line %d\n", i)
+		long += fmt.Sprintf("line %d\n\n", i)
 	}
 	capped := hoverLines(long)
-	if len(capped) != 13 || capped[12] != "…" {
+	if len(capped) != 16 || capped[15] != "…" {
 		t.Errorf("cap: got %d lines, last %q", len(capped), capped[len(capped)-1])
 	}
 
 	if hoverLines("  \n\t\n") != nil {
 		t.Error("whitespace-only hover should flatten to nothing")
+	}
+}
+
+// TestHoverLines_ReflowsProseParagraphs pins the fix for ragged hover
+// docs: a doc comment's source line breaks are soft, so a paragraph
+// arrives as one line for the tooltip to wrap — while fenced code,
+// lists, indented code and hard breaks keep their lines.
+func TestHoverLines_ReflowsProseParagraphs(t *testing.T) {
+	in := "```go\nfunc F(a int,\n\tb int)\n```\n\n" +
+		"First line of the doc\ncontinues here.\n\n" +
+		"- item one\n- item two\n\n" +
+		"    indented code\n    more code\n\n" +
+		"hard break  \nafter it\n" +
+		"1. ordered\n"
+	got := hoverLines(in)
+	want := []string{
+		"func F(a int,", "\tb int)", "",
+		"First line of the doc continues here.", "",
+		"- item one", "- item two", "",
+		"    indented code", "    more code", "",
+		"hard break", "after it",
+		"1. ordered",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("hoverLines =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestHoverLines_PlaintextKeepsTheSignatureApart pins the plaintext
+// shape gopls sends (ced asks for plaintext first): no fence, no blank
+// line between the signature and the doc. The signature and a type's
+// declaration body must survive as their own lines while the doc
+// paragraph still joins.
+func TestHoverLines_PlaintextKeepsTheSignatureApart(t *testing.T) {
+	got := hoverLines("func F(a int) (string, error)\nF decides which DAG\ncarries the id.\nhttps://pkg.go.dev/x#F")
+	want := []string{"func F(a int) (string, error)", "F decides which DAG carries the id.", "https://pkg.go.dev/x#F"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("func hover =\n%q\nwant\n%q", got, want)
+	}
+
+	got = hoverLines("type T struct {\n\tA int\n}\nT holds\nan A.")
+	want = []string{"type T struct {", "\tA int", "}", "T holds an A."}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("type hover =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestHoverLines_CutsAnOverlongParagraphAtARow pins the cap's other
+// half: one paragraph taller than the cap keeps the rows that fit and
+// marks the cut, rather than vanishing whole behind a lone "…".
+func TestHoverLines_CutsAnOverlongParagraphAtARow(t *testing.T) {
+	got := hoverLines(strings.Repeat("word ", 400))
+	if len(got) != 2 || got[1] != "…" {
+		t.Fatalf("hoverLines = %d lines, want the cut paragraph + …", len(got))
+	}
+	if rows := len(wrapTooltipLine([]rune(got[0]), hoverModalTextWidth)); rows != 15 {
+		t.Errorf("kept paragraph wraps to %d rows, want 15 (16-row cap less the marker)", rows)
 	}
 }
 

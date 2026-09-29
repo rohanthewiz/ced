@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-030**
+**Next ID: N-031**
 
 ## Open
 
@@ -119,6 +119,16 @@ plus the LSP work done in the seeding session itself
   (gitignored), nor the "No file open" placeholder's Recent files ·
   Recent locations links (added `2026-0928-1735-empty-editor-recent-links`).
   An instance of N-003.
+
+- **N-030** · raised `2026-0929-1249-hover-tooltip-wrap` · value low
+  Hover asks for PLAINTEXT first (`contentFormat: plaintext, markdown`),
+  so `hoverReflow` finds the signature/doc boundary by heuristic: the
+  text's first line is the header and never joins, and a line ending in
+  `{` `}` `;` never absorbs the next. A doc line that happens to end that
+  way stays unjoined (a short row, never a mangled signature), and a
+  plaintext signature gopls might split over lines would join its own
+  continuation. Requesting markdown would give real structure (fences,
+  blank-line sections) at the cost of rendering its escapes and links.
 
 ## Roadmap
 

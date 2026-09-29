@@ -319,9 +319,10 @@ func posLess(a, b editor.Position) bool {
 // vocabulary) with the source named at the end, since "which tool
 // said this" is often the first question about a warning.
 //
-// Messages are WRAPPED, not truncated: the tooltip exists to show the
-// text the gutter could not, and drawTooltipBox's ellipsis would cut the
-// clause that says what to do. Capped, with the cut marked.
+// Messages are WRAPPED here, under the glyph, rather than left to
+// drawTooltipBox's generic wrap: that one would hang continuation rows
+// flush left instead of under the message text. Capped, with the cut
+// marked.
 func diagTipLines(diags []lsp.Diagnostic) []string {
 	ds := append([]lsp.Diagnostic(nil), diags...)
 	sort.SliceStable(ds, func(i, j int) bool {

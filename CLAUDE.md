@@ -380,6 +380,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   - References: generation-checked (`refSeq`); context read off-loop,
     reconciled on-loop preferring open buffers; sorted before capped;
     `includeDeclaration` true; 30s timeout.
+  - Hover / every tooltip box: lines WRAP (`tooltipLayout`, shared by
+    measure and paint), the box grows DOWN, never wider than
+    `hoverModalMaxWidth`; too tall for either side of the anchor →
+    `tooltipPlace` shortens it and the painter ends in `…`.
+    `hoverReflow` re-joins prose soft breaks; plaintext's first line is
+    the header and never joins. `hoverLines` caps in wrapped ROWS (16).
   - Signature help: MANUAL only (a modal would eat keystrokes); label
     hard-wrapped for exact offsets; active param's doc first.
   - Progress: status-bar segment, token SET, `lspLoadingNote` on empty

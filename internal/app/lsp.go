@@ -865,20 +865,21 @@ func (a *App) handleLSPHover(e *lspHoverEvent) {
 
 // hoverLines flattens hover text for the modal: markdown code fences
 // dropped (the modal is monospace already — fence markers are pure
-// noise), trailing blank lines trimmed, and length capped so a huge
-// doc comment can't swallow the screen.
+// noise), prose paragraphs re-joined (hoverReflow), trailing blank lines
+// trimmed, and length capped so a huge doc comment can't swallow the
+// screen.
+//
+// The cap counts ROWS as the tooltip will wrap them at its widest
+// (hoverModalTextWidth), not source lines: once a paragraph is one long
+// line, "12 lines" would say nothing about how tall the box gets. A
+// paragraph that straddles the cap is cut at a row boundary, so the
+// reader keeps every row that fit rather than losing the whole thing.
 func hoverLines(text string) []string {
-	const maxLines = 12
+	const maxRows = 16
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	var out []string
-	for _, ln := range strings.Split(text, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(ln), "```") {
-			continue
-		}
-		out = append(out, strings.TrimRight(ln, " \t"))
-	}
+	out := hoverReflow(strings.Split(text, "\n"))
 	// Trim leading/trailing blanks left behind by dropped fences.
 	for len(out) > 0 && out[0] == "" {
 		out = out[1:]
@@ -886,10 +887,110 @@ func hoverLines(text string) []string {
 	for len(out) > 0 && out[len(out)-1] == "" {
 		out = out[:len(out)-1]
 	}
-	if len(out) > maxLines {
-		out = append(out[:maxLines], "…")
+
+	segs := make([][]tooltipSeg, len(out))
+	total := 0
+	for i, ln := range out {
+		segs[i] = wrapTooltipLine([]rune(ln), hoverModalTextWidth)
+		total += len(segs[i])
+	}
+	if total <= maxRows {
+		return out
+	}
+	// Cutting: one row is reserved for the marker, so the budget for
+	// text is a row short — and an over-long first line still leaves
+	// room to say it was cut.
+	budget, rows := maxRows-1, 0
+	for i, ln := range out {
+		if rows+len(segs[i]) <= budget {
+			rows += len(segs[i])
+			continue
+		}
+		kept := out[:i:i]
+		if fit := budget - rows; fit > 0 {
+			kept = append(kept, string([]rune(ln)[:segs[i][fit-1].end]))
+		}
+		return append(kept, "…")
+	}
+	return out // unreachable: total > maxRows means some line overflows
+}
+
+// hoverReflow drops fence markers and re-joins the soft line breaks of
+// markdown prose. Servers hand doc comments over with the SOURCE's line
+// breaks (gopls: ~70 columns), which in markdown are soft — the
+// paragraph is one unit. Wrapped again at the tooltip's narrower width
+// each of those breaks would leave an orphan row of one or two words:
+//
+//	source (70 cols)                 tooltip (62 cols), not reflowed
+//	"…to textW columns and carries any"  → "…to textW columns and"
+//	"emphasis runs along onto the rows…"   "carries any"          ← orphan
+//	                                       "emphasis runs along…"
+//
+// Only plain prose joins. Anything whose line shape carries meaning is
+// kept as-is: fenced code (the signature), indented code, list items,
+// headings, quotes, tables, and a markdown hard break (a line ending in
+// two spaces or a backslash).
+//
+// PLAINTEXT hover (what ced asks for first) has no fence and no blank
+// line between the signature and the doc — gopls separates its sections
+// with a single newline. So the text's first line, when it is not
+// fenced, is taken to be the header and never absorbs the next line; and
+// a line ending like code (`{`, `}`, `;` — a type declaration's body)
+// never absorbs one either. A doc line that happens to end that way just
+// stays unjoined, which costs a short row, never a mangled signature.
+func hoverReflow(src []string) []string {
+	var out []string
+	inFence := false
+	joinable := false // may the next prose line join out[len(out)-1]?
+	for _, raw := range src {
+		header := len(out) == 0 // first line of the text, fenced or not
+		if strings.HasPrefix(strings.TrimSpace(raw), "```") {
+			inFence = !inFence
+			joinable = false
+			continue
+		}
+		ln := strings.TrimRight(raw, " \t")
+		if inFence {
+			out = append(out, ln)
+			continue
+		}
+		prose := hoverIsProse(ln)
+		if prose && joinable {
+			out[len(out)-1] += " " + ln
+		} else {
+			out = append(out, ln)
+		}
+		hardBreak := strings.HasSuffix(raw, "  ") || strings.HasSuffix(ln, "\\")
+		codeEnd := strings.HasSuffix(ln, "{") || strings.HasSuffix(ln, "}") || strings.HasSuffix(ln, ";")
+		joinable = prose && !hardBreak && !codeEnd && !header
 	}
 	return out
+}
+
+// hoverIsProse reports whether a markdown line is plain paragraph text —
+// the only kind hoverReflow will join to its neighbour. Blank lines end
+// a paragraph; leading whitespace means indented code or a list item's
+// body; the rest are block markers whose line breaks are the structure.
+func hoverIsProse(ln string) bool {
+	if ln == "" || ln[0] == ' ' || ln[0] == '\t' {
+		return false
+	}
+	// A bare URL (gopls' plaintext pkg.go.dev link) is its own line: glued
+	// onto the doc's last sentence it would read as part of it.
+	for _, p := range []string{"#", ">", "|", "- ", "* ", "+ ", "---", "===", "http://", "https://"} {
+		if strings.HasPrefix(ln, p) {
+			return false
+		}
+	}
+	// Ordered list item: digits then ". " or ") ".
+	i := 0
+	for i < len(ln) && ln[i] >= '0' && ln[i] <= '9' {
+		i++
+	}
+	if i > 0 && i+1 < len(ln) && (ln[i] == '.' || ln[i] == ')') && ln[i+1] == ' ' {
+		return false
+	}
+	return true
 }
 
 // -----------------------------------------------------------------------------

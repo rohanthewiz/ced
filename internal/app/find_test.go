@@ -581,7 +581,7 @@ func TestDrawFindBar_ShowsToggleStates(t *testing.T) {
 	if !screenHasText(t, a, "|W|") {
 		t.Error("bar does not show the whole-word button")
 	}
-	if !screenHasText(t, a, "Repl:") {
+	if !screenHasText(t, a, "Repl▾") {
 		t.Error("bar does not show the replace row's label")
 	}
 	if !screenHasText(t, a, "Replace") {

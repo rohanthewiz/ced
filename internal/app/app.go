@@ -1342,6 +1342,10 @@ type App struct {
 	findFocus       int
 	findField       textField
 	replField       textField
+	// findHist is the bar's history dropdown (searchhistory.go), open
+	// over whichever row its kind names: the Find row for find history,
+	// the Repl row for replacements. Closed with the bar.
+	findHist histDrop
 
 	// Search modifiers. The App holds the authoritative copy (the tabs
 	// get a pushed copy via applyFindOptions) because they describe how
@@ -1916,6 +1920,9 @@ func (a *App) Close() {
 	// both exits (a plain quit and a folder switch), so recording here
 	// means neither path has to remember to. See folder.go.
 	a.recordSession()
+	// A find bar still open at exit holds a search the user ran; it joins
+	// the history before the write below.
+	a.rememberFindBar()
 	// The repository's history is written on the same exit, for the same
 	// reason (recentlocations.go). Its own file, so recordSession's early
 	// return without a session store must not skip it.
@@ -3164,6 +3171,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		}
 		a.updateMenuHover(x, y)
 		a.handleMenuMouse(x, y, btn)
+		return
+	}
+
+	// The find bar's history dropdown is drawn over the editor and any
+	// panel beside it, so it hears the pointer before any of them. It
+	// claims only what lands on it; a press outside closes it and falls
+	// through. See searchhistory.go.
+	if a.dragMode == "" && a.findHistMouse(x, y, btn) {
 		return
 	}
 
@@ -5003,6 +5018,12 @@ func (a *App) draw() {
 	// handleGitCommitReceipt declines to open under either, since a
 	// receipt nobody can see would expire unread.
 	a.drawCommitReceipt()
+
+	// The find bar's history dropdown. Here rather than beside the bar
+	// because it reaches up over the editor and the panels drawn after
+	// the bar; still below the menu and modals, whose opening closes the
+	// bar and the list with it.
+	a.drawFindHist()
 
 	// Overlay layer. The menu and the active modal are mutually
 	// exclusive (closeAllModals enforces it), so at most one of these

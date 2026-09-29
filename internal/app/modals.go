@@ -44,6 +44,10 @@ const (
 func (a *App) closeAllModals() {
 	a.menuOpen = false
 	a.modal = nil
+	// The find bar goes too, so its query is remembered on the way out —
+	// the same record closeFind makes (see rememberFindBar).
+	a.rememberFindBar()
+	a.findHist = histDrop{}
 	a.findOpen = false
 	a.findReplaceOpen = false
 	a.findFocus = findFocusQuery
@@ -175,6 +179,26 @@ type promptModal struct {
 	// beside it. Empty slice = no buttons, and the modal is exactly what
 	// it always was.
 	extras []promptExtra
+
+	// histKind names the search history this prompt offers under its
+	// field (searchhistory.go); empty means none, and the prompt is
+	// exactly what it always was. hist is that dropdown's state.
+	histKind string
+	hist     histDrop
+}
+
+// openSearchPrompt is openPrompt for a prompt that asks for a SEARCH:
+// the field gets a ▾ and Up opens kind's recent entries under it. The
+// callback is unchanged — the search records itself where it runs, so
+// the prompt only has to offer the list.
+func (a *App) openSearchPrompt(title, hint, initial, kind string, callback func(*App, string)) {
+	a.openModal(&promptModal{
+		title:    title,
+		hint:     hint,
+		field:    newTextField(initial),
+		callback: callback,
+		histKind: kind,
+	})
 }
 
 // openPrompt shows a single-line text input modal. title is the heading,
@@ -223,6 +247,21 @@ func (m *promptModal) submit(a *App) {
 // everything else is standard single-line editing handled by the shared
 // textField.
 func (m *promptModal) handleKey(a *App, ev *tcell.EventKey) {
+	// The history dropdown hears keys first while it is open; a key it
+	// hands back (it has closed) carries on as if it never opened.
+	if m.hist.open {
+		consumed, v, picked := a.histDropKey(&m.hist, m.histGeom(a), ev)
+		if picked {
+			m.field = newTextField(v)
+		}
+		if consumed {
+			return
+		}
+	}
+	if ev.Key() == tcell.KeyUp && m.histKind != "" {
+		m.openHist(a)
+		return
+	}
 	if ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune && m.fireExtraKey(a, ev.Rune()) {
 		return
 	}
@@ -286,6 +325,32 @@ func (m *promptModal) extraRects(a *App) []btnRect {
 	return rects
 }
 
+// histBtnRect is the ▾ that opens the history dropdown: the cell just
+// right of the field, plus the margin cell beside it so the target is
+// two cells wide. Zero when the prompt has no history.
+func (m *promptModal) histBtnRect(a *App) btnRect {
+	if m.histKind == "" {
+		return btnRect{}
+	}
+	fy, _, end := m.fieldSpan(a)
+	return btnRect{x: end, y: fy, w: 2}
+}
+
+// histGeom lays the dropdown out under the field — the one geometry
+// draw, keys and the mouse share. It prefers DOWN: a centered prompt
+// has the lower half of the screen free, and the list then reads in the
+// order it is stored, newest on top.
+func (m *promptModal) histGeom(a *App) histGeom {
+	fy, start, end := m.fieldSpan(a)
+	return a.histDropGeom(&m.hist, btnRect{x: start, y: fy, w: end - start + 1})
+}
+
+// openHist opens the dropdown on this prompt's history, highlighting the
+// field's current text when it is already an entry.
+func (m *promptModal) openHist(a *App) {
+	a.openHistDrop(&m.hist, m.histKind, m.field.String(), false)
+}
+
 // fieldSpan returns the input row and its [start, end) columns.
 func (m *promptModal) fieldSpan(a *App) (y, start, end int) {
 	mx, my, mw, _ := m.rect(a)
@@ -296,12 +361,29 @@ func (m *promptModal) fieldSpan(a *App) (y, start, end int) {
 // Clicks on OK / Cancel run the corresponding action; clicks outside the
 // modal cancel; clicks on the input field reposition the cursor.
 func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
+	// The history dropdown can hang past the prompt's box, so it is asked
+	// before the outside-click-cancels rule below would dismiss the whole
+	// prompt for a click on one of its rows. A click it hands back has
+	// closed it and is then routed as if it had never been open.
+	if m.hist.open {
+		consumed, v, picked := a.histDropMouse(&m.hist, m.histGeom(a), x, y, btn)
+		if picked {
+			m.field = newTextField(v)
+		}
+		if consumed {
+			return
+		}
+	}
 	if btn&tcell.Button1 == 0 {
 		return
 	}
 	mx, my, mw, mh := m.rect(a)
 	if x < mx || x >= mx+mw || y < my || y >= my+mh {
 		a.closeModal()
+		return
+	}
+	if m.histBtnRect(a).contains(x, y) {
+		m.openHist(a)
 		return
 	}
 	cancel, ok := m.buttons(a)
@@ -390,6 +472,16 @@ func (m *promptModal) draw(a *App) {
 	fy, start, end := m.fieldSpan(a)
 	inputStyle := tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Text)
 	m.field.draw(a.screen, fy, start, end, inputStyle, true)
+	if m.histKind != "" {
+		// The ▾ sits on the field's own background so the pair reads as
+		// one combo box, and the hint row names its key — right-aligned,
+		// and only when the caller's hint leaves room for it.
+		b := m.histBtnRect(a)
+		drawAt(a.screen, b.x, b.y, "▾", tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Muted))
+		if tip := "↑ recent"; runeLen(m.hint)+runeLen(tip)+3 <= mw-4 {
+			drawAt(a.screen, mx+mw-2-runeLen(tip), my+3, tip, c.muted)
+		}
+	}
 
 	cancel, ok := m.buttons(a)
 	drawButton(a.screen, cancel.x, cancel.y, "[ Cancel ]", c.bg, a.theme.Text, false)
@@ -399,6 +491,10 @@ func (m *promptModal) draw(a *App) {
 		// differ in length ("[trailer: on]" / "[trailer: off]") leaves
 		// no stale cell behind when it shortens.
 		drawButton(a.screen, r.x, r.y, padTo(m.extras[i].label(a), r.w), c.bg, a.theme.AccentSoft, false)
+	}
+	// Last, so the list covers the buttons it hangs over.
+	if m.hist.open {
+		a.drawHistDrop(&m.hist, m.histGeom(a))
 	}
 }
 

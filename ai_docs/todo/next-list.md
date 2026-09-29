@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-031**
+**Next ID: N-033**
 
 ## Open
 
@@ -129,6 +129,18 @@ plus the LSP work done in the seeding session itself
   plaintext signature gopls might split over lines would join its own
   continuation. Requesting markdown would give real structure (fences,
   blank-line sections) at the cost of rendering its escapes and links.
+
+- **N-031** · raised `2026-0929-1318-search-history-dropdown` · value low
+  The Find-all list's replace box RECORDS into the replacement history
+  but has no dropdown of its own (it sits in a narrow shared row, pinned
+  or not). The list's filter box, the git log filter and the references
+  filter have no history either — filters, not searches. Add if asked.
+
+- **N-032** · raised `2026-0929-1318-search-history-dropdown` · value low
+  README `### Find in file` is stale beyond this session's bullet: it
+  still says there is no whole-word or case-sensitive toggle (the bar has
+  `Aa` / `|W|`) and never mentions the replace row, ↓ list-all, or Find
+  in project. An instance of N-003.
 
 ## Roadmap
 

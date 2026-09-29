@@ -34,6 +34,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/history"
 )
 
 // findBarHeight is the cell height of ONE row of the find bar. Layout
@@ -133,6 +134,8 @@ func (a *App) openReplace() {
 // after a closed bar simply re-opens it so the user can type a fresh
 // query.
 func (a *App) closeFind() {
+	a.rememberFindBar()
+	a.findHist = histDrop{}
 	a.findOpen = false
 	a.findReplaceOpen = false
 	a.findFocus = findFocusQuery
@@ -141,6 +144,20 @@ func (a *App) closeFind() {
 	if tab := a.activeTabPtr(); tab != nil {
 		tab.ClearFind()
 	}
+}
+
+// rememberFindBar records the bar's query in the find history as the bar
+// goes away. Closing is the one moment every use of the bar passes
+// through — typing a query, reading the hits and pressing Esc is the
+// commonest search there is, and it never presses Enter — so recording
+// here is what makes the history hold what was actually searched. Enter
+// records too (handleFindKey), so a query stepped through and then
+// edited is not lost to the edit.
+func (a *App) rememberFindBar() {
+	if !a.findOpen {
+		return
+	}
+	a.recordSearch(history.SearchFind, a.findField.String())
 }
 
 // findBarRows is the bar's total height: one row for find, two once the
@@ -228,7 +245,19 @@ func (a *App) replaceCurrent() {
 	}
 	if !tab.ReplaceCurrent(a.replField.String()) {
 		a.flash("Nothing to replace")
+		return
 	}
+	a.rememberReplace()
+}
+
+// rememberReplace records the pair a replace just used: the query in the
+// find history and the replacement in its own. Only a replace that DID
+// something records — a button pressed on a bar with no hits changed
+// nothing worth recalling. An empty replacement (delete every hit) is
+// refused by the history itself: a blank row cannot be picked by eye.
+func (a *App) rememberReplace() {
+	a.recordSearch(history.SearchFind, a.findField.String())
+	a.recordSearch(history.SearchReplace, a.replField.String())
 }
 
 // replaceAll swaps every hit in one undo step and reports the count —
@@ -244,6 +273,7 @@ func (a *App) replaceAll() {
 		a.flash("Nothing to replace")
 		return
 	}
+	a.rememberReplace()
 	a.flash("Replaced " + plural(n, "occurrence", "occurrences"))
 }
 
@@ -392,12 +422,97 @@ func (a *App) findFieldSpan(field int) (y, start, end int) {
 }
 
 // findBarLabel names a row. Same rune width for both so the two inputs
-// start in the same column and the bar reads as a form.
+// start in the same column and the bar reads as a form. The ▾ in place of
+// the colon marks the label as the row's history button
+// (findHistBtnRect): the label is the one part of the row that is not
+// already something else, so the button costs the input no width.
 func findBarLabel(field int) string {
 	if field == findFocusReplace {
-		return " Repl: "
+		return " Repl▾ "
 	}
-	return " Find: "
+	return " Find▾ "
+}
+
+// findHistBtnRect is a row's history button — its whole label, so the
+// target is the width of a word rather than the one ▾ cell.
+func (a *App) findHistBtnRect(field int) btnRect {
+	bx, by, _, _ := a.findBarRect()
+	if field == findFocusReplace {
+		by += findBarHeight
+	}
+	return btnRect{x: bx, y: by, w: runeLen(findBarLabel(field))}
+}
+
+// findHistField names the row the open dropdown belongs to, from the
+// list it shows.
+func (a *App) findHistField() int {
+	if a.findHist.kind == history.SearchReplace {
+		return findFocusReplace
+	}
+	return findFocusQuery
+}
+
+// findHistGeom lays the bar's dropdown out against its row's input — the
+// one geometry the draw, the keys and the mouse all read. The anchor row
+// is the bar's TOP whichever row the list belongs to, so the replacement
+// list opens above the Find row instead of covering the query it is
+// about to be paired with.
+func (a *App) findHistGeom() histGeom {
+	_, start, end := a.findFieldSpan(a.findHistField())
+	_, by, _, _ := a.findBarRect()
+	return a.histDropGeom(&a.findHist, btnRect{x: start, y: by, w: end - start})
+}
+
+// openFindHist opens the dropdown over field's row and gives that row the
+// keyboard — the pick lands in it, so it should be where typing goes
+// after. It opens UPWARD by preference: the bar hugs the bottom of the
+// editor, and below it is the status bar or a docked panel.
+func (a *App) openFindHist(field int) {
+	a.findFocus = field
+	kind, cur := history.SearchFind, a.findField.String()
+	if field == findFocusReplace {
+		kind, cur = history.SearchReplace, a.replField.String()
+	}
+	a.openHistDrop(&a.findHist, kind, cur, true)
+}
+
+// findHistPick puts a picked entry in field's input and gives that row the
+// keyboard. field is passed in rather than read from the dropdown because
+// a pick has already closed (and so zeroed) it. A picked query is searched
+// at once, exactly as if it had been typed — the bar's contract is that
+// what is in the Find box is what is highlighted.
+func (a *App) findHistPick(field int, v string) {
+	a.findFocus = field
+	if field == findFocusReplace {
+		a.replField = newTextField(v)
+		return
+	}
+	a.findField = newTextField(v)
+	a.findApplyQuery()
+}
+
+// findHistMouse routes a mouse event to the bar's open dropdown, reporting
+// whether it claimed it. The router asks this before any panel: the list
+// is drawn over the editor and whatever is docked beside it.
+func (a *App) findHistMouse(x, y int, btn tcell.ButtonMask) bool {
+	if !a.findOpen || !a.findHist.open {
+		return false
+	}
+	g := a.findHistGeom()
+	field := a.findHistField()
+	consumed, v, picked := a.histDropMouse(&a.findHist, g, x, y, btn)
+	if picked {
+		a.findHistPick(field, v)
+	}
+	return consumed
+}
+
+// drawFindHist paints the bar's dropdown. Called from the overlay layer,
+// not from drawFindBar: the list covers panels drawn after the bar.
+func (a *App) drawFindHist() {
+	if a.findOpen && a.findHist.open {
+		a.drawHistDrop(&a.findHist, a.findHistGeom())
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -412,6 +527,8 @@ func findBarLabel(field int) string {
 //	Shift+Enter             jump to the previous match
 //	Enter (replace row)     replace this hit and advance
 //	Tab / Shift+Tab         move between the query and replace inputs
+//	Up                      recent searches / replacements for the
+//	                        focused row (searchhistory.go)
 //	Down                    list every occurrence (findall.go)
 //	Alt+c / Alt+w           toggle match case / whole word
 //	Alt+a                   replace all
@@ -423,6 +540,18 @@ func findBarLabel(field int) string {
 // keyboard, so handleKey's Alt+rune leader branch never sees them —
 // including inside tmux, where "Esc c" arrives folded as Alt+c.
 func (a *App) handleFindKey(ev *tcell.EventKey) {
+	// An open history dropdown hears the key first; one it hands back
+	// (it has closed) carries on through the bar as if it never opened.
+	if a.findHist.open {
+		field := a.findHistField()
+		consumed, v, picked := a.histDropKey(&a.findHist, a.findHistGeom(), ev)
+		if picked {
+			a.findHistPick(field, v)
+		}
+		if consumed {
+			return
+		}
+	}
 	if ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune {
 		switch ev.Rune() {
 		case 'c':
@@ -452,9 +581,13 @@ func (a *App) handleFindKey(ev *tcell.EventKey) {
 		} else {
 			a.findNext()
 		}
+		a.recordSearch(history.SearchFind, a.findField.String())
 		return
 	case tcell.KeyTab, tcell.KeyBacktab:
 		a.findSwitchField()
+		return
+	case tcell.KeyUp:
+		a.openFindHist(a.findFocus)
 		return
 	case tcell.KeyDown:
 		// Down out of a one-line input means "show me the rest" — the
@@ -509,6 +642,21 @@ func (a *App) findBarPress(x, y int) bool {
 	case a.findCaseRect().contains(x, y):
 		a.toggleFindCase()
 		return true
+	}
+	for _, field := range []int{findFocusQuery, findFocusReplace} {
+		if field == findFocusReplace && !a.findReplaceOpen {
+			continue
+		}
+		if a.findHistBtnRect(field).contains(x, y) {
+			// A second click on the same label puts the list away, the
+			// way a dropdown's own button does.
+			if a.findHist.open && a.findHistField() == field {
+				a.findHist = histDrop{}
+				return true
+			}
+			a.openFindHist(field)
+			return true
+		}
 	}
 	if a.findReplaceOpen {
 		switch {
@@ -583,9 +731,9 @@ func (a *App) drawFindBar() {
 	// hold it, walking leftwards from the toggles.
 	rightEdge := a.findCaseRect().x
 	counter := a.findCounterText()
-	hint := " Enter: next · ⇧Enter: prev · ↓: list all · Esc: close "
+	hint := " Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: close "
 	if a.findReplaceOpen {
-		hint = " Enter: replace · alt+a: all · tab: field · Esc: close "
+		hint = " Enter: replace · alt+a: all · ↑: recent · tab: field · Esc: close "
 	}
 	inputStart := bx + runeLen(findBarLabel(findFocusQuery))
 	if counter != "" && rightEdge-runeLen(counter)-2 > inputStart+8 {

@@ -64,6 +64,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/history"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
@@ -255,7 +256,7 @@ func (a *App) openFindAll() {
 	// (Argument evaluation order already guarantees this; the local makes
 	// the dependency visible so a later refactor can't quietly break it.)
 	seed := a.findAllPromptSeed()
-	a.openPrompt("Find all in file", "lists every occurrence", seed, func(app *App, v string) {
+	a.openSearchPrompt("Find all in file", "lists every occurrence", seed, history.SearchFind, func(app *App, v string) {
 		app.showFindAll(v)
 	})
 }
@@ -337,6 +338,10 @@ func (a *App) showFindAll(query string) {
 	if tab == nil || tab.IsImage() || tab.Buffer == nil || query == "" {
 		return
 	}
+	// Remembered before the miss check: a query with no hits in THIS
+	// file is often the one wanted in the next file, or across the
+	// project a moment later (searchhistory.go).
+	a.recordSearch(history.SearchFind, query)
 	matches := editor.FindAll(tab.Buffer, query)
 	if len(matches) == 0 {
 		a.flash(fmt.Sprintf("Find all: no occurrences of %q in this file", query))
@@ -1800,6 +1805,9 @@ func (m *findAllModal) confirmReplace(a *App) {
 	wasPinned := m.pinned
 	a.openConfirm("Replace in results", msg, func(app *App) {
 		if ok, _ := app.commitWorkspaceEdit(plan); ok {
+			// Only a replacement that landed is worth recalling — the
+			// find bar's rule (rememberReplace).
+			app.recordSearch(history.SearchReplace, replacement)
 			// The rows this list held now describe text that no longer
 			// exists. Re-running is the honest refresh — and for the
 			// unpinned modal the confirm displaced, reopening it on

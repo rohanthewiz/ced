@@ -155,7 +155,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   rather than dimming or hiding, when the fix is something the user can
   do (install a binary, export $EDITOR, create favorites.json).
 - **Choose-one-from-a-list UIs reuse `openPicker`** (palette). Only
-  exception: the Find-all list (a live-preview peek).
+  exceptions: the Find-all list (a live-preview peek) and the search
+  history dropdown (it fills a field the modal slot would tear down).
 - **Single modal slot** (`App.modal`, `openModal`). Implement the
   `modal` interface; button geometry in ONE method returning `btnRect`s
   used by both draw and hit-test; single-line input = `textField`. Don't
@@ -317,6 +318,20 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `ApplyMultiEdit`; ReplaceCurrent advances past what it wrote.
 - Go to line clamps and parses `file:line:col`. Leaders: Esc-j goto,
   Esc-e replace.
+
+### Search history (history/searches.go, app/searchhistory.go)
+- Lists per KIND (`find` shared by find bar / Find all / Find in
+  project; `replace`; `symbol`), MRU, exact dedupe, `MaxSearches` 25,
+  in `.ced/history.bytdb` (`search_history`, same add-don't-overwrite
+  write as recent files). Recorded where a search RUNS (`showFindAll`,
+  `startProjectSearch`, `startWorkspaceSymbols`, find bar Enter/close,
+  successful replaces), never in the prompt.
+- ONE dropdown (`histDrop`, geometry only via `histDropGeom`): Up or
+  the ▾ opens; arrows move visually; Enter/Tab/click FILLS, never
+  submits; Delete/× forgets; any other key closes and is typed. Find bar
+  = `Find▾`/`Repl▾` labels, list above the whole bar; prompts =
+  `openSearchPrompt`. A pick must be told its field — the drop has
+  already zeroed itself.
 
 ### Find-all list + project search (app/findall.go, projectsearch.go, internal/search)
 - A PEEK, not a picker: moving the highlight moves the cursor live, Esc

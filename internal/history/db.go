@@ -43,7 +43,8 @@
 // rewrites the file. btypedb compacts on its own only past 32MB, and only
 // from a long-lived engine — neither ever happens here. The live set is
 // capped (MaxFolders rows + MaxRecentFiles rows ≈ 45KB at worst, measured
-// with deep paths) while each write appends ~2.6KB, so left alone the file
+// with deep paths; the three search lists add at most 3 × MaxSearches ×
+// MaxSearchBytes ≈ 38KB more, and typically a few hundred bytes) while each write appends ~2.6KB, so left alone the file
 // would grow by the session forever. A write therefore ends with a VACUUM
 // once the file passes compactAbove:
 //
@@ -60,7 +61,12 @@
 //
 //	folder_use(path PK, hits, last)  — path relative to the repo
 //	recent_files(path PK, last)      — relative inside, absolute outside
-//	history_meta(k PK, v)            — 'folder_seq', 'file_seq'
+//	search_history(k PK, last)       — k = "<kind>:<text>" (searches.go)
+//	history_meta(k PK, v)            — 'folder_seq', 'file_seq', 'search_seq'
+//
+// Searches follow the recent-file recipe exactly: touched entries are
+// re-stamped from their counter in list order, oldest first, and each
+// kind is trimmed to its newest MaxSearches after the merge.
 
 package history
 
@@ -98,6 +104,7 @@ const (
 const (
 	folderSeqKey = "folder_seq"
 	fileSeqKey   = "file_seq"
+	searchSeqKey = "search_seq"
 )
 
 // compactAbove is the file size past which a write ends with a VACUUM —
@@ -115,6 +122,10 @@ var schema = []string{
 	)`,
 	`CREATE TABLE IF NOT EXISTS recent_files (
 		path TEXT PRIMARY KEY,
+		last BIGINT NOT NULL
+	)`,
+	`CREATE TABLE IF NOT EXISTS search_history (
+		k TEXT PRIMARY KEY,
 		last BIGINT NOT NULL
 	)`,
 	`CREATE TABLE IF NOT EXISTS history_meta (
@@ -274,7 +285,44 @@ func (h *History) load(db *sql.DB) error {
 		}
 		h.files = append(h.files, h.decodeFile(r.path))
 	}
+	return h.loadSearches(db)
+}
+
+// loadSearches reads the search lists (searches.go).
+func (h *History) loadSearches(db *sql.DB) error {
+	var err error
+	if h.searchSeq, err = readSeq(db, searchSeqKey); err != nil {
+		return err
+	}
+	rows, err := readSearchRows(db)
+	if err != nil {
+		return err
+	}
+	h.loadSearchRows(rows)
 	return nil
+}
+
+// readSearchRows reads every stored search row, unordered.
+func readSearchRows(q interface {
+	Query(string, ...any) (*sql.Rows, error)
+}) ([]searchRow, error) {
+	rows, err := q.Query(`SELECT k, last FROM search_history`)
+	if err != nil {
+		return nil, fmt.Errorf("read searches: %w", err)
+	}
+	defer rows.Close()
+	var out []searchRow
+	for rows.Next() {
+		var r searchRow
+		if err := rows.Scan(&r.key, &r.last); err != nil {
+			return nil, fmt.Errorf("read search row: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read searches: %w", err)
+	}
+	return out, nil
 }
 
 // Write adds the pending changes to the database at dbPath in one
@@ -302,6 +350,9 @@ func (h *History) Write(dbPath string, ring []string) error {
 	if err == nil {
 		err = h.writeFiles(tx, ring)
 	}
+	if err == nil {
+		err = h.writeSearches(tx)
+	}
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -312,6 +363,8 @@ func (h *History) Write(dbPath string, ring []string) error {
 	h.Folders.adoptWrite(remap, folderTop)
 	h.touched = map[string]bool{}
 	h.removed = map[string]bool{}
+	h.searchTouched = map[string]bool{}
+	h.searchRemoved = map[string]bool{}
 	compactIfLarge(db, dbPath)
 	return nil
 }
@@ -493,6 +546,60 @@ func trimFiles(tx *sql.Tx) error {
 	for _, r := range all[MaxRecentFiles:] {
 		if _, err := tx.Exec(`DELETE FROM recent_files WHERE path = $1`, r.path); err != nil {
 			return fmt.Errorf("trim recent files: %w", err)
+		}
+	}
+	return nil
+}
+
+// writeSearches writes the search lists' changes, the writeFiles recipe
+// per kind: forgotten rows deleted, touched rows stamped in list order
+// (oldest first, so each list's head gets the highest number), and every
+// kind trimmed to its newest MaxSearches once this instance's rows have
+// merged with whatever a sibling stored.
+func (h *History) writeSearches(tx *sql.Tx) error {
+	if !h.searchesDirty() {
+		return nil
+	}
+	// Sorted so two identical writes issue identical statements.
+	removed := make([]string, 0, len(h.searchRemoved))
+	for k := range h.searchRemoved {
+		removed = append(removed, k)
+	}
+	sort.Strings(removed)
+	for _, k := range removed {
+		if _, err := tx.Exec(`DELETE FROM search_history WHERE k = $1`, k); err != nil {
+			return fmt.Errorf("delete search: %w", err)
+		}
+	}
+	g, err := readSeq(tx, searchSeqKey)
+	if err != nil {
+		return err
+	}
+	var stamped uint64
+	for _, kind := range h.searchKinds() {
+		list := h.searches[kind]
+		for i := len(list) - 1; i >= 0; i-- {
+			k := searchKey(kind, list[i])
+			if !h.searchTouched[k] {
+				continue
+			}
+			stamped++
+			if _, err := tx.Exec(`INSERT INTO search_history (k, last) VALUES ($1, $2) ON CONFLICT (k) DO UPDATE SET last = excluded.last`,
+				k, int64(g+stamped)); err != nil {
+				return fmt.Errorf("write search: %w", err)
+			}
+		}
+	}
+	if err := writeSeq(tx, searchSeqKey, g+stamped); err != nil {
+		return err
+	}
+	rows, err := readSearchRows(tx)
+	if err != nil {
+		return err
+	}
+	for _, k := range overflowSearchKeys(rows) {
+		if _, err := tx.Exec(`DELETE FROM search_history WHERE k = $1`, k); err != nil {
+			return fmt.Errorf("trim searches: %w", err)
 		}
 	}
 	return nil

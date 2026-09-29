@@ -43,6 +43,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/history"
 	"github.com/rohanthewiz/ced/internal/search"
 )
 
@@ -81,7 +82,7 @@ func (a *App) menuFindInProject() {
 	// Captured before openPrompt for the reason openFindAll documents:
 	// opening a modal clears the find bar that may be seeding this.
 	seed := a.projectSearchSeed()
-	a.openPrompt("Find in project", "searches every file", seed, func(app *App, v string) {
+	a.openSearchPrompt("Find in project", "searches every file", seed, history.SearchFind, func(app *App, v string) {
 		app.startProjectSearch(v)
 	})
 }
@@ -126,6 +127,10 @@ func (a *App) startProjectSearch(query string) {
 		return
 	}
 
+	// Remembered once the walk is really going to run — not for a query
+	// refused because the index is still building, which the user will
+	// simply retry (searchhistory.go).
+	a.recordSearch(history.SearchFind, query)
 	a.projectSearchSeq++
 	seq := a.projectSearchSeq
 	// Marked busy here and cleared on arrival, so "the editor is working"

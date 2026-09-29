@@ -6,8 +6,9 @@
 // =============================================================================
 
 // Package history is one repository's navigation history — the folders
-// used in it (index.go) and the files made active in it — kept in the
-// repository itself, at <repo>/.ced/history.bytdb (db.go).
+// used in it (index.go), the files made active in it, and the searches
+// typed in it (searches.go) — kept in the repository itself, at
+// <repo>/.ced/history.bytdb (db.go).
 //
 // WHY IN THE REPO, NOT ~/.config. History answers "where have I been in
 // THIS project", so it lives with the project: it moves when the checkout
@@ -57,6 +58,15 @@ type History struct {
 	// touched and removed are the ring's changes since the last write.
 	touched map[string]bool
 	removed map[string]bool
+
+	// searches holds the search lists by kind, most recent first
+	// (searches.go); searchSeq is their stored counter as of the last
+	// load or write, and searchTouched / searchRemoved their changes since,
+	// keyed by searchKey.
+	searches      map[string][]string
+	searchSeq     uint64
+	searchTouched map[string]bool
+	searchRemoved map[string]bool
 }
 
 // New returns an empty history for the repository at root.
@@ -67,6 +77,10 @@ func New(root string) *History {
 		Folders:    NewIndex(),
 		touched:    map[string]bool{},
 		removed:    map[string]bool{},
+
+		searches:      map[string][]string{},
+		searchTouched: map[string]bool{},
+		searchRemoved: map[string]bool{},
 	}
 }
 
@@ -99,7 +113,7 @@ func (h *History) RemoveFile(path string) {
 
 // Dirty reports whether a write has anything to do.
 func (h *History) Dirty() bool {
-	return h.Folders.Dirty() || len(h.touched) > 0 || len(h.removed) > 0
+	return h.Folders.Dirty() || len(h.touched) > 0 || len(h.removed) > 0 || h.searchesDirty()
 }
 
 // Inside reports whether path (in either spelling) lies strictly inside

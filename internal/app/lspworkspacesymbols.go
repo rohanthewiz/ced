@@ -45,6 +45,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/history"
 	"github.com/rohanthewiz/ced/internal/lsp"
 )
 
@@ -101,7 +102,7 @@ func (a *App) menuGoToWorkspaceSymbol() {
 		return
 	}
 	seed := cursorWord(a.activeTabPtr())
-	a.openPrompt("Go to symbol in project", "a name, or part of one", seed, func(app *App, query string) {
+	a.openSearchPrompt("Go to symbol in project", "a name, or part of one", seed, history.SearchSymbol, func(app *App, query string) {
 		app.startWorkspaceSymbols(query)
 	})
 }
@@ -115,6 +116,9 @@ func (a *App) startWorkspaceSymbols(query string) {
 		a.flash("Go to symbol in project: no language server")
 		return
 	}
+	// Its own list, not the find list: a symbol query is a name matched
+	// fuzzily by a server, not text to search for (searchhistory.go).
+	a.recordSearch(history.SearchSymbol, query)
 	for _, t := range a.tabs {
 		a.lspFlushChange(t)
 	}

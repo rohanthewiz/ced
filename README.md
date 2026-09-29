@@ -626,7 +626,7 @@ as `"wordhl": "off"` in `~/.config/ced/config.json`.
 above the status bar:
 
 ```
- Find: foo█                       3 of 12   Enter: next · Shift+Enter: prev · Esc: close
+ Find▾ foo█                       3 of 12   Enter: next · Shift+Enter: prev · Esc: close
 ```
 
 - Type to search — matching is **case-insensitive substring**, results
@@ -637,6 +637,12 @@ above the status bar:
   a fresh search.
 - The active match is painted a brighter color than the rest, so you
   can pick out where you are in the result set.
+- `↑` (or a click on the `Find▾` label) drops down your recent searches
+  in this project; `Enter` or a click puts one in the box, `Delete` or
+  its `×` forgets it. The replace row's `Repl▾` does the same for recent
+  replacements, and the **Find all in file**, **Find in project** and
+  **Go to symbol in project** prompts offer theirs under a `▾`. The
+  lists live in the project's `.ced/history.bytdb`.
 
 There's no regex, whole-word, or case-sensitive toggle in v1 — the
 common case is "I know roughly what I'm looking for, take me there."

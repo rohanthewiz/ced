@@ -137,7 +137,9 @@ func (a *App) menuRecentFiles() {
 	}
 	a.recentFiles = kept
 	if len(items) == 0 {
-		a.flash("No other recent files yet — this list fills in as you open them")
+		if !a.flashHistoryNoSave() {
+			a.flash("No other recent files yet — this list fills in as you open them")
+		}
 		return
 	}
 	title := "Recent files"
@@ -145,6 +147,20 @@ func (a *App) menuRecentFiles() {
 		title += " (current: " + t.DisplayName() + ")"
 	}
 	a.openPicker(title, items)
+	a.flashHistoryNoSave()
+}
+
+// recentFilesLabel is the ≡ Nav "Recent files…" label — the ring is
+// written to the same per-repo database as the locations, so it carries
+// the same "(not saved)" notice (historyRowLabel).
+func (a *App) recentFilesLabel() string {
+	return a.historyRowLabel("Recent files…")
+}
+
+// hasRecentFilesRow gates the ≡ row: a list to show, or the reason the
+// history won't be saved (see hasRecentLocationsRow).
+func (a *App) hasRecentFilesRow() bool {
+	return a.hasRecentFiles() || a.historyWriteProblem() != nil
 }
 
 // recentFileLabel renders one row. Open files are rendered by exactly the

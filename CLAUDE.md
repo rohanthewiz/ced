@@ -700,6 +700,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (`TestWrite_TwoInstancesAdd`). A write past `compactAbove` (256KB)
   ends with a VACUUM — btypedb's own auto-compact never fires on a
   briefly-opened small file. Spacers only in the unfiltered view.
+  Unwritable history (read-only checkout, chmodded `.ced/`): probed by
+  `history.WriteProblem` (self-undoing, never at startup — first menu /
+  palette ask), HELD, shown as "(not saved)" on ≡ Nav Recent files /
+  Recent locations; those rows then stay clickable and flash the reason.
+  No fallback location (it would be a new dotfile). Not a repository is
+  memory-only by design and never labelled.
 - **Favorites (internal/favorites, favorites.go, favmanage.go)**:
   `ced fav <name>` REVEALS in the tree, never re-roots. Relative names;
   CLI walks up (each dir asked in full), the ≡ row resolves strictly in

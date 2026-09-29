@@ -98,11 +98,6 @@ plus the LSP work done in the seeding session itself
   (`ed4962c`). Worth checking first that forwarding it does not cost
   other panes (a shell) a select-all they relied on.
 
-- **N-028** · raised `2026-0928-1408-recent-locations-per-repo-history` · value low
-  A read-only checkout (or unwritable `.ced/`) silently loses that
-  session's folder + recent-file history — `writeHistory` is silent by
-  design. A fallback location, or one flash at startup, would say so.
-
 - **N-029** · raised `2026-0928-1408-recent-locations-per-repo-history` · value low
   README does not mention ≡ Nav → Recent locations…, the drill-in, or that
   recent files / locations now live in `<repo>/.ced/history.bytdb`
@@ -194,6 +189,17 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, `2026-0929-1722-history-not-saved-notice` — **N-028** neither option as written: no
+  fallback location (a new dotfile, which CLAUDE.md rules out) and no
+  startup flash (startup errors are HELD for a ≡ label). Instead
+  `history.WriteProblem` probes by doing — temp dir beside a missing
+  `.ced/`, temp file in an existing one, write-open of the database, each
+  undone — on the first menu/palette ask, and the answer is held: ≡ Nav
+  "Recent files…" / "Recent locations…" read "(not saved)", stay
+  clickable, and flash "History won't be saved this session: can't create
+  .ced (permission denied)". A non-repository root is memory-only by
+  design and never labelled. Pinned by `TestWriteProblem_*` and
+  `TestHistoryNoSave_*`.
 - closed 2026-09-29, `2026-0929-1710-select-all-file-row` — **N-008** ≡ **File** now carries a "Select all"
   row too (under the Copy-path rows), same action and predicate as the
   Edit row. It is flagged `paletteTwin` so the command palette still

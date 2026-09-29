@@ -467,3 +467,117 @@ func TestPersists_CedFileIsNotADirectory(t *testing.T) {
 		t.Fatal("a .ced FILE made a bare folder persist")
 	}
 }
+
+// skipIfRoot skips a permission test when running as root, which the
+// kernel exempts from mode bits — an unsatisfiable environment, not a flake.
+func skipIfRoot(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+}
+
+// entries lists dir's names, for "the probe left nothing behind".
+func entries(t *testing.T, dir string) []string {
+	t.Helper()
+	des, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, d := range des {
+		out = append(out, d.Name())
+	}
+	return out
+}
+
+// TestWriteProblem_WritableLeavesNothing pins the happy paths: no .ced/
+// yet, an existing .ced/, and an existing database all answer nil — and
+// the probe undoes itself, so a missing .ced/ stays missing (N-028; the
+// "loading creates nothing" promise).
+func TestWriteProblem_WritableLeavesNothing(t *testing.T) {
+	root := repo(t)
+	if err := WriteProblem(DBPath(root)); err != nil {
+		t.Fatalf("fresh root: %v", err)
+	}
+	if got := entries(t, root); len(got) != 0 {
+		t.Fatalf("probe left %v behind in the root", got)
+	}
+
+	h := mustLoad(t, root)
+	h.TouchFile(filepath.Join(root, "a.go"))
+	if err := h.Write(DBPath(root), h.Files()); err != nil {
+		t.Fatal(err)
+	}
+	before := entries(t, filepath.Join(root, ".ced"))
+	if err := WriteProblem(DBPath(root)); err != nil {
+		t.Fatalf("existing database: %v", err)
+	}
+	if after := entries(t, filepath.Join(root, ".ced")); fmt.Sprint(after) != fmt.Sprint(before) {
+		t.Fatalf(".ced/ changed: %v → %v", before, after)
+	}
+}
+
+// TestWriteProblem_ReadOnlyRoot is the read-only checkout: no .ced/ and a
+// root that cannot take one. The error names .ced/ (what a Write would
+// have created), not the probe's temp dir, and keeps the OS cause.
+func TestWriteProblem_ReadOnlyRoot(t *testing.T) {
+	skipIfRoot(t)
+	root := repo(t)
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+
+	err := WriteProblem(DBPath(root))
+	var pe *os.PathError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v, want an *os.PathError", err)
+	}
+	if pe.Path != filepath.Join(root, ".ced") || pe.Op != "create" {
+		t.Fatalf("err = %v, want create %s", err, filepath.Join(root, ".ced"))
+	}
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("err = %v, want a permission error", err)
+	}
+}
+
+// TestWriteProblem_ReadOnlyCedAndDatabase covers the two chmodded cases:
+// a .ced/ that refuses new files (bytdb's lock sidecar lives there), and
+// a writable .ced/ holding a read-only database.
+func TestWriteProblem_ReadOnlyCedAndDatabase(t *testing.T) {
+	skipIfRoot(t)
+	root := repo(t)
+	ced := filepath.Join(root, ".ced")
+	if err := os.Mkdir(ced, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db := DBPath(root)
+	if err := os.WriteFile(db, nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	var pe *os.PathError
+	if err := WriteProblem(db); !errors.As(err, &pe) || pe.Path != db {
+		t.Fatalf("read-only database: err = %v, want one naming %s", err, db)
+	}
+
+	if err := os.Chmod(ced, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ced, 0o755) })
+	if err := WriteProblem(db); !errors.As(err, &pe) || pe.Path != ced {
+		t.Fatalf("read-only .ced/: err = %v, want one naming %s", err, ced)
+	}
+}
+
+// TestWriteProblem_CedIsAFile: a .ced FILE blocks the MkdirAll a Write
+// would do, and is reported as such rather than as a permission problem.
+func TestWriteProblem_CedIsAFile(t *testing.T) {
+	root := repo(t)
+	if err := os.WriteFile(filepath.Join(root, ".ced"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteProblem(DBPath(root)); err == nil {
+		t.Fatal("a .ced file should be a write problem")
+	}
+}

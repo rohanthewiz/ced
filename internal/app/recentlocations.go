@@ -42,8 +42,10 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/rohanthewiz/bytdb"
 	"github.com/rohanthewiz/ced/internal/history"
@@ -102,6 +104,84 @@ func (a *App) writeHistory() {
 	_ = a.history.Write(historyPathFn(a.rootDir), a.recentFiles)
 }
 
+// historyWriteProblem answers "will this session's history reach disk?"
+// — nil when it will, or when it was never going to (a root that is not a
+// repository is memory-only BY DESIGN, not a fault to report). Asked on
+// first need, which is the first draw of the ≡ menu or palette, never at
+// startup, and then HELD: a startup flash would scroll past before anyone
+// read it, and the write it predicts is on Close, when nothing can be
+// said at all. The probe is a few syscalls that undo themselves
+// (history.WriteProblem), so asking from a menu predicate costs one frame
+// once.
+//
+// Not re-asked: a user who fixes the permissions mid-session gets their
+// history written on Close regardless (writeHistory never consults this),
+// and only the label lags.
+func (a *App) historyWriteProblem() error {
+	if !a.historyProbed {
+		a.historyProbed = true
+		if historyPersistsFn(a.rootDir) {
+			a.historyNoSave = history.WriteProblem(historyPathFn(a.rootDir))
+		}
+	}
+	return a.historyNoSave
+}
+
+// historyNoSaveMsg is the sentence behind "(not saved)", or "" when the
+// history will be saved. It names what the user would fix — the .ced/
+// directory or the database, root-relative — and the OS's reason.
+func (a *App) historyNoSaveMsg() string {
+	err := a.historyWriteProblem()
+	if err == nil {
+		return ""
+	}
+	const lead = "History won't be saved this session: "
+	var pe *os.PathError
+	if !errors.As(err, &pe) {
+		return lead + err.Error()
+	}
+	where := displayPath(pe.Path)
+	if rel, rerr := filepath.Rel(a.rootDir, pe.Path); rerr == nil && !strings.HasPrefix(rel, "..") {
+		where = rel
+	}
+	return fmt.Sprintf("%scan't %s %s (%v)", lead, pe.Op, where, pe.Err)
+}
+
+// flashHistoryNoSave flashes historyNoSaveMsg when there is one, and
+// reports whether it did — the recent-files and locations pickers say it
+// as they open, since opening them is the moment a user is looking for
+// what the history holds.
+func (a *App) flashHistoryNoSave() bool {
+	msg := a.historyNoSaveMsg()
+	if msg != "" {
+		a.flash(msg)
+	}
+	return msg != ""
+}
+
+// historyRowLabel is a ≡ Nav history row's label: base, plus
+// "(not saved)" while the history cannot reach disk. The suffix is the
+// held notice — the menu is where someone who wonders why the list came
+// back empty goes looking.
+func (a *App) historyRowLabel(base string) string {
+	if a.historyWriteProblem() != nil {
+		return base + " (not saved)"
+	}
+	return base
+}
+
+// recentLocationsLabel is the ≡ Nav "Recent locations…" label.
+func (a *App) recentLocationsLabel() string {
+	return a.historyRowLabel("Recent locations…")
+}
+
+// hasRecentLocationsRow gates the ≡ row: something to list, or a reason
+// to give. A row labelled "(not saved)" that could not be clicked would
+// announce a problem and refuse to explain it.
+func (a *App) hasRecentLocationsRow() bool {
+	return a.hasRecentLocations() || a.historyWriteProblem() != nil
+}
+
 // noteFolderUse records a use of dir. Only folders strictly inside the
 // workspace are recorded — a folder outside it belongs to some other
 // repository's history, and the root itself is the top of every list
@@ -141,7 +221,9 @@ func (a *App) openLocations(dir string) {
 	sections := a.locationSections(dir, recent, frequent)
 	if len(sections) == 0 {
 		if dir == root {
-			a.flash("No recent locations yet — this list fills in as you open files")
+			if !a.flashHistoryNoSave() {
+				a.flash("No recent locations yet — this list fills in as you open files")
+			}
 			return
 		}
 		// The history said drill, the filesystem disagreed: everything
@@ -160,6 +242,9 @@ func (a *App) openLocations(dir string) {
 	}
 	items = append(items, sections...)
 	a.openPickerRows(title, items, locationRows(items), nil)
+	if dir == root {
+		a.flashHistoryNoSave()
+	}
 }
 
 // locationPick is the veto both sections of one picker share. It stats

@@ -494,8 +494,13 @@ func builtinMenuGroups() []menuGroup {
 			// Recent files sits under Switch tab because it answers the
 			// same question — "get me to another file" — over a wider set:
 			// the ones no longer open (recentfiles.go).
-			{label: "Recent files…", shortcut: "esc B", action: (*App).menuRecentFiles, enabled: (*App).hasRecentFiles},
-			{label: "Recent locations…", action: (*App).menuRecentLocations, enabled: (*App).hasRecentLocations},
+			// Both rows are faces of the per-repo history, so both carry
+			// "(not saved)" when it cannot reach disk (historyRowLabel) and
+			// stay clickable then, to say why.
+			{shortcut: "esc B", action: (*App).menuRecentFiles, enabled: (*App).hasRecentFilesRow,
+				labelFor: (*App).recentFilesLabel},
+			{action: (*App).menuRecentLocations, enabled: (*App).hasRecentLocationsRow,
+				labelFor: (*App).recentLocationsLabel},
 			{label: "Go to line…", shortcut: "esc j", action: (*App).menuGoToLine, enabled: (*App).hasGoToLine},
 			// Named locations (favorites.go) — the mid-session twin of
 			// `ced fav <name>`. It belongs to this group's question
@@ -1617,6 +1622,12 @@ type App struct {
 	// Loaded on first use, written on Close; read it through
 	// repoHistory(). See recentlocations.go.
 	history *history.History
+	// historyProbed / historyNoSave hold the answer to "will this
+	// session's history reach disk?" (history.WriteProblem), asked once
+	// on first need and HELD for the ≡ Nav labels — the only write is on
+	// Close, too late to say anything. See historyWriteProblem.
+	historyProbed bool
+	historyNoSave error
 
 	// sessionEnabled is the "session" config preference: whether opening
 	// a folder reopens its tabs. Folders are recorded either way — the

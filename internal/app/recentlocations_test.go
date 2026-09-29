@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/rohanthewiz/ced/internal/history"
+	"github.com/rohanthewiz/ced/internal/session"
 )
 
 // useFolder records n uses of dir, the way n file opens there would.
@@ -225,5 +226,114 @@ func TestWriteHistory_OnlyInARepository(t *testing.T) {
 	}
 	if !back.Folders.HasUsesBelow(root) {
 		t.Fatal("once a repository, the pending history never reached the database")
+	}
+}
+
+// readOnlyHistory points the history database into a directory that
+// cannot take a .ced/ — the read-only checkout — for one test. newTestApp
+// has already pinned historyPersistsFn to "yes".
+func readOnlyHistory(t *testing.T) string {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	ro := t.TempDir()
+	if err := os.Chmod(ro, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ro, 0o755) })
+	prev := historyPathFn
+	historyPathFn = func(string) string { return filepath.Join(ro, ".ced", history.DBName) }
+	t.Cleanup(func() { historyPathFn = prev })
+	return ro
+}
+
+// TestHistoryNoSave_WritableSaysNothing pins the ordinary case: a
+// writable history leaves both ≡ Nav labels bare and the rows gated on
+// having something to list, exactly as before N-028.
+func TestHistoryNoSave_WritableSaysNothing(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	if got := a.recentLocationsLabel(); got != "Recent locations…" {
+		t.Fatalf("label = %q, want it bare", got)
+	}
+	if got := a.recentFilesLabel(); got != "Recent files…" {
+		t.Fatalf("label = %q, want it bare", got)
+	}
+	if a.hasRecentLocationsRow() || a.hasRecentFilesRow() {
+		t.Fatal("with no history and no problem both rows should be dimmed")
+	}
+	if msg := a.historyNoSaveMsg(); msg != "" {
+		t.Fatalf("msg = %q, want none", msg)
+	}
+}
+
+// TestHistoryNoSave_ReadOnlyCheckout is N-028: history that cannot reach
+// disk says so on both ≡ Nav rows, the rows stay clickable even with
+// nothing to list, and clicking one flashes the reason — naming .ced/
+// and the OS cause — instead of the "fills in as you open files" line,
+// which would be a promise the session cannot keep.
+func TestHistoryNoSave_ReadOnlyCheckout(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	readOnlyHistory(t)
+
+	if got := a.recentLocationsLabel(); got != "Recent locations… (not saved)" {
+		t.Fatalf("label = %q", got)
+	}
+	if got := a.recentFilesLabel(); got != "Recent files… (not saved)" {
+		t.Fatalf("label = %q", got)
+	}
+	if !a.hasRecentLocationsRow() || !a.hasRecentFilesRow() {
+		t.Fatal("rows must stay clickable to explain themselves")
+	}
+
+	a.menuRecentLocations()
+	if a.modal != nil {
+		t.Fatalf("modal = %T, want only a flash with nothing to list", a.modal)
+	}
+	for _, want := range []string{"History won't be saved", "can't create", ".ced", "permission denied"} {
+		if !strings.Contains(a.statusMsg, want) {
+			t.Fatalf("status = %q, want it to contain %q", a.statusMsg, want)
+		}
+	}
+	a.statusMsg = ""
+	a.menuRecentFiles()
+	if !strings.HasPrefix(a.statusMsg, "History won't be saved") {
+		t.Fatalf("status = %q, want the reason from Recent files too", a.statusMsg)
+	}
+}
+
+// TestHistoryNoSave_ReasonAlsoWhenListing: with history to show, the
+// picker opens as usual and the reason rides along in the status bar.
+func TestHistoryNoSave_ReasonAlsoWhenListing(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	readOnlyHistory(t)
+	sub := filepath.Join(root, "pkg")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	useFolder(a, session.Normalize(sub), 1)
+
+	a.menuRecentLocations()
+	if _, ok := a.modal.(*paletteModal); !ok {
+		t.Fatalf("modal = %T, want the picker", a.modal)
+	}
+	if !strings.HasPrefix(a.statusMsg, "History won't be saved") {
+		t.Fatalf("status = %q, want the reason alongside the picker", a.statusMsg)
+	}
+}
+
+// TestHistoryNoSave_NotARepositoryIsNotAProblem: a root that is not a
+// repository keeps history for the session BY DESIGN (N-027), so it is
+// never labelled — even where the directory could not be written anyway.
+func TestHistoryNoSave_NotARepositoryIsNotAProblem(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	readOnlyHistory(t)
+	prev := historyPersistsFn
+	historyPersistsFn = func(string) bool { return false }
+	t.Cleanup(func() { historyPersistsFn = prev })
+
+	if got := a.recentLocationsLabel(); got != "Recent locations…" {
+		t.Fatalf("label = %q, want it bare outside a repository", got)
 	}
 }

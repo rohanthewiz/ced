@@ -178,6 +178,72 @@ func Persists(root string) bool {
 	}
 }
 
+// WriteProblem reports why a Write to dbPath would fail on permissions —
+// a read-only checkout, a .ced/ or database file someone chmodded — or nil
+// when it would not. It exists because the one guaranteed write happens on
+// Close, where there is no screen left to report a failure on: without an
+// answer ahead of time, such a session's history is lost in silence.
+//
+// It asks the filesystem by DOING, not by reading mode bits: bits say
+// nothing about a read-only mount, ACLs, or which uid is asking. Every
+// probe undoes itself, so the "loading creates nothing" promise holds —
+// nothing is left behind, and a missing .ced/ stays missing:
+//
+//	.ced/ missing        → make and remove a temp dir beside it (the
+//	                       MkdirAll a Write would do)
+//	.ced/ present        → create and remove a temp file in it (bytdb's
+//	                       lock sidecar lives there)
+//	  + database present → open it for writing, unchanged (no O_TRUNC)
+//
+// What it cannot see is a disk that fills up or a lock held past the retry
+// window; both leave the changes pending, which is the normal failure mode
+// and not this one.
+//
+// The error is an *os.PathError naming what the user would have to fix —
+// the .ced/ directory or the database — never the probe's temp name.
+func WriteProblem(dbPath string) error {
+	dir := filepath.Dir(dbPath)
+	fi, err := os.Stat(dir)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		d, err := os.MkdirTemp(filepath.Dir(dir), ".ced-probe-")
+		if err != nil {
+			return renamePathErr(err, "create", dir)
+		}
+		_ = os.Remove(d)
+		return nil
+	case err != nil:
+		return err
+	case !fi.IsDir():
+		return &os.PathError{Op: "create", Path: dir, Err: errors.New("a file is in the way")}
+	}
+	f, err := os.CreateTemp(dir, ".probe-")
+	if err != nil {
+		return renamePathErr(err, "write in", dir)
+	}
+	_ = f.Close()
+	_ = os.Remove(f.Name())
+	if _, err := os.Stat(dbPath); err == nil {
+		db, err := os.OpenFile(dbPath, os.O_WRONLY, 0)
+		if err != nil {
+			return renamePathErr(err, "write", dbPath)
+		}
+		_ = db.Close()
+	}
+	return nil
+}
+
+// renamePathErr re-labels a probe's failure with the path the user knows
+// (the probe's own temp name means nothing to them), keeping the cause
+// ("permission denied", "read-only file system") so errors.Is still works.
+func renamePathErr(err error, op, path string) error {
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		return &os.PathError{Op: op, Path: path, Err: pe.Err}
+	}
+	return err
+}
+
 // open opens the database at path, creating its directory and schema,
 // retrying while another process holds the lock.
 func open(path string) (*sql.DB, error) {

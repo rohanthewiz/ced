@@ -558,7 +558,8 @@ live whenever there's more than one.
 ### Overflow markers
 
 Anything that scrolls — the editor, the file tree, the find-all list,
-both panes of the changes panel and of the git log — puts a small **▴**
+both panes of the changes panel and of the git log, the compare and
+problems panels, the chat transcript and the terminal — puts a small **▴**
 or **▾** in the last column of its first and last row when there is more
 content that way. That is the whole
 indicator: no rail, no thumb, no column permanently spent on chrome.
@@ -573,9 +574,12 @@ indicator: no rail, no thumb, no column permanently spent on chrome.
                                     └───────────────────┘
 ```
 
-It counts in the unit the surface is made of: lines in the editor and a
-diff, rows in the tree, **files** in the changes panel's list, **commits**
-in the log's, **results** in the find-all list.
+It counts in the unit the surface is made of: lines in the editor, a
+diff and the terminal, rows in the tree and the (wrapped) chat
+transcript, **files** in the changes panel's list, **commits** in the
+log's, **results** in the find-all list, **problems** in the problems
+panel — whose marker also turns red or amber when an error or warning
+is among the rows out of view.
 
 The second line appears when there is something out there worth naming,
 and the marker takes that thing's **color**: red for an error below,

@@ -787,3 +787,270 @@ func TestOverflowClick_PagesTheTree(t *testing.T) {
 		t.Error("the press opened the file under the marker")
 	}
 }
+
+// panelMarkerPair asserts the up/down pair on one panel column: nothing
+// up while unscrolled, `hidden` rows down in `unit`; then, scrolled to
+// the end via setScroll, the pair swaps. It is the git-diff-pane test's
+// shape, shared by the four panels that gained markers together so a
+// fifth copy of the arithmetic cannot drift from the others.
+func panelMarkerPair(t *testing.T, a *App, name string, col, top, visible, hidden int,
+	unit string, setScroll func(int)) {
+	t.Helper()
+	bot := top + visible - 1
+	if _, ok := a.overflowMarkerAt(col, top); ok {
+		t.Errorf("%s: unscrolled panel drew an up-marker", name)
+	}
+	down := markerAt(t, a, col, bot)
+	if down.off.lines != hidden || down.unit != unit || !down.down {
+		t.Errorf("%s: down marker = %d %s (down=%v), want %d %s",
+			name, down.off.lines, down.unit, down.down, hidden, unit)
+	}
+	if down.page != visible {
+		t.Errorf("%s: marker page = %d, want the viewport's %d rows", name, down.page, visible)
+	}
+
+	setScroll(hidden)
+	if _, ok := a.overflowMarkerAt(col, bot); ok {
+		t.Errorf("%s: down marker survived a scroll to the end", name)
+	}
+	if up := markerAt(t, a, col, top); up.off.lines != hidden || up.down {
+		t.Errorf("%s: up marker = %d (down=%v), want %d pointing up", name, up.off.lines, up.down, hidden)
+	}
+}
+
+// TestOverflowMarkers_ComparePanel pins the compare panel's pair: in the
+// diff's blank right margin (the body is drawn from px+2 and truncated
+// short of the edge), counted in lines, over the rows under the header.
+func TestOverflowMarkers_ComparePanel(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.compare.open = true
+	px, py, pw, ph := a.comparePanelRect()
+	visible := ph - 1
+	if visible <= 2 {
+		t.Skipf("panel too short in this fixture (%d rows)", ph)
+	}
+	lines := make([]string, visible+25)
+	for i := range lines {
+		lines[i] = "+ added"
+	}
+	a.compare.lines = lines
+	panelMarkerPair(t, a, "compare", px+pw-1, py+1, visible, 25, "line",
+		func(n int) { a.compare.scroll = n })
+
+	a.compare.open = false
+	for _, m := range a.overflowMarkers() {
+		if m.x == px+pw-1 && m.y == py+1 {
+			t.Error("a closed compare panel still enumerated a marker")
+		}
+	}
+}
+
+// problemsFixture opens the Problems panel over `n` rows whose severity
+// is chosen per index, bypassing the LSP plumbing: the marker reads the
+// derived view, and building it directly keeps the counts exact.
+func problemsFixture(t *testing.T, n int, sev func(i int) int) *App {
+	t.Helper()
+	a := newTestApp(t, t.TempDir())
+	a.problems.open = true
+	rows := make([]problemRow, n)
+	view := make([]int, n)
+	for i := range rows {
+		rows[i] = problemRow{path: "/x/f.go", label: "f.go:" + itoa(i+1), msg: "m", sev: sev(i)}
+		view[i] = i
+	}
+	a.problems.rows, a.problems.view = rows, view
+	return a
+}
+
+// TestOverflowMarkers_ProblemsPanel pins the Problems list's pair,
+// counted in problems over the FILTERED view — a row the chips hide is
+// not "below", it is not in the list at all.
+func TestOverflowMarkers_ProblemsPanel(t *testing.T) {
+	vis := 0
+	a := problemsFixture(t, 1, func(int) int { return lsp.SeverityWarning })
+	if vis = a.problemsVisibleRows(); vis <= 2 {
+		t.Skipf("panel too short in this fixture (%d rows)", vis)
+	}
+	a = problemsFixture(t, vis+12, func(int) int { return lsp.SeverityWarning })
+	px, py, pw, _ := a.problemsRect()
+	panelMarkerPair(t, a, "problems", px+pw-1, py+1, vis, 12, "problem",
+		func(n int) { a.problems.scroll = n })
+
+	// Filtered down to what fits: no marker in either direction.
+	a.problems.scroll = 0
+	a.problems.view = a.problems.view[:vis]
+	for _, y := range []int{py + 1, py + vis} {
+		if _, ok := a.overflowMarkerAt(px+pw-1, y); ok {
+			t.Errorf("a view that fits still drew a marker at row %d", y)
+		}
+	}
+}
+
+// TestOverflowMarkers_ProblemsColoredBySeverity pins the one list that
+// colors its marker: the rows are sorted by path, not rank, so an error
+// past the bottom edge is news — and only what is OFF screen counts, so
+// an error on screen leaves the marker at the loudest hidden severity.
+func TestOverflowMarkers_ProblemsColoredBySeverity(t *testing.T) {
+	probe := problemsFixture(t, 1, func(int) int { return lsp.SeverityInfo })
+	vis := probe.problemsVisibleRows()
+	if vis <= 2 {
+		t.Skipf("panel too short in this fixture (%d rows)", vis)
+	}
+	// Row 0 (on screen) is an error; one hidden row is a warning, the
+	// rest notes.
+	a := problemsFixture(t, vis+5, func(i int) int {
+		switch i {
+		case 0:
+			return lsp.SeverityError
+		case vis + 2:
+			return lsp.SeverityWarning
+		}
+		return lsp.SeverityInfo
+	})
+	px, py, pw, _ := a.problemsRect()
+	down := markerAt(t, a, px+pw-1, py+vis)
+	if down.off.kind() != offWarn || down.off.warns != 1 || down.off.infos != 4 {
+		t.Errorf("down marker = %+v, want 1 warning + 4 notes (the on-screen error not counted)", down.off)
+	}
+	if got := overflowTipLines(down); len(got) != 2 || got[0] != "5 problems below" {
+		t.Errorf("tip = %q, want the count in problems plus the severity line", got)
+	}
+
+	// Scrolled past the error, the UP marker carries it.
+	a.problems.scroll = 5
+	if up := markerAt(t, a, px+pw-1, py+1); up.off.kind() != offError || up.off.errors != 1 {
+		t.Errorf("up marker = %+v, want the hidden error", up.off)
+	}
+}
+
+// TestOverflowMarkers_ChatTranscript pins the chat pair to the
+// TRANSCRIPT band — never the composer below it, which does not scroll —
+// counted in wrapped rows.
+func TestOverflowMarkers_ChatTranscript(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.chat.open = true
+	px, py, pw, ph := a.chatPanelRect()
+	band := ph - 1 - a.chatComposerRowsView() - a.chatAttachRows()
+	if pw <= 2 || band <= 2 {
+		t.Skipf("panel too small in this fixture (%dx%d)", pw, ph)
+	}
+	body := make([]string, band+20)
+	for i := range body {
+		body[i] = "x"
+	}
+	a.chat.msgs = []chatMsg{{role: chatRoleAgent, text: strings.Join(body, "\n")}}
+	// Taken from the derivation rather than assumed: chatRows adds its
+	// own action rows (the copy buttons), and the marker must agree with
+	// the scroller, which counts those too.
+	hidden := a.chatContentRows() - band
+	if hidden < 20 {
+		t.Fatalf("fixture derived %d hidden rows, want at least 20", hidden)
+	}
+	panelMarkerPair(t, a, "chat", px+pw-1, py+1, band, hidden, "row",
+		func(n int) { a.chat.scroll = n })
+	if py+band >= a.chatComposerTop() {
+		t.Errorf("the band (%d rows) runs into the composer at row %d", band, a.chatComposerTop())
+	}
+	if _, ok := a.overflowMarkerAt(px+pw-1, a.chatComposerTop()); ok {
+		t.Error("a marker landed on the composer row")
+	}
+}
+
+// TestOverflowMarkers_TerminalScrollback pins the terminal pair to the
+// scrollback — between the header rule and the input row — counted in
+// lines, and plain-colored even over stderr (see overflowMarkers for why).
+func TestOverflowMarkers_TerminalScrollback(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.term.open = true
+	px, py, pw, ph := a.termPanelRect()
+	visible := ph - 2
+	if visible <= 2 {
+		t.Skipf("panel too short in this fixture (%d rows)", ph)
+	}
+	for i := 0; i < visible+15; i++ {
+		a.term.lines = append(a.term.lines, termLine{text: "boom", kind: termErr})
+	}
+	panelMarkerPair(t, a, "terminal", px+pw-1, py+1, visible, 15, "line",
+		func(n int) { a.term.scroll = n })
+	if up := markerAt(t, a, px+pw-1, py+1); up.off.kind() != offNone {
+		t.Errorf("terminal marker kind = %v, want plain over stderr", up.off.kind())
+	}
+	iy, _, _ := a.termInputSpan()
+	if _, ok := a.overflowMarkerAt(px+pw-1, iy); ok {
+		t.Error("a marker landed on the input row")
+	}
+
+	// And it is really PAINTED: the panel draws before the marker pass,
+	// so the glyph survives on the frame rather than being covered by
+	// the scrollback it annotates.
+	a.draw()
+	a.screen.Show()
+	cells, w, _ := a.screen.(tcell.SimulationScreen).GetContents()
+	if cell := cells[(py+1)*w+px+pw-1]; len(cell.Runes) == 0 || cell.Runes[0] != overflowUpRune {
+		t.Errorf("terminal's top-right cell = %q, want %q", cell.Runes, overflowUpRune)
+	}
+}
+
+// TestOverflowClick_PagesThePanels pins that the click came along for
+// free: a press on each new panel's ▾ pages THAT panel through scrollAt
+// by the viewport less a row, and is claimed — so it neither focuses the
+// terminal/chat under it nor jumps to a problem.
+func TestOverflowClick_PagesThePanels(t *testing.T) {
+	type surface struct {
+		name   string
+		open   func(a *App) (col, bot, visible int)
+		scroll func(a *App) int
+	}
+	surfaces := []surface{
+		{"compare", func(a *App) (int, int, int) {
+			a.compare.open = true
+			px, py, pw, ph := a.comparePanelRect()
+			a.compare.lines = make([]string, 3*ph)
+			return px + pw - 1, py + ph - 1, ph - 1
+		}, func(a *App) int { return a.compare.scroll }},
+		{"problems", func(a *App) (int, int, int) {
+			a.problems.open = true
+			vis := a.problemsVisibleRows()
+			for i := 0; i < 3*vis; i++ {
+				a.problems.rows = append(a.problems.rows, problemRow{path: "/nope/f.go", sev: lsp.SeverityError})
+				a.problems.view = append(a.problems.view, i)
+			}
+			px, py, pw, _ := a.problemsRect()
+			return px + pw - 1, py + vis, vis
+		}, func(a *App) int { return a.problems.scroll }},
+		{"chat", func(a *App) (int, int, int) {
+			a.chat.open = true
+			px, py, pw, ph := a.chatPanelRect()
+			band := ph - 1 - a.chatComposerRowsView() - a.chatAttachRows()
+			a.chat.msgs = []chatMsg{{role: chatRoleAgent, text: strings.Repeat("x\n", 3*ph)}}
+			return px + pw - 1, py + band, band
+		}, func(a *App) int { return a.chat.scroll }},
+		{"terminal", func(a *App) (int, int, int) {
+			a.term.open = true
+			px, py, pw, ph := a.termPanelRect()
+			for i := 0; i < 3*ph; i++ {
+				a.term.lines = append(a.term.lines, termLine{text: "out"})
+			}
+			return px + pw - 1, py + ph - 2, ph - 2
+		}, func(a *App) int { return a.term.scroll }},
+	}
+	for _, s := range surfaces {
+		a := newTestApp(t, t.TempDir())
+		col, bot, visible := s.open(a)
+		if visible <= 2 {
+			t.Logf("%s: panel too short in this fixture (%d rows); skipped", s.name, visible)
+			continue
+		}
+		tabs := len(a.tabs)
+		pressAt(a, col, bot)
+		if got := s.scroll(a); got != visible-1 {
+			t.Errorf("%s: a click on ▾ scrolled to %d, want one page (%d)", s.name, got, visible-1)
+		}
+		if a.term.focused || a.chat.focused {
+			t.Errorf("%s: the press fell through and focused a panel", s.name)
+		}
+		if len(a.tabs) != tabs {
+			t.Errorf("%s: the press fell through and opened a file", s.name)
+		}
+	}
+}

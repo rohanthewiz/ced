@@ -8,8 +8,8 @@
 // "There is more that way", said once per direction: a single '▴' or
 // '▾' in the LAST column of a viewport's first and last row, on every
 // surface that scrolls — the editor body, both git panels, the file
-// tree, and the Find-all list — plus a popup on hover saying how much
-// more.
+// tree, the Find-all list, and the compare, problems, chat and terminal
+// panels — plus a popup on hover saying how much more.
 //
 //	func handleKey(...) {                    ▴   ← 412 lines above
 //	    switch {
@@ -310,6 +310,34 @@ func (a *App) editorOffscreen(t *editor.Tab, firstLine, lastLine int) (above, be
 	return above, below
 }
 
+// problemsOffscreen summarises the Problems view rows above and below a
+// viewport of `vis` rows starting at `scroll`: the row counts, plus each
+// hidden row's severity folded into the same buckets the editor's
+// diagnostics use — so a red marker on this list and a red one on the
+// editor mean the same thing.
+//
+// It walks the view rather than subtracting, so a scroll offset left
+// past the clamp (a view that shrank before the next clamp ran) floors
+// at zero instead of inventing rows.
+func (a *App) problemsOffscreen(scroll, vis int) (above, below offscreen) {
+	for vi, ri := range a.problems.view {
+		var o *offscreen
+		switch {
+		case vi < scroll:
+			o = &above
+		case vi >= scroll+vis:
+			o = &below
+		default:
+			continue // on screen: its own glyph already says it
+		}
+		o.lines++
+		if ri >= 0 && ri < len(a.problems.rows) {
+			o.countDiag(lspOffscreenKind(a.problems.rows[ri].sev))
+		}
+	}
+	return above, below
+}
+
 // countDiag adds one diagnostic to the right counter. A method rather
 // than three branches at each call site because both diagnostic sources
 // (gopls and the plugins) feed it and must land in the same buckets — a
@@ -472,6 +500,73 @@ func (a *App) overflowMarkers() []overflowMarker {
 			if listW := a.gitLogListW(pw); listW > 0 {
 				pane(px+listW-1, top, visible, a.gitLog.listScroll, len(a.gitLog.commits), "commit")
 			}
+		}
+	}
+
+	// The four bodies that were once viewports with no markers: compare,
+	// problems, chat and terminal. Every one of them paints its content
+	// one column in from each side (text from px+1 or px+2, truncated to
+	// stop at px+pw-2), so the last column is the same blank margin the
+	// git diff pane has and the marker covers nothing. Each already
+	// answers the wheel through scrollAt, which is all the click needs —
+	// overflowMarkerClick hands its delta to scrollAt, which routes by
+	// rect to the panel's own clamped scroller.
+	//
+	// They share the bottom edge (compare, problems, terminal) or a side
+	// one (chat), and an edge shows one tool at a time (claimDock), so no
+	// two of these can claim one cell.
+
+	// Compare: a unified diff under the header rule, counted in lines —
+	// the git diff pane's shape exactly, and compareClampScroll's
+	// ph-1 is the viewport.
+	if a.compare.open {
+		px, py, pw, ph := a.comparePanelRect()
+		if visible := ph - 1; pw > 0 && visible > 0 {
+			pane(px+pw-1, py+1, visible, a.compare.scroll, len(a.compare.lines), "line")
+		}
+	}
+
+	// Problems: counted in PROBLEMS, over the filtered view (the list
+	// the panel is a viewport onto — the Find-all rule). Unlike every
+	// other list here it is also COLORED: its rows carry mixed
+	// severities, sorted by path rather than by rank, so "there is an
+	// error further down" is real news the marker can carry — where a
+	// Find-all marker colored offFind would only repeat the title.
+	if a.problems.open {
+		px, py, pw, _ := a.problemsRect()
+		if vis := a.problemsVisibleRows(); pw > 0 && vis > 0 {
+			above, below := a.problemsOffscreen(a.problems.scroll, vis)
+			add(px+pw-1, py+1, false, "problem", vis, above)
+			add(px+pw-1, py+vis, true, "problem", vis, below)
+		}
+	}
+
+	// Chat: the transcript band only — between the header rule and the
+	// attachment chips / composer, which do not scroll. Counted in ROWS
+	// because the transcript is wrapped to the panel's width (the
+	// markdown preview's rule: a message is several rows, and the row is
+	// what the scroll offset counts). The raw band height is recomputed
+	// here rather than read from chatVisibleRows, which floors at one so
+	// the scroller never divides by nothing; a panel whose composer has
+	// eaten the whole band has no viewport to annotate.
+	if a.chat.open {
+		px, py, pw, ph := a.chatPanelRect()
+		band := ph - 1 - a.chatComposerRowsView() - a.chatAttachRows()
+		if pw > 0 && band > 0 {
+			pane(px+pw-1, py+1, band, a.chat.scroll, a.chatContentRows(), "row")
+		}
+	}
+
+	// Terminal: the scrollback between the header rule and the input
+	// row. Counted in LINES — the strip truncates rather than wraps, so a
+	// row is a line of output. Deliberately uncolored: stderr rows are
+	// the only candidate, and a shell's stderr is progress chatter as
+	// often as failure, so an error-red marker would cry wolf on every
+	// `go test -v`.
+	if a.term.open {
+		px, py, pw, ph := a.termPanelRect()
+		if visible := ph - 2; pw > 0 && visible > 0 {
+			pane(px+pw-1, py+1, visible, a.term.scroll, a.termContentRows(), "line")
 		}
 	}
 

@@ -174,10 +174,6 @@ Wanted, but not next. Parked, not declined.
   Tree marks: a cross-folder "select all matching" (tick every
   `*_test.go`). The finder answers the question differently today.
 
-- **N-018** · raised `2026-0910-1826-clickable-overflow-markers` · value low
-  Overflow markers on the surfaces that have none — compare panel, problems
-  panel, chat, terminal. The click comes along for free via `scrollAt`.
-
 - **N-019** · raised `2026-0828-1713-chat-archive` · value low
   Real chat RESUME via ACP `session/load`. Contingent on an agent
   advertising `loadSession` and on solving the replay-doubles-the-transcript
@@ -208,6 +204,13 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, `2026-0929-1552-overflow-markers-panels` — **N-018** overflow markers on the compare panel
+  (lines), Problems (problems, over the filtered view), chat (wrapped
+  transcript rows, band stops above chips/composer) and terminal
+  (scrollback lines). All sit in each panel's blank right margin. Problems
+  is the only list COLORED by what's hidden (severity, since rows sort by
+  path); the terminal stays plain over stderr on purpose. The click routes
+  through `scrollAt` unchanged. Seen in the real binary (terminal ▴/▾).
 - closed 2026-09-21, `2026-0921-0932-next-list-run` — **N-004** `release.yml`'s auto-bump now rewrites
   `cats-plugin.toml`'s version in the same commit, and
   `TestVersion_MatchesCatsManifest` catches a manual bump that forgot it.

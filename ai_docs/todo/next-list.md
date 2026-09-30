@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-036**
+**Next ID: N-037**
 
 ## Open
 
@@ -99,12 +99,15 @@ plus the LSP work done in the seeding session itself
   item and never dispatched it). Both are expected to deliver it; close
   on confirmation. cats `bd18905` is not pushed yet.
 
-- **N-029** · raised `2026-0928-1408-recent-locations-per-repo-history` · value low
-  README does not mention ≡ Nav → Recent locations…, the drill-in, or that
-  recent files / locations now live in `<repo>/.ced/history.bytdb`
-  (gitignored), nor the "No file open" placeholder's Recent files ·
-  Recent locations links (added `2026-0928-1735-empty-editor-recent-links`).
-  An instance of N-003.
+- **N-036** · raised `2026-0929-1929-readme-recent-files-and-locations` · value low
+  The README's leader-key table is missing top-level leaders that are
+  bound in leader.go: `Esc b` (switch tab), `Esc ,` / `Esc .`,
+  `Esc o` / `Esc O` (back / forward), `Esc T` (focus tree), `Esc Z`
+  (redo), `Esc v` (markdown preview), `Esc h` / `Esc H` (next / previous
+  change), `Esc A` (blame), `Esc g` (git panel), `Esc L` (git log),
+  `Esc S` (git log search), `` Esc ` `` (terminal) and `Esc ~` (terminal
+  locations). Some may be documented in their own sections; the table
+  is what's short. An instance of N-003.
 
 ## Roadmap
 
@@ -156,6 +159,12 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, `2026-0929-1929-readme-recent-files-and-locations` —
+  **N-029** README gains `### Recent files and recent locations`: both
+  ≡ Nav pickers (the 5 + 10 lists, the `›` drill-in, reveal not re-root,
+  what counts as a use), the "No file open" links, and where the history
+  lives (`.ced/history.bytdb`, gitignored, repositories only, "(not
+  saved)"). Plus a Features bullet and the `Esc B` hotkey row.
 - closed 2026-09-29, no session doc (commit "Hover asks for markdown first (N-030)") —
   **N-030** hover now asks for MARKDOWN first. Checked against real
   gopls v0.21 on ced's own sources before deciding: the plaintext form

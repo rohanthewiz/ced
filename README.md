@@ -88,6 +88,11 @@ The goals, in order:
   expanded below it) containing it lights up, and the cursor jumps to the
   first one, scrolling if needed. `Tab` / `Shift-Tab` cycle the matches,
   `Backspace` trims, `Esc` clears.
+- **Recent files and recent locations** — get back to the file you
+  closed an hour ago, or to the folders you work in most, from
+  `≡` → Nav or the links on the "No file open" screen. Each repository
+  keeps its own history, in a gitignored `.ced/history.bytdb`. See
+  [Recent files and recent locations](#recent-files-and-recent-locations).
 - **Clipboard over SSH** — OSC 52, including a `tmux` passthrough so
   copy works from inside a tmux session on a remote host.
 - **Formatting** — Go files are formatted on every save (goimports /
@@ -460,6 +465,7 @@ within half a second tap one of the letters below.
 | `Esc P`     | Find in project      |
 | `Esc j`     | Go to line           |
 | `Esc p`     | Find file in project |
+| `Esc B`     | Recent files         |
 | `Esc k`     | Command palette      |
 | `Esc m`     | Add caret below      |
 | `Esc M`     | Add caret above      |
@@ -731,6 +737,61 @@ fuzzy file finder over every non-ignored file in the project:
   as the file tree, plus immediately after any create/rename/delete
   inside the editor.
 - Only files are listed — no directories, no symlinked duplicates.
+
+### Recent files and recent locations
+
+Two lists under `≡` → **Nav** take you back to where you were working.
+
+**Recent files…** (`Esc B`, or `⌘E` where `Cmd` arrives) lists the files
+you've had open in this project, most recent first, including ones you've
+since closed. The file on screen isn't listed, so the first row is the
+one you were in before it: press the key, then `Enter`, and you're back.
+Files that have since been deleted or moved drop off the list.
+
+**Recent locations…** lists this project's folders, not its files. The
+five you've used most recently come first, then a thin `┄┄┄` line, then
+the ten you've used most often (leaving out any already named above it):
+
+```
+┌ Recent locations ───────────────┐    ┌ Folders in internal ────────────┐
+│  internal  ›                    │    │  Reveal internal in tree        │
+│  ai_docs/plans                  │    │  app                            │
+│  …                              │ →  │  …                              │
+│  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  │    │  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  │
+│  …                              │    │  …                              │
+└─────────────────────────────────┘    └─────────────────────────────────┘
+```
+
+- A row marked `›` has folders you've used inside it. Picking it opens
+  the same list one level down, and that list's first row reveals the
+  folder itself, in case it was what you wanted after all.
+- Any other row **reveals** the folder in the file tree, expanding its
+  parents. It never re-roots the editor, so git, the language server and
+  the file finder keep working on the whole project. To switch projects,
+  use `≡` → File → **Recent folders…**.
+- A folder counts as "used" when you open a file from it in a new tab
+  (switching to a tab that's already open doesn't count), or when you
+  pick it here.
+
+With no file open, the editor's placeholder offers both lists as links:
+
+```
+            No file open
+
+Click a file in the tree, or  ≡  for the menu
+
+      Recent files   ·   Recent locations
+```
+
+**Where they're kept.** Both lists, along with your search history, live
+in the project itself, in `.ced/history.bytdb`. ced creates that file on
+the first save, next to a `.ced/.gitignore` that keeps it out of your
+commits. Each repository has its own history, and two ced windows on the
+same repository add to it rather than overwrite each other. It's written
+only for a git repository (or a folder that already has a `.ced/`).
+Anywhere else, e.g. `ced ~`, the lists last for the session and leave
+nothing behind. If the history can't be written, say in a read-only
+checkout, both `≡` rows read **(not saved)** and clicking one says why.
 
 ## Code intelligence (language servers)
 

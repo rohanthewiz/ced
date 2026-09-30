@@ -91,12 +91,13 @@ plus the LSP work done in the seeding session itself
   matters.
 
 - **N-026** · raised `2026-0921-0932-next-list-run` · value low
-  cats-side: add `"KeyA"` to `CMD_TO_PANE` (`cmd/catway/web/js/20-keys.js`)
-  so ⌘A reaches a ced pane in browser-cats. ced binds it as of N-007 and
-  it is live in kitty / Ghostty / WezTerm; in browser-cats the browser
-  still keeps the chord for its own select-all. The road ⌘E took
-  (`ed4962c`). Worth checking first that forwarding it does not cost
-  other panes (a shell) a select-all they relied on.
+  cats-side: `"KeyA"` is now in `CMD_TO_PANE` (cats `bd18905`,
+  `cmd/catway/web/js/20-keys.js`; the cost to a shell was checked first
+  and is nil: a legacy pane fails the kitty gate). What's left is a HAND
+  CHECK that ⌘A actually reaches a ced pane in Chrome and in the cats mac
+  app, the lesson ⌘E taught (`ed4962c`; Chrome resolved its ⌘E as a menu
+  item and never dispatched it). Both are expected to deliver it; close
+  on confirmation. cats `bd18905` is not pushed yet.
 
 - **N-029** · raised `2026-0928-1408-recent-locations-per-repo-history` · value low
   README does not mention ≡ Nav → Recent locations…, the drill-in, or that

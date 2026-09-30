@@ -221,6 +221,9 @@ type lspHoverEvent struct {
 	path string
 	text string
 	err  error
+	// markdown is the content kind the server answered with (see
+	// lsp.Hover.Markup); hoverLines reads the two kinds differently.
+	markdown bool
 
 	// dwell marks a request made by the pointer rather than the caret.
 	dwell bool
@@ -814,11 +817,11 @@ func (a *App) menuHoverInfo() {
 	a.lspFlushChange(t)
 	go func() {
 		h, err := client.HoverAt(path, pos)
-		text := ""
+		text, markdown := "", false
 		if h != nil {
-			text = h.HoverText()
+			text, markdown = h.Markup()
 		}
-		_ = scr.PostEvent(&lspHoverEvent{when: time.Now(), path: path, text: text, err: err})
+		_ = scr.PostEvent(&lspHoverEvent{when: time.Now(), path: path, text: text, markdown: markdown, err: err})
 	}()
 }
 
@@ -840,7 +843,7 @@ func (a *App) handleLSPHover(e *lspHoverEvent) {
 	}
 	var lines []string
 	if e.err == nil {
-		lines = hoverLines(e.text)
+		lines = hoverLines(e.text, e.markdown)
 	}
 	// Diagnostics under the caret lead the tooltip: on a red line, "what
 	// is wrong here" is the question the key was most likely pressed to
@@ -865,21 +868,22 @@ func (a *App) handleLSPHover(e *lspHoverEvent) {
 
 // hoverLines flattens hover text for the modal: markdown code fences
 // dropped (the modal is monospace already — fence markers are pure
-// noise), prose paragraphs re-joined (hoverReflow), trailing blank lines
-// trimmed, and length capped so a huge doc comment can't swallow the
-// screen.
+// noise), prose paragraphs re-joined (hoverReflow), markdown's inline
+// syntax rendered down to plain text when the server sent markdown,
+// trailing blank lines trimmed, and length capped so a huge doc comment
+// can't swallow the screen.
 //
 // The cap counts ROWS as the tooltip will wrap them at its widest
 // (hoverModalTextWidth), not source lines: once a paragraph is one long
 // line, "12 lines" would say nothing about how tall the box gets. A
 // paragraph that straddles the cap is cut at a row boundary, so the
 // reader keeps every row that fit rather than losing the whole thing.
-func hoverLines(text string) []string {
+func hoverLines(text string, markdown bool) []string {
 	const maxRows = 16
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	out := hoverReflow(strings.Split(text, "\n"))
+	out := hoverReflow(strings.Split(text, "\n"), markdown)
 	// Trim leading/trailing blanks left behind by dropped fences.
 	for len(out) > 0 && out[0] == "" {
 		out = out[1:]
@@ -917,9 +921,10 @@ func hoverLines(text string) []string {
 
 // hoverReflow drops fence markers and re-joins the soft line breaks of
 // markdown prose. Servers hand doc comments over with the SOURCE's line
-// breaks (gopls: ~70 columns), which in markdown are soft — the
-// paragraph is one unit. Wrapped again at the tooltip's narrower width
-// each of those breaks would leave an orphan row of one or two words:
+// breaks (gopls' plaintext: ~70 columns; other servers' markdown too),
+// which in markdown are soft — the paragraph is one unit. Wrapped again
+// at the tooltip's narrower width each of those breaks would leave an
+// orphan row of one or two words:
 //
 //	source (70 cols)                 tooltip (62 cols), not reflowed
 //	"…to textW columns and carries any"  → "…to textW columns and"
@@ -931,15 +936,33 @@ func hoverLines(text string) []string {
 // headings, quotes, tables, and a markdown hard break (a line ending in
 // two spaces or a backslash).
 //
-// PLAINTEXT hover (what ced asks for first) has no fence and no blank
-// line between the signature and the doc — gopls separates its sections
-// with a single newline. So the text's first line, when it is not
-// fenced, is taken to be the header and never absorbs the next line; and
-// a line ending like code (`{`, `}`, `;` — a type declaration's body)
-// never absorbs one either. A doc line that happens to end that way just
-// stays unjoined, which costs a short row, never a mangled signature.
-func hoverReflow(src []string) []string {
+// The two content kinds differ in where the structure comes from:
+//
+//   - MARKDOWN (what ced asks for first) carries it in syntax. gopls
+//     fences the signature and a type's method list, splits sections
+//     with `---`, and sends each doc paragraph as one line already. A
+//     thematic break becomes a blank line, runs of blanks collapse to
+//     one, and every line that is not code is rendered through the
+//     preview's inline scanner (hoverInline): escapes resolved, links
+//     reduced to their text, code-span backticks dropped. Rendering
+//     happens AFTER joining, so a link or code span a server broke over
+//     two source lines is whole again when it is read.
+//   - PLAINTEXT (servers that ignore the preference) has no fence and no
+//     blank line between the signature and the doc — gopls separates its
+//     sections with a single newline. So the text's first line, when it
+//     is not fenced, is taken to be the header and never absorbs the
+//     next line; and a line ending like code (`{`, `}`, `;` — a type
+//     declaration's body) never absorbs one either. A doc line that
+//     happens to end that way just stays unjoined, which costs a short
+//     row, never a mangled signature. Markdown needs neither guess, so
+//     neither applies to it. Plaintext text is shown literally: a
+//     backslash or bracket in it is the server's own character.
+func hoverReflow(src []string, markdown bool) []string {
 	var out []string
+	// render[i] marks out[i] as markdown text still to go through
+	// hoverInline — false for fenced and indented code, whose characters
+	// are literal, and for every line of a plaintext answer.
+	var render []bool
 	inFence := false
 	joinable := false // may the next prose line join out[len(out)-1]?
 	for _, raw := range src {
@@ -952,19 +975,100 @@ func hoverReflow(src []string) []string {
 		ln := strings.TrimRight(raw, " \t")
 		if inFence {
 			out = append(out, ln)
+			render = append(render, false)
 			continue
 		}
+		if markdown && hoverIsRule(ln) {
+			// A section break reads as a paragraph break; drawing the
+			// dashes would spend a row on a line a blank already says.
+			ln = ""
+		}
 		prose := hoverIsProse(ln)
+		if markdown && prose {
+			// A line that is one link and nothing else is a footer
+			// ("`strings` on pkg.go.dev") — its own line, never glued
+			// onto the sentence above, as the bare URL of the plaintext
+			// form already is.
+			if _, _, lone := editor.MarkdownLinkOnly(ln); lone {
+				prose = false
+			}
+		}
+		hardBreak := strings.HasSuffix(raw, "  ") || strings.HasSuffix(ln, "\\")
+		if markdown && hardBreak {
+			// The break is honoured by not joining; the backslash that
+			// asked for it is syntax, not text.
+			ln = strings.TrimSuffix(ln, "\\")
+		}
 		if prose && joinable {
 			out[len(out)-1] += " " + ln
 		} else {
 			out = append(out, ln)
+			render = append(render, markdown && !hoverIsIndentedCode(ln))
 		}
-		hardBreak := strings.HasSuffix(raw, "  ") || strings.HasSuffix(ln, "\\")
+		if markdown {
+			joinable = prose && !hardBreak
+			continue
+		}
 		codeEnd := strings.HasSuffix(ln, "{") || strings.HasSuffix(ln, "}") || strings.HasSuffix(ln, ";")
 		joinable = prose && !hardBreak && !codeEnd && !header
 	}
-	return out
+	if !markdown {
+		return out
+	}
+	// Render, then collapse blank runs: "\n\n---\n\n" between gopls'
+	// sections is three blank lines by now, and markdown reads any run
+	// of them as one break. A blank inside a fence is exempt — it is part
+	// of the code — and is the only kind of blank render leaves false.
+	kept := out[:0]
+	for i, ln := range out {
+		if !render[i] {
+			kept = append(kept, ln)
+			continue
+		}
+		ln = hoverInline(ln)
+		if ln == "" && len(kept) > 0 && kept[len(kept)-1] == "" {
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	return kept
+}
+
+// hoverInline renders one markdown line to what the tooltip shows.
+// Leading indentation (a nested list item) is kept as it is; a heading
+// loses its hashes; a line that is only an http(s) link shows its URL,
+// since in a footer the destination is the content and the label
+// ("`json.Unmarshal` on pkg.go.dev") only says where it points; any
+// other link shows its label (a doc link's file:// destination is
+// noise). The rest is the preview's own inline scanner.
+func hoverInline(ln string) string {
+	body := strings.TrimLeft(ln, " \t")
+	indent := ln[:len(ln)-len(body)]
+	if _, dest, ok := editor.MarkdownLinkOnly(body); ok &&
+		(strings.HasPrefix(dest, "https://") || strings.HasPrefix(dest, "http://")) {
+		return indent + dest
+	}
+	if h := strings.TrimLeft(body, "#"); h != body && len(body)-len(h) <= 6 && strings.HasPrefix(h, " ") {
+		body = strings.TrimSpace(h)
+	}
+	return indent + editor.MarkdownInlineText(body)
+}
+
+// hoverIsRule reports whether a markdown line is a thematic break:
+// three or more of one of - * _, optionally spaced ("---", "* * *").
+func hoverIsRule(ln string) bool {
+	t := strings.ReplaceAll(strings.TrimSpace(ln), " ", "")
+	if len(t) < 3 || !strings.ContainsRune("-*_", rune(t[0])) {
+		return false
+	}
+	return strings.Count(t, t[:1]) == len(t)
+}
+
+// hoverIsIndentedCode reports whether a markdown line is an indented
+// code block line (a tab, or four spaces), whose text is literal. A list
+// item indented by two spaces is not — gopls nests its bullets that way.
+func hoverIsIndentedCode(ln string) bool {
+	return strings.HasPrefix(ln, "\t") || strings.HasPrefix(ln, "    ")
 }
 
 // hoverIsProse reports whether a markdown line is plain paragraph text —

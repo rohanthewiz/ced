@@ -201,12 +201,12 @@ func (a *App) handleHoverDwellTick(e *hoverDwellEvent) {
 	a.lspFlushChange(t) // the answer must describe what is on screen
 	go func() {
 		h, err := client.HoverAt(path, lpos)
-		text := ""
+		text, markdown := "", false
 		if h != nil {
-			text = h.HoverText()
+			text, markdown = h.Markup()
 		}
 		_ = scr.PostEvent(&lspHoverEvent{
-			when: time.Now(), path: path, text: text, err: err,
+			when: time.Now(), path: path, text: text, markdown: markdown, err: err,
 			dwell: true, seq: seq, ax: ax, ay: ay,
 		})
 	}()
@@ -296,7 +296,7 @@ func (a *App) handleHoverDwellResult(e *lspHoverEvent) {
 	if t == nil || t.Path != e.path || e.err != nil {
 		return
 	}
-	lines := hoverLines(e.text)
+	lines := hoverLines(e.text, e.markdown)
 	if len(lines) == 0 {
 		return
 	}

@@ -286,6 +286,83 @@ func (h Hover) HoverText() string {
 	return ""
 }
 
+// Markup is HoverText plus the one fact HoverText throws away: whether
+// the text is MARKDOWN. The hover tooltip reads the two kinds
+// differently — markdown carries its structure in syntax (fences,
+// blank-line sections, one paragraph per line from gopls) while
+// plaintext has to be read by heuristic (see hoverReflow in the app) —
+// so the kind has to survive the trip from the wire.
+//
+// The shapes, and the kind each one means:
+//
+//   - MarkupContent {kind, value}: whatever kind says.
+//   - A bare string (MarkedString): markdown, per the spec.
+//   - A {language, value} MarkedString: code, returned as a fenced
+//     block so it stays apart from any prose around it.
+//   - An array of the two MarkedString forms: markdown, each element its
+//     own block. Joined with a BLANK line rather than HoverText's single
+//     newline: two prose strings side by side would otherwise read as
+//     one paragraph and be joined together.
+//   - {value} with neither kind nor language: taken literally, since
+//     nothing says how to read it.
+//
+// HoverText stays as it was for callers that only want the flat text.
+func (h Hover) Markup() (text string, markdown bool) {
+	if len(h.Contents) == 0 {
+		return "", false
+	}
+	var obj struct {
+		Kind     string `json:"kind"`
+		Language string `json:"language"`
+		Value    string `json:"value"`
+	}
+	if err := json.Unmarshal(h.Contents, &obj); err == nil {
+		switch {
+		case obj.Value == "":
+			return "", false
+		case obj.Kind != "":
+			return obj.Value, obj.Kind == "markdown"
+		case obj.Language != "":
+			return fenceMarkdown(obj.Language, obj.Value), true
+		}
+		return obj.Value, false
+	}
+	var s string
+	if err := json.Unmarshal(h.Contents, &s); err == nil {
+		return s, s != ""
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(h.Contents, &arr); err != nil {
+		return "", false
+	}
+	var parts []string
+	for _, el := range arr {
+		if err := json.Unmarshal(el, &s); err == nil {
+			if s != "" {
+				parts = append(parts, s)
+			}
+			continue
+		}
+		obj.Language, obj.Value = "", ""
+		if err := json.Unmarshal(el, &obj); err == nil && obj.Value != "" {
+			if obj.Language != "" {
+				parts = append(parts, fenceMarkdown(obj.Language, obj.Value))
+			} else {
+				parts = append(parts, obj.Value)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return "", false
+	}
+	return strings.Join(parts, "\n\n"), true
+}
+
+// fenceMarkdown wraps code in a markdown fence tagged with its language.
+func fenceMarkdown(lang, code string) string {
+	return "```" + lang + "\n" + strings.TrimRight(code, "\n") + "\n```"
+}
+
 // -----------------------------------------------------------------------------
 // Signature help
 // -----------------------------------------------------------------------------

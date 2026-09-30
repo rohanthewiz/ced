@@ -182,3 +182,37 @@ func TestFindRun_MatchesExactLength(t *testing.T) {
 		t.Errorf("findRun = %d, want 5 (the exact-length run, not the triple)", got)
 	}
 }
+
+// TestMarkdownInlineText_ReadsLikeThePreview pins the plain-text door
+// onto the inline scanner, fed the markup gopls actually puts in a
+// hover: escaped brackets, a doc link with a file:// destination, a code
+// span inside link text. Every delimiter goes; every word stays.
+func TestMarkdownInlineText_ReadsLikeThePreview(t *testing.T) {
+	cases := map[string]string{
+		`  - \[]any, for JSON arrays`: "  - []any, for JSON arrays",
+		"returns an [InvalidUnmarshalError](file:///go/src/encoding/json/decode.go#158,6).": "returns an InvalidUnmarshalError.",
+		"[`strings` on pkg.go.dev](https://pkg.go.dev/strings)":                             "strings on pkg.go.dev",
+		"plain prose, untouched": "plain prose, untouched",
+		"":                       "",
+	}
+	for in, want := range cases {
+		if got := MarkdownInlineText(in); got != want {
+			t.Errorf("MarkdownInlineText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestMarkdownLinkOnly pins the "whole line is one link" test: a lone
+// link answers with both halves, surrounding text or a reference-style
+// link does not.
+func TestMarkdownLinkOnly(t *testing.T) {
+	text, dest, ok := MarkdownLinkOnly("  [`json.Unmarshal` on pkg.go.dev](https://pkg.go.dev/encoding/json#Unmarshal) ")
+	if !ok || text != "`json.Unmarshal` on pkg.go.dev" || dest != "https://pkg.go.dev/encoding/json#Unmarshal" {
+		t.Errorf("lone link = (%q, %q, %v)", text, dest, ok)
+	}
+	for _, in := range []string{"see [docs](https://x.dev)", "[docs](https://x.dev) here", "[ref][1]", "no link", ""} {
+		if _, _, ok := MarkdownLinkOnly(in); ok {
+			t.Errorf("MarkdownLinkOnly(%q) = ok, want not a lone link", in)
+		}
+	}
+}

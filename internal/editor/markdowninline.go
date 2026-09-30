@@ -202,6 +202,37 @@ func parseInline(s string, base tcell.Style, p mdPalette, depth int) []mdSpan {
 	return out
 }
 
+// MarkdownInlineText renders one line of markdown to the plain text a
+// reader would see: escapes resolved, code-span and emphasis delimiters
+// dropped, links reduced to their text. It is parseInline with the
+// styles thrown away, so it exists for callers that draw markdown into
+// a plain text box (the LSP hover tooltip) and should agree with the
+// preview on every rune without keeping a second scanner in step.
+//
+// It does not know about blocks: a list marker, heading marker or
+// indentation passes through as the literal text it is.
+func MarkdownInlineText(s string) string {
+	var b strings.Builder
+	for _, sp := range parseInline(s, tcell.StyleDefault, mdPalette{}, 0) {
+		b.WriteString(sp.text)
+	}
+	return b.String()
+}
+
+// MarkdownLinkOnly reports whether s, trimmed, is exactly one inline
+// link "[text](dest)" and nothing else, returning both halves. A line
+// that is only a link is the one case where the destination IS the
+// content — a "see the docs" footer — and a caller rendering to plain
+// text may want to show the URL there rather than the label.
+func MarkdownLinkOnly(s string) (text, dest string, ok bool) {
+	rs := []rune(strings.TrimSpace(s))
+	text, dest, next, ok := parseLinkAt(rs, 0)
+	if !ok || next != len(rs) {
+		return "", "", false
+	}
+	return text, dest, true
+}
+
 // parseNested recurses into an emphasis body, or gives up and emits the
 // body flat once the depth bound is reached.
 func parseNested(body string, st tcell.Style, p mdPalette, depth int) []mdSpan {

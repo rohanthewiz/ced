@@ -105,16 +105,6 @@ plus the LSP work done in the seeding session itself
   Recent locations links (added `2026-0928-1735-empty-editor-recent-links`).
   An instance of N-003.
 
-- **N-030** · raised `2026-0929-1249-hover-tooltip-wrap` · value low
-  Hover asks for PLAINTEXT first (`contentFormat: plaintext, markdown`),
-  so `hoverReflow` finds the signature/doc boundary by heuristic: the
-  text's first line is the header and never joins, and a line ending in
-  `{` `}` `;` never absorbs the next. A doc line that happens to end that
-  way stays unjoined (a short row, never a mangled signature), and a
-  plaintext signature gopls might split over lines would join its own
-  continuation. Requesting markdown would give real structure (fences,
-  blank-line sections) at the cost of rendering its escapes and links.
-
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.
@@ -165,6 +155,30 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-09-29, no session doc (commit "Hover asks for markdown first (N-030)") —
+  **N-030** hover now asks for MARKDOWN first. Checked against real
+  gopls v0.21 on ced's own sources before deciding: the plaintext form
+  was worse than the heuristic's known costs. A type's method list
+  arrives as unindented `func (c *Client) …` lines, which `hoverReflow`
+  could only read as prose and joined into one paragraph. Every doc link
+  also trails a `[Name]: file:///…` definition line, visible in any
+  short tooltip. Markdown fences the signature and the method list, splits sections
+  with `---`, sends each paragraph on one line, and resolves doc links.
+  `lsp.Hover.Markup` keeps the kind (bare MarkedString = markdown,
+  `{language, value}` fenced, array elements blank-separated); it rides
+  `lspHoverEvent.markdown` for both the Esc-i modal and the dwell
+  tooltip. In markdown, non-code lines go through the preview's own
+  inline scanner (`editor.MarkdownInlineText`, plus `MarkdownLinkOnly`
+  for the pkg.go.dev footer, shown as its URL). The plaintext guesses
+  stay for servers that ignore the preference. Signature help and
+  completion docs stay plaintext first. Known wart, gopls-side: its
+  markdown linkifies the `[string]` in `map[string]any`, so that one
+  reads "mapstringany". Pinned by
+  `TestHoverLines_MarkdownReadsGoplsStructure`,
+  `TestHoverLines_MarkdownDropsThePlaintextGuesses`,
+  `TestHandleLSPHover_RendersMarkdown`, `TestHoverMarkup`,
+  `TestInitialize_PrefersMarkdownHover`,
+  `TestMarkdownInlineText_ReadsLikeThePreview`, `TestMarkdownLinkOnly`.
 - closed 2026-09-29, no session doc (commit "gofmt drift (N-034)") —
   **N-034** `gofmt -w` on `internal/app/hovermodal.go` (the
   `tooltipPlace` diagram's leading indent), `internal/editor/tab.go`

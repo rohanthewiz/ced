@@ -982,3 +982,39 @@ func TestLocations_SendsTheNamedMethod(t *testing.T) {
 		t.Errorf("got %d locations, want 2", len(locs))
 	}
 }
+
+// TestInitialize_PrefersMarkdownHover pins the handshake half of the
+// same decision: hover asks for markdown FIRST, while signature help
+// and completion documentation keep asking for plaintext first.
+func TestInitialize_PrefersMarkdownHover(t *testing.T) {
+	c, srv, done := pipeClient(t, nil, nil)
+	defer done()
+
+	go func() { _ = c.Initialize("/p") }()
+	m := srv.read(t)
+	var p struct {
+		Capabilities struct {
+			TextDocument struct {
+				Hover struct {
+					ContentFormat []string `json:"contentFormat"`
+				} `json:"hover"`
+				SignatureHelp struct {
+					SignatureInformation struct {
+						DocumentationFormat []string `json:"documentationFormat"`
+					} `json:"signatureInformation"`
+				} `json:"signatureHelp"`
+			} `json:"textDocument"`
+		} `json:"capabilities"`
+	}
+	if err := json.Unmarshal(m.Params, &p); err != nil {
+		t.Fatalf("params: %v", err)
+	}
+	if f := p.Capabilities.TextDocument.Hover.ContentFormat; len(f) == 0 || f[0] != "markdown" {
+		t.Errorf("hover contentFormat = %v, want markdown first", f)
+	}
+	if f := p.Capabilities.TextDocument.SignatureHelp.SignatureInformation.DocumentationFormat; len(f) == 0 || f[0] != "plaintext" {
+		t.Errorf("signature documentationFormat = %v, want plaintext first", f)
+	}
+	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"capabilities":{}}}`, *m.ID))
+	srv.read(t) // the `initialized` notification
+}

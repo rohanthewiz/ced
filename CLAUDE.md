@@ -377,6 +377,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Handshake declares workspaceEdit with `documentChanges: true` and EMPTY
   `resourceOperations`, `workDoneProgress`, `codeActionLiteralSupport`;
   deliberately NOT `resolveSupport`, `prepareSupport`, `linkSupport`.
+  Hover `contentFormat` is MARKDOWN first; signature help and completion
+  docs stay plaintext first (`TestInitialize_PrefersMarkdownHover`).
 - `onRequest` hook is narrow: return `lsp.ErrRequestUnhandled` for
   methods it doesn't own (gopls blocks on `workspace/configuration`).
   `StartWithRequests` installs the hook before the read loop.
@@ -407,8 +409,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
     measure and paint), the box grows DOWN, never wider than
     `hoverModalMaxWidth`; too tall for either side of the anchor →
     `tooltipPlace` shortens it and the painter ends in `…`.
-    `hoverReflow` re-joins prose soft breaks; plaintext's first line is
-    the header and never joins. `hoverLines` caps in wrapped ROWS (16).
+    `hoverReflow` re-joins prose soft breaks. The kind rides the event
+    (`lsp.Hover.Markup`): markdown gets `---` → blank, blank runs
+    collapsed, non-code lines through `editor.MarkdownInlineText` (the
+    preview's scanner, not a second one), a lone http(s) link shown as
+    its URL; plaintext keeps the guesses (first line is the header,
+    `{`/`}`/`;` ends never join). `hoverLines` caps in wrapped ROWS (16).
   - Signature help: MANUAL only (a modal would eat keystrokes); label
     hard-wrapped for exact offsets; active param's doc first.
   - Progress: status-bar segment, token SET, `lspLoadingNote` on empty

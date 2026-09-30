@@ -536,7 +536,7 @@ func readMessage(r *bufio.Reader) (*message, error) {
 
 // Initialize runs the initialize → initialized handshake for the
 // workspace rooted at rootDir. The capability set is the minimal
-// honest one: full-text sync, plaintext-preferred hover, and the
+// honest one: full-text sync, markdown-preferred hover, and the
 // publishDiagnostics / definition defaults.
 func (c *Client) Initialize(rootDir string) error {
 	return c.InitializeWithOptions(rootDir, nil)
@@ -608,17 +608,32 @@ func (c *Client) InitializeWithOptions(rootDir string, options any) error {
 				"documentSymbol": map[string]any{
 					"hierarchicalDocumentSymbolSupport": true,
 				},
-				// Plaintext first here too: the tooltip that renders this
-				// is the hover modal, which is a dumb text box.
+				// Plaintext first, unlike hover below: the tooltip that
+				// renders this is the hover modal, a dumb text box, and a
+				// parameter's documentation is a sentence or two with no
+				// sections for markdown to mark out — hover's reasons for
+				// preferring markdown don't arise here.
 				"signatureHelp": map[string]any{
 					"signatureInformation": map[string]any{
 						"documentationFormat": []string{"plaintext", "markdown"},
 					},
 				},
 				"hover": map[string]any{
-					// Plaintext first: the hover modal is a dumb text
-					// box, and gopls honours the preference order.
-					"contentFormat": []string{"plaintext", "markdown"},
+					// MARKDOWN first — the one place ced prefers it, and
+					// gopls honours the order. The hover tooltip is still
+					// a plain text box, but gopls' markdown hover carries
+					// its structure where its plaintext hover does not:
+					// the signature in a fence, sections split by `---`,
+					// each doc paragraph already on one line, and doc
+					// links resolved. Its plaintext form runs signature
+					// and doc together with a bare newline, sends a
+					// type's method list as unindented lines that read as
+					// prose, and trails every doc link's
+					// "[Name]: file:///…" definition. What markdown costs
+					// — escapes, code spans, link syntax — is rendered
+					// down to plain text by hoverLines, which reuses the
+					// markdown preview's inline scanner to do it.
+					"contentFormat": []string{"markdown", "plaintext"},
 				},
 				// Completion. Three declarations, each of which changes
 				// what the server sends, and each chosen so that what
@@ -631,8 +646,9 @@ func (c *Client) InitializeWithOptions(rootDir string, options any) error {
 				//     user's buffer. Declining gets literal text
 				//     instead, which is exactly what the popup inserts.
 				//   - documentationFormat plaintext-first, for the same
-				//     reason hover and signature help ask for it: the
-				//     detail pane is a dumb text box.
+				//     reason signature help asks for it: the detail pane
+				//     is a dumb text box. (Hover asks for markdown, for
+				//     reasons its own entry gives.)
 				//   - resolveSupport is ABSENT, the same trade codeAction
 				//     makes above. Declaring it tells the server it may
 				//     defer additionalTextEdits to a resolve round trip —

@@ -103,6 +103,34 @@ func TestHoverText(t *testing.T) {
 	}
 }
 
+// TestHoverMarkup pins that the content KIND survives: MarkupContent
+// says what it is, a bare MarkedString is markdown per the spec, a
+// {language, value} pair comes back fenced, and an array's elements are
+// separated by a blank line so two prose strings stay two paragraphs.
+func TestHoverMarkup(t *testing.T) {
+	cases := []struct {
+		name, contents, want string
+		markdown             bool
+	}{
+		{"markdown content", `{"kind":"markdown","value":"**F**"}`, "**F**", true},
+		{"plaintext content", `{"kind":"plaintext","value":"func Foo()"}`, "func Foo()", false},
+		{"bare string", `"just text"`, "just text", true},
+		{"language pair", `{"language":"go","value":"var x int\n"}`, "```go\nvar x int\n```", true},
+		{"array", `["one",{"language":"go","value":"var x int"},"two"]`, "one\n\n```go\nvar x int\n```\n\ntwo", true},
+		{"value alone", `{"value":"raw"}`, "raw", false},
+		{"empty object", `{}`, "", false},
+		{"empty array", `[]`, "", false},
+		{"null-ish", ``, "", false},
+	}
+	for _, tc := range cases {
+		h := Hover{Contents: json.RawMessage(tc.contents)}
+		got, md := h.Markup()
+		if got != tc.want || md != tc.markdown {
+			t.Errorf("%s: Markup() = (%q, %v), want (%q, %v)", tc.name, got, md, tc.want, tc.markdown)
+		}
+	}
+}
+
 // TestParseDocumentSymbols_Hierarchical pins the modern shape: the tree
 // flattens in document order with Depth recording the nesting, and the
 // jump position comes from selectionRange (the NAME) rather than range

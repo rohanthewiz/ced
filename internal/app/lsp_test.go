@@ -822,7 +822,7 @@ func TestHoverOpensModal(t *testing.T) {
 // TestHoverLines pins the text flattening: fences stripped, blank
 // edges trimmed, and the row cap with its ellipsis marker.
 func TestHoverLines(t *testing.T) {
-	got := hoverLines("```go\nfunc F()\n```\n\ndocs here\n")
+	got := hoverLines("```go\nfunc F()\n```\n\ndocs here\n", true)
 	want := []string{"func F()", "", "docs here"}
 	if len(got) != len(want) {
 		t.Fatalf("hoverLines = %q, want %q", got, want)
@@ -839,12 +839,12 @@ func TestHoverLines(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		long += fmt.Sprintf("line %d\n\n", i)
 	}
-	capped := hoverLines(long)
+	capped := hoverLines(long, false)
 	if len(capped) != 16 || capped[15] != "…" {
 		t.Errorf("cap: got %d lines, last %q", len(capped), capped[len(capped)-1])
 	}
 
-	if hoverLines("  \n\t\n") != nil {
+	if hoverLines("  \n\t\n", true) != nil {
 		t.Error("whitespace-only hover should flatten to nothing")
 	}
 }
@@ -860,7 +860,7 @@ func TestHoverLines_ReflowsProseParagraphs(t *testing.T) {
 		"    indented code\n    more code\n\n" +
 		"hard break  \nafter it\n" +
 		"1. ordered\n"
-	got := hoverLines(in)
+	got := hoverLines(in, true)
 	want := []string{
 		"func F(a int,", "\tb int)", "",
 		"First line of the doc continues here.", "",
@@ -875,21 +875,100 @@ func TestHoverLines_ReflowsProseParagraphs(t *testing.T) {
 }
 
 // TestHoverLines_PlaintextKeepsTheSignatureApart pins the plaintext
-// shape gopls sends (ced asks for plaintext first): no fence, no blank
-// line between the signature and the doc. The signature and a type's
+// shape gopls sends when asked for it (and servers that ignore ced's
+// markdown preference may send): no fence, no blank line between the
+// signature and the doc. The signature and a type's
 // declaration body must survive as their own lines while the doc
 // paragraph still joins.
 func TestHoverLines_PlaintextKeepsTheSignatureApart(t *testing.T) {
-	got := hoverLines("func F(a int) (string, error)\nF decides which DAG\ncarries the id.\nhttps://pkg.go.dev/x#F")
+	got := hoverLines("func F(a int) (string, error)\nF decides which DAG\ncarries the id.\nhttps://pkg.go.dev/x#F", false)
 	want := []string{"func F(a int) (string, error)", "F decides which DAG carries the id.", "https://pkg.go.dev/x#F"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("func hover =\n%q\nwant\n%q", got, want)
 	}
 
-	got = hoverLines("type T struct {\n\tA int\n}\nT holds\nan A.")
+	got = hoverLines("type T struct {\n\tA int\n}\nT holds\nan A.", false)
 	want = []string{"type T struct {", "\tA int", "}", "T holds an A."}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("type hover =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestHoverLines_MarkdownReadsGoplsStructure pins the reason hover asks
+// for markdown first (N-030), on the shape gopls v0.21 actually sends for
+// a type: the declaration and the method list each in a fence, sections
+// split by `---`, the doc paragraph on one line with its doc links
+// resolved, and a pkg.go.dev footer link.
+//
+// The same hover as PLAINTEXT sends the method list as bare unindented
+// lines, which the plaintext heuristic can only read as prose and joins
+// into one paragraph. In markdown the fence says they are code.
+func TestHoverLines_MarkdownReadsGoplsStructure(t *testing.T) {
+	in := "```go\ntype Client struct {\n\tmu sync.Mutex\n\n\tcaps caps\n}\n```\n\n---\n\n" +
+		"Client talks to one [Server](file:///x/server.go#12,6) \\[see below].\n\n\n" +
+		"```go\nfunc (c *Client) Call() error\nfunc (c *Client) Close()\n```\n\n---\n\n" +
+		"[`lsp.Client` on pkg.go.dev](https://pkg.go.dev/x/lsp#Client)"
+	got := hoverLines(in, true)
+	want := []string{
+		"type Client struct {", "\tmu sync.Mutex", "", "\tcaps caps", "}",
+		"",
+		"Client talks to one Server [see below].",
+		"",
+		"func (c *Client) Call() error", "func (c *Client) Close()",
+		"",
+		"https://pkg.go.dev/x/lsp#Client",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("hoverLines =\n%q\nwant\n%q", got, want)
+	}
+
+	// The same method list as plaintext: the heuristic has nothing to go
+	// on and joins it — the failure markdown-first exists to avoid.
+	plain := hoverLines("Client talks.\n\nfunc (c *Client) Call() error\nfunc (c *Client) Close()", false)
+	if len(plain) != 3 || !strings.Contains(plain[2], "error func (c") {
+		t.Errorf("plaintext method list = %q, expected the heuristic to join it", plain)
+	}
+}
+
+// TestHoverLines_MarkdownDropsThePlaintextGuesses pins that neither
+// plaintext heuristic applies to markdown: an unfenced first line joins
+// its paragraph (only plaintext treats it as the header), and a doc line
+// ending in `;` still joins the next. List items, indented code, a lone
+// link and a backslash hard break keep their lines, and indented code is
+// shown literally rather than rendered.
+func TestHoverLines_MarkdownDropsThePlaintextGuesses(t *testing.T) {
+	got := hoverLines("Soft wrapped\nfirst paragraph;\ncontinues.\n\n"+
+		"  - \\[]any, for arrays\n\n"+
+		"\tcode \\[x](y)\n\n"+
+		"## Notes\n"+
+		"broken\\\nhere", true)
+	want := []string{
+		"Soft wrapped first paragraph; continues.", "",
+		"  - []any, for arrays", "",
+		"\tcode \\[x](y)", "",
+		"Notes",
+		"broken", "here",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("hoverLines =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestHandleLSPHover_RendersMarkdown pins the plumbing: the kind rides the
+// event, so the modal shows rendered text rather than markdown source.
+func TestHandleLSPHover_RendersMarkdown(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	tab := openScratch(t, a, "x.go", "package x\n")
+	a.handleLSPHover(&lspHoverEvent{
+		when: time.Now(), path: tab.Path, markdown: true,
+		text: "```go\nfunc F()\n```\n\n---\n\nF returns [G](file:///g.go#1,1).",
+	})
+	hm, ok := a.modal.(*hoverModal)
+	if !ok {
+		t.Fatalf("modal = %T, want *hoverModal", a.modal)
+	}
+	if got := strings.Join(hm.lines, "|"); got != "func F()||F returns G." {
+		t.Errorf("hover lines = %q", got)
 	}
 }
 
@@ -897,7 +976,7 @@ func TestHoverLines_PlaintextKeepsTheSignatureApart(t *testing.T) {
 // half: one paragraph taller than the cap keeps the rows that fit and
 // marks the cut, rather than vanishing whole behind a lone "…".
 func TestHoverLines_CutsAnOverlongParagraphAtARow(t *testing.T) {
-	got := hoverLines(strings.Repeat("word ", 400))
+	got := hoverLines(strings.Repeat("word ", 400), false)
 	if len(got) != 2 || got[1] != "…" {
 		t.Fatalf("hoverLines = %d lines, want the cut paragraph + …", len(got))
 	}

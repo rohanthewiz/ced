@@ -97,7 +97,7 @@ plus the LSP work done in the seeding session itself
   CHECK that ⌘A actually reaches a ced pane in Chrome and in the cats mac
   app, the lesson ⌘E taught (`ed4962c`; Chrome resolved its ⌘E as a menu
   item and never dispatched it). Both are expected to deliver it; close
-  on confirmation. cats `bd18905` is not pushed yet.
+  on confirmation.
 
 - **N-036** · raised `2026-0929-1929-readme-recent-files-and-locations` · value low
   The README's leader-key table is missing top-level leaders that are

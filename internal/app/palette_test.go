@@ -376,10 +376,12 @@ func buildFinderT(t *testing.T, a *App) {
 	}
 }
 
-// TestOpenPalette_IncludesFileItems pins the second source: with a
-// ready index, project files list after the actions (empty query =
-// source order, actions first) and Enter on a file row opens it.
-func TestOpenPalette_IncludesFileItems(t *testing.T) {
+// TestOpenPalette_ExcludesFileItems pins that project files are NOT a
+// palette source: even with a ready index, no path row is listed and a
+// query naming a file matches nothing from the index. In a large repo
+// the path rows used to bury the actions the palette exists to reach;
+// files belong to the finder modal.
+func TestOpenPalette_ExcludesFileItems(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -393,57 +395,36 @@ func TestOpenPalette_IncludesFileItems(t *testing.T) {
 	a.openPalette()
 	m := paletteOf(a)
 
-	labels := map[string]int{}
-	for i, it := range m.items {
-		labels[it.label] = i
+	for _, it := range m.items {
+		if it.label == "alpha.go" || it.label == filepath.Join("sub", "beta.txt") {
+			t.Fatalf("palette must not list project files; found %q", it.label)
+		}
 	}
-	alphaIdx, ok := labels["alpha.go"]
-	if !ok {
-		t.Fatalf("palette items missing alpha.go: %v", labels)
+	// Actions are still all there — the source seam kept working.
+	var sawQuit bool
+	for _, it := range m.items {
+		if it.label == "Quit editor" {
+			sawQuit = true
+		}
 	}
-	if _, ok := labels[filepath.Join("sub", "beta.txt")]; !ok {
-		t.Fatalf("palette items missing sub/beta.txt: %v", labels)
-	}
-	if quitIdx := labels["Quit editor"]; quitIdx > alphaIdx {
-		t.Fatal("actions must list before files on an empty query")
-	}
-
-	// Filter down to the file and run it — the tab must open.
-	typePalette(a, "alpha")
-	m.runSelected(a)
-	if got := a.activeTabPtr(); got == nil || filepath.Base(got.Path) != "alpha.go" {
-		t.Fatalf("selecting a file row should open it; active tab = %+v", got)
+	if !sawQuit {
+		t.Fatal("palette should still list actions (Quit editor missing)")
 	}
 }
 
-// TestPalette_RecollectsOnIndexRebuild verifies the streaming-in path:
-// a palette opened before the first index build shows no file rows,
-// and the finderRebuiltEvent posted by the build re-collects sources
-// so the files appear without reopening the modal.
-func TestPalette_RecollectsOnIndexRebuild(t *testing.T) {
+// TestOpenPalette_LeavesIndexIdle verifies opening the palette no longer
+// kicks a background walk of the project: with files out of the palette
+// that build would be pure cost on every open.
+func TestOpenPalette_LeavesIndexIdle(t *testing.T) {
 	dir := t.TempDir()
 	writeFileT(t, filepath.Join(dir, "alpha.go"), "package a\n")
 
 	a := newTestApp(t, dir)
-	a.finder = finder.New(a.rootDir) // idle — openPalette kicks the build
+	a.finder = finder.New(a.rootDir)
 	a.openPalette()
-
-	m := paletteOf(a)
-	for _, it := range m.items {
-		if it.label == "alpha.go" {
-			t.Fatal("file rows must not exist before the index is built")
-		}
+	if got := a.finder.State(); got != finder.StateIdle {
+		t.Fatalf("finder state after openPalette = %v, want StateIdle", got)
 	}
-
-	// Pump the rebuilt event the build posts and expect re-collection.
-	pumpAppEvents(t, a, func() bool {
-		for _, it := range paletteOf(a).items {
-			if it.label == "alpha.go" {
-				return true
-			}
-		}
-		return false
-	})
 }
 
 // TestOpenPicker_TitleAndCallerItems pins the picker mode: the given

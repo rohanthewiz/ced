@@ -2120,15 +2120,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 		// The background indexer just finished. Re-run the visible
 		// query so "Indexing…" gives way to real results without
 		// the user having to type or wait for the next keystroke.
-		// A sourced palette re-collects too — its file rows come from
-		// the same index. Pickers (sourced=false) keep their
-		// caller-owned items.
+		// The command palette no longer lists files, so it has nothing
+		// to re-collect here.
 		if m, ok := a.modal.(*finderModal); ok {
 			m.refresh(a)
-		}
-		if m, ok := a.modal.(*paletteModal); ok && m.sourced {
-			m.collectItems(a)
-			m.refresh()
 		}
 	case *lspReadyEvent:
 		a.handleLSPReady(e)

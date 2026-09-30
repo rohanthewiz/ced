@@ -999,9 +999,13 @@ func (m *gitPushModal) submit(a *App) {
 	}
 
 	args := m.pushArgs(remote, branch)
-	label := "Push " + m.local + " → " + remote + "/" + branch
+	head := m.local + " → " + remote + "/" + branch
+	label := "Push " + head
 	a.closeModal()
-	a.runGitCmd(label, args...)
+	// The success hook shows git's own push output in the receipt panel
+	// (gitpushreceipt.go) — the flash alone says "done" but not where it
+	// went or what moved. Failures still land in the info modal.
+	a.runGitCmdOKOutput(label, pushReceiptHook(head), args...)
 	// A push is the slowest thing in the git menu — seconds against a
 	// remote — so it announces itself on the way out. The done-event's
 	// own flash replaces this one when it lands.

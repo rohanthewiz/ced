@@ -580,7 +580,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (`commitDraftBlockedReason`), not a hidden button.
 - Commit receipt: passive layer, never takes the modal slot; dismissed by
   anything without consuming the key; reads `git log -1` via
-  `gitCmdDoneEvent.onOK`.
+  `gitCmdDoneEvent.onOK`. A successful push shows git's own output in
+  the SAME panel ("Pushed", gitpushreceipt.go) via `onOKOutput` /
+  `runGitCmdOKOutput`; both open through `openGitReceipt`, one replaces
+  the other.
 - Blame (gitblame.go, Esc-A): blames the BUFFER (`--contents -`). Two
   styles, `"blamestyle"` + ≡ Git row, both measured on every
   `fileBlame` (`newFileBlame`) so a switch never forks git: `bands`

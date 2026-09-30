@@ -62,6 +62,16 @@ type gitCmdDoneEvent struct {
 	// READ back, and the hash it produced exists only after the command
 	// has actually exited.
 	onOK func(*App)
+
+	// onOKOutput is onOK for a verb whose follow-up needs what git
+	// PRINTED rather than what the repository now holds. A push is the
+	// case: its whole answer ("To <url>", "abc..def  main -> main",
+	// "Everything up-to-date", the remote's own `remote:` lines) exists
+	// only in the child's output and cannot be re-read from the repo
+	// afterwards the way a commit's hash can. A second field rather
+	// than widening onOK's signature so the commit receipt's method
+	// expression — and every other func(*App) hook — stays as it is.
+	onOKOutput func(*App, []byte)
 }
 
 // When satisfies the tcell.Event interface.
@@ -95,21 +105,28 @@ func (a *App) runGitCmdHook(label string, onFail func(*App, *gitCmdDoneEvent) bo
 // caller but the conflict resolver wants — see gitNoEditorEnv for the
 // one that doesn't.
 func (a *App) runGitCmdEnv(label string, env []string, onFail func(*App, *gitCmdDoneEvent) bool, args ...string) {
-	a.runGitCmdFull(label, env, onFail, nil, args...)
+	a.runGitCmdFull(label, env, onFail, nil, nil, args...)
 }
 
 // runGitCmdOK is runGitCmd for a caller that wants to act on SUCCESS —
 // the onFail hook's twin, and the only one of the two that ever needs to
 // see the command's aftermath rather than its output.
 func (a *App) runGitCmdOK(label string, onOK func(*App), args ...string) {
-	a.runGitCmdFull(label, nil, nil, onOK, args...)
+	a.runGitCmdFull(label, nil, nil, onOK, nil, args...)
+}
+
+// runGitCmdOKOutput is runGitCmdOK for a caller whose success hook needs
+// git's combined output — see gitCmdDoneEvent.onOKOutput for why that is
+// a separate hook. The push receipt (gitpushreceipt.go) is the caller.
+func (a *App) runGitCmdOKOutput(label string, onOK func(*App, []byte), args ...string) {
+	a.runGitCmdFull(label, nil, nil, nil, onOK, args...)
 }
 
 // runGitCmdFull is the single launcher every variant above funnels
 // through: an optional child environment plus both outcome hooks. The
 // wrappers exist so a call site names only what it actually uses — the
 // escalating-variant idiom this file already follows.
-func (a *App) runGitCmdFull(label string, env []string, onFail func(*App, *gitCmdDoneEvent) bool, onOK func(*App), args ...string) {
+func (a *App) runGitCmdFull(label string, env []string, onFail func(*App, *gitCmdDoneEvent) bool, onOK func(*App), onOKOutput func(*App, []byte), args ...string) {
 	if a.screen == nil || a.rootDir == "" {
 		return
 	}
@@ -121,7 +138,7 @@ func (a *App) runGitCmdFull(label string, env []string, onFail func(*App, *gitCm
 		out, err := cmd.CombinedOutput()
 		_ = scr.PostEvent(&gitCmdDoneEvent{
 			when: time.Now(), label: label, err: err, output: out,
-			onFail: onFail, onOK: onOK,
+			onFail: onFail, onOK: onOK, onOKOutput: onOKOutput,
 		})
 	}()
 }
@@ -256,6 +273,9 @@ func (a *App) handleGitCmdDone(e *gitCmdDoneEvent) {
 	// flash rather than under it.
 	if e.onOK != nil {
 		e.onOK(a)
+	}
+	if e.onOKOutput != nil {
+		e.onOKOutput(a, e.output)
 	}
 }
 

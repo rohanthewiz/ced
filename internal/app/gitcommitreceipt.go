@@ -44,6 +44,13 @@
 //     costs the receipt, not the commit — which already succeeded and
 //     already flashed. Same silent-degradation contract as the LSP and
 //     the formatters.
+//
+// The panel is shared with the push receipt (gitpushreceipt.go), which
+// is the same shape of answer — a git write whose result the user wants
+// to read back — with a different title and a different accent line.
+// Both go through openGitReceipt so there is one panel, one timer and
+// one set of dismissal paths; a second receipt replaces the first rather
+// than stacking over it.
 
 package app
 
@@ -115,8 +122,16 @@ var (
 // closed; there is no separate flag to keep in step with it.
 type commitReceiptState struct {
 	// hash is the full 40-character object name of the commit being
-	// reported, and doubles as the open/closed flag.
+	// reported. Empty for a push receipt, which has no single object to
+	// name — see head.
 	hash string
+	// title is the panel's heading ("Committed", "Pushed"). Empty reads
+	// as "Committed" so a state built with only a hash still draws right.
+	title string
+	// head is the accent line for a receipt that has no hash — for a
+	// push, "main → origin/main". Either hash or head non-empty means
+	// the panel is open; see headline.
+	head string
 	// lines is the wrapped, capped message body, ready to draw.
 	lines []string
 	// seq counts receipts. A scheduled expiry carries the seq current
@@ -166,9 +181,28 @@ func (a *App) handleGitCommitReceipt(e *gitCommitReceiptEvent) {
 	if hash == "" {
 		return
 	}
+	a.openGitReceipt("Committed", hash, "", commitReceiptBody(msg, commitReceiptWidth-4))
+}
+
+// openGitReceipt fills the shared panel and starts its window. Every
+// field is written, so whatever receipt was showing is replaced whole —
+// a push landing over a commit receipt must not inherit its hash.
+// Callers have already applied the modal/menu suppression rule.
+func (a *App) openGitReceipt(title, hash, head string, lines []string) {
+	a.commitReceipt.title = title
 	a.commitReceipt.hash = hash
-	a.commitReceipt.lines = commitReceiptBody(msg, commitReceiptWidth-4)
+	a.commitReceipt.head = head
+	a.commitReceipt.lines = lines
 	a.armCommitReceiptExpiry()
+}
+
+// headline is the accent line under the title: the commit hash when
+// there is one, else the receipt's own head. Empty means closed.
+func (s *commitReceiptState) headline() string {
+	if s.hash != "" {
+		return s.hash
+	}
+	return s.head
 }
 
 // parseCommitReceipt splits `git log -1 --format=%H%n%B` output into the
@@ -265,13 +299,15 @@ func (a *App) handleCommitReceiptExpire(e *commitReceiptExpireEvent) {
 // keyboard and mouse paths call it unconditionally.
 func (a *App) closeCommitReceipt() {
 	a.commitReceipt.hash = ""
+	a.commitReceipt.title = ""
+	a.commitReceipt.head = ""
 	a.commitReceipt.lines = nil
 	a.commitReceipt.box = struct{ x, y, w, h int }{}
 	a.commitReceipt.seq++
 }
 
 // commitReceiptOpen reports whether the panel is up.
-func (a *App) commitReceiptOpen() bool { return a.commitReceipt.hash != "" }
+func (a *App) commitReceiptOpen() bool { return a.commitReceipt.headline() != "" }
 
 // commitReceiptContains reports whether a screen cell is inside the
 // drawn panel, using the rect the last draw stamped.
@@ -283,11 +319,11 @@ func (a *App) commitReceiptContains(x, y int) bool {
 // commitReceiptRect measures and centers the panel. Rows:
 //
 //	0        top border
-//	1        title — "Committed            any key"
+//	1        title — "Committed            any key" (or "Pushed")
 //	2        divider
-//	3        the hash
+//	3        the headline — the hash, or a push's "main → origin/main"
 //	4        blank
-//	5..5+n-1 the message
+//	5..5+n-1 the message (or git push's output)
 //	5+n      blank
 //	6+n      bottom border
 func (a *App) commitReceiptRect() (x, y, w, h int) {
@@ -314,7 +350,11 @@ func (a *App) drawCommitReceipt() {
 	fillRect(a.screen, mx, my, mw, mh, c.bgSt)
 	drawBorder(a.screen, mx, my, mw, mh, c.border)
 	drawHDivider(a.screen, mx, my+2, mw, c.border)
-	drawAt(a.screen, mx+1, my+1, " Committed", c.title)
+	title := a.commitReceipt.title
+	if title == "" {
+		title = "Committed"
+	}
+	drawAt(a.screen, mx+1, my+1, " "+title, c.title)
 	// The hint says what dismisses this, not "esc" — the frame every
 	// MODAL draws promises a keystroke you must spend, and this one
 	// costs nothing: whatever you press next both closes the panel and
@@ -325,7 +365,7 @@ func (a *App) drawCommitReceipt() {
 	// The hash gets the accent, because it is the fact that exists
 	// nowhere else on screen and the one a reader is most likely to be
 	// copying by eye.
-	drawAt(a.screen, mx+2, my+3, elide(a.commitReceipt.hash, mw-4), c.title)
+	drawAt(a.screen, mx+2, my+3, elide(a.commitReceipt.headline(), mw-4), c.title)
 	for i, ln := range a.commitReceipt.lines {
 		drawAt(a.screen, mx+2, my+5+i, elide(ln, mw-4), c.body)
 	}

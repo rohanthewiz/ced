@@ -1237,3 +1237,88 @@ func gitPanelDiffStyle(line string, th theme.Theme) tcell.Style {
 		return base.Foreground(th.Text)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// One file's changes — the tab menu's "Show uncommitted changes"
+// -----------------------------------------------------------------------------
+
+// gitPanelRevealFile opens the changes panel with path selected, so its
+// diff fills the panel's diff pane. The tab menu's row (tabcontext.go)
+// and its ≡ Git twin both land here.
+//
+// The panel is the answer rather than a new diff surface: it already
+// splits staged from unstaged, synthesises an untracked file's
+// all-added view, and offers the hunk and stage verbs a user looking at
+// a file's changes reaches for next.
+//
+// The list is refreshed SYNCHRONOUSLY before the lookup (opening does it
+// anyway), because the 10s status snapshot can lag a save made a moment
+// ago. A file with nothing to show says so, and a panel opened only to
+// look for it is put away again — the flash is the whole answer, and a
+// panel full of OTHER files would read as "here are its changes".
+func (a *App) gitPanelRevealFile(path string) {
+	if !a.gitIsRepo {
+		a.flash("Not a git repository")
+		return
+	}
+	if path == "" {
+		a.flash("This buffer has never been saved")
+		return
+	}
+	wasOpen := a.gitPanel.open
+	if wasOpen {
+		a.refreshGitPanelFiles()
+	} else if !a.showTool(toolGit) {
+		return
+	}
+	for i, f := range a.gitPanel.files {
+		if samePath(f.Path, path) {
+			a.gitPanelSelect(i)
+			return
+		}
+	}
+	if !wasOpen {
+		a.hideTool(toolGit)
+	}
+	msg := "No uncommitted changes in " + filepath.Base(path)
+	// The one case the answer would otherwise mislead: edits that exist
+	// only in the buffer are not on disk, so git cannot see them.
+	if t := a.tabForPath(path); t != nil && t.Dirty {
+		msg += " — unsaved edits aren't on disk yet"
+	}
+	a.flash(msg)
+}
+
+// menuGitShowFileChanges is the ≡ Git twin of the tab menu's row, for the
+// active tab.
+func (a *App) menuGitShowFileChanges() {
+	a.closeMenu()
+	t := a.activeTabPtr()
+	if t == nil {
+		a.flash("No file open")
+		return
+	}
+	a.gitPanelRevealFile(t.Path)
+}
+
+// hasGitFileTab gates the per-file git rows: a repository, and an active
+// tab with a file behind it. Deliberately NOT "has changes" — that reads
+// the 10s snapshot, and a row dimmed by a stale snapshot just after a
+// save is a row that lies; the verb's own flash answers "no changes".
+func (a *App) hasGitFileTab() bool {
+	return a.gitIsRepo && a.hasFileTab()
+}
+
+// samePath reports whether two absolute paths name the same file,
+// looking through symlinks when the spellings differ. git reports paths
+// under `rev-parse --show-toplevel`, which is symlink-resolved (macOS's
+// /var → /private/var), while tab paths keep the spelling they were
+// opened with.
+func samePath(p, q string) bool {
+	if p == q {
+		return true
+	}
+	rp, err1 := filepath.EvalSymlinks(p)
+	rq, err2 := filepath.EvalSymlinks(q)
+	return err1 == nil && err2 == nil && rp == rq
+}

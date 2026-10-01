@@ -439,7 +439,9 @@ func TestCatsSurfacesAppearOnlyInsideCats(t *testing.T) {
 
 	withCtlSpy(t, a)
 	openTestFileTab(t, a, "main.go")
-	if len(a.catsMenuItems()) != 10 || len(catsLeaderBindings(a)) != 10 {
+	// One more row than keys: "Move to split →" is a ≡ row with no leader
+	// (the tab menu's twin), the namespace is not widened for it.
+	if len(a.catsMenuItems()) != 11 || len(catsLeaderBindings(a)) != 10 {
 		t.Fatalf("rows=%d keys=%d", len(a.catsMenuItems()), len(catsLeaderBindings(a)))
 	}
 	found := false
@@ -546,5 +548,57 @@ func TestCatsSplitFallsBackWhenTheHostNamesNoPane(t *testing.T) {
 	}
 	if want := "exec '/opt/bin/ced' --root '" + a.rootDir + "' '" + path + "'\n"; in.Text != want {
 		t.Fatalf("command = %q, want %q", in.Text, want)
+	}
+}
+
+// TestCatsSplitTab_MoveSavesThenClosesAfterTheSplit pins "Move to split":
+// a dirty tab is saved FIRST (the sibling reads the disk), the split
+// runs, and the tab here closes only once the host has answered.
+func TestCatsSplitTab_MoveSavesThenClosesAfterTheSplit(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	s := withCtlSpy(t, a)
+	keep := openTestFileTab(t, a, "keep.go")
+	path := openTestFileTab(t, a, "main.go")
+	catsExecutable = func() (string, error) { return "/opt/bin/ced", nil }
+	t.Cleanup(func() { catsExecutable = os.Executable })
+	tab := a.activeTabPtr()
+	tab.Buffer.Lines[0] = "package moved"
+	tab.Dirty = true
+	tab.EditRev++
+
+	a.catsSplitTab(tab, cats.SplitHorizontal, "→", true)
+
+	if got, _ := os.ReadFile(path); !strings.HasPrefix(string(got), "package moved") {
+		t.Fatalf("disk = %q, want the unsaved edit saved before the split", got)
+	}
+	if a.tabIndexOf(tab) < 0 {
+		t.Fatal("the tab closed before the host answered")
+	}
+	s.wait(t)
+	pumpAppEvents(t, a, func() bool { return a.tabIndexOf(tab) < 0 })
+	if len(a.tabs) != 1 || a.tabs[0].Path != keep {
+		t.Errorf("tabs left = %d, want only keep.go", len(a.tabs))
+	}
+	if !strings.Contains(a.statusMsg, "Moved main.go to a split →") {
+		t.Errorf("flash = %q", a.statusMsg)
+	}
+}
+
+// TestCatsSplitMoved_KeepsATabEditedMeanwhile pins the guard on the
+// close: edits made while the host was answering never reached the
+// split, so the tab stays and the flash says why.
+func TestCatsSplitMoved_KeepsATabEditedMeanwhile(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	openTestFileTab(t, a, "main.go")
+	tab := a.activeTabPtr()
+	tab.Dirty = true
+
+	a.catsSplitMoved(&catsEvent{kind: catsKindSplitMoved, notice: "Moved main.go to a split →", clipTab: tab})
+
+	if a.tabIndexOf(tab) < 0 {
+		t.Fatal("a tab with fresh edits was closed")
+	}
+	if !strings.Contains(a.statusMsg, "kept here too") {
+		t.Errorf("flash = %q", a.statusMsg)
 	}
 }

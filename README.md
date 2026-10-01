@@ -424,12 +424,27 @@ Then:
 
 - Click a file in the tree to open it.
 - Click a tab to switch, click the `×` to close it. **Right-click a
-  tab** for that file's menu: *Reveal in file tree* (expands the folders
-  and selects the file), *Close tab*, *Close other tabs* (unsaved tabs
-  are kept), and *Copy relative / absolute path*. The menu acts on the
-  tab you clicked without switching to it. Reveal and Close other tabs
-  are also ≡ rows (Nav → *Reveal file in tree*, File → *Close other
-  tabs*) for terminals that swallow the right button.
+  tab** for that file's menu:
+  - *Reveal in file tree* — expands the folders and selects the file.
+  - *Show uncommitted changes* — the git panel, opened on this file's
+    diff (or a flash saying it has none).
+  - *Show git history* — the git log filtered to this file (`p:` query,
+    renames followed).
+  - *Compare with clipboard*, *Preview* (markdown files), *Format file*.
+  - *Validate file* — ced's own JSON check plus whatever the language
+    server last reported; the caret lands on the first error.
+  - *Move to split →* / *Copy to split →* (inside cats) — open the file
+    in a pane beside this one; Move then closes the tab here. An
+    unsaved tab is saved first, since the second editor reads the disk.
+  - *Zip file*, *Copy relative / absolute path*, *Close tab*, *Close
+    other tabs* (unsaved tabs are kept).
+
+  Rows that show you something about the file (compare, preview,
+  format, validate) bring the tab to the front first; the rest act on
+  it in place. Every row is also a ≡ row for terminals that swallow the
+  right button: Nav → *Reveal file in tree*, File → *Validate file* /
+  *Close other tabs*, Git → *Show file's uncommitted changes* / *Show
+  file's git history*, Cats → *Move to split →* / *Open in split →*.
 - Click `≡` (top-left), right-click anywhere, or double-tap `Esc`
   for the action menu — including New file, Rename, Delete.
 - If your terminal forwards Button3, right-click on a file or folder

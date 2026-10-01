@@ -2023,7 +2023,7 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 // every section expanded: the pinned top zone contributes two rows (the
 // command palette + the expand/collapse-all toggle), fifteen collapsible
 // groups each contribute a header row (15) plus their action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 152 total. The
+// Quit renders headerless behind a divider (its 1 row) — 155 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -2031,16 +2031,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 175 {
-		t.Errorf("modalHeight = %d, want 175", h)
+	if h != 178 {
+		t.Errorf("modalHeight = %d, want 178", h)
 	}
-	if got := len(items); got != 169 {
-		t.Errorf("row count = %d, want 169 (2 top-zone + 152 group actions + 15 headers)", got)
+	if got := len(items); got != 172 {
+		t.Errorf("row count = %d, want 172 (2 top-zone + 155 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (172) — headers separate the
+	// one setting off the headerless Quit group (175) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 172}
+	wantDiv := []int{2, 5, 175}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2136,17 +2136,17 @@ func TestMenuLayout_CollapseHidesSectionRows(t *testing.T) {
 	a.customActions = nil
 	before, _, hBefore := a.menuLayout()
 
-	// Git is the largest section (23 rows) — a clear signal.
+	// Git is the largest section (25 rows) — a clear signal.
 	a.toggleMenuSection("Git")
 	if !a.sectionCollapsed("Git") {
 		t.Fatal("toggle should collapse Git")
 	}
 	after, _, hAfter := a.menuLayout()
-	if got := len(before) - len(after); got != 23 {
-		t.Errorf("collapsing Git hid %d rows, want 23", got)
+	if got := len(before) - len(after); got != 25 {
+		t.Errorf("collapsing Git hid %d rows, want 25", got)
 	}
-	if got := hBefore - hAfter; got != 23 {
-		t.Errorf("height shrank by %d, want 23", got)
+	if got := hBefore - hAfter; got != 25 {
+		t.Errorf("height shrank by %d, want 25", got)
 	}
 	// The Git header itself must survive so the user can unfold.
 	if menuHeaderIndex(after, "Git") < 0 {
@@ -2624,8 +2624,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 178 { // 175 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 178", h)
+	if h != 181 { // 178 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 181", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

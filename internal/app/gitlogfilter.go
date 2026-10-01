@@ -798,3 +798,52 @@ func (a *App) drawGitLogFilterBar() {
 		}
 	}
 }
+
+// gitLogShowFile opens the git log filtered to one file's history — the
+// `p:` mode, which runs `git log --follow` so renames are walked. The tab
+// menu's "Show git history" (tabcontext.go) and its ≡ Git twin land here.
+//
+// The filter bar is the mechanism rather than a separate query path: the
+// user sees `p:<file>` in the field, which says what the list is, and
+// can edit or clear it to widen the search — a hidden filter would be a
+// list lying about what it shows.
+//
+// Unlike Search history, the bar does NOT take the keyboard: the user
+// asked to read a history, not to type a query, and a focused field
+// would turn the next keystroke into an edit of the path.
+func (a *App) gitLogShowFile(path string) {
+	if !a.gitIsRepo {
+		a.flash("Not a git repository")
+		return
+	}
+	if path == "" {
+		a.flash("This buffer has never been saved")
+		return
+	}
+	if !a.gitLog.open && !a.showTool(toolGitLog) {
+		return
+	}
+	a.gitLogFilterStopTimer()
+	a.gitLog.filter.open = true
+	a.gitLog.filter.focused = false
+	// Relative to the tree root, where `git -C <root>` runs, so the field
+	// reads as the path the user knows. A file outside the root keeps its
+	// absolute path, which git also accepts inside its work tree.
+	a.gitLog.filter.field = newTextField(gitLogModePrefix(gitLogModePath) + a.relativePathFor(path))
+	// A fresh sequence drops any search still in flight for the old text.
+	a.gitLog.filter.seq++
+	a.gitLogFilterRun()
+	a.gitLogClampScrolls()
+}
+
+// menuGitFileHistory is the ≡ Git twin of the tab menu's row, for the
+// active tab.
+func (a *App) menuGitFileHistory() {
+	a.closeMenu()
+	t := a.activeTabPtr()
+	if t == nil {
+		a.flash("No file open")
+		return
+	}
+	a.gitLogShowFile(t.Path)
+}

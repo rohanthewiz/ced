@@ -279,6 +279,10 @@ func builtinMenuGroups() []menuGroup {
 			// request. No leader: the flat table is out of mnemonic
 			// letters, and the palette reaches it for free.
 			{label: "Format file", action: (*App).menuFormatFile, enabled: (*App).hasSavableTab},
+			// Its checking twin (validate.go's validateFile): ced's own
+			// parse plus whatever the language server and plugins last
+			// said, on request. The ≡ door of the tab menu's row.
+			{label: "Validate file", action: (*App).menuValidateFile, enabled: (*App).hasSavableTab},
 			{label: "Save & close tab", action: (*App).menuSaveAndClose, enabled: (*App).hasSavableTab},
 			{label: "Close tab", shortcut: "esc w", action: (*App).menuClose, enabled: (*App).hasTab},
 			// The ≡ twin of the tab menu's row (tabcontext.go): every
@@ -627,6 +631,12 @@ func builtinMenuGroups() []menuGroup {
 			// clicks.
 			{shortcut: "esc A", action: (*App).menuToggleBlame, enabled: (*App).hasGitRepo, labelFor: (*App).blameToggleLabel},
 			{label: "Blame this line…", action: (*App).menuBlameCommit, enabled: (*App).hasGitRepo},
+			// One file's story, the ≡ doors of the tab menu's rows
+			// (tabcontext.go): its diff in the changes panel, and the git
+			// log filtered to it (`p:`, renames followed). Beside blame,
+			// the other per-file history verb.
+			{label: "Show file's uncommitted changes", action: (*App).menuGitShowFileChanges, enabled: (*App).hasGitFileTab},
+			{label: "Show file's git history", action: (*App).menuGitFileHistory, enabled: (*App).hasGitFileTab},
 			// The column's look (gitblame.go): dated bands, the IDE
 			// style, or the compact once-per-run stamp. Beside the
 			// toggle it restyles; persisted as "blamestyle".

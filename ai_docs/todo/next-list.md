@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-038**
+**Next ID: N-040**
 
 ## Open
 
@@ -113,6 +113,21 @@ plus the LSP work done in the seeding session itself
   DOES report motion, a click on the underline shows both the note and
   the pointer tooltip (the release arrives as a motion report on the
   same cell and arms the dwell). Harmless, slightly redundant.
+
+- **N-038** · raised `2026-0930-2002-tab-menu-file-verbs` · value low
+  Tab menu "Move to split →" / "Copy to split →" have only run against
+  the test's fake control socket (`withCtlSpy`). The real binary drew the
+  rows inside cats, but no hand check has clicked one and watched the
+  pane appear and the tab close. Also open: whether a `↓` pair is
+  wanted. It was left out to keep the menu at 15 rows (≡ Cats still has
+  "Open in split ↓").
+
+- **N-039** · raised `2026-0930-2002-tab-menu-file-verbs` · value low
+  The tab menu is now 15 rows (17 with the border) and
+  `editorContextModal` does not scroll. On a window shorter than about 19
+  rows, `placeContextSized` clamps the menu to row 0 and its bottom rows
+  fall off the screen. The editor right-click menu has the same limit;
+  nobody has run into it yet.
 
 ## Roadmap
 

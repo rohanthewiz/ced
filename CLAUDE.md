@@ -236,13 +236,22 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   nav history and flushes auto-save. `+N` button opens the switcher.
 - Tab switching leaders: `Esc ,` / `Esc .` / `Esc b`.
 - Tab right-click menu (tabcontext.go): `editorContextModal` chassis,
-  acts on the CLICKED tab without switching (rows capture `*editor.Tab`,
-  resolved via `tabIndexOf`). Rows: Reveal in file tree (RevealPath;
-  keyboard stays in the editor), Close tab, Close other tabs (KEEPS
-  dirty tabs, flashes the count — no stacked save dialogs), Copy
-  rel/abs path. ≡ twins: Nav "Reveal file in tree", File "Close other
-  tabs". `closeTab` decrements `activeTab` for a tab closed to its left
-  (`TestCloseTab_LeftOfActiveKeepsActive`).
+  acts on the CLICKED tab (rows capture `*editor.Tab`, resolved via
+  `tabIndexOf`). Rows that answer with a VIEW or a buffer write
+  (compare with clipboard, Preview, Format, Validate) go through
+  `onTab` (switchToTab first); the rest act in place. Order: Reveal,
+  uncommitted changes (`gitPanelRevealFile`), git history
+  (`gitLogShowFile`, `p:` filter, field NOT focused), compare, Preview
+  (markdown only), Format, Validate (`validateFile`), Move/Copy to
+  split → (only when `InCats`, like the ≡ Cats group), Zip, copy paths,
+  Close tab, Close other tabs (KEEPS dirty tabs). Rows call the same
+  verbs as their ≡ twins: Nav "Reveal file in tree", File "Validate
+  file" / "Close other tabs", Git "Show file's uncommitted changes" /
+  "Show file's git history", Cats "Move to split →" ("Open in split →"
+  is Copy). Splits (`catsSplitTab`) SAVE a dirty tab first; Move closes
+  the tab only on the host's answer (`catsKindSplitMoved`) and keeps it
+  if edited meanwhile. `closeTab` decrements `activeTab` for a tab
+  closed to its left (`TestCloseTab_LeftOfActiveKeepsActive`).
 - Labels are the basename until another OPEN tab collides, then grow by
   directory segments per colliding group; cache keyed by the list of
   open paths. `tabWidth` measures the label; icon keys off the real name.
@@ -813,8 +822,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 152 group
-  actions + 15 headers (169), height 175, dividers `[2, 5, 172]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 155 group
+  actions + 15 headers (172), height 178, dividers `[2, 5, 175]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

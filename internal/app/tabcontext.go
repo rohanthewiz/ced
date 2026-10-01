@@ -11,21 +11,39 @@
 // THIS file?".
 //
 //	 ┌ main.go × ┐┌ app.go × ┐
-//	             ┌──────────────────────┐   right-click on app.go
-//	             │ ▸ Reveal in file tree│
-//	             │ ▸ Close tab          │
-//	             │ ▸ Close other tabs   │
-//	             │ ▸ Copy relative path │
-//	             │ ▸ Copy absolute path │
-//	             └──────────────────────┘
+//	             ┌───────────────────────────┐   right-click on app.go
+//	             │ ▸ Reveal in file tree     │   look: where is it,
+//	             │ ▸ Show uncommitted changes│         what changed,
+//	             │ ▸ Show git history        │         how did it get here,
+//	             │ ▸ Compare with clipboard  │         how does it differ
+//	             │ ▸ Preview                 │   (markdown only)
+//	             │ ▸ Format file             │   change / check it
+//	             │ ▸ Validate file           │
+//	             │ ▸ Move to split →         │   place it (inside cats
+//	             │ ▸ Copy to split →         │   only)
+//	             │ ▸ Zip file                │   copy it out
+//	             │ ▸ Copy relative path      │
+//	             │ ▸ Copy absolute path      │
+//	             │ ▸ Close tab               │   make it go away
+//	             │ ▸ Close other tabs        │
+//	             └───────────────────────────┘
 //
 // Design choices:
 //
-//   - **It acts on the CLICKED tab, without switching to it first.**
-//     Closing or copying the path of a background tab must not drag it
-//     to the front. Reveal is the exception by nature: revealing opens
-//     the file (RevealPath), because the selected tree row and the
-//     active tab are meant to agree.
+//   - **It acts on the CLICKED tab.** Whether that tab comes to the
+//     front depends on where the answer appears. Rows whose answer is a
+//     VIEW of the file or a write to its buffer (compare, preview,
+//     format, validate) bring it forward first (onTab) — a diff or a
+//     caret on a problem in a tab nobody can see is an answer shown
+//     nowhere. Rows whose answer is a flash, a panel or a file on disk
+//     (close, zip, copy path, git changes / history, the splits) act in
+//     place, so tidying a background tab never drags it forward. Reveal
+//     opens the file by nature (RevealPath): the selected tree row and
+//     the active tab are meant to agree.
+//   - **Every verb is an existing one.** Each row calls the same code
+//     as its ≡ row, so the two doors cannot drift; the only new verbs
+//     are the three that had no door at all (one file's changes, one
+//     file's history, Validate) and Move to split.
 //   - **Rows capture the *editor.Tab, never its index.** An index goes
 //     stale the moment any tab before it closes; the pointer is resolved
 //     back to an index when the row runs (tabIndexOf).
@@ -34,8 +52,11 @@
 //     a fixed vocabulary whose positions the hand learns.
 //   - **Every row has a ≡ twin** (the macOS Terminal + tmux rule — the
 //     right button is often swallowed): Reveal is ≡ Nav "Reveal file in
-//     tree", Close other tabs sits under Close tab in ≡ File, and the
-//     rest were already there. The twins act on the ACTIVE tab.
+//     tree"; Close other tabs and Validate file sit in ≡ File; the git
+//     pair is ≡ Git "Show file's uncommitted changes" / "Show file's git
+//     history"; Move to split is ≡ Cats "Move to split →" and Copy to
+//     split is its "Open in split →"; the rest were already there. The
+//     twins act on the ACTIVE tab.
 //   - **Close other tabs keeps unsaved tabs** and says how many. Closing
 //     several dirty tabs would mean a queue of save/discard dialogs from
 //     one click, and the single modal slot cannot stack them; the dirty
@@ -44,6 +65,7 @@
 package app
 
 import (
+	"github.com/rohanthewiz/ced/internal/cats"
 	"github.com/rohanthewiz/ced/internal/editor"
 )
 
@@ -77,19 +99,87 @@ func (a *App) tryTabContextClick(x, y int) bool {
 	return false
 }
 
-// tabContextItems builds the rows for one tab.
+// tabContextItems builds the rows for one tab, grouped look → change →
+// place → copy → close: questions about the file first (where is it,
+// what changed, how did it get here, how does it differ), then verbs that
+// rewrite or check it, then where it lives, the clipboard, and last the
+// verbs that make the tab go away.
+//
+// Rows that need the tab IN FRONT go through onTab: their answer is a
+// view of the file (a diff, a preview, a caret on a problem) or a write
+// to its buffer, and doing either to a tab the user cannot see would be
+// a result shown nowhere. Rows whose answer is a flash or a file on disk
+// (zip, copy path, close) act in place.
 func (a *App) tabContextItems(t *editor.Tab) []editorContextItem {
 	hasPath := func(*App) bool { return t.Path != "" }
-	return []editorContextItem{
+	isText := func(*App) bool { return t.Buffer != nil && !t.IsImage() }
+	isTextFile := func(*App) bool { return t.Path != "" && !t.IsImage() }
+	inRepo := func(app *App) bool { return app.gitIsRepo && t.Path != "" }
+	items := []editorContextItem{
 		{label: "Reveal in file tree", action: func(app *App) { app.revealTabInTree(t) }, enabled: hasPath},
-		{label: "Close tab", action: func(app *App) { app.requestCloseTab(app.tabIndexOf(t)) }, enabled: alwaysTrue},
-		{label: "Close other tabs", action: func(app *App) { app.closeOtherTabs(t) }, enabled: (*App).hasMultipleTabs},
-		{label: "Copy relative path", action: func(app *App) {
+		{label: "Show uncommitted changes", action: func(app *App) { app.gitPanelRevealFile(t.Path) }, enabled: inRepo},
+		{label: "Show git history", action: func(app *App) { app.gitLogShowFile(t.Path) }, enabled: inRepo},
+		{label: "Compare with clipboard", action: onTab(t, (*App).menuCatsCompareClipboard), enabled: isText},
+	}
+	// Preview only on a file that has one — the editor menu's rule
+	// (contextmenu.go): a row dead on every source file is noise. Labelled
+	// by what the click does, so a previewed tab offers the way back.
+	if t.MarkdownCapable() {
+		label := "Preview"
+		if t.IsMarkdownView() {
+			label = "Stop preview"
+		}
+		items = append(items, editorContextItem{label: label, action: onTab(t, (*App).toggleMarkdownView), enabled: alwaysTrue})
+	}
+	items = append(items,
+		editorContextItem{label: "Format file", action: onTab(t, (*App).formatActiveFile), enabled: isTextFile},
+		editorContextItem{label: "Validate file", action: onTab(t, (*App).validateFile), enabled: isTextFile},
+	)
+	// The splits (catssplit.go) appear only inside cats, like the ≡ Cats
+	// group that holds their twins: no plain terminal can split, so the
+	// rows would be dead in every ced outside it. Inside cats they dim
+	// the ordinary way (Tier 1 down, an untitled tab). They act in
+	// place — the file opens in ANOTHER pane, so this one's front tab is
+	// beside the point; Move closes the tab once the pane exists.
+	if a.cats.caps.InCats {
+		canSplit := func(app *App) bool { return app.catsTier1() && catsSplitPath(t) != "" }
+		items = append(items,
+			editorContextItem{label: "Move to split →", action: func(app *App) {
+				app.catsSplitTab(t, cats.SplitHorizontal, "→", true)
+			}, enabled: canSplit},
+			editorContextItem{label: "Copy to split →", action: func(app *App) {
+				app.catsSplitTab(t, cats.SplitHorizontal, "→", false)
+			}, enabled: canSplit},
+		)
+	}
+	items = append(items,
+		editorContextItem{label: "Zip file", action: func(app *App) { app.startZip(t.Path) }, enabled: hasPath},
+		editorContextItem{label: "Copy relative path", action: func(app *App) {
 			app.copyPathToSystemClipboard(app.relativePathFor(t.Path), "relative path")
 		}, enabled: hasPath},
-		{label: "Copy absolute path", action: func(app *App) {
+		editorContextItem{label: "Copy absolute path", action: func(app *App) {
 			app.copyPathToSystemClipboard(absolutePathFor(t.Path), "absolute path")
 		}, enabled: hasPath},
+		editorContextItem{label: "Close tab", action: func(app *App) { app.requestCloseTab(app.tabIndexOf(t)) }, enabled: alwaysTrue},
+		editorContextItem{label: "Close other tabs", action: func(app *App) { app.closeOtherTabs(t) }, enabled: (*App).hasMultipleTabs},
+	)
+	return items
+}
+
+// onTab wraps an active-tab verb so it runs on t: switch t to the front
+// (through switchToTab, the one place a switch records nav history and
+// flushes auto-save), then run it. The pointer is resolved when the row
+// RUNS, so a tab that closed while the menu was up is simply skipped.
+func onTab(t *editor.Tab, verb func(*App)) func(*App) {
+	return func(app *App) {
+		idx := app.tabIndexOf(t)
+		if idx < 0 {
+			return
+		}
+		if idx != app.activeTab {
+			app.switchToTab(idx)
+		}
+		verb(app)
 	}
 }
 

@@ -885,3 +885,100 @@ func TestDrawGitPanel_DividerCarriesAGrip(t *testing.T) {
 		t.Errorf("plain row: rune=%q fg=%v, want │ in Subtle %v", r, fg, a.theme.Subtle)
 	}
 }
+
+// twoFileRepo commits f.txt and g.txt, the fixture for picking ONE
+// file's changes out of several.
+func twoFileRepo(t *testing.T) (repo, f, g string) {
+	t.Helper()
+	repo = initRepo(t)
+	f, g = filepath.Join(repo, "f.txt"), filepath.Join(repo, "g.txt")
+	writeFileT(t, f, "one\n")
+	writeFileT(t, g, "two\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-q", "-m", "init")
+	return repo, f, g
+}
+
+// TestGitPanelRevealFile_SelectsTheFile pins the tab menu's "Show
+// uncommitted changes": the panel opens with THAT file selected (not the
+// first changed one) and its diff loads.
+func TestGitPanelRevealFile_SelectsTheFile(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	repo, f, g := twoFileRepo(t)
+	writeFileT(t, f, "one\nF\n")
+	writeFileT(t, g, "two\nG\n")
+	a := newTestApp(t, repo)
+	a.refreshGitStatus()
+
+	a.gitPanelRevealFile(g)
+
+	if !a.gitPanel.open {
+		t.Fatal("the panel should open")
+	}
+	sel, ok := a.gitPanelSelectedFile()
+	if !ok || !samePath(sel.Path, g) {
+		t.Fatalf("selected = %+v, want g.txt", sel)
+	}
+	pumpAppEvents(t, a, func() bool {
+		return strings.Contains(strings.Join(a.gitPanel.diffLines, "\n"), "+G")
+	})
+}
+
+// TestGitPanelRevealFile_CleanFileSaysSo pins the no-changes answer: a
+// flash naming the file, and a panel opened only to look is put away.
+// A dirty buffer adds why git cannot see its edits.
+func TestGitPanelRevealFile_CleanFileSaysSo(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	repo, f, g := twoFileRepo(t)
+	writeFileT(t, f, "one\nF\n")
+	a := newTestApp(t, repo)
+	a.refreshGitStatus()
+	a.openFile(g)
+	a.activeTabPtr().Dirty = true
+
+	a.gitPanelRevealFile(g)
+
+	if a.gitPanel.open {
+		t.Error("a panel opened only to look should close again")
+	}
+	if !strings.Contains(a.statusMsg, "No uncommitted changes in g.txt") ||
+		!strings.Contains(a.statusMsg, "unsaved edits") {
+		t.Errorf("flash = %q", a.statusMsg)
+	}
+}
+
+// TestGitPanelRevealFile_OutsideARepo pins the refusal outside git.
+func TestGitPanelRevealFile_OutsideARepo(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanelRevealFile(filepath.Join(a.rootDir, "x.txt"))
+	if a.gitPanel.open || a.statusMsg != "Not a git repository" {
+		t.Errorf("open=%v flash=%q", a.gitPanel.open, a.statusMsg)
+	}
+}
+
+// TestSamePath_LooksThroughSymlinks pins the path comparison git paths
+// need: equal spellings, a symlinked spelling of the same file, and two
+// different files.
+func TestSamePath_LooksThroughSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileT(t, filepath.Join(real, "a.txt"), "a")
+	writeFileT(t, filepath.Join(real, "b.txt"), "b")
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	if !samePath(filepath.Join(real, "a.txt"), filepath.Join(link, "a.txt")) {
+		t.Error("a symlinked spelling should match")
+	}
+	if samePath(filepath.Join(real, "a.txt"), filepath.Join(real, "b.txt")) {
+		t.Error("different files matched")
+	}
+}

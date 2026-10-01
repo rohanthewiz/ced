@@ -66,10 +66,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // catsExecutable resolves the path of the running ced binary — the program
@@ -86,21 +88,54 @@ var catsExecutable = os.Executable
 func (a *App) catsSplitRight() { a.catsOpenInSplit(cats.SplitHorizontal, "→") }
 func (a *App) catsSplitDown()  { a.catsOpenInSplit(cats.SplitVertical, "↓") }
 
-// catsOpenInSplit is the shared body: check we can, then hand the whole
-// sequence to a goroutine.
+// menuCatsMoveToSplit is the ≡ Cats twin of the tab menu's "Move to
+// split →": the active file opens in a pane to the right and its tab
+// here closes.
+func (a *App) menuCatsMoveToSplit() {
+	a.closeMenu()
+	a.catsSplitTab(a.activeTabPtr(), cats.SplitHorizontal, "→", true)
+}
+
+// catsOpenInSplit is the shared body of the ≡ / leader / editor-menu
+// rows: open the ACTIVE tab's file beside this editor and keep it here
+// too. The tab menu's rows (tabcontext.go) call catsSplitTab directly,
+// because they name a tab that may not be the active one.
+func (a *App) catsOpenInSplit(direction, arrow string) {
+	a.closeMenu()
+	a.catsSplitTab(a.activeTabPtr(), direction, arrow, false)
+}
+
+// catsSplitTab is the one implementation behind every split row: check
+// we can, save the tab if it is dirty, then hand the whole sequence to a
+// goroutine. move=true is "Move to split": the tab here closes once the
+// host reports the new pane, so the file ends up living in the split
+// only.
 //
 // The preconditions are checked HERE, on the loop, where a refusal can be
 // explained. A row that is enabled but silently does nothing is worse than
 // a dimmed one; a row that says why is better than both.
-func (a *App) catsOpenInSplit(direction, arrow string) {
-	a.closeMenu()
+//
+// Why a dirty tab is SAVED first: the second editor is a separate process
+// that reads the file from disk. Without the save it would open the last
+// saved bytes, and a "move" would then close the only copy of the
+// unsaved edits. A save refused by the clobber guard (the file changed
+// on disk) ends the verb — its prompt is already up and is the more
+// urgent question.
+//
+// Why the close waits for the host's answer rather than happening up
+// front: a split can fail (a host refusal, an ambiguous pane), and a tab
+// closed optimistically would then have vanished for nothing.
+func (a *App) catsSplitTab(t *editor.Tab, direction, arrow string, move bool) {
 	if !a.catsTier1() {
 		a.flash("Splits need cats — ced is running in a plain terminal")
 		return
 	}
-	path := a.catsSplitTarget()
-	if path == "" {
+	path := catsSplitPath(t)
+	if path == "" || a.tabIndexOf(t) < 0 {
 		a.flash("Nothing to open in a split — save this tab to a file first")
+		return
+	}
+	if t.Dirty && !a.saveTabAt(a.tabIndexOf(t)) {
 		return
 	}
 	exe, err := catsExecutable()
@@ -126,16 +161,44 @@ func (a *App) catsOpenInSplit(direction, arrow string) {
 			catsPostNotice(scr, "Split failed: "+err.Error())
 			return
 		}
+		if move {
+			// The tab pointer rides the event as a plain value; only the
+			// main loop resolves it (catsSplitMoved), so a tab closed in
+			// the meantime is simply not found.
+			_ = scr.PostEvent(&catsEvent{when: time.Now(), kind: catsKindSplitMoved,
+				notice: "Moved " + shown + " to a split " + arrow, clipTab: t})
+			return
+		}
 		catsPostNotice(scr, "Opened "+shown+" in a split "+arrow)
 	}()
 }
 
+// catsSplitMoved finishes "Move to split" on the main loop: the new pane
+// is up, so the tab here closes. A tab edited AGAIN while the host was
+// answering is kept — closing it would drop edits the split never saw —
+// and the flash says so.
+func (a *App) catsSplitMoved(e *catsEvent) {
+	idx := a.tabIndexOf(e.clipTab)
+	if idx < 0 {
+		a.flash(e.notice)
+		return
+	}
+	if e.clipTab.Dirty {
+		a.flash(e.notice + " — kept here too: it has unsaved edits")
+		return
+	}
+	a.closeTab(idx)
+	a.flash(e.notice)
+}
+
 // catsSplitTarget is the file the split would open: the active tab's path.
-// An untitled buffer has no file for a second process to open, and an image
-// preview would open in a text editor — both decline rather than substitute
-// something else.
-func (a *App) catsSplitTarget() string {
-	tab := a.activeTabPtr()
+func (a *App) catsSplitTarget() string { return catsSplitPath(a.activeTabPtr()) }
+
+// catsSplitPath is the file a split of t would open, "" when there is
+// none. An untitled buffer has no file for a second process to open, and
+// an image preview would open in a text editor — both decline rather than
+// substitute something else.
+func catsSplitPath(tab *editor.Tab) string {
 	if tab == nil || tab.Path == "" || tab.IsImage() {
 		return ""
 	}

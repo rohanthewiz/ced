@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // tabMenuTestApp opens three files — a.go, b.go and sub/deep/c.go — with
@@ -96,7 +98,8 @@ func TestTabContext_RightClickOpensTheTabMenu(t *testing.T) {
 	for _, it := range m.items {
 		labels = append(labels, it.label)
 	}
-	want := "Reveal in file tree|Close tab|Close other tabs|Copy relative path|Copy absolute path"
+	want := "Reveal in file tree|Show uncommitted changes|Show git history|Compare with clipboard|" +
+		"Format file|Validate file|Zip file|Copy relative path|Copy absolute path|Close tab|Close other tabs"
 	if got := strings.Join(labels, "|"); got != want {
 		t.Errorf("rows = %s, want %s", got, want)
 	}
@@ -219,17 +222,138 @@ func TestCloseOtherTabs_KeepsUnsavedAndSaysSo(t *testing.T) {
 }
 
 // TestTabContext_RowsDimWithoutAPath pins the enabled predicates: an
-// untitled tab has no path to reveal or copy, and a lone tab has no
-// others to close.
+// untitled tab has no path to reveal, check, zip or copy, and a lone tab
+// has no others to close. Comparing needs only a buffer, so it stays.
 func TestTabContext_RowsDimWithoutAPath(t *testing.T) {
 	a, _ := tabMenuTestApp(t)
 	a.closeOtherTabs(a.tabs[0])
+	a.gitIsRepo = true // the git rows must dim on the path, not the repo
 	tab := a.tabs[0]
 	tab.Path = ""
+	live := map[string]bool{"Close tab": true, "Compare with clipboard": true}
 	for _, it := range a.tabContextItems(tab) {
-		on := it.enabled(a)
-		if (it.label == "Close tab") != on {
+		if on := it.enabled(a); live[it.label] != on {
 			t.Errorf("%q enabled = %v", it.label, on)
 		}
+	}
+}
+
+// tabMenuLabels lists the rows tabContextItems builds for t.
+func tabMenuLabels(a *App, t *editor.Tab) []string {
+	var out []string
+	for _, it := range a.tabContextItems(t) {
+		out = append(out, it.label)
+	}
+	return out
+}
+
+// TestTabContext_GitRowsDimOutsideARepo pins the git rows' predicate: a
+// saved file outside a repository has no changes or history to show.
+func TestTabContext_GitRowsDimOutsideARepo(t *testing.T) {
+	a, _ := tabMenuTestApp(t)
+	for _, it := range a.tabContextItems(a.tabs[1]) {
+		if strings.HasPrefix(it.label, "Show ") && it.enabled(a) {
+			t.Errorf("%q enabled outside a repo", it.label)
+		}
+	}
+}
+
+// TestTabContext_PreviewOnlyOnMarkdown pins the Preview row: absent on a
+// source file, present on markdown, and run from a BACKGROUND tab it
+// brings that tab forward and previews it — the label then offers the
+// way back.
+func TestTabContext_PreviewOnlyOnMarkdown(t *testing.T) {
+	a, paths := tabMenuTestApp(t)
+	if strings.Contains(strings.Join(tabMenuLabels(a, a.tabs[1]), "|"), "Preview") {
+		t.Error("a .go tab offered Preview")
+	}
+	md := filepath.Join(filepath.Dir(paths[0]), "README.md")
+	if err := os.WriteFile(md, []byte("# hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.openFile(md)
+	mdTab := a.activeTabPtr()
+	a.switchToTab(0)
+	a.draw()
+
+	_, sy, _ := a.tabStripRect()
+	rightClick(a, tabRectFor(t, a, md).X+2, sy)
+	runTabMenuRow(t, a, "Preview")
+
+	if a.activeTabPtr() != mdTab || !mdTab.IsMarkdownView() {
+		t.Fatalf("active=%s preview=%v, want README.md previewed in front",
+			a.activeTabPtr().Path, mdTab.IsMarkdownView())
+	}
+	if !strings.Contains(strings.Join(tabMenuLabels(a, mdTab), "|"), "Stop preview") {
+		t.Error("a previewed tab should offer Stop preview")
+	}
+}
+
+// TestTabContext_ValidateRunsOnTheClickedTab pins onTab: a verb that
+// works on the active tab is run on the CLICKED one, which is brought to
+// the front first so its answer (here, a caret on the problem) is seen.
+func TestTabContext_ValidateRunsOnTheClickedTab(t *testing.T) {
+	a, paths := tabMenuTestApp(t)
+	bad := filepath.Join(filepath.Dir(paths[0]), "conf.json")
+	if err := os.WriteFile(bad, []byte("{\n  \"a\": 1,\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.openFile(bad)
+	a.switchToTab(0)
+	a.draw()
+
+	_, sy, _ := a.tabStripRect()
+	rightClick(a, tabRectFor(t, a, bad).X+2, sy)
+	runTabMenuRow(t, a, "Validate file")
+
+	if a.activeTabPtr().Path != bad {
+		t.Fatalf("active = %s, want conf.json brought forward", a.activeTabPtr().Path)
+	}
+	if !strings.HasPrefix(a.statusMsg, "conf.json: 1 error") {
+		t.Errorf("flash = %q", a.statusMsg)
+	}
+}
+
+// TestTabContext_ZipActsInPlace pins that Zip, whose answer is a file on
+// disk, does not drag the clicked tab to the front.
+func TestTabContext_ZipActsInPlace(t *testing.T) {
+	a, paths := tabMenuTestApp(t)
+	_, sy, _ := a.tabStripRect()
+	rightClick(a, tabRectFor(t, a, paths[1]).X+2, sy)
+	runTabMenuRow(t, a, "Zip file")
+
+	if a.activeTabPtr().Path != paths[0] {
+		t.Errorf("active = %s, want a.go still", a.activeTabPtr().Path)
+	}
+	e := waitForZipEvent(t, a)
+	a.handleEvent(e)
+	if _, err := os.Stat(paths[1] + ".zip"); err != nil {
+		t.Errorf("no b.go.zip beside b.go: %v", err)
+	}
+}
+
+// TestTabContext_SplitRowsOnlyInsideCats pins the split rows' gate: absent
+// in a plain terminal (no host can split), present inside cats, and Copy
+// leaves the tab open here.
+func TestTabContext_SplitRowsOnlyInsideCats(t *testing.T) {
+	a, paths := tabMenuTestApp(t)
+	if strings.Contains(strings.Join(tabMenuLabels(a, a.tabs[1]), "|"), "split") {
+		t.Fatal("split rows outside cats")
+	}
+	s := withCtlSpy(t, a)
+	catsExecutable = func() (string, error) { return "/opt/bin/ced", nil }
+	t.Cleanup(func() { catsExecutable = os.Executable })
+	labels := strings.Join(tabMenuLabels(a, a.tabs[1]), "|")
+	if !strings.Contains(labels, "Move to split →|Copy to split →") {
+		t.Fatalf("rows = %s, want the split pair", labels)
+	}
+
+	_, sy, _ := a.tabStripRect()
+	rightClick(a, tabRectFor(t, a, paths[1]).X+2, sy)
+	runTabMenuRow(t, a, "Copy to split →")
+	s.wait(t)
+	pumpAppEvents(t, a, func() bool { return strings.Contains(a.statusMsg, "Opened b.go in a split") })
+	if len(a.tabs) != 3 || a.activeTabPtr().Path != paths[0] {
+		t.Errorf("tabs=%d active=%s, want all three kept and a.go in front", len(a.tabs), a.activeTabPtr().Path)
 	}
 }

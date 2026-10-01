@@ -684,3 +684,55 @@ func TestMenuGitLogSearch_OpensPanel(t *testing.T) {
 		t.Error("the log panel opened empty")
 	}
 }
+
+// TestGitLogShowFile_FiltersToThePath pins the tab menu's "Show git
+// history": the log opens with a `p:` query naming the file relative to
+// the root, the field does NOT take the keyboard, and the list holds
+// only the commits that touched the file.
+func TestGitLogShowFile_FiltersToThePath(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	repo, f, g := twoFileRepo(t)
+	writeFileT(t, f, "one\nF\n")
+	gitRun(t, repo, "commit", "-q", "-am", "touch f")
+	writeFileT(t, g, "two\nG\n")
+	gitRun(t, repo, "commit", "-q", "-am", "touch g")
+	a := newTestApp(t, repo)
+	a.refreshGitStatus()
+
+	a.gitLogShowFile(f)
+
+	if !a.gitLog.open || !a.gitLog.filter.open {
+		t.Fatalf("log open=%v filter open=%v", a.gitLog.open, a.gitLog.filter.open)
+	}
+	if got := a.gitLog.filter.field.String(); got != "p:f.txt" {
+		t.Errorf("query = %q, want p:f.txt", got)
+	}
+	if a.gitLog.filter.focused {
+		t.Error("the filter field should not take the keyboard")
+	}
+	pumpAppEvents(t, a, func() bool { return a.gitLog.filter.applied != "" })
+	var subjects []string
+	for _, c := range a.gitLog.commits {
+		subjects = append(subjects, c.Subject)
+	}
+	if got := strings.Join(subjects, "|"); got != "touch f|init" {
+		t.Errorf("commits = %s, want touch f|init", got)
+	}
+}
+
+// TestGitLogShowFile_Refusals pins the two refusals: outside a repo, and
+// an untitled buffer.
+func TestGitLogShowFile_Refusals(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitLogShowFile("/x")
+	if a.gitLog.open || a.statusMsg != "Not a git repository" {
+		t.Errorf("non-repo: open=%v flash=%q", a.gitLog.open, a.statusMsg)
+	}
+	a.gitIsRepo = true
+	a.gitLogShowFile("")
+	if a.gitLog.open || !strings.Contains(a.statusMsg, "never been saved") {
+		t.Errorf("untitled: open=%v flash=%q", a.gitLog.open, a.statusMsg)
+	}
+}

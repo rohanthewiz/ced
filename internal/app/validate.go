@@ -61,10 +61,14 @@
 package app
 
 import (
+	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/format"
+	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
 
@@ -341,4 +345,94 @@ func validateProblemRange(t *editor.Tab, p format.Problem) (start, end editor.Po
 		stop = min(col+1, len(runes))
 	}
 	return editor.Position{Line: p.Line, Col: col}, editor.Position{Line: p.Line, Col: stop}
+}
+
+// -----------------------------------------------------------------------------
+// The explicit verb — "Validate file"
+// -----------------------------------------------------------------------------
+
+// validateFile answers "is this file OK?" on request: the tab menu's
+// "Validate" row (tabcontext.go) and its ≡ File twin, for the ACTIVE tab.
+//
+// It asks every producer the editor already has rather than adding a
+// checker of its own: ced's in-process parse (re-run NOW, skipping the
+// debounce — the user asked), the language server's last answer, and any
+// plugin findings, all merged through diagsFor. One verb then means the
+// same thing on a .json file (ced parses it) and a .go file (gopls has
+// already checked it).
+//
+// Problems: the caret lands on the first ERROR (else the first finding)
+// and the flash carries the counts plus its message, so the answer is
+// both said and shown. No problems: a flash naming who checked, because
+// "no problems" from nobody would be a false all-clear. Nobody able to
+// check: a flash saying so, since the fix — install a language server —
+// is the user's to make (the "unavailable explains itself" rule).
+func (a *App) validateFile() {
+	t := a.activeTabPtr()
+	if t == nil || t.Path == "" || t.IsImage() {
+		a.flash("Nothing to validate — open a file first")
+		return
+	}
+	name := filepath.Base(t.Path)
+	builtin := format.Validates(t.Path)
+	if builtin {
+		a.validateTab(t)
+	}
+	server := ""
+	if a.lspReadyFor(t.Path) {
+		if def := lspServerFor(t.Path); def != nil {
+			server = def.id
+		}
+	}
+	diags := a.diagsFor(t.Path)
+	if !builtin && server == "" && len(diags) == 0 {
+		a.flash("Can't validate " + name + " — ced checks JSON itself; other files need their language server on PATH")
+		return
+	}
+	if len(diags) == 0 {
+		checker := server
+		if builtin {
+			checker = "ced"
+		}
+		a.flash(name + ": no problems (" + checker + ")")
+		return
+	}
+	first, errs, warns := 0, 0, 0
+	for i, d := range diags {
+		switch d.Severity {
+		case lsp.SeverityError, 0: // unset severity reads as an error (LSP leaves it to the client)
+			if errs == 0 {
+				first = i
+			}
+			errs++
+		case lsp.SeverityWarning:
+			warns++
+		}
+	}
+	d := diags[first]
+	a.lspJumpTo(t.Path, t.Cursor, t.Path, d.Range.Start)
+	a.flash(fmt.Sprintf("%s: %s — line %d: %s", name, diagCounts(errs, warns, len(diags)-errs-warns),
+		d.Range.Start.Line+1, firstLine(d.Message)))
+}
+
+// diagCounts phrases a severity tally for a flash: "2 errors, 1 warning",
+// with zero buckets left out and the remainder called notes.
+func diagCounts(errs, warns, other int) string {
+	var parts []string
+	if errs > 0 {
+		parts = append(parts, plural(errs, "error", "errors"))
+	}
+	if warns > 0 {
+		parts = append(parts, plural(warns, "warning", "warnings"))
+	}
+	if other > 0 {
+		parts = append(parts, plural(other, "note", "notes"))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// menuValidateFile is the ≡ File row for validateFile.
+func (a *App) menuValidateFile() {
+	a.closeMenu()
+	a.validateFile()
 }

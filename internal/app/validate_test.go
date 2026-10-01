@@ -8,6 +8,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rohanthewiz/ced/internal/editor"
@@ -290,6 +291,72 @@ func TestValidateAfterEvent_CleanFileArmsNothingRepeatedly(t *testing.T) {
 		a.validateAfterEvent()
 		if a.validate.timer != nil {
 			t.Fatalf("dispatch %d armed a timer on an already-parsed clean file", i)
+		}
+	}
+}
+
+// TestValidateFile_JumpsToTheProblem pins the explicit verb on a broken
+// file: the caret lands on the finding and the flash carries the count
+// and the message.
+func TestValidateFile_JumpsToTheProblem(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	tab := openScratch(t, a, "conf.json", "{\n  \"a\": 1,\n}\n")
+
+	a.validateFile()
+
+	if tab.Cursor.Line != 1 {
+		t.Errorf("caret on line %d, want 1 (the trailing comma)", tab.Cursor.Line)
+	}
+	if !strings.HasPrefix(a.statusMsg, "conf.json: 1 error — line 2: ") {
+		t.Errorf("flash = %q", a.statusMsg)
+	}
+}
+
+// TestValidateFile_CleanFileNamesTheChecker pins the all-clear: it says
+// who checked, so "no problems" is never an answer from nobody. The parse
+// runs NOW — an edit inside the debounce is judged as it stands.
+func TestValidateFile_CleanFileNamesTheChecker(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	tab := openScratch(t, a, "conf.json", "{\n  \"a\": 1,\n}\n")
+	tab.Buffer.Lines[1] = "  \"a\": 1"
+	tab.EditRev++
+
+	a.validateFile()
+
+	if a.statusMsg != "conf.json: no problems (ced)" {
+		t.Errorf("flash = %q", a.statusMsg)
+	}
+}
+
+// TestValidateFile_NothingCanCheckExplains pins the refusal on a kind no
+// producer covers: it says what WOULD check it, rather than a false
+// all-clear.
+func TestValidateFile_NothingCanCheckExplains(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	openScratch(t, a, "notes.txt", "hello\n")
+
+	a.validateFile()
+
+	if !strings.HasPrefix(a.statusMsg, "Can't validate notes.txt") {
+		t.Errorf("flash = %q", a.statusMsg)
+	}
+}
+
+// TestDiagCounts pins the tally phrasing: zero buckets dropped, plurals
+// right, the remainder called notes.
+func TestDiagCounts(t *testing.T) {
+	cases := []struct {
+		e, w, o int
+		want    string
+	}{
+		{1, 0, 0, "1 error"},
+		{2, 1, 0, "2 errors, 1 warning"},
+		{0, 0, 3, "3 notes"},
+		{0, 2, 1, "2 warnings, 1 note"},
+	}
+	for _, c := range cases {
+		if got := diagCounts(c.e, c.w, c.o); got != c.want {
+			t.Errorf("diagCounts(%d,%d,%d) = %q, want %q", c.e, c.w, c.o, got, c.want)
 		}
 	}
 }

@@ -94,6 +94,10 @@ const (
 	// catsKindClip carries the HOST's system clipboard back, plus what the
 	// user asked it for — a diff or an insertion at the caret (catsclip.go).
 	catsKindClip
+	// catsKindSplitMoved is a split's notice PLUS the tab to close here:
+	// "Move to split" finishes on the loop once the host has made the
+	// pane (catssplit.go). The tab rides clipTab.
+	catsKindSplitMoved
 )
 
 // catsEvent is the goroutine → main-loop message for everything cats. The
@@ -134,7 +138,7 @@ type catsEvent struct {
 	// rather than land somewhere the user was not looking (catsclip.go).
 	clipUse   catsClipUse
 	truncated bool
-	clipTab   *editor.Tab
+	clipTab   *editor.Tab // also catsKindSplitMoved: the tab to close
 	clipRev   int
 }
 
@@ -289,6 +293,8 @@ func (a *App) handleCatsEvent(e *catsEvent) {
 		a.catsCaptureArrived(e)
 	case catsKindClip:
 		a.catsClipArrived(e)
+	case catsKindSplitMoved:
+		a.catsSplitMoved(e)
 	}
 }
 
@@ -509,6 +515,9 @@ func (a *App) catsMenuItems() []menuItemDef {
 		// half of the screen the second editor lands in.
 		{label: "Open in split →", shortcut: "esc C r", action: (*App).catsSplitRight, enabled: (*App).hasCatsSplit},
 		{label: "Open in split ↓", shortcut: "esc C d", action: (*App).catsSplitDown, enabled: (*App).hasCatsSplit},
+		// The tab menu's "Move to split →" (tabcontext.go): open beside,
+		// then close here. Its "Copy to split →" twin is "Open in split →".
+		{label: "Move to split →", action: (*App).menuCatsMoveToSplit, enabled: (*App).hasCatsSplit},
 		// The frecency story's second half (catsfrecency.go). Its first
 		// half needs no row of its own: the host's places are merged into
 		// ≡ → File → Recent folders…, where a user already looks for them.

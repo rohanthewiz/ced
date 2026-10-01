@@ -281,6 +281,9 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Format file", action: (*App).menuFormatFile, enabled: (*App).hasSavableTab},
 			{label: "Save & close tab", action: (*App).menuSaveAndClose, enabled: (*App).hasSavableTab},
 			{label: "Close tab", shortcut: "esc w", action: (*App).menuClose, enabled: (*App).hasTab},
+			// The ≡ twin of the tab menu's row (tabcontext.go): every
+			// tab but the active one, unsaved tabs kept.
+			{label: "Close other tabs", action: (*App).menuCloseOtherTabs, enabled: (*App).hasMultipleTabs},
 			{label: "Revert file", action: (*App).menuRevert, enabled: (*App).hasRevert},
 			{action: (*App).menuToggleAutoSave, enabled: alwaysTrue, labelFor: (*App).autoSaveToggleLabel},
 			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
@@ -491,6 +494,11 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Next tab", shortcut: "esc .", action: (*App).menuNextTab, enabled: (*App).hasMultipleTabs},
 			{label: "Previous tab", shortcut: "esc ,", action: (*App).menuPrevTab, enabled: (*App).hasMultipleTabs},
 			{label: "Switch tab…", shortcut: "esc b", action: (*App).menuSwitchTab, enabled: (*App).hasMultipleTabs},
+			// "Where is this file?" — the active tab's row selected and
+			// scrolled to in the tree, folders expanded, sidebar shown.
+			// Twin of the tab menu's Reveal row (tabcontext.go). No leader:
+			// the flat table is out of mnemonic letters.
+			{label: "Reveal file in tree", action: (*App).menuRevealActiveFile, enabled: (*App).hasFileTab},
 			// Recent files sits under Switch tab because it answers the
 			// same question — "get me to another file" — over a wider set:
 			// the ones no longer open (recentfiles.go).
@@ -3317,6 +3325,11 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		if a.tryGitLogContextClick(x, y) {
 			return
 		}
+		// A tab's own menu (tabcontext.go). Only drawn tabs claim it; the
+		// ≡ and +N buttons on the same row still fall through to ≡.
+		if a.tryTabContextClick(x, y) {
+			return
+		}
 		if a.tryEditorContextClick(x, y) {
 			return
 		}
@@ -4354,6 +4367,14 @@ func (a *App) closeTab(idx int) {
 		a.completionClose()
 	}
 	a.tabs = append(a.tabs[:idx], a.tabs[idx+1:]...)
+	// A tab closed to the LEFT of the active one shifts it down a slot;
+	// without following it, the view jumped to the active tab's right
+	// neighbour (closing a background tab by its × switched files).
+	// Closing the active tab itself keeps the index, so its right
+	// neighbour takes over — the usual tab-strip behaviour.
+	if idx < a.activeTab {
+		a.activeTab--
+	}
 	if a.activeTab >= len(a.tabs) {
 		a.activeTab = len(a.tabs) - 1
 	}

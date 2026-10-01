@@ -1867,10 +1867,11 @@ func TestHandleMouse_SidebarSplitterDrag(t *testing.T) {
 // dismisses on outside click.
 func TestHandleMenuMouse_ClicksRowAndOutside(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	// The toggle row lives near the menu's bottom, past what a 40-row
-	// screen shows of the 58-row layout; give it room so this test stays
-	// about click dispatch (scrolled clicks are pinned separately).
-	a.height = 60
+	// The toggle row lives deep in the fully expanded menu (tests build
+	// App with every section unfolded); give the whole menu room so this
+	// test stays about click dispatch (scrolled clicks are pinned
+	// separately).
+	a.height = 180
 	a.openMenu()
 	mx, my, _, _ := a.menuModalRect()
 	// Click on the sidebar toggle row — flips the sidebar.
@@ -2022,7 +2023,7 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 // every section expanded: the pinned top zone contributes two rows (the
 // command palette + the expand/collapse-all toggle), fifteen collapsible
 // groups each contribute a header row (15) plus their action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 150 total. The
+// Quit renders headerless behind a divider (its 1 row) — 152 total. The
 // height matches the layout total. Catches accidental off-by-one
 // regressions when someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
@@ -2030,16 +2031,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 173 {
-		t.Errorf("modalHeight = %d, want 173", h)
+	if h != 175 {
+		t.Errorf("modalHeight = %d, want 175", h)
 	}
-	if got := len(items); got != 167 {
-		t.Errorf("row count = %d, want 167 (2 top-zone + 150 group actions + 15 headers)", got)
+	if got := len(items); got != 169 {
+		t.Errorf("row count = %d, want 169 (2 top-zone + 152 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (170) — headers separate the
+	// one setting off the headerless Quit group (172) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 170}
+	wantDiv := []int{2, 5, 172}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2623,8 +2624,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 176 { // 173 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 176", h)
+	if h != 178 { // 175 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 178", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.

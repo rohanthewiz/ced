@@ -83,7 +83,7 @@ internal/app/
   inputburst.go               One frame per wheel/motion burst
   modal.go leader.go whichkey.go  Modal slot; leader table + namespaces; which-key band
   metakeys.go nav.go          ⌘ layer; back/forward history
-  tabbar.go tablabel.go statusbar.go
+  tabbar.go tablabel.go tabcontext.go statusbar.go
   toolwindow.go tooladapt.go toolheader.go toollayout.go toolmenu.go  Tool windows
   splitter.go treeautofit.go treefilter.go treemarks.go overflow.go
   find.go findall.go projectsearch.go goto.go bracket.go
@@ -235,6 +235,14 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   a too-narrow strip). `switchToTab` is the single place a switch records
   nav history and flushes auto-save. `+N` button opens the switcher.
 - Tab switching leaders: `Esc ,` / `Esc .` / `Esc b`.
+- Tab right-click menu (tabcontext.go): `editorContextModal` chassis,
+  acts on the CLICKED tab without switching (rows capture `*editor.Tab`,
+  resolved via `tabIndexOf`). Rows: Reveal in file tree (RevealPath;
+  keyboard stays in the editor), Close tab, Close other tabs (KEEPS
+  dirty tabs, flashes the count — no stacked save dialogs), Copy
+  rel/abs path. ≡ twins: Nav "Reveal file in tree", File "Close other
+  tabs". `closeTab` decrements `activeTab` for a tab closed to its left
+  (`TestCloseTab_LeftOfActiveKeepsActive`).
 - Labels are the basename until another OPEN tab collides, then grow by
   directory segments per colliding group; cache keyed by the list of
   open paths. `tabWidth` measures the label; icon keys off the real name.
@@ -805,8 +813,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 150 group
-  actions + 15 headers (167), height 173, dividers `[2, 5, 170]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 152 group
+  actions + 15 headers (169), height 175, dividers `[2, 5, 172]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

@@ -423,7 +423,13 @@ remembered, so the recent list keeps working).
 Then:
 
 - Click a file in the tree to open it.
-- Click a tab to switch, click the `×` to close it.
+- Click a tab to switch, click the `×` to close it. **Right-click a
+  tab** for that file's menu: *Reveal in file tree* (expands the folders
+  and selects the file), *Close tab*, *Close other tabs* (unsaved tabs
+  are kept), and *Copy relative / absolute path*. The menu acts on the
+  tab you clicked without switching to it. Reveal and Close other tabs
+  are also ≡ rows (Nav → *Reveal file in tree*, File → *Close other
+  tabs*) for terminals that swallow the right button.
 - Click `≡` (top-left), right-click anywhere, or double-tap `Esc`
   for the action menu — including New file, Rename, Delete.
 - If your terminal forwards Button3, right-click on a file or folder

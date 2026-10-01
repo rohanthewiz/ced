@@ -1054,3 +1054,33 @@ func TestOverflowClick_PagesThePanels(t *testing.T) {
 		}
 	}
 }
+
+// TestEditorOffscreen_CountsBookmarksWithoutColoring pins the bookmark
+// rule: off-screen bookmarks are counted per side (on-screen ones are
+// not — the gutter flag is there), they reach the popup's detail row
+// LAST, and they never change the marker's color.
+func TestEditorOffscreen_CountsBookmarksWithoutColoring(t *testing.T) {
+	a, _ := overflowApp(t, 400)
+	tab := a.activeTabPtr()
+	tab.ScrollY = 100
+	_, _, _, eh := a.editorRect()
+	for _, line := range []int{5, 50, 105, 300, 350, 399} {
+		tab.ToggleBookmark(line)
+	}
+	// The caret would color the marker; park it on screen.
+	tab.MoveCursorTo(editor.Position{Line: 105}, false)
+	above, below := a.editorOffscreen(tab, 100, 100+eh-1)
+	if above.bookmarks != 2 || below.bookmarks != 3 {
+		t.Fatalf("bookmarks above=%d below=%d, want 2 and 3 (105 is on screen)", above.bookmarks, below.bookmarks)
+	}
+	if above.kind() != offNone || below.kind() != offNone {
+		t.Errorf("bookmarks must not color the marker: kinds %d / %d", above.kind(), below.kind())
+	}
+	if got := (offscreen{lines: 9, errors: 1, bookmarks: 3}).detail(); got != "1 error · 3 bookmarks" {
+		t.Errorf("detail = %q, want the bookmarks after the counts that color", got)
+	}
+	got := overflowTipLines(overflowMarker{down: true, unit: "line", off: below})
+	if len(got) != 2 || got[1] != "3 bookmarks" {
+		t.Errorf("popup = %q, want the count row then \"3 bookmarks\"", got)
+	}
+}

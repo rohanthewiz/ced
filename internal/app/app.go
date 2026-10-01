@@ -547,6 +547,9 @@ func builtinMenuGroups() []menuGroup {
 			// editor's right-click menu. Next / Previous / the list stay
 			// clickable with none, to say how to make one.
 			{label: "Toggle bookmark", action: (*App).menuToggleBookmark, enabled: (*App).hasFileTab},
+			// Naming sits under Toggle: it is the same "this line" verb
+			// with text, and it bookmarks an unmarked line on the way.
+			{label: "Label bookmark…", action: (*App).menuLabelBookmark, enabled: (*App).hasFileTab},
 			{label: "Next bookmark", action: (*App).menuNextBookmark, enabled: alwaysTrue},
 			{label: "Previous bookmark", action: (*App).menuPrevBookmark, enabled: alwaysTrue},
 			{action: (*App).menuBookmarks, enabled: alwaysTrue, labelFor: (*App).bookmarksLabel},

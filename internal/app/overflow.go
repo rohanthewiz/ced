@@ -138,6 +138,24 @@ type offscreen struct {
 	infos  int
 	hits   int // find matches
 	caret  bool
+
+	// bookmarks counts the line bookmarks this way (editor/bookmark.go).
+	// POPUP ONLY — it deliberately has no offscreenKind and never colors
+	// the marker:
+	//
+	//   - the one color a bookmark could wear is Accent (its gutter flag
+	//     is Accent + bold), and Accent on a marker already means "the
+	//     caret is out there" — a bookmark below would read as a lost
+	//     cursor;
+	//   - ranked anywhere, it would demote a real signal: above the
+	//     diagnostics it hides an error behind a note the user made on
+	//     purpose and already knows about; below info it would only ever
+	//     show in a file with no diagnostics at all, i.e. inconsistently.
+	//
+	// So the marker keeps saying what is LOUD, and the popup says what is
+	// there — "3 bookmarks" beside the counts — which is where a reader
+	// hovering to ask "how much more?" is already looking.
+	bookmarks int
 }
 
 // kind reports the loudest thing off-screen this way, which is what the
@@ -164,7 +182,7 @@ func (o offscreen) kind() offscreenKind {
 // when there is nothing but text out there — the popup then has one line
 // and says only how much.
 func (o offscreen) detail() string {
-	parts := make([]string, 0, 5)
+	parts := make([]string, 0, 6)
 	if o.caret {
 		parts = append(parts, "cursor")
 	}
@@ -179,6 +197,11 @@ func (o offscreen) detail() string {
 	}
 	if o.infos > 0 {
 		parts = append(parts, plural(o.infos, "note", "notes"))
+	}
+	// Last: not part of the color ranking (see the field), so it does
+	// not get to come before the thing that explains the color.
+	if o.bookmarks > 0 {
+		parts = append(parts, plural(o.bookmarks, "bookmark", "bookmarks"))
 	}
 	return joinMid(parts, " · ")
 }
@@ -301,6 +324,14 @@ func (a *App) editorOffscreen(t *editor.Tab, firstLine, lastLine int) (above, be
 	for _, m := range t.FindMatches {
 		if o := side(m.Line); o != nil {
 			o.hits++
+		}
+	}
+
+	// Bookmarks. Bookmarks() reconciles against the buffer first (and is
+	// a length check on a tab with none), so the lines are this frame's.
+	for _, b := range t.Bookmarks() {
+		if o := side(b.Line); o != nil {
+			o.bookmarks++
 		}
 	}
 

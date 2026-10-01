@@ -423,3 +423,164 @@ func TestRender_BookmarkFlagInTheApp(t *testing.T) {
 		t.Errorf("gutter cell = %q, want the bookmark flag", r)
 	}
 }
+
+// bmSubmitPrompt types v into the open prompt and submits it.
+func bmSubmitPrompt(t *testing.T, a *App, v string) *promptModal {
+	t.Helper()
+	pm, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("expected a prompt, got %T", a.modal)
+	}
+	pm.field = newTextField(v)
+	pm.submit(a)
+	return pm
+}
+
+// TestMenuLabelBookmark_NamesAndShowsTheName pins the ≡ row end to end:
+// the prompt opens on the caret's bookmark with its current name, the
+// submitted name is trimmed and flattened, and it shows in the picker
+// (before the line text) and in Next's flash.
+func TestMenuLabelBookmark_NamesAndShowsTheName(t *testing.T) {
+	a, _, _ := bmTestApp(t)
+	tab := a.activeTabPtr()
+	tab.ToggleBookmark(2)
+	bmCaretTo(a, 2)
+	a.menuLabelBookmark()
+	bmSubmitPrompt(t, a, "  entry\tpoint ")
+	if b, _ := tab.BookmarkAt(2); b.Label != "entry point" {
+		t.Fatalf("label = %q, want trimmed and tab-flattened", b.Label)
+	}
+	if !strings.Contains(a.statusMsg, `named "entry point"`) {
+		t.Errorf("flash = %q", a.statusMsg)
+	}
+
+	// Re-opening pre-fills the current name.
+	a.menuLabelBookmark()
+	if pm := a.modal.(*promptModal); pm.field.String() != "entry point" {
+		t.Errorf("prompt initial = %q, want the current name", pm.field.String())
+	}
+	a.closeModal()
+
+	a.menuBookmarks()
+	rows := pickerLabels(t, a)
+	if rows[0] != "a.go:3  [entry point]  func A() {}" {
+		t.Errorf("picker row = %q", rows[0])
+	}
+	a.closeModal()
+
+	bmCaretTo(a, 0)
+	a.menuNextBookmark()
+	if !strings.HasSuffix(a.statusMsg, "· entry point") {
+		t.Errorf("Next flash = %q, want the name at the end", a.statusMsg)
+	}
+}
+
+// TestMenuLabelBookmark_AddsClearsAndRefuses pins the edges: naming an
+// unmarked line bookmarks it, the clear button drops the name only, the
+// cap refuses a NEW bookmark before the prompt opens, and a tab closed
+// under the prompt is said rather than written.
+func TestMenuLabelBookmark_AddsClearsAndRefuses(t *testing.T) {
+	a, aPath, _ := bmTestApp(t)
+	tab := a.activeTabPtr()
+	bmCaretTo(a, 4)
+	a.menuLabelBookmark()
+	bmSubmitPrompt(t, a, "second")
+	if b, ok := tab.BookmarkAt(4); !ok || b.Label != "second" {
+		t.Fatalf("unmarked line: %+v %v, want bookmarked and named", b, ok)
+	}
+	a.menuLabelBookmark()
+	pm, _ := a.modal.(*promptModal)
+	if pm == nil || len(pm.extras) != 1 || pm.extras[0].key != 'c' {
+		t.Fatalf("a named bookmark's prompt should carry the alt+c clear button: %+v", pm)
+	}
+	pm.extras[0].run(a)
+	if b, ok := tab.BookmarkAt(4); !ok || b.Label != "" || !strings.Contains(a.statusMsg, "Cleared the name") || a.modal != nil {
+		t.Errorf("clear: %+v %v flash=%q modal=%T", b, ok, a.statusMsg, a.modal)
+	}
+	a.menuLabelBookmark()
+	if pm := a.modal.(*promptModal); len(pm.extras) != 0 {
+		t.Error("an unnamed bookmark has no name to clear — no button")
+	}
+	a.closeModal()
+
+	parked := make([]editor.Bookmark, history.MaxBookmarks)
+	for i := range parked {
+		parked[i] = editor.Bookmark{Line: i}
+	}
+	a.bookmarks = map[string][]editor.Bookmark{"/elsewhere.go": parked}
+	bmCaretTo(a, 0)
+	a.menuLabelBookmark()
+	if a.modal != nil || !strings.Contains(a.statusMsg, "limit") {
+		t.Errorf("past the cap: modal=%T flash=%q", a.modal, a.statusMsg)
+	}
+	// An existing bookmark can still be renamed at the cap.
+	bmCaretTo(a, 4)
+	a.menuLabelBookmark()
+	if _, ok := a.modal.(*promptModal); !ok {
+		t.Errorf("renaming at the cap should still prompt, got %T", a.modal)
+	}
+	a.closeModal()
+	a.bookmarks = nil
+
+	a.closeTab(a.tabIndexOf(tab))
+	a.labelBookmarkAt(tab, 4, "late")
+	if !strings.Contains(a.statusMsg, "was closed") {
+		t.Errorf("closed tab flash = %q", a.statusMsg)
+	}
+	if bms := a.bookmarks[aPath]; len(bms) != 1 || bms[0].Label != "" {
+		t.Errorf("a closed tab's parked bookmark must not be renamed: %+v", bms)
+	}
+}
+
+// TestBookmarkLabel_ParkedPersistedAndRestored pins that the name rides
+// every home: parked on close, written to the history database, and
+// back on the reopened tab of a fresh app.
+func TestBookmarkLabel_ParkedPersistedAndRestored(t *testing.T) {
+	a, aPath, _ := bmTestApp(t)
+	dbPath := historyPathFn(a.rootDir)
+	bmCaretTo(a, 2)
+	a.menuLabelBookmark()
+	bmSubmitPrompt(t, a, "entry")
+	a.closeTab(a.activeTab)
+	if bms := a.bookmarks[aPath]; len(bms) != 1 || bms[0].Label != "entry" {
+		t.Fatalf("parked = %+v", bms)
+	}
+	h, err := history.Load(a.rootDir, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h.Bookmarks()[aPath]; len(got) != 1 || got[0].Label != "entry" {
+		t.Fatalf("on disk = %+v", got)
+	}
+
+	b := newTestApp(t, a.rootDir)
+	historyPathFn = func(string) string { return dbPath }
+	b.loadBookmarks()
+	b.openFile(aPath)
+	if bm, ok := b.activeTabPtr().BookmarkAt(2); !ok || bm.Label != "entry" {
+		t.Errorf("restored = %+v %v", bm, ok)
+	}
+}
+
+// TestEditorContext_LabelRowOnlyOnABookmarkedLine pins the right-click
+// twin: offered on a bookmarked line, absent on a plain one.
+func TestEditorContext_LabelRowOnlyOnABookmarkedLine(t *testing.T) {
+	a, _, _ := bmTestApp(t)
+	a.draw()
+	m := openEditorContextAt(t, a, 9, 2)
+	if contextRowIndex(m, "Label bookmark") >= 0 {
+		t.Error("a plain line should not offer Label bookmark…")
+	}
+	a.closeModal()
+	a.activeTabPtr().ToggleBookmark(2)
+	m = openEditorContextAt(t, a, 9, 2)
+	i := contextRowIndex(m, "Label bookmark")
+	if i < 0 {
+		t.Fatalf("no Label bookmark row in %v", m.items)
+	}
+	a.closeModal()
+	m.items[i].action(a)
+	if _, ok := a.modal.(*promptModal); !ok {
+		t.Errorf("the row should open the label prompt, got %T", a.modal)
+	}
+}

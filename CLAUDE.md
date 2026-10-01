@@ -713,6 +713,7 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (`"scrollbar"` retired, `TestLoadRetiredScrollbarKey`).
 - Color = loudest thing off-screen: caret > find > error > warn > info;
   only OFF-screen items count; read from caches, not DecorationSources.
+  Bookmarks are popup-only counts with no rank.
 - `overflowMarkers()` is the ONE enumerator for draw, hit-test, popup.
   Keeps the cell's background. Drawn after all surfaces render; the
   unpinned Find-all list paints via `drawOverflowMarkersOverlay`.
@@ -764,6 +765,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   record, checked before `diagGutterPress`). No leader. Untitled tabs
   refuse. Next/Prev skip missing files; the picker labels and removes
   them. Clear all confirms.
+- Labels: `Bookmark.Label` is payload, never a key (text re-anchors);
+  every path that rebuilds a bookmark must carry it (remap, SetBookmarks,
+  the normalize merge keeps a name). ≡ Nav "Label bookmark…" adds the
+  bookmark if missing; clearing is the prompt's `[Clear name]` alt+c
+  (prompts drop empty submits). Stored omitempty, 60 runes.
+- Off-screen bookmarks are counted in the overflow POPUP only — never a
+  marker colour (Accent means the caret).
 - Persisted in `.ced/history.bytdb` (history/bookmarks.go), NOT
   state.json: table `bookmarks(path PK, marks JSON)`, ONE ROW PER FILE
   (a line is no stable key). STATE not deltas: `writeHistory` hands the
@@ -875,8 +883,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 161 group
-  actions + 15 headers (178), height 184, dividers `[2, 5, 181]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 162 group
+  actions + 15 headers (179), height 185, dividers `[2, 5, 182]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

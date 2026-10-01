@@ -49,6 +49,16 @@
 // purpose. Like the rest of the history it reaches disk only inside a git
 // work tree (history.Persists); elsewhere bookmarks last for the session.
 //
+// # Names
+//
+// A bookmark may carry a label ("Label bookmark…"): the picker shows it
+// in brackets ahead of the line text, Next / Previous say it in their
+// flash, and it rides every home the bookmark has (tab, parked map,
+// history row). It is never a KEY — the line text still re-anchors the
+// bookmark — so renaming one costs nothing but a write. A rename-in-
+// place prompt rather than a picker row action because a picker row
+// can only run, and naming needs text.
+//
 // Untitled buffers refuse a bookmark: a bookmark is kept by path, and a
 // flag that vanished at the first restart would teach that bookmarks
 // are unreliable.
@@ -73,10 +83,11 @@ const bookmarkLabelText = 60
 // bookmarkRef is one bookmark in the project-wide view. tab is the open
 // tab that owns it, nil for a parked one.
 type bookmarkRef struct {
-	tab  *editor.Tab
-	path string
-	line int
-	text string
+	tab   *editor.Tab
+	path  string
+	line  int
+	text  string
+	label string
 }
 
 // allBookmarks is every bookmark in the project — live ones from open
@@ -90,12 +101,12 @@ func (a *App) allBookmarks() []bookmarkRef {
 			continue
 		}
 		for _, b := range t.Bookmarks() {
-			out = append(out, bookmarkRef{tab: t, path: t.Path, line: b.Line, text: b.Text})
+			out = append(out, bookmarkRef{tab: t, path: t.Path, line: b.Line, text: b.Text, label: b.Label})
 		}
 	}
 	for path, bms := range a.bookmarks {
 		for _, b := range bms {
-			out = append(out, bookmarkRef{path: path, line: b.Line, text: b.Text})
+			out = append(out, bookmarkRef{path: path, line: b.Line, text: b.Text, label: b.Label})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -220,6 +231,87 @@ func (a *App) toggleBookmarkAt(t *editor.Tab, line int) {
 	a.saveBookmarks()
 }
 
+// menuLabelBookmark is the ≡ Nav "Label bookmark…" row and the editor
+// menu's twin: name the bookmark on the caret's line, prompting with
+// its current name. A line with no bookmark gets one along with the
+// name (SetBookmarkLabel), under the same cap as a toggle.
+//
+// The tab and line are captured when the prompt opens. The prompt owns
+// the keyboard, so neither can change before submit except by the tab
+// closing (a remote close, a session switch) — which is re-checked.
+func (a *App) menuLabelBookmark() {
+	t := a.activeTabPtr()
+	switch {
+	case t == nil || t.IsImage():
+		a.flash("Open a file to bookmark a line in it")
+		return
+	case t.Path == "":
+		a.flash("Save the file first — bookmarks are kept by file path")
+		return
+	}
+	line := t.Cursor.Line
+	cur, had := t.BookmarkAt(line)
+	if !had && a.bookmarkTotal() >= history.MaxBookmarks {
+		a.flash(fmt.Sprintf("Bookmark limit reached (%d) — clear some from ≡ Nav → Bookmarks…", history.MaxBookmarks))
+		return
+	}
+	hint := fmt.Sprintf("Name for the bookmark on line %d", line+1)
+	if !had {
+		hint = fmt.Sprintf("Bookmarks line %d with this name", line+1)
+	}
+	// A prompt drops an empty submit (promptModal.submit), so clearing a
+	// name cannot be "erase the field and press Enter". It gets its own
+	// button instead — only when there is a name to clear — with the
+	// Alt chord every prompt button owes (the modal owns the keyboard).
+	var extras []promptExtra
+	if cur.Label != "" {
+		hint += " · alt+c clear"
+		extras = append(extras, promptExtra{
+			label: func(*App) string { return bookmarkClearNameLabel },
+			width: len(bookmarkClearNameLabel),
+			key:   'c',
+			run: func(app *App) {
+				app.closeModal()
+				app.labelBookmarkAt(t, line, "")
+			},
+		})
+	}
+	a.openPromptExtras("Label bookmark", hint, cur.Label, extras, func(app *App, v string) {
+		app.labelBookmarkAt(t, line, v)
+	})
+}
+
+// bookmarkClearNameLabel is the label prompt's clear button. ASCII, so
+// its byte length is its cell width.
+const bookmarkClearNameLabel = "[Clear name]"
+
+// labelBookmarkAt applies a submitted label: trimmed, newlines and tabs
+// flattened (a label is one picker row), clipped to the stored cap, then
+// written through.
+func (a *App) labelBookmarkAt(t *editor.Tab, line int, v string) {
+	if a.tabIndexOf(t) < 0 {
+		a.flash("That file was closed — the bookmark was not named")
+		return
+	}
+	v = strings.TrimSpace(strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(v))
+	if r := []rune(v); len(r) > history.MaxBookmarkLabel {
+		v = string(r[:history.MaxBookmarkLabel])
+	}
+	_, had := t.BookmarkAt(line)
+	if !t.SetBookmarkLabel(line, v) {
+		return
+	}
+	switch {
+	case v == "" && had:
+		a.flash(fmt.Sprintf("Cleared the name of the bookmark on line %d", line+1))
+	case v == "":
+		a.flash(fmt.Sprintf("Bookmarked line %d", line+1))
+	default:
+		a.flash(fmt.Sprintf("Bookmark on line %d named %q", line+1, v))
+	}
+	a.saveBookmarks()
+}
+
 // menuNextBookmark / menuPrevBookmark walk the project's bookmarks from
 // the caret, wrapping at either end.
 func (a *App) menuNextBookmark() { a.stepBookmark(1) }
@@ -285,7 +377,13 @@ func (a *App) stepBookmark(dir int) {
 	}
 	r := list[idx]
 	if a.jumpToBookmark(r) {
-		a.flash(fmt.Sprintf("Bookmark %d/%d · %s:%d", idx+1, len(list), a.relativePathFor(r.path), r.line+1))
+		msg := fmt.Sprintf("Bookmark %d/%d · %s:%d", idx+1, len(list), a.relativePathFor(r.path), r.line+1)
+		// The name, when there is one, is the point of having given it:
+		// walking named bookmarks should say which one you landed on.
+		if r.label != "" {
+			msg += " · " + r.label
+		}
+		a.flash(msg)
 	}
 }
 
@@ -362,7 +460,7 @@ func (a *App) menuBookmarks() {
 	}
 	items := make([]paletteItem, 0, len(list)+3)
 	for _, r := range list {
-		label := fmt.Sprintf("%s:%d", a.relativePathFor(r.path), r.line+1)
+		label := bookmarkPickerLabel(a.relativePathFor(r.path), r)
 		missing := r.tab == nil && !fileExists(r.path)
 		if missing {
 			label += "  (missing — pick to remove)"
@@ -394,6 +492,19 @@ func (a *App) menuBookmarks() {
 	// Said as the list opens, like the recent-files picker: this is the
 	// moment someone is looking at what the history holds.
 	a.flashHistoryNoSave()
+}
+
+// bookmarkPickerLabel is the head of a picker row: "path:line", then the
+// bookmark's name in brackets when it has one. The name sits BEFORE the
+// line text (which follows in the caller) because it is the part the
+// user chose — and the picker's filter matches the whole label, so
+// typing a name finds its bookmark.
+func bookmarkPickerLabel(rel string, r bookmarkRef) string {
+	label := fmt.Sprintf("%s:%d", rel, r.line+1)
+	if r.label != "" {
+		label += "  [" + r.label + "]"
+	}
+	return label
 }
 
 // bookmarksLabel is the ≡ Nav "Bookmarks…" label. Bookmarks live in the
@@ -521,7 +632,7 @@ func (a *App) loadBookmarks() {
 	a.bookmarks = make(map[string][]editor.Bookmark, len(stored))
 	for path, bms := range stored {
 		for _, b := range bms {
-			a.bookmarks[path] = append(a.bookmarks[path], editor.Bookmark{Line: b.Line, Text: b.Text})
+			a.bookmarks[path] = append(a.bookmarks[path], editor.Bookmark{Line: b.Line, Text: b.Text, Label: b.Label})
 		}
 	}
 }
@@ -533,7 +644,7 @@ func (a *App) loadBookmarks() {
 func (a *App) bookmarkSnapshot() map[string][]history.Bookmark {
 	out := map[string][]history.Bookmark{}
 	for _, r := range a.allBookmarks() {
-		out[r.path] = append(out[r.path], history.Bookmark{Line: r.line, Text: r.text})
+		out[r.path] = append(out[r.path], history.Bookmark{Line: r.line, Text: r.text, Label: r.label})
 	}
 	return out
 }

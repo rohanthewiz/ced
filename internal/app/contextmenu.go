@@ -192,10 +192,18 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	// Bookmarks (bookmarks.go): the click placed the caret on the clicked
 	// line, so the row aims there; labelled by the state it produces.
 	// Only on a file with a path — an untitled buffer refuses one.
+	// "Label bookmark…" follows it only on a line that already has one:
+	// naming an unmarked line is the ≡ row's job, and two bookmark rows
+	// on every right-click would crowd a menu that is about the text.
 	if tab.Path != "" {
 		items = append(items, editorContextItem{
 			label: bookmarkContextLabel(tab), action: (*App).menuToggleBookmark, enabled: alwaysTrue,
 		})
+		if tab.HasBookmark(tab.Cursor.Line) {
+			items = append(items, editorContextItem{
+				label: "Label bookmark…", action: (*App).menuLabelBookmark, enabled: alwaysTrue,
+			})
+		}
 	}
 	if word := a.contextSearchWord(tab); word != "" {
 		items = append(items, editorContextItem{

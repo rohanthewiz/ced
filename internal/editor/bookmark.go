@@ -82,9 +82,16 @@ const BookmarkGlyph = '⚑'
 // last time the bookmark was reconciled: it is the key the bookmark is
 // re-found by after a change the region rule cannot place, and after a
 // restart against a file that changed on disk meanwhile.
+//
+// Label is the user's own name for the bookmark ("" = unnamed). It is
+// pure payload: nothing here reads it, it only has to ride along with
+// the bookmark through every path that rebuilds one (remapBookmarks,
+// SetBookmarks, normalizeBookmarks' merge) — the line text is what a
+// bookmark is FOUND by, the label is what it is CALLED.
 type Bookmark struct {
-	Line int
-	Text string
+	Line  int
+	Text  string
+	Label string
 }
 
 // Bookmarks returns the tab's bookmarks, reconciled against the current
@@ -137,6 +144,37 @@ func (t *Tab) ToggleBookmark(line int) bool {
 	return true
 }
 
+// BookmarkAt returns the bookmark on line, if there is one.
+func (t *Tab) BookmarkAt(line int) (Bookmark, bool) {
+	t.syncBookmarks()
+	if i, ok := t.bookmarkIndex(line); ok {
+		return t.bookmarks[i], true
+	}
+	return Bookmark{}, false
+}
+
+// SetBookmarkLabel names the bookmark on line, adding the bookmark when
+// the line has none (naming a line is a way of marking it — refusing
+// with "toggle it first" would be a second gesture for no reason). An
+// empty label clears the name and keeps the bookmark. Reports whether
+// the line is bookmarked afterwards: false only for image tabs and tabs
+// with no buffer, which have no lines.
+func (t *Tab) SetBookmarkLabel(line int, label string) bool {
+	if t.Buffer == nil || t.IsImage() {
+		return false
+	}
+	t.syncBookmarks()
+	line = clampLine(line, len(t.Buffer.Lines))
+	if i, ok := t.bookmarkIndex(line); ok {
+		t.bookmarks[i].Label = label
+		return true
+	}
+	t.bookmarks = append(t.bookmarks, Bookmark{Line: line, Label: label})
+	t.normalizeBookmarks()
+	t.snapshotBookmarks()
+	return true
+}
+
 // SetBookmarks replaces the tab's bookmarks with stored ones — a
 // session restore, or the app handing back the bookmarks it parked when
 // the tab was last closed. Each is re-anchored by its text first
@@ -148,7 +186,7 @@ func (t *Tab) SetBookmarks(bms []Bookmark) {
 		return
 	}
 	for _, b := range bms {
-		t.bookmarks = append(t.bookmarks, Bookmark{Line: anchorStored(t.Buffer.Lines, b)})
+		t.bookmarks = append(t.bookmarks, Bookmark{Line: anchorStored(t.Buffer.Lines, b), Label: b.Label})
 	}
 	t.normalizeBookmarks()
 	t.snapshotBookmarks()
@@ -224,6 +262,9 @@ func (t *Tab) snapshotBookmarks() {
 // normalizeBookmarks sorts by line, clamps into the buffer and drops
 // duplicates — two bookmarks a delete pushed onto the same line become
 // one, which is what the gutter (one flag per line) can show anyway.
+// The survivor is the first in line order; when it is unnamed and the
+// one merged into it had a label, the label is kept — a name the user
+// typed is worth more than which of two colliding bookmarks "won".
 func (t *Tab) normalizeBookmarks() {
 	n := len(t.Buffer.Lines)
 	for i := range t.bookmarks {
@@ -233,6 +274,9 @@ func (t *Tab) normalizeBookmarks() {
 	out := t.bookmarks[:0]
 	for i, b := range t.bookmarks {
 		if i > 0 && b.Line == out[len(out)-1].Line {
+			if last := &out[len(out)-1]; last.Label == "" {
+				last.Label = b.Label
+			}
 			continue
 		}
 		out = append(out, b)
@@ -271,7 +315,7 @@ func remapBookmarks(old, cur []string, bms []Bookmark) []Bookmark {
 		default:
 			line = anchorInRegion(cur, p, newEnd, oldEnd-p, b)
 		}
-		out = append(out, Bookmark{Line: line, Text: b.Text})
+		out = append(out, Bookmark{Line: line, Text: b.Text, Label: b.Label})
 	}
 	return out
 }

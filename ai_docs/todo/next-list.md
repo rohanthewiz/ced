@@ -159,15 +159,6 @@ plus the LSP work done in the seeding session itself
   first, per the ⌘ allowlist rule) would make stepping through them
   practical. Decide which, then add it as a second door.
 
-- **N-044** · raised `2026-0930-2056-bookmarks` · value low
-  Bookmark extras left out of the first cut:
-  - labels / names on a bookmark (the picker shows the line's text)
-  - off-screen bookmarks in the overflow markers (`▴`/`▾` colour or popup)
-  - parked bookmarks are re-keyed on rename only; a tree cut/paste MOVE
-    of a closed file was not checked and would leave them "(missing)"
-  - a hand check in a real terminal that `⚑` is one cell wide there
-    (uniseg says 1; an emoji-presentation font could disagree)
-
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.
@@ -217,6 +208,28 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-01, `2026-1001-0055-bookmark-labels` —
+  **N-044** the four bookmark extras:
+  - labels: `editor.Bookmark.Label` rides remap / restore / merge; ≡ Nav
+    "Label bookmark…" (+ editor right-click twin on a bookmarked line),
+    `[Clear name]` alt+c because a prompt drops an empty submit; shown in
+    brackets in the picker and in Next/Prev's flash; stored as an
+    omitempty `label` key (`history.MaxBookmarkLabel` 60 runes).
+  - overflow: `offscreen.bookmarks`, POPUP ONLY — no colour (Accent
+    already means the caret; any rank demotes a diagnostic).
+  - "tree cut/paste MOVE": premise lapsed — ced has no move verb; the
+    file clipboard only COPIES (`startPaste` → `copyTree`), and a copy
+    rightly gets no bookmarks. Renames are the only in-editor move and
+    were already re-keyed. A move made outside ced (shell `mv`,
+    `git mv`) still leaves "(missing)" rows — unchanged by design.
+  - `⚑` width: U+2691 is East-Asian-Width Neutral, not
+    Emoji_Presentation; macOS libc `wcwidth` = 1, uniseg = 1 (2 only
+    with VS16, which ced never emits). The real binary in a PTY (run-ced
+    capture) lines `⚑   7` up with `    8`. Not checked: a GUI terminal
+    whose font fallback draws the glyph wider than its cell — tmux and
+    tcell lay out by wcwidth, so that would be a font overdraw, not a
+    column shift.
 
 - closed 2026-09-30, `2026-0930-1910-diagnostic-caret-note` —
   **N-012** the caret line's diagnostic is echoed as the caret moves,

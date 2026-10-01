@@ -792,12 +792,18 @@ the accent colour and a `⚑` sits in front of it:
 - **Add or remove one:** double-click the line number, right-click the
   line → *Add bookmark* / *Remove bookmark*, or ≡ Nav → **Toggle
   bookmark** (the caret's line).
+- **Name one:** ≡ Nav → **Label bookmark…** (or right-click a bookmarked
+  line → *Label bookmark…*) gives the caret line's bookmark a name,
+  bookmarking the line first if it isn't yet. The prompt starts with the
+  current name; **Clear name** (`Alt+c`) removes it. Names show in the
+  list and in the Next / Previous message, and the list's filter matches
+  them.
 - **Walk them:** ≡ Nav → **Next bookmark** / **Previous bookmark** go
   through every bookmark in the project, file by file, top to bottom,
   wrapping at the ends and opening files as needed. Each jump is a step
   for Go back.
-- **List them:** ≡ Nav → **Bookmarks…** shows each one with its line's
-  text; pick to jump. The list ends with *Clear bookmarks in <file>* and
+- **List them:** ≡ Nav → **Bookmarks…** shows each one with its name in
+  brackets (if it has one) and its line's text; pick to jump. The list ends with *Clear bookmarks in <file>* and
   *Clear all bookmarks* (which asks first).
 - A bookmark stays with its line as you edit: typing, Enter, pasting,
   moving lines, undo and redo, and the file being reloaded after a change
@@ -812,6 +818,10 @@ the accent colour and a `⚑` sits in front of it:
   bookmarks. If a file changed while it was closed, each bookmark is found
   again by the text of its line. A bookmark in a file that has since been deleted shows as
   *(missing)* in the list; pick it to remove it.
+- Bookmarks above or below the screen are counted in the popup you get
+  by resting the pointer on the `▴` / `▾` marker at the edge of the
+  editor ("3 bookmarks"). They don't change the marker's colour; that
+  stays for the cursor, find hits and diagnostics.
 - Unsaved, untitled buffers can't be bookmarked: bookmarks are kept by
   file path.
 

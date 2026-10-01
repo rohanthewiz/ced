@@ -138,3 +138,38 @@ func TestEncodeMarks_DropsOverlongText(t *testing.T) {
 		t.Error("an empty set should have no row")
 	}
 }
+
+// TestBookmarks_LabelRoundTripsAndOldRowsReadBack pins the label column:
+// a name is written and read back, an unnamed bookmark encodes exactly
+// as rows did before labels existed (no "label" key), and such an old
+// row decodes with an empty label.
+func TestBookmarks_LabelRoundTripsAndOldRowsReadBack(t *testing.T) {
+	root := repo(t)
+	a := filepath.Join(root, "a.go")
+	h := mustLoad(t, root)
+	h.SetBookmarks(map[string][]Bookmark{a: {{Line: 1, Text: "x", Label: "entry"}, {Line: 4, Text: "y"}}})
+	mustWrite(t, h, root, nil)
+	got := mustLoad(t, root).Bookmarks()[a]
+	want := []Bookmark{{Line: 1, Text: "x", Label: "entry"}, {Line: 4, Text: "y"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("loaded = %+v, want %+v", got, want)
+	}
+
+	if enc, _ := encodeMarks([]Bookmark{{Line: 4, Text: "y"}}); enc != `[{"line":4,"text":"y"}]` {
+		t.Errorf("unnamed encoding = %q, want the pre-label form", enc)
+	}
+}
+
+// TestEncodeMarks_ClipsLongLabels pins MaxBookmarkLabel: a label past it
+// is cut on a rune boundary, not dropped.
+func TestEncodeMarks_ClipsLongLabels(t *testing.T) {
+	long := strings.Repeat("é", MaxBookmarkLabel+5)
+	enc, ok := encodeMarks([]Bookmark{{Line: 0, Label: long}})
+	want := `[{"line":0,"label":"` + strings.Repeat("é", MaxBookmarkLabel) + `"}]`
+	if !ok || enc != want {
+		t.Errorf("encoded = %q (ok=%v)", enc, ok)
+	}
+	if got := clipLabel("short"); got != "short" {
+		t.Errorf("clipLabel(short) = %q", got)
+	}
+}

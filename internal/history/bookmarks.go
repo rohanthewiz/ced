@@ -16,7 +16,12 @@
 // the table holds one row per file whose value is that file's whole set,
 // as JSON:
 //
-//	bookmarks(path PK, marks)   marks = [{"line":41,"text":"func main() {"}, …]
+//	bookmarks(path PK, marks)   marks = [{"line":41,"text":"func main() {","label":"entry"}, …]
+//
+// "label" is the user's name for the bookmark and is omitted when there
+// is none, so rows written before labels existed read back unchanged and
+// an unnamed set encodes byte-for-byte as it always did (no spurious
+// rewrite of every row on the first write after an upgrade).
 //
 // STATE, NOT DELTAS — PER FILE. The app does not report each toggle; it
 // hands over the complete set (SetBookmarks) before every write, and the
@@ -45,12 +50,15 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"unicode/utf8"
 )
 
 // MaxBookmarks caps one repository's bookmarks. A backstop, not a
 // budget: the app refuses (with a flash) the bookmark that would pass it.
-// With MaxBookmarkText it bounds the table to ~100KB, which keeps the
-// whole live set under db.go's compactAbove ceiling.
+// With MaxBookmarkText and MaxBookmarkLabel it bounds the table to about
+// 220KB at worst (500 × (160B text + 240B of 4-byte-rune label + JSON
+// framing)), which keeps the whole live set under db.go's compactAbove
+// ceiling; real sets, mostly unnamed, sit far below it.
 const MaxBookmarks = 500
 
 // MaxBookmarkText is the longest line text kept with a bookmark. The
@@ -60,11 +68,26 @@ const MaxBookmarks = 500
 // the database.
 const MaxBookmarkText = 160
 
+// MaxBookmarkLabel is the longest bookmark label kept, in runes. The app
+// clips a typed label to it before it reaches a tab; encodeMarks clips
+// again so a hand-edited row cannot carry an essay into every picker row.
+const MaxBookmarkLabel = 60
+
 // Bookmark is one stored bookmark. Line is 0-based; Text is the line's
-// content when it was written.
+// content when it was written; Label is the user's name for it.
 type Bookmark struct {
-	Line int    `json:"line"`
-	Text string `json:"text,omitempty"`
+	Line  int    `json:"line"`
+	Text  string `json:"text,omitempty"`
+	Label string `json:"label,omitempty"`
+}
+
+// clipLabel trims a label to MaxBookmarkLabel runes. Cut on a rune
+// boundary — a byte cut could leave invalid UTF-8 in the row.
+func clipLabel(s string) string {
+	if utf8.RuneCountInString(s) <= MaxBookmarkLabel {
+		return s
+	}
+	return string([]rune(s)[:MaxBookmarkLabel])
 }
 
 // Bookmarks returns the stored bookmarks by absolute path, as of the
@@ -120,6 +143,7 @@ func encodeMarks(bms []Bookmark) (string, bool) {
 		if len(b.Text) > MaxBookmarkText {
 			b.Text = ""
 		}
+		b.Label = clipLabel(b.Label)
 		clean = append(clean, b)
 	}
 	sort.SliceStable(clean, func(i, j int) bool { return clean[i].Line < clean[j].Line })

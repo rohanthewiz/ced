@@ -287,3 +287,75 @@ func TestRender_BookmarkFlagsTheLineNumber(t *testing.T) {
 		t.Errorf("bookmarked number fg = %v, want Accent", fg)
 	}
 }
+
+// TestSetBookmarkLabel_NamesAddsAndClears pins the naming contract: an
+// existing bookmark gets the name, an unmarked line is bookmarked with
+// it, an empty name clears the name but keeps the bookmark, and image
+// tabs refuse.
+func TestSetBookmarkLabel_NamesAddsAndClears(t *testing.T) {
+	tab := bmTab("a", "b", "c")
+	tab.ToggleBookmark(0)
+	if !tab.SetBookmarkLabel(0, "top") {
+		t.Fatal("naming a bookmarked line should report it bookmarked")
+	}
+	if b, ok := tab.BookmarkAt(0); !ok || b.Label != "top" || b.Text != "a" {
+		t.Errorf("BookmarkAt(0) = %+v, %v", b, ok)
+	}
+	if !tab.SetBookmarkLabel(2, "end") || !tab.HasBookmark(2) {
+		t.Fatal("naming an unmarked line should bookmark it")
+	}
+	if b, _ := tab.BookmarkAt(2); b.Text != "c" {
+		t.Errorf("an added bookmark should carry its line's text, got %+v", b)
+	}
+	tab.SetBookmarkLabel(0, "")
+	if b, ok := tab.BookmarkAt(0); !ok || b.Label != "" {
+		t.Errorf("empty name: %+v, %v — want the bookmark kept, unnamed", b, ok)
+	}
+	if _, ok := tab.BookmarkAt(1); ok {
+		t.Error("BookmarkAt on an unmarked line should miss")
+	}
+	img := &Tab{Buffer: NewBuffer(""), Mode: imageMode}
+	if img.SetBookmarkLabel(0, "x") {
+		t.Error("an image tab has no lines to name")
+	}
+}
+
+// TestBookmarkLabel_RidesEditsAndRestore pins that the name survives
+// every path that rebuilds a bookmark: a shift below an insertion, a
+// MoveLines rotation (the in-region search), and SetBookmarks'
+// re-anchor by text.
+func TestBookmarkLabel_RidesEditsAndRestore(t *testing.T) {
+	tab := bmTab("a", "B", "c", "d")
+	tab.SetBookmarkLabel(1, "bee")
+	caretAt(tab, 0, 0)
+	tab.InsertString("top\n")
+	caretAt(tab, 2, 0)
+	tab.MoveLines(1)
+	got := tab.Bookmarks()
+	if len(got) != 1 || got[0].Line != 3 || got[0].Label != "bee" {
+		t.Fatalf("after insert + move = %+v, want line 3 named bee", got)
+	}
+
+	fresh := bmTab("x", "x", "B")
+	fresh.SetBookmarks(got)
+	if back := fresh.Bookmarks(); len(back) != 1 || back[0].Line != 2 || back[0].Label != "bee" {
+		t.Errorf("restored = %+v, want line 2 named bee", back)
+	}
+}
+
+// TestBookmarks_MergeKeepsTheName pins normalizeBookmarks' merge: when a
+// delete pushes two bookmarks onto one line, a name on either survives.
+func TestBookmarks_MergeKeepsTheName(t *testing.T) {
+	tab := bmTab("a", "b", "c", "d")
+	tab.ToggleBookmark(1)
+	tab.SetBookmarkLabel(2, "kept")
+	// Delete lines 1–2 ("b", "c"): both bookmarks land on what is now
+	// line 1, and the survivor (the unnamed one, first in order) must
+	// take the other's name.
+	selectRange(tab, Position{Line: 1}, Position{Line: 3})
+	tab.DeleteSelection()
+	got := tab.Bookmarks()
+	if len(got) != 1 || got[0].Label != "kept" {
+		t.Errorf("after the merge = %+v, want one bookmark named kept", got)
+	}
+}

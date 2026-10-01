@@ -373,14 +373,9 @@ func (a *App) diagLinesAtCaret() []string {
 	if len(all) == 0 {
 		return nil
 	}
-	ds := diagsCovering(t, all, t.Cursor)
-	if len(ds) == 0 {
-		for _, d := range all {
-			if d.Range.Start.Line == t.Cursor.Line {
-				ds = append(ds, d)
-			}
-		}
-	}
+	// The selection rule is diagnote.go's, so the caret-line note and
+	// this answer always describe the same diagnostics.
+	ds := diagsAtCaret(t, all)
 	if len(ds) == 0 {
 		return nil
 	}

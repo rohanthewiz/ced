@@ -4962,6 +4962,9 @@ func (a *App) draw() {
 
 	if tab := a.activeTabPtr(); tab != nil {
 		ex, ey, ew, eh := a.editorRect()
+		// Per frame, like the decoration merge: the caret and the
+		// diagnostic cache both move without telling anyone. diagnote.go.
+		a.stampDiagCaretNote(tab)
 		tab.Render(a.screen, a.theme, ex, ey, ew, eh)
 	} else {
 		a.drawEmptyEditor()

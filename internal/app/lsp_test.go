@@ -1112,7 +1112,7 @@ func TestMenuHoverInfo_AnswersWithDiagnosticsWithoutAServer(t *testing.T) {
 	if a.hasLSPActions() {
 		t.Fatal("test harness unexpectedly has a live language server")
 	}
-	tab.MoveCursorTo(editor.Position{Line: 2, Col: 0}, false)
+	tab.MoveCursorTo(editor.Position{Line: 1, Col: 0}, false) // the comma's line
 
 	a.menuHoverInfo()
 
@@ -1121,8 +1121,8 @@ func TestMenuHoverInfo_AnswersWithDiagnosticsWithoutAServer(t *testing.T) {
 		t.Fatalf("modal = %T, want *hoverModal carrying the diagnostic", a.modal)
 	}
 	joined := strings.Join(hm.lines, "\n")
-	if !strings.Contains(joined, "invalid character") {
-		t.Errorf("tooltip = %q, want the parser's own wording", joined)
+	if !strings.Contains(joined, "trailing comma") {
+		t.Errorf("tooltip = %q, want the validator's explanation", joined)
 	}
 }
 

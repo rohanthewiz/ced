@@ -73,7 +73,7 @@ internal/cats/                cats detection, control socket, event stream, hook
 internal/favorites/           favorites.json: two scopes, walk-up resolver
 internal/filetree/            Lazy tree, identity-preserving refresh, marks; filter.go
 internal/format/              format.json, trust store, builtin ladder, kinds.go,
-                              inprocess.go (JSON), validate.go
+                              inprocess.go (JSON), validate.go, jsonexplain.go
 internal/theme/               Theme struct, palette derivation, builtins, loader
 internal/userconfig/          ~/.config/ced/config.json + other config paths
 internal/clipboard/           OSC 52 with tmux passthrough
@@ -88,7 +88,8 @@ internal/app/
   splitter.go treeautofit.go treefilter.go treemarks.go overflow.go
   find.go findall.go projectsearch.go goto.go bracket.go
   markdown.go softwrap.go wordhl.go multicaret.go
-  lsp*.go hovermodal.go diagtip.go diagmerge.go workspaceedit.go
+  lsp*.go hovermodal.go diagtip.go diagnote.go diagmerge.go
+  workspaceedit.go
   copilot*.go chatcomposer.go chatagent.go chatarchive.go summarize.go gonotes.go
   mcp.go skills.go plugins.go plugincmd.go plugindeco.go
   git*.go compare.go           Git panel/log/commit/receipt/status; compare panel
@@ -453,6 +454,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   gutter answers by line, code by rune (PosScreenCell round-trip).
   Gutter click toggles it (`diagGutterPress`, after `blameColumnPress`).
   Messages wrapped, capped.
+- Caret-line note (diagnote.go): the WORST diagnostic at the caret
+  (`diagsAtCaret`, shared with Esc-i) painted end-of-line in severity
+  colour, `(+N more)`; caret line ONLY; replaces that line's inlay note;
+  stamped every frame before Render (`Tab.SetCaretNote`, rev + caret
+  guarded). The no-motion-terminal door: clicking the underline shows it.
 
 ### Data formats (internal/format/kinds.go, inprocess.go, validate.go, app/validate.go)
 - `format.kindFor` is the ONE table for formatter + in-process pass +
@@ -467,6 +473,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   the revision (`liveProblems`). 400ms debounce armed only for validated
   kinds; parse once at open. One problem reported; columns in runes,
   offset-1. Go deliberately not validated (gopls does it).
+- JSON messages are EXPLAINED (format/jsonexplain.go): keyed on the
+  parser's error class + rejected byte + previous non-blank byte, the
+  mark MOVES to the mistake (trailing comma → the comma; missing comma
+  → end of the previous value; EOF → the unclosed opener). Unrecognised
+  shapes keep the parser's wording and position.
 - **Only Go formats on save** (`format.FormatsOnSave`). Everything else
   (JSON, non-Go `format.json` entries) runs only via ≡ File → "Format
   file" (`formatActiveFile`: saves a dirty tab first; a Go save already

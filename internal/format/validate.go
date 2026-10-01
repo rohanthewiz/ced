@@ -131,16 +131,19 @@ func validateJSON(src []byte) []Problem {
 
 	// Offset points at the byte just AFTER the offending one — the
 	// parser consumed the bad character and then complained — so the
-	// character to underline is at Offset-1. Verified across every
-	// error shape encoding/json produces: a stray token, a character
-	// in the wrong place, and the unterminated-document case, where
-	// Offset is len(src) and Offset-1 is the last byte read.
+	// character it rejected is at Offset-1. Verified across every error
+	// shape encoding/json produces: a stray token, a character in the
+	// wrong place, and the unterminated-document case, where Offset is
+	// len(src) and Offset-1 is the last byte read.
 	//
-	// This is the difference between underlining the broken character
-	// and underlining the blameless one after it, which on a one-cell
-	// mark is the whole value of the feature.
-	line, col := offsetToLineCol(src, int(syn.Offset)-1)
-	return []Problem{{Line: line, Col: col, Message: syn.Error()}}
+	// The rejected character is not always the MISTAKE, though: a
+	// trailing comma is rejected at the ']' after it, a missing comma at
+	// the value after the gap. explainJSONError moves the mark onto the
+	// character that needs fixing and says what is wrong in words — an
+	// underline on a blameless ']' reads as the editor being confused.
+	msg, at := explainJSONError(src, syn)
+	line, col := offsetToLineCol(src, at)
+	return []Problem{{Line: line, Col: col, Message: msg}}
 }
 
 // offsetToLineCol converts a BYTE offset into src to a zero-based line

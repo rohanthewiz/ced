@@ -239,6 +239,10 @@ type Tab struct {
 	lineNotes    map[int]string
 	lineNotesRev int
 
+	// caretNote is the diagnostic message pinned to the caret's line.
+	// See linenote.go.
+	caretNote caretNote
+
 	// undoSuppress is set while a multi-caret fan-out is in flight so
 	// the per-caret primitives don't each file their own undo entry —
 	// applyAtCarets pushes one snapshot for the whole burst. Nothing
@@ -1338,9 +1342,14 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 			// empty on its last row. Skipped when an unwrapped line runs
 			// past the pane: there is no empty room, and the `›` above
 			// already owns the last cell. See linenote.go.
-			if lastRow && liveNotes != nil {
+			// The caret's note, when there is one, takes the slot instead.
+			if lastRow {
 				if used := visualCol - scrollVisual; used >= 0 && used <= contentW {
-					paintLineNote(scr, th, liveNotes[lineIdx], cy, contentX, contentW, used, lineBg)
+					if n, ok := t.liveCaretNote(lineIdx); ok {
+						paintCaretNote(scr, n, cy, contentX, contentW, used, lineBg)
+					} else if liveNotes != nil {
+						paintLineNote(scr, th, liveNotes[lineIdx], cy, contentX, contentW, used, lineBg)
+					}
 				}
 			}
 

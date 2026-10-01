@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-037**
+**Next ID: N-038**
 
 ## Open
 
@@ -60,17 +60,14 @@ plus the LSP work done in the seeding session itself
   Homebrew installs. True up to v0.3.0, false for anything released after
   the tap was removed; tweak if N-001 (now Roadmap) ever ships a release.
 
-- **N-010** · raised `2026-0921-0801-lsp-diagnostic-messages` · value medium
+- **N-010** · raised `2026-0921-0801-lsp-diagnostic-messages` · value low
   Try the diagnostic pointer tooltip in a REAL terminal (plain tmux, cats,
   macOS Terminal.app): do motion events reach it, does 250ms feel right.
-  Only exercised on the simulation screen so far. `run-ced` cannot send
-  mouse motion; this needs a person or a capture-tool extension.
-
-- **N-012** · raised `2026-0921-0801-lsp-diagnostic-messages` · value low
-  Echo the caret line's diagnostic in the status bar as the caret moves
-  (vim/ALE style). Not done because the bar is width-budgeted; Esc-i
-  already covers the keyboard path. The `lspProgressSuffix` segment added
-  2026-09-21 is the shape it would take.
+  `run-ced` CAN send motion (SGR button 35, `{esc}[<35{semi}X{semi}YM`)
+  and the tooltip opens on the underline in the real binary
+  (2026-09-30); what stays is a person's hand check. Value lowered from
+  medium: the caret-line note (`diagnote.go`) now answers in a terminal
+  with no motion at all, so the tooltip is no longer the only mouse door.
 
 - **N-013** · raised `2026-0921-0906-lsp-experience` · value medium
   **Most non-Go language servers have never been run.** clangd WAS, on
@@ -108,6 +105,14 @@ plus the LSP work done in the seeding session itself
   `Esc S` (git log search), `` Esc ` `` (terminal) and `Esc ~` (terminal
   locations). Some may be documented in their own sections; the table
   is what's short. An instance of N-003.
+
+- **N-037** · raised `2026-0930-1910-diagnostic-caret-note` · value low
+  The caret-line diagnostic note (`diagnote.go`) has no off switch. Left
+  out because a ≡ View row means re-pinning the menu-layout tests, and
+  the note shows only on the caret's line. Related nit: on a host that
+  DOES report motion, a click on the underline shows both the note and
+  the pointer tooltip (the release arrives as a motion report on the
+  same cell and arms the dwell). Harmless, slightly redundant.
 
 ## Roadmap
 
@@ -158,6 +163,13 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-09-30, `2026-0930-1910-diagnostic-caret-note` —
+  **N-012** the caret line's diagnostic is echoed as the caret moves,
+  but END-OF-LINE (the inlay-note slot, in severity colour) rather than
+  in the width-budgeted status bar: `diagnote.go`, `Tab.SetCaretNote`.
+  Worst diagnostic + `(+N more)`, caret line only, shares
+  `diagsAtCaret` with Esc-i.
 
 - closed 2026-09-29, `2026-0929-1929-readme-recent-files-and-locations` —
   **N-029** README gains `### Recent files and recent locations`: both

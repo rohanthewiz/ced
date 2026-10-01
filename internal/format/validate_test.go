@@ -49,15 +49,17 @@ func TestValidate_EmptyFileIsNotBroken(t *testing.T) {
 // it. encoding/json reports the byte AFTER the bad one, so this pins
 // the correction — without it every underline sits one column right.
 func TestValidate_LocatesTheBrokenCharacter(t *testing.T) {
-	// A trailing comma. The '}' is what the parser chokes on, and it
-	// sits on line 2 (zero-based) at column 0.
-	src := "{\n  \"a\": 1,\n}\n"
+	// A mismatched closer: the '}' is both what the parser chokes on and
+	// the mistake, so no explanation moves the mark (a trailing comma
+	// would — see jsonexplain_test.go). It sits on line 2 (zero-based)
+	// at column 3.
+	src := "[\n  1,\n  2}\n"
 	got := Validate("/proj/data.json", []byte(src))
 	if len(got) != 1 {
 		t.Fatalf("Validate = %v, want exactly one problem", got)
 	}
-	if got[0].Line != 2 || got[0].Col != 0 {
-		t.Errorf("problem at line %d col %d, want line 2 col 0 (the '}')",
+	if got[0].Line != 2 || got[0].Col != 3 {
+		t.Errorf("problem at line %d col %d, want line 2 col 3 (the '}')",
 			got[0].Line, got[0].Col)
 	}
 	if got[0].Message == "" {

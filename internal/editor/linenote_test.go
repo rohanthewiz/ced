@@ -112,3 +112,50 @@ func TestLineNote_DiesWithTheRevision(t *testing.T) {
 		t.Errorf("a stale note was painted: %q", row)
 	}
 }
+
+// TestCaretNote_PaintsOnTheCaretLineInItsColour pins the caret note: it
+// sits after the caret's line in the colour it was given, upright and
+// without the inlay `»`, and takes that line's slot from an inlay note.
+func TestCaretNote_PaintsOnTheCaretLineInItsColour(t *testing.T) {
+	tab := &Tab{Buffer: NewBuffer("x := f()\ny := 2\n")}
+	tab.SetLineNotes(map[int]string{0: "x: int", 1: "y: int"})
+	red := tcell.NewRGBColor(0xf7, 0x76, 0x8e)
+	tab.SetCaretNote(0, "✗ broken", red)
+	scr := noteScreen(t, tab, 60, 4)
+
+	row := noteRow(scr, 0, 60)
+	if !strings.Contains(row, "x := f()  ✗ broken") || strings.Contains(row, "x: int") {
+		t.Errorf("row 0 = %q, want the caret note in place of the inlay note", row)
+	}
+	_, _, st, _ := scr.GetContent(len([]rune(row[:strings.Index(row, "✗")])), 0)
+	if fg, _, attr := st.Decompose(); fg != red || attr&tcell.AttrItalic != 0 {
+		t.Errorf("caret note style fg=%v italic=%v, want the given colour, upright", fg, attr&tcell.AttrItalic != 0)
+	}
+	// The other line keeps its inlay note.
+	if row := noteRow(scr, 1, 60); !strings.Contains(row, "» y: int") {
+		t.Errorf("row 1 = %q, want its inlay note untouched", row)
+	}
+}
+
+// TestCaretNote_FollowsTheCaretAndTheRevision pins the two staleness
+// guards: a note stamped for a line the caret has since left is not
+// painted, nor is one stamped against an older buffer.
+func TestCaretNote_FollowsTheCaretAndTheRevision(t *testing.T) {
+	tab := &Tab{Buffer: NewBuffer("aaa\nbbb\n")}
+	tab.SetCaretNote(0, "✗ note", tcell.ColorRed)
+	tab.Cursor = Position{Line: 1}
+	if row := noteRow(noteScreen(t, tab, 40, 3), 0, 40); strings.Contains(row, "note") {
+		t.Errorf("note painted on a line the caret left: %q", row)
+	}
+
+	tab.Cursor = Position{Line: 0}
+	tab.EditRev++
+	if row := noteRow(noteScreen(t, tab, 40, 3), 0, 40); strings.Contains(row, "note") {
+		t.Errorf("note painted against a newer revision: %q", row)
+	}
+
+	tab.SetCaretNote(0, "", tcell.ColorRed)
+	if row := noteRow(noteScreen(t, tab, 40, 3), 0, 40); strings.Contains(row, "note") {
+		t.Errorf("an empty note still painted: %q", row)
+	}
+}

@@ -26,8 +26,8 @@ func TestValidate_OpeningABrokenFileMarksIt(t *testing.T) {
 	if len(probs) != 1 {
 		t.Fatalf("liveProblems = %v, want one finding on open", probs)
 	}
-	if probs[0].Line != 2 {
-		t.Errorf("finding on line %d, want 2 (the '}')", probs[0].Line)
+	if probs[0].Line != 1 {
+		t.Errorf("finding on line %d, want 1 (the trailing comma)", probs[0].Line)
 	}
 
 	spans, marks := validateSource{app: a}.Decorations(tab, theme.Default(), 0, 3)
@@ -97,8 +97,8 @@ func TestValidate_ReparseRestoresTheFinding(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	tab := openScratch(t, a, "conf.json", "{\n  \"a\": 1,\n}\n")
 
-	// Push the whole document down one line; the broken '}' moves with
-	// it, so a cached position would now be wrong.
+	// Push the whole document down one line; the trailing comma moves
+	// with it, so a cached position would now be wrong.
 	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
 	tab.InsertRune('\n')
 	a.validateTab(tab)
@@ -107,8 +107,8 @@ func TestValidate_ReparseRestoresTheFinding(t *testing.T) {
 	if len(probs) != 1 {
 		t.Fatalf("liveProblems = %v, want the finding back after a re-parse", probs)
 	}
-	if probs[0].Line != 3 {
-		t.Errorf("finding on line %d, want 3 — it must track the text it moved with", probs[0].Line)
+	if probs[0].Line != 2 {
+		t.Errorf("finding on line %d, want 2 — it must track the text it moved with", probs[0].Line)
 	}
 }
 

@@ -814,9 +814,11 @@ Everything below lives in the ≡ **Code** group, and so in the command
 palette:
 
 - **Diagnostics** — a dot in the gutter and an underline on the span,
-  with counts in the status bar. To read the message, **click the
-  gutter** of the marked line, rest the pointer on the dot or the
-  underline, or press `Esc i` with the caret on it. `Esc !` opens the
+  with counts in the status bar. **Put the caret on the marked line** —
+  click the underline, or arrow onto it — and the message appears after
+  the line in the problem's colour. For the full list on a line, **click
+  the gutter** mark, rest the pointer on the dot or the underline, or
+  press `Esc i`. `Esc !` opens the
   **Problems** panel for the whole project; *Next / Previous problem*
   step through it and say what they landed on.
 - **Go to definition** (`Esc d`, or `⌘`+click inside cats). Already
@@ -1141,6 +1143,10 @@ file** (a dirty buffer is saved first). That covers:
   two-space default. When the repo configures the tool itself
   (`.prettierrc`, `biome.json`, `deno.json`, …) that config wins.
   JSON-with-comments files (`tsconfig.json`, `.vscode/*`) are left alone.
+  A JSON file that doesn't parse is marked **as you type** (◇ in the
+  gutter), on the character to fix and in plain words — a trailing
+  comma is marked on the comma ("trailing comma: JSON allows no ','
+  before ']'"), not on the bracket the parser tripped over.
 - **Any extension your project lists** in `.ced/format.json` —
   `php-cs-fixer`, `ruff`, `prettier`, anything you like. This is **off by
   default** and only kicks in for projects that opt in by checking in a

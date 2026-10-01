@@ -112,17 +112,18 @@ func TestDiagsFor_RespectsTheRevisionGate(t *testing.T) {
 func TestDiagTooltip_ReadsEveryProducer(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	tab := openScratch(t, a, "conf.json", "{\n  \"a\": 1,\n}\n")
-	// Park the caret on the broken line — the tooltip answers for the
-	// whole line when the cursor isn't inside a range.
-	tab.MoveCursorTo(editor.Position{Line: 2, Col: 0}, false)
+	// Park the caret on the broken line (the comma's — jsonexplain.go
+	// moves the mark off the blameless '}') — the tooltip answers for
+	// the whole line when the cursor isn't inside a range.
+	tab.MoveCursorTo(editor.Position{Line: 1, Col: 0}, false)
 
 	lines := a.diagLinesAtCaret()
 	if len(lines) == 0 {
 		t.Fatal("diagLinesAtCaret returned nothing; the underline would be mute")
 	}
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "invalid character") {
-		t.Errorf("tooltip = %q, want the parser's own wording", joined)
+	if !strings.Contains(joined, "trailing comma") {
+		t.Errorf("tooltip = %q, want the validator's explanation", joined)
 	}
 }
 

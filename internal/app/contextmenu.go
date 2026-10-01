@@ -189,6 +189,14 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	items = append(items, editorContextItem{
 		label: softWrapContextLabel(tab.IsSoftWrap()), action: (*App).toggleSoftWrap, enabled: alwaysTrue,
 	})
+	// Bookmarks (bookmarks.go): the click placed the caret on the clicked
+	// line, so the row aims there; labelled by the state it produces.
+	// Only on a file with a path — an untitled buffer refuses one.
+	if tab.Path != "" {
+		items = append(items, editorContextItem{
+			label: bookmarkContextLabel(tab), action: (*App).menuToggleBookmark, enabled: alwaysTrue,
+		})
+	}
 	if word := a.contextSearchWord(tab); word != "" {
 		items = append(items, editorContextItem{
 			label:   "Search project for \"" + word + "\"",

@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-043**
+**Next ID: N-045**
 
 ## Open
 
@@ -150,6 +150,23 @@ plus the LSP work done in the seeding session itself
     (today it starts from a tab in that folder)
   - a COLOURED member underline, if a capability check can tell which
     terminals take the colon-form SGR 58
+
+- **N-043** · raised `2026-0930-2056-bookmarks` · value medium
+  Bookmarks have no keyboard door: the leader table is out of letters,
+  so Toggle / Next / Previous are ≡ Nav rows reached by the palette
+  (`Esc k` + typing). A function key (F2 / F11-style, nothing in ced
+  binds F-keys yet) or a ⌘ chord (must be pressed in a real browser
+  first, per the ⌘ allowlist rule) would make stepping through them
+  practical. Decide which, then add it as a second door.
+
+- **N-044** · raised `2026-0930-2056-bookmarks` · value low
+  Bookmark extras left out of the first cut:
+  - labels / names on a bookmark (the picker shows the line's text)
+  - off-screen bookmarks in the overflow markers (`▴`/`▾` colour or popup)
+  - parked bookmarks are re-keyed on rename only; a tree cut/paste MOVE
+    of a closed file was not checked and would leave them "(missing)"
+  - a hand check in a real terminal that `⚑` is one cell wide there
+    (uniseg says 1; an emoji-presentation font could disagree)
 
 ## Roadmap
 

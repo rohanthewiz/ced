@@ -101,6 +101,10 @@ func (a *App) writeHistory() {
 	if a.history == nil || !historyPersistsFn(a.rootDir) {
 		return
 	}
+	// Bookmarks are handed over as a whole set rather than recorded as
+	// they change: their lines move with every edit, so only the state at
+	// write time is worth comparing with what is stored (bookmarks.go).
+	a.history.SetBookmarks(a.bookmarkSnapshot())
 	_ = a.history.Write(historyPathFn(a.rootDir), a.recentFiles)
 }
 

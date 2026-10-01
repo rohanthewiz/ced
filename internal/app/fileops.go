@@ -200,6 +200,8 @@ func (a *App) doRenameFile(oldPath, newName string) {
 			t.DiskGone = false
 		}
 	}
+	// Parked bookmarks are keyed by path; the open tab's ride its Path.
+	a.bookmarksRenamed(oldPath, newPath, false)
 	a.workspaceChanged()
 	a.flash(fmt.Sprintf("Renamed to %s", newName))
 }
@@ -496,6 +498,8 @@ func (a *App) doRenameFolder(oldPath, newName string) {
 			a.setActiveFolder(filepath.Join(newPath, a.activeFolder[len(prefix):]))
 		}
 	}
+	// Every parked bookmark under the folder moves with it.
+	a.bookmarksRenamed(oldPath, newPath, true)
 	a.workspaceChanged()
 	a.flash(fmt.Sprintf("Renamed to %s", newName))
 }

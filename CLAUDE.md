@@ -56,6 +56,7 @@ internal/editor/
   decoration.go               Span/GutterMark overlay merged in Tab.Render
   wordhl.go symbolhl.go       Word highlight; server-resolved symbol uses
   linenote.go bracket.go      End-of-line notes (inlay hints); brace matcher
+  bookmark.go                 Line bookmarks: content-diff re-anchoring, gutter flag
   ghost.go                    Ghost-text display form + render-row splice
 internal/diff/diff.go         Patience line differ + unified rendering
 internal/search/search.go     Project-wide text search over the finder index
@@ -67,7 +68,7 @@ internal/plugins/             plugin.json manifests; diag.go compiler-output par
 internal/chatstore/           One JSON file per saved conversation
 internal/gonotes/             GoNotes REST client
 internal/session/session.go   state.json: recent folders, per-folder tabs, layout
-internal/history/             <repo>/.ced/history.bytdb: folder index (trie), file ring
+internal/history/             <repo>/.ced/history.bytdb: folder index (trie), file ring, bookmarks
 internal/remote/remote.go     `ced --remote/--wait`: sockets, root-based discovery
 internal/cats/                cats detection, control socket, event stream, hooks
 internal/favorites/           favorites.json: two scopes, walk-up resolver
@@ -96,6 +97,7 @@ internal/app/
   terminal.go termdiag.go runexec.go openineditor.go
   autosave.go format.go validate.go syntax.go zipops.go
   folder.go favorites.go favmanage.go recentlocations.go remote.go
+  bookmarks.go                Project-wide bookmarks: park/adopt, verbs, persistence
   cats_glue.go hostident.go theme.go
 ```
 
@@ -221,7 +223,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   Render's paint loop. Precedence: syntax < external < word-hl <
   bracket < selection < find. Gutter precedence: git < validate < plugin
   < LSP (glyphs: validate `◇`, plugin `◆`, LSP `●`). Exceptions that are
-  PAINTED not decorated: ghost text, secondary carets, end-of-line notes.
+  PAINTED not decorated: ghost text, secondary carets, end-of-line notes,
+  the bookmark line-number flag.
 - **Identity-preserving tree refresh**: `reload` keeps survivor `*Node`s
   and their `Expanded` state.
 - **External-change reconcile** (each tree tick): clean + changed →
@@ -743,6 +746,36 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   has no subshell), omitted when already there; directory picker reuses
   frecency sources; execute bit re-checked live.
 
+### Bookmarks (editor/bookmark.go, app/bookmarks.go)
+- Lines are re-derived from CONTENT, never shifted by edit hooks:
+  the tab snapshots `Buffer.Lines` (a COPY — MoveLines rewrites in
+  place) and on EditRev movement diffs prefix/suffix; inside the region
+  the bookmark's text is searched, a net deletion takes an adjacent twin
+  (`TestBookmarks_DeletingOneOfTwinLinesKeepsTheSurvivor`), an in-place
+  edit never hops (`TestBookmarks_TypingOnABlankLineDoesNotHop`). Don't
+  add per-primitive shift hooks.
+- Two homes, never both: open tab owns them; `closeTab` parks by path
+  (`a.bookmarks`), `wireTab` adopts (`SetBookmarks` re-anchors by text;
+  blank lines never searched).
+- Painted in the line NUMBER (Accent + bold, `⚑` in the blank leading
+  cell), not the mark cell — a diagnostic would hide it.
+- Doors: ≡ Nav rows (Toggle / Next / Previous / Bookmarks…), editor
+  right-click row, DOUBLE-click on a line number (own `bookmarkClick`
+  record, checked before `diagGutterPress`). No leader. Untitled tabs
+  refuse. Next/Prev skip missing files; the picker labels and removes
+  them. Clear all confirms.
+- Persisted in `.ced/history.bytdb` (history/bookmarks.go), NOT
+  state.json: table `bookmarks(path PK, marks JSON)`, ONE ROW PER FILE
+  (a line is no stable key). STATE not deltas: `writeHistory` hands the
+  whole set over (`SetBookmarks`) and only files whose set differs from
+  the loaded/written one are upserted/deleted — unchanged files never
+  written, so sibling instances keep each other's. Never-set history
+  deletes nothing. Written through (`saveBookmarks` → `writeHistory`)
+  and at Close; loaded regardless of the `"session"` toggle; gated by
+  `history.Persists` like the rest. ≡ row carries "(not saved)". Cap
+  `history.MaxBookmarks` (500) refused with a flash; text over
+  `MaxBookmarkText` stored without it.
+
 ### Workspace, sessions, navigation
 - **Nav history (nav.go)**: recorded centrally by openFile / switchToTab;
   `nav.suppress` during retrace; fresh navigation clears forward. LSP
@@ -842,8 +875,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 157 group
-  actions + 15 headers (174), height 180, dividers `[2, 5, 177]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 161 group
+  actions + 15 headers (178), height 184, dividers `[2, 5, 181]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

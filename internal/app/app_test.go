@@ -382,7 +382,7 @@ func TestMenuModalRect_Centered(t *testing.T) {
 	// The menu (141 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 180
+	a.height = 184
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -2031,16 +2031,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 180 {
-		t.Errorf("modalHeight = %d, want 180", h)
+	if h != 184 {
+		t.Errorf("modalHeight = %d, want 184", h)
 	}
-	if got := len(items); got != 174 {
-		t.Errorf("row count = %d, want 174 (2 top-zone + 157 group actions + 15 headers)", got)
+	if got := len(items); got != 178 {
+		t.Errorf("row count = %d, want 178 (2 top-zone + 161 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (177) — headers separate the
+	// one setting off the headerless Quit group (181) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 177}
+	wantDiv := []int{2, 5, 181}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2624,8 +2624,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 183 { // 180 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 183", h)
+	if h != 187 { // 184 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 187", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -3079,7 +3079,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 180
+	a.height = 184
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

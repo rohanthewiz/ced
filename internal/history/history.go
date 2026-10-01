@@ -67,6 +67,13 @@ type History struct {
 	searchSeq     uint64
 	searchTouched map[string]bool
 	searchRemoved map[string]bool
+
+	// bmStored is the bookmark table as of the last load or write, stored
+	// path → that file's encoded set; bmWant is the set the app last
+	// handed over, and bmSet whether it ever did (bookmarks.go).
+	bmStored map[string]string
+	bmWant   map[string]string
+	bmSet    bool
 }
 
 // New returns an empty history for the repository at root.
@@ -81,6 +88,8 @@ func New(root string) *History {
 		searches:      map[string][]string{},
 		searchTouched: map[string]bool{},
 		searchRemoved: map[string]bool{},
+
+		bmStored: map[string]string{},
 	}
 }
 
@@ -113,7 +122,8 @@ func (h *History) RemoveFile(path string) {
 
 // Dirty reports whether a write has anything to do.
 func (h *History) Dirty() bool {
-	return h.Folders.Dirty() || len(h.touched) > 0 || len(h.removed) > 0 || h.searchesDirty()
+	return h.Folders.Dirty() || len(h.touched) > 0 || len(h.removed) > 0 || h.searchesDirty() ||
+		h.bookmarksDirty()
 }
 
 // Inside reports whether path (in either spelling) lies strictly inside

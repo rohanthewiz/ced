@@ -93,6 +93,10 @@ The goals, in order:
   `≡` → Nav or the links on the "No file open" screen. Each repository
   keeps its own history, in a gitignored `.ced/history.bytdb`. See
   [Recent files and recent locations](#recent-files-and-recent-locations).
+- **Bookmarks** — double-click a line number to flag the line (`⚑`),
+  then walk every flagged line in the project with ≡ Nav → Next /
+  Previous bookmark, or pick one from **Bookmarks…**. See
+  [Bookmarks](#bookmarks).
 - **Clipboard over SSH** — OSC 52, including a `tmux` passthrough so
   copy works from inside a tmux session on a remote host.
 - **Formatting** — Go files are formatted on every save (goimports /
@@ -774,6 +778,46 @@ fuzzy file finder over every non-ignored file in the project:
   inside the editor.
 - Only files are listed — no directories, no symlinked duplicates.
 
+### Bookmarks
+
+A bookmark flags a line you want to come back to. The line number turns
+the accent colour and a `⚑` sits in front of it:
+
+```
+    8
+⚑   9  func helper() int {
+   10      return 42
+```
+
+- **Add or remove one:** double-click the line number, right-click the
+  line → *Add bookmark* / *Remove bookmark*, or ≡ Nav → **Toggle
+  bookmark** (the caret's line).
+- **Walk them:** ≡ Nav → **Next bookmark** / **Previous bookmark** go
+  through every bookmark in the project, file by file, top to bottom,
+  wrapping at the ends and opening files as needed. Each jump is a step
+  for Go back.
+- **List them:** ≡ Nav → **Bookmarks…** shows each one with its line's
+  text; pick to jump. The list ends with *Clear bookmarks in <file>* and
+  *Clear all bookmarks* (which asks first).
+- A bookmark stays with its line as you edit: typing, Enter, pasting,
+  moving lines, undo and redo, and the file being reloaded after a change
+  on disk. If the bookmarked line is deleted, it moves to the line that
+  takes its place.
+- Bookmarks are saved as you make them, in the repository's own
+  `.ced/history.bytdb` beside recent files (see
+  [Where they're kept](#recent-files-and-recent-locations)), and come back
+  even with session restore turned off. Like the rest of that history
+  they're saved only inside a git repository; anywhere else they last for
+  the session. Two ced windows on one repository keep each other's
+  bookmarks. If a file changed while it was closed, each bookmark is found
+  again by the text of its line. A bookmark in a file that has since been deleted shows as
+  *(missing)* in the list; pick it to remove it.
+- Unsaved, untitled buffers can't be bookmarked: bookmarks are kept by
+  file path.
+
+There are no keyboard shortcuts for these; the command palette (`Esc k`)
+reaches all four rows.
+
 ### Recent files and recent locations
 
 Two lists under `≡` → **Nav** take you back to where you were working.
@@ -819,8 +863,8 @@ Click a file in the tree, or  ≡  for the menu
       Recent files   ·   Recent locations
 ```
 
-**Where they're kept.** Both lists, along with your search history, live
-in the project itself, in `.ced/history.bytdb`. ced creates that file on
+**Where they're kept.** Both lists, along with your search history and
+your [bookmarks](#bookmarks), live in the project itself, in `.ced/history.bytdb`. ced creates that file on
 the first save, next to a `.ced/.gitignore` that keeps it out of your
 commits. Each repository has its own history, and two ced windows on the
 same repository add to it rather than overwrite each other. It's written

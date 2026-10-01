@@ -540,6 +540,16 @@ func builtinMenuGroups() []menuGroup {
 			// predicate is a file read, which menuLayout runs on every
 			// frame the menu is open.
 			{label: "Go to favorite…", action: (*App).menuGoToFavorite, enabled: alwaysTrue},
+			// Line bookmarks (bookmarks.go), beside favorites: those are
+			// places named in advance, these are lines marked as you
+			// read. No leader (the flat table is out of letters); the
+			// mouse door is a double-click on a line number and the
+			// editor's right-click menu. Next / Previous / the list stay
+			// clickable with none, to say how to make one.
+			{label: "Toggle bookmark", action: (*App).menuToggleBookmark, enabled: (*App).hasFileTab},
+			{label: "Next bookmark", action: (*App).menuNextBookmark, enabled: alwaysTrue},
+			{label: "Previous bookmark", action: (*App).menuPrevBookmark, enabled: alwaysTrue},
+			{action: (*App).menuBookmarks, enabled: alwaysTrue, labelFor: (*App).bookmarksLabel},
 			// Matching bracket and terminal locations are jumps that need no
 			// language server, so they live here rather than among the
 			// server-backed rows in Code.
@@ -1247,6 +1257,14 @@ type App struct {
 	// (tabgroups.go). Empty for anyone who never made one, which keeps
 	// every grouping pass a no-op.
 	tabGroups []*tabGroup
+	// bookmarks are the PARKED bookmarks: those of files with no open
+	// tab, by absolute path. An open tab owns its own (editor/bookmark.go)
+	// and is never also listed here — see bookmarks.go.
+	bookmarks map[string][]editor.Bookmark
+	// bookmarkClick stamps the first press of a line-number double-click
+	// (bookmarkGutterPress); kept apart from lastClick, which the same
+	// press also stamps for editorPress's word-select.
+	bookmarkClick clickRecord
 
 	// statusSegs is the status bar's clickable spans, re-stamped by
 	// every drawStatusBar the same way lastTabRects tracks the tab
@@ -1820,6 +1838,9 @@ func New(rootDir string) (*App, error) {
 	// treatment a clicked one would, and BEFORE main opens any file
 	// named on the command line — an explicit `ced foo.go` must end up
 	// on foo.go, not on whatever tab was active a week ago.
+	// Park the project's bookmarks first, so every tab restoreSession
+	// (or main's command-line open) creates is handed its own by wireTab.
+	a.loadBookmarks()
 	a.restoreSession()
 	// Identify ourselves to the hosting terminal (OSC 7 cwd + OSC 2
 	// title — see hostident.go). After restoreSession so the first
@@ -3642,6 +3663,13 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			if a.blameColumnPress(x, y) {
 				return
 			}
+			// A double-click on a line number toggles that line's
+			// bookmark (bookmarks.go). Ahead of the diagnostic press:
+			// the number cells are inside its gutter band, and on a
+			// marked line it would claim the second press too.
+			if a.bookmarkGutterPress(x, y) {
+				return
+			}
 			// A press on a diagnosed line's gutter opens its message at
 			// once — the mouse door for terminals that report no motion,
 			// where the dwell tooltip can never fire (diagtip.go). After
@@ -4215,6 +4243,10 @@ func (a *App) wireTab(t *editor.Tab) {
 	// without this a user could open a malformed config, read it, and
 	// never be told — the one case the feature exists for.
 	a.validateTab(t)
+	// Hand back the bookmarks parked for this file when it was last
+	// closed (or loaded from the session), re-anchored against it as it
+	// reads now (bookmarks.go).
+	a.adoptBookmarks(t)
 	a.requestFileDiff(t.Path)
 	// Blame the newly opened file too, but only while the layer is on —
 	// this is a fork per file, unlike the diff, and nobody has asked to
@@ -4392,6 +4424,9 @@ func (a *App) closeTab(idx int) {
 	// And its tab-group membership, also keyed by pointer; an ad-hoc
 	// group losing its last tab goes with it (tabgroups.go).
 	a.tabGroupsForgetTab(a.tabs[idx])
+	// Its bookmarks go back to the parked map, by path, to be handed to
+	// the file again when it reopens (bookmarks.go).
+	a.parkBookmarks(a.tabs[idx])
 	// And a completion popup anchored into the buffer that is about to
 	// disappear. completionSync would close it on the next event anyway,
 	// but the list would draw once against a tab that no longer exists

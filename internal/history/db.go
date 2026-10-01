@@ -57,7 +57,8 @@
 // from a long-lived engine — neither ever happens here. The live set is
 // capped (MaxFolders rows + MaxRecentFiles rows ≈ 45KB at worst, measured
 // with deep paths; the three search lists add at most 3 × MaxSearches ×
-// MaxSearchBytes ≈ 38KB more, and typically a few hundred bytes) while each write appends ~2.6KB, so left alone the file
+// MaxSearchBytes ≈ 38KB more, and typically a few hundred bytes; bookmarks
+// at most MaxBookmarks × ~200B ≈ 100KB, typically far less) while each write appends ~2.6KB, so left alone the file
 // would grow by the session forever. A write therefore ends with a VACUUM
 // once the file passes compactAbove:
 //
@@ -75,6 +76,8 @@
 //	folder_use(path PK, hits, last)  — path relative to the repo
 //	recent_files(path PK, last)      — relative inside, absolute outside
 //	search_history(k PK, last)       — k = "<kind>:<text>" (searches.go)
+//	bookmarks(path PK, marks)        — one row per file, marks = JSON set
+//	                                   (bookmarks.go)
 //	history_meta(k PK, v)            — 'folder_seq', 'file_seq', 'search_seq'
 //
 // Searches follow the recent-file recipe exactly: touched entries are
@@ -140,6 +143,10 @@ var schema = []string{
 	`CREATE TABLE IF NOT EXISTS search_history (
 		k TEXT PRIMARY KEY,
 		last BIGINT NOT NULL
+	)`,
+	`CREATE TABLE IF NOT EXISTS bookmarks (
+		path TEXT PRIMARY KEY,
+		marks TEXT NOT NULL
 	)`,
 	`CREATE TABLE IF NOT EXISTS history_meta (
 		k TEXT PRIMARY KEY,
@@ -390,7 +397,10 @@ func (h *History) load(db *sql.DB) error {
 		}
 		h.files = append(h.files, h.decodeFile(r.path))
 	}
-	return h.loadSearches(db)
+	if err := h.loadSearches(db); err != nil {
+		return err
+	}
+	return h.loadBookmarks(db)
 }
 
 // loadSearches reads the search lists (searches.go).
@@ -458,6 +468,9 @@ func (h *History) Write(dbPath string, ring []string) error {
 	if err == nil {
 		err = h.writeSearches(tx)
 	}
+	if err == nil {
+		err = h.writeBookmarks(tx)
+	}
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -470,6 +483,7 @@ func (h *History) Write(dbPath string, ring []string) error {
 	h.removed = map[string]bool{}
 	h.searchTouched = map[string]bool{}
 	h.searchRemoved = map[string]bool{}
+	h.adoptBookmarkWrite()
 	compactIfLarge(db, dbPath)
 	return nil
 }

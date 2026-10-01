@@ -243,6 +243,14 @@ type Tab struct {
 	// See linenote.go.
 	caretNote caretNote
 
+	// bookmarks are the tab's bookmarked lines, sorted and unique;
+	// bmLines / bmRev are the snapshot of the buffer they were last
+	// placed against, which the next reconcile diffs the buffer with.
+	// See bookmark.go.
+	bookmarks []Bookmark
+	bmLines   []string
+	bmRev     int
+
 	// undoSuppress is set while a multi-caret fan-out is in flight so
 	// the per-caret primitives don't each file their own undo entry —
 	// applyAtCarets pushes one snapshot for the whole burst. Nothing
@@ -1117,6 +1125,10 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	// loop ends at whichever runs out first — the viewport or the buffer.
 	liveNotes := t.LiveLineNotes()
 	caretLines := t.caretLineSet()
+	// Bookmarks are reconciled against the buffer here, once per frame,
+	// so an edit that moved them is reflected in the very frame it lands
+	// in (bookmark.go).
+	marked := t.bookmarkLineSet()
 	row := 0
 	for lineIdx := t.ScrollY; row < h && lineIdx < t.Buffer.LineCount(); lineIdx++ {
 		isCursorLine := lineIdx == t.Cursor.Line
@@ -1232,7 +1244,22 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 					// the only thing at the left edge saying "editing here".
 					gutterStyle = gutterStyle.Foreground(th.Text).Bold(true)
 				}
-				for i, r := range numStr {
+				// A bookmarked line (bookmark.go) is told in the line
+				// NUMBER rather than the mark cell: that cell already
+				// carries git / validate / plugin / LSP by precedence, and
+				// a bookmark that lost to a diagnostic dot would vanish
+				// exactly on the lines most worth coming back to. Accent,
+				// bold, plus the flag in the number's blank leading cell
+				// (blank for every line below 10000). Accent outranks the
+				// caret's Text colour: the caret line is already told by
+				// its wash, the bookmark only by this.
+				if marked[lineIdx] {
+					gutterStyle = gutterStyle.Foreground(th.Accent).Bold(true)
+					if numStr[0] == ' ' {
+						numStr = string(BookmarkGlyph) + numStr[1:]
+					}
+				}
+				for i, r := range []rune(numStr) {
 					scr.SetContent(x+i, cy, r, nil, gutterStyle)
 				}
 

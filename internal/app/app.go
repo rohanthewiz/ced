@@ -2030,7 +2030,7 @@ func (a *App) Close() {
 	a.stopCaretBlink()
 	// A folder switch rebuilds the App, so a validate tick armed under
 	// the old one must not be honoured by the new: stop the timer and
-	// bump the generation the handler checks (validate.go).
+	// bump the seq the handler checks (validate.go).
 	a.stopValidateTimer()
 	a.validate.seq++
 	a.lspShutdown()

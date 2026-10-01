@@ -360,3 +360,46 @@ func TestDiagCounts(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateTick_StaleTickAfterReArmIsDropped pins the fired-but-
+// undelivered race. timer.Stop cannot recall a tick the timer already
+// posted: when a keystroke is queued ahead of that tick, the keystroke's
+// dispatch re-arms the debounce and the old tick is then handled
+// anyway. Honouring it would parse the buffer the instant after the
+// edit (the flicker the debounce exists to prevent) and nil out the
+// LIVE timer's handle, so teardown could no longer stop it and the
+// recovery check in validateAfterEvent would arm a second one.
+func TestValidateTick_StaleTickAfterReArmIsDropped(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	tab := openScratch(t, a, "conf.json", "{\n  \"a\": 1\n}\n")
+	a.validateAfterEvent() // absorb the open
+	t.Cleanup(a.stopValidateTimer)
+
+	// The first arm's tick, as its timer would have posted it.
+	tab.InsertRune(' ')
+	a.validateAfterEvent()
+	stale := &validateEvent{seq: a.validate.seq}
+
+	// A keystroke handled before that tick re-arms the debounce.
+	tab.InsertRune(',')
+	a.validateAfterEvent()
+	live := a.validate.timer
+	if live == nil {
+		t.Fatal("the second edit did not re-arm the debounce")
+	}
+
+	a.handleValidateTick(stale)
+	if a.validate.rev[tab.Path] == tab.EditRev {
+		t.Error("stale tick parsed the buffer inside the new debounce window")
+	}
+	if a.validate.timer != live {
+		t.Error("stale tick dropped the live timer's handle")
+	}
+
+	// The live arm's own tick is still honoured.
+	a.stopValidateTimer()
+	a.handleValidateTick(&validateEvent{seq: a.validate.seq})
+	if a.validate.rev[tab.Path] != tab.EditRev {
+		t.Error("the live tick did not parse the buffer")
+	}
+}

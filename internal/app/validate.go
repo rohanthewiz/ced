@@ -115,9 +115,26 @@ type validateState struct {
 	// timer is the live debounce, nil when nothing is pending.
 	timer *time.Timer
 
-	// seq invalidates a timer armed before a teardown. A folder switch
-	// rebuilds the App, but a pending tick posted under the old one
-	// must not be honoured by the new.
+	// seq names the LATEST arm; a tick carrying any other value is
+	// dropped. It is bumped on every arm and again at teardown, which
+	// covers two ways a tick can outlive the countdown that sent it:
+	//
+	//   - Re-arm race. timer.Stop cannot recall a tick already posted.
+	//     When a keystroke is queued ahead of that tick, its dispatch
+	//     re-arms the debounce, and the old tick arrives next:
+	//
+	//       timer A fires ──► PostEvent(tick seq=1)   (queued behind key)
+	//       key handled  ──► arm B: Stop(A)=false, seq=2
+	//       tick seq=1   ──► dropped (B's tick, seq=2, still pending)
+	//
+	//     Honouring it would parse the instant after the edit (the
+	//     flicker the debounce exists to prevent) and nil the handle of
+	//     the LIVE timer B, leaving it unstoppable at teardown.
+	//   - Teardown. A folder switch rebuilds the App; a tick posted
+	//     under the old one must not be honoured by the new.
+	//
+	// The parse itself is synchronous on the main loop, so this is the
+	// only place two validations could ever be "in flight" at once.
 	seq int
 }
 
@@ -242,13 +259,16 @@ func (a *App) validateAfterEvent() {
 	}
 }
 
-// armValidateTimer restarts the debounce countdown.
+// armValidateTimer restarts the debounce countdown. The seq bump is
+// what retires a tick the previous timer already posted (see
+// validateState.seq); Stop alone only catches one still counting down.
 func (a *App) armValidateTimer() {
 	a.stopValidateTimer()
 	scr := a.screen
 	if scr == nil {
 		return
 	}
+	a.validate.seq++
 	seq := a.validate.seq
 	a.validate.timer = time.AfterFunc(validateDebounce, func() {
 		_ = scr.PostEvent(&validateEvent{when: time.Now(), seq: seq})
@@ -265,6 +285,8 @@ func (a *App) stopValidateTimer() {
 }
 
 // handleValidateTick re-parses the active tab once typing has settled.
+// Only the latest arm's tick gets past the seq check, so clearing the
+// timer handle here can never orphan a countdown that is still live.
 func (a *App) handleValidateTick(e *validateEvent) {
 	if e == nil || e.seq != a.validate.seq {
 		return

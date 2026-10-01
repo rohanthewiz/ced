@@ -436,6 +436,7 @@ Then:
   - *Move to split →* / *Copy to split →* (inside cats) — open the file
     in a pane beside this one; Move then closes the tab here. An
     unsaved tab is saved first, since the second editor reads the disk.
+  - *Add to group…* / *Remove from group* — see tab groups below.
   - *Zip file*, *Copy relative / absolute path*, *Close tab*, *Close
     other tabs* (unsaved tabs are kept).
 
@@ -445,6 +446,20 @@ Then:
   right button: Nav → *Reveal file in tree*, File → *Validate file* /
   *Close other tabs*, Git → *Show file's uncommitted changes* / *Show
   file's git history*, Cats → *Move to split →* / *Open in split →*.
+- **Tab groups.** *Add to group…* on a tab starts or joins a group
+  named with up to 4 letters or digits. There are two kinds:
+  - **Folder** — every open file under that folder belongs, including
+    ones you open later.
+  - **Ad-hoc** — tabs you pick by hand.
+
+  A group's tabs sit together behind a coloured chip (` api `) and are
+  underlined. Click the chip to collapse the group to `api +3`; the
+  active tab always stays visible. Right-click the chip to Collapse /
+  Expand, Switch to a tab in the group, Rename, Make ad-hoc (freeze a
+  folder group's members), Close the group's tabs (unsaved ones are
+  kept) or Ungroup. ≡ File → *Add tab to group…* and *Tab groups…* are
+  the keyboard doors. Groups are remembered per project with the
+  session.
 - Click `≡` (top-left), right-click anywhere, or double-tap `Esc`
   for the action menu — including New file, Rename, Delete.
 - If your terminal forwards Button3, right-click on a file or folder

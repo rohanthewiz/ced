@@ -99,7 +99,7 @@ func TestTabContext_RightClickOpensTheTabMenu(t *testing.T) {
 		labels = append(labels, it.label)
 	}
 	want := "Reveal in file tree|Show uncommitted changes|Show git history|Compare with clipboard|" +
-		"Format file|Validate file|Zip file|Copy relative path|Copy absolute path|Close tab|Close other tabs"
+		"Format file|Validate file|Add to group…|Zip file|Copy relative path|Copy absolute path|Close tab|Close other tabs"
 	if got := strings.Join(labels, "|"); got != want {
 		t.Errorf("rows = %s, want %s", got, want)
 	}
@@ -230,7 +230,7 @@ func TestTabContext_RowsDimWithoutAPath(t *testing.T) {
 	a.gitIsRepo = true // the git rows must dim on the path, not the repo
 	tab := a.tabs[0]
 	tab.Path = ""
-	live := map[string]bool{"Close tab": true, "Compare with clipboard": true}
+	live := map[string]bool{"Close tab": true, "Compare with clipboard": true, "Add to group…": true}
 	for _, it := range a.tabContextItems(tab) {
 		if on := it.enabled(a); live[it.label] != on {
 			t.Errorf("%q enabled = %v", it.label, on)

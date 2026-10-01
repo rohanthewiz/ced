@@ -508,3 +508,36 @@ func TestLayoutOmittedWhenAbsent(t *testing.T) {
 		t.Errorf("state.json mentions layout with none set:\n%s", data)
 	}
 }
+
+// Tab groups survive the state file in order, with each kind's own
+// fields, and the two shapes that cannot be restored — a nameless group
+// and an ad-hoc group with no members — are dropped on the way.
+func TestGroupsRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	root := t.TempDir()
+
+	s := &Store{}
+	s.Record(Entry{Root: root, Groups: []TabGroup{
+		{Name: "api", Folder: filepath.Join(root, "api"), Exclude: []string{"x.go"}, Collapsed: true, Color: 2},
+		{Name: "", Folder: root},
+		{Name: "wip"},
+		{Name: "todo", Members: []string{filepath.Join(root, "a.go")}},
+	}})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	back, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	e, _ := back.Find(root)
+	if len(e.Groups) != 2 {
+		t.Fatalf("Groups = %+v, want api and todo only", e.Groups)
+	}
+	if g := e.Groups[0]; g.Name != "api" || !g.Collapsed || g.Color != 2 || len(g.Exclude) != 1 {
+		t.Errorf("folder group = %+v, want it back as written", g)
+	}
+	if g := e.Groups[1]; g.Name != "todo" || len(g.Members) != 1 {
+		t.Errorf("ad-hoc group = %+v, want its one member", g)
+	}
+}

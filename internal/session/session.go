@@ -109,6 +109,31 @@ type Entry struct {
 	// shape and encodes it — see toollayout.go — which is what keeps a
 	// tool added there from needing a field added here.
 	Layout *Layout `json:"layout,omitempty"`
+
+	// Groups are the project's TAB GROUPS (app/tabgroups.go), in strip
+	// order. Per project for the layout's reason: a group names a part
+	// of THIS tree ("api", "docs"), and is meaningless in any other.
+	Groups []TabGroup `json:"groups,omitempty"`
+}
+
+// TabGroup is one tab group as it goes to disk. Membership is stored by
+// PATH because that is all that survives a restart; the app resolves the
+// paths back to the tabs it reopened and drops the ones that did not
+// come back.
+//
+// A group is one of two kinds, told apart by Folder:
+//
+//   - Folder != "": a FOLDER group. It is a rule — every open file under
+//     Folder belongs — so Members is unused; Exclude lists the files the
+//     user took out by hand.
+//   - Folder == "": an AD-HOC group. Members is the whole membership.
+type TabGroup struct {
+	Name      string   `json:"name"`
+	Folder    string   `json:"folder,omitempty"`
+	Members   []string `json:"members,omitempty"`
+	Exclude   []string `json:"exclude,omitempty"`
+	Collapsed bool     `json:"collapsed,omitempty"`
+	Color     int      `json:"color,omitempty"`
 }
 
 // Layout is one project's tool-window arrangement as it goes to disk.
@@ -184,6 +209,7 @@ func Load(path string) (*Store, error) {
 		e.Tabs = trimTabs(e.Tabs)
 		e.Active = clampActive(e.Active, len(e.Tabs))
 		e.Recent = trimRecent(e.Recent)
+		e.Groups = trimGroups(e.Groups)
 		s.Folders = append(s.Folders, e)
 		if len(s.Folders) >= MaxEntries {
 			break
@@ -258,6 +284,7 @@ func (s *Store) Record(e Entry) {
 	e.Tabs = trimTabs(e.Tabs)
 	e.Active = clampActive(e.Active, len(e.Tabs))
 	e.Recent = trimRecent(e.Recent)
+	e.Groups = trimGroups(e.Groups)
 	s.put(e)
 }
 
@@ -358,6 +385,25 @@ func trimTabs(tabs []TabState) []TabState {
 		if len(out) >= MaxTabs {
 			break
 		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// trimGroups drops nameless groups (a hand edit, or a writer bug: the
+// app refuses an empty name, and a chip with no name has nothing to
+// draw) and ad-hoc groups with no members (nothing to restore them onto).
+// A folder group with no files open is kept — it is a rule, and the
+// next file opened under its folder joins it.
+func trimGroups(groups []TabGroup) []TabGroup {
+	out := make([]TabGroup, 0, len(groups))
+	for _, g := range groups {
+		if g.Name == "" || (g.Folder == "" && len(g.Members) == 0) {
+			continue
+		}
+		out = append(out, g)
 	}
 	if len(out) == 0 {
 		return nil

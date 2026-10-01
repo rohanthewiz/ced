@@ -73,17 +73,33 @@ func (a *App) tabOverflowReserve() int {
 	}
 	tx, _, tw, _ := a.tabBarRect()
 	_ = tx
-	total := 0
-	for i := range a.tabs {
-		total += a.tabWidth(i)
-	}
-	if total <= tw-menuButtonWidth {
+	if a.widthOfTabs(0, len(a.tabs)-1) <= tw-menuButtonWidth {
 		return 0
 	}
 	return tabOverflowGap + len(fmt.Sprintf(" +%d ", len(a.tabs)))
 }
 
-// tabWidth is the rendered width of one tab:
+// tabWidth is tab i's slot width with the strip unscrolled — see
+// tabSlotWidth, which is what layout measures with.
+func (a *App) tabWidth(i int) int { return a.tabSlotWidth(i, 0) }
+
+// tabSlotWidth is the width tab i takes when the strip's first drawn tab
+// is first: its group chip, if it carries one (tabgroups.go), plus its
+// body, which is 0 when a collapsed group folds it away. The chip is
+// counted HERE, inside the tab's slot, so tabScroll stays an index of
+// tabs and the scroll arithmetic never has to know chips exist.
+func (a *App) tabSlotWidth(i, first int) int {
+	w := 0
+	if text, _, ok := a.tabChip(i, first); ok {
+		w += runeLen(text)
+	}
+	if !a.tabHiddenByGroup(i) {
+		w += a.tabBodyWidth(i)
+	}
+	return w
+}
+
+// tabBodyWidth is the rendered width of one tab:
 //
 //	" <dirty><icon? ><label> × " — a single space pad, two-cell dirty slot
 //	(dot+space, or two spaces), an optional Nerd Font glyph + 1-space
@@ -95,7 +111,7 @@ func (a *App) tabOverflowReserve() int {
 // them apart (tablabel.go), and a width measured against the basename
 // would leave the difference clipped off the end — the one part of the
 // label that carries the information.
-func (a *App) tabWidth(i int) int {
+func (a *App) tabBodyWidth(i int) int {
 	if i < 0 || i >= len(a.tabs) {
 		return 0
 	}
@@ -131,11 +147,12 @@ func (a *App) ensureActiveTabVisible() {
 	}
 }
 
-// widthOfTabs sums the rendered widths of tabs [first, last].
+// widthOfTabs sums the rendered widths of tabs [first, last], measured
+// as if first were the leftmost drawn tab (it carries its group's chip).
 func (a *App) widthOfTabs(first, last int) int {
 	total := 0
 	for i := max(first, 0); i <= last && i < len(a.tabs); i++ {
-		total += a.tabWidth(i)
+		total += a.tabSlotWidth(i, first)
 	}
 	return total
 }
@@ -145,6 +162,9 @@ func (a *App) widthOfTabs(first, last int) int {
 // — which is what makes hit-testing honest, since lastTabRects then holds
 // exactly what the user can see and click.
 func (a *App) layoutTabs() []tabRect {
+	// Groups first: arranging reorders a.tabs, and every measurement
+	// below indexes into it (tabgroups.go).
+	a.arrangeTabGroups()
 	a.ensureActiveTabVisible()
 	sx, _, sw := a.tabStripRect()
 	out := make([]tabRect, 0, len(a.tabs))
@@ -154,7 +174,7 @@ func (a *App) layoutTabs() []tabRect {
 	}
 	cursor := sx
 	for i := a.tabScroll; i < len(a.tabs); i++ {
-		w := a.tabWidth(i)
+		w := a.tabSlotWidth(i, a.tabScroll)
 		if cursor+w > sx+sw {
 			// The active tab must always make it in: on a strip too
 			// narrow for even one tab, draw it clipped rather than
@@ -163,14 +183,22 @@ func (a *App) layoutTabs() []tabRect {
 				break
 			}
 		}
+		r := tabRect{Index: i, ChipX: cursor}
+		if text, g, ok := a.tabChip(i, a.tabScroll); ok {
+			r.ChipW = runeLen(text)
+			r.Group = g
+		} else if len(a.tabGroups) > 0 {
+			r.Group = a.tabGroupOf(a.tabs[i])
+		}
+		body := cursor + r.ChipW
 		nameLen := len([]rune(a.tabLabel(i)))
-		out = append(out, tabRect{
-			Index:   i,
-			X:       cursor,
-			Width:   w,
-			MarkerX: cursor + 1, // one pad column, then the status slot.
-			CloseX:  cursor + 1 + 2 + iconW + nameLen + 1,
-		})
+		r.X = body
+		if !a.tabHiddenByGroup(i) {
+			r.Width = w - r.ChipW
+		}
+		r.MarkerX = body + 1 // one pad column, then the status slot.
+		r.CloseX = body + 1 + 2 + iconW + nameLen + 1
+		out = append(out, r)
 		cursor += w
 	}
 	return out
@@ -215,6 +243,12 @@ func (a *App) drawTabBar() {
 	rects := a.layoutTabs()
 	a.lastTabRects = rects
 	for _, r := range rects {
+		if r.ChipW > 0 {
+			a.drawTabGroupChip(r)
+		}
+		if r.Width == 0 {
+			continue // folded into a collapsed group
+		}
 		active := r.Index == a.activeTab
 		bg := a.theme.SidebarBG
 		fg := a.theme.Muted
@@ -225,6 +259,16 @@ func (a *App) drawTabBar() {
 		st := tcell.StyleDefault.Background(bg).Foreground(fg)
 		if active {
 			st = st.Bold(true)
+		}
+		// A group member is underlined end to end — the strip has one
+		// row, so the line under the tabs is the only place membership
+		// can be drawn without costing a column. The chip in front says
+		// WHICH group; the underline says how far it runs. Plain, not
+		// coloured: a coloured underline is the colon-form SGR 58, which
+		// ced emits nowhere else and which a terminal that splits colons
+		// like semicolons would read as stray colour codes.
+		if r.Group != nil {
+			st = st.Underline(true)
 		}
 		// Background.
 		for cx := r.X; cx < r.X+r.Width; cx++ {
@@ -298,6 +342,23 @@ func (a *App) drawTabBar() {
 	a.drawTabOverflow()
 }
 
+// drawTabGroupChip paints a group's chip: its name on the group colour,
+// bold, in whichever of background/text reads better there. Clipped to
+// the bar like the tabs are.
+func (a *App) drawTabGroupChip(r tabRect) {
+	tx, ty, tw, _ := a.tabBarRect()
+	bg := a.tabGroupColor(r.Group)
+	st := tcell.StyleDefault.Background(bg).Foreground(a.tabGroupChipFG(bg)).Bold(true)
+	col := r.ChipX
+	for _, ru := range a.tabChipText(r.Group) {
+		if col >= tx+tw {
+			break
+		}
+		a.screen.SetContent(col, ty, ru, nil, st)
+		col++
+	}
+}
+
 // drawTabOverflow paints the "+N" button at the right edge of the tab bar
 // when some tabs aren't drawn. Accent-colored: it is the only thing on
 // screen saying files are open that you can't see, and it must not read
@@ -331,6 +392,12 @@ func (a *App) tabBarClick(x, _ int) {
 		return
 	}
 	for _, r := range a.lastTabRects {
+		// A chip folds or unfolds its group; its right-click menu holds
+		// the rest (tabcontext.go → openTabGroupMenu).
+		if r.ChipW > 0 && x >= r.ChipX && x < r.ChipX+r.ChipW {
+			a.toggleTabGroupCollapsed(r.Group)
+			return
+		}
 		if x >= r.X && x < r.X+r.Width {
 			if x == r.CloseX {
 				a.requestCloseTab(r.Index)

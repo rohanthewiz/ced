@@ -83,7 +83,7 @@ internal/app/
   inputburst.go               One frame per wheel/motion burst
   modal.go leader.go whichkey.go  Modal slot; leader table + namespaces; which-key band
   metakeys.go nav.go          ⌘ layer; back/forward history
-  tabbar.go tablabel.go tabcontext.go statusbar.go
+  tabbar.go tablabel.go tabcontext.go tabgroups.go statusbar.go
   toolwindow.go tooladapt.go toolheader.go toollayout.go toolmenu.go  Tool windows
   splitter.go treeautofit.go treefilter.go treemarks.go overflow.go
   find.go findall.go projectsearch.go goto.go bracket.go
@@ -243,7 +243,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   uncommitted changes (`gitPanelRevealFile`), git history
   (`gitLogShowFile`, `p:` filter, field NOT focused), compare, Preview
   (markdown only), Format, Validate (`validateFile`), Move/Copy to
-  split → (only when `InCats`, like the ≡ Cats group), Zip, copy paths,
+  split → (only when `InCats`, like the ≡ Cats group), Add to group…,
+  Remove from group <name> (grouped tabs only), Zip, copy paths,
   Close tab, Close other tabs (KEEPS dirty tabs). Rows call the same
   verbs as their ≡ twins: Nav "Reveal file in tree", File "Validate
   file" / "Close other tabs", Git "Show file's uncommitted changes" /
@@ -252,6 +253,25 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   the tab only on the host's answer (`catsKindSplitMoved`) and keeps it
   if edited meanwhile. `closeTab` decrements `activeTab` for a tab
   closed to its left (`TestCloseTab_LeftOfActiveKeepsActive`).
+- **Tab groups (tabgroups.go)**: name ≤4 letters/digits, unique
+  case-insensitively. FOLDER group = a rule (every open file under it,
+  `exclude` for hand removals); AD-HOC = `members`. Membership keyed by
+  `*editor.Tab`, resolved by `tabGroupOf` (ad-hoc first, then deepest
+  folder), never stored on the tab; `tabGroupsForgetTab` in closeTab
+  (an empty ad-hoc group goes with its last tab, folder groups stay).
+  Contiguity = `arrangeTabGroups` REORDERS `a.tabs` (cluster at first
+  member, stable, no-op with no groups) at the top of `layoutTabs`.
+  The chip lives inside its tab's slot (`tabSlotWidth(i, first)`), so
+  `tabScroll` stays a tab index; the first DRAWN member carries it.
+  Collapse never hides the active tab; folded tabs get zero-width rects
+  so `+N` counts only scrolled-off tabs. Members get a PLAIN underline
+  (no colour: the colon-form SGR 58 is emitted nowhere in ced). Chip
+  colours come from the syntax palette (read at paint time). Chip left
+  click folds, right click = group menu (`tabGroupContextItems`, shared
+  with the ≡ File "Tab groups…" picker); ≡ File "Add tab to group…" is
+  the tab row's twin. Persisted in `session.Entry.Groups` by path;
+  `restoreTabGroups` is DEFERRED in `restoreSession` so it runs after
+  the tabs, and still runs on the no-tabs return.
 - Labels are the basename until another OPEN tab collides, then grow by
   directory segments per colliding group; cache keyed by the list of
   open paths. `tabWidth` measures the label; icon keys off the real name.
@@ -822,8 +842,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 155 group
-  actions + 15 headers (172), height 178, dividers `[2, 5, 175]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 157 group
+  actions + 15 headers (174), height 180, dividers `[2, 5, 177]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

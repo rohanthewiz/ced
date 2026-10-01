@@ -21,6 +21,8 @@
 //	             │ ▸ Validate file           │
 //	             │ ▸ Move to split →         │   place it (inside cats
 //	             │ ▸ Copy to split →         │   only)
+//	             │ ▸ Add to group…           │   group it (tabgroups.go)
+//	             │ ▸ Remove from group api   │   (grouped tabs only)
 //	             │ ▸ Zip file                │   copy it out
 //	             │ ▸ Copy relative path      │
 //	             │ ▸ Copy absolute path      │
@@ -79,6 +81,12 @@ func (a *App) tryTabContextClick(x, y int) bool {
 		return false
 	}
 	for _, r := range a.lastTabRects {
+		// A group chip has its own menu: group management, not file
+		// verbs (tabgroups.go).
+		if r.ChipW > 0 && x >= r.ChipX && x < r.ChipX+r.ChipW {
+			a.openTabGroupMenu(r.Group, x, y)
+			return true
+		}
 		if x < r.X || x >= r.X+r.Width || r.Index < 0 || r.Index >= len(a.tabs) {
 			continue
 		}
@@ -151,6 +159,15 @@ func (a *App) tabContextItems(t *editor.Tab) []editorContextItem {
 				app.catsSplitTab(t, cats.SplitHorizontal, "→", false)
 			}, enabled: canSplit},
 		)
+	}
+	// Grouping is placement too, so it sits with the splits. "Add to
+	// group…" is always there (its picker also starts new groups);
+	// "Remove from group" appears only on a grouped tab, named after the
+	// group, for Preview's reason: the row says what the click will do,
+	// and on an ungrouped tab there is nothing it could do.
+	items = append(items, editorContextItem{label: "Add to group…", action: func(app *App) { app.openAddToGroup(t) }, enabled: alwaysTrue})
+	if g := a.tabGroupOf(t); g != nil {
+		items = append(items, editorContextItem{label: "Remove from group " + g.name, action: func(app *App) { app.removeTabFromGroup(t) }, enabled: alwaysTrue})
 	}
 	items = append(items,
 		editorContextItem{label: "Zip file", action: func(app *App) { app.startZip(t.Path) }, enabled: hasPath},

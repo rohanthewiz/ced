@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-040**
+**Next ID: N-043**
 
 ## Open
 
@@ -123,11 +123,33 @@ plus the LSP work done in the seeding session itself
   "Open in split ↓").
 
 - **N-039** · raised `2026-0930-2002-tab-menu-file-verbs` · value low
-  The tab menu is now 15 rows (17 with the border) and
-  `editorContextModal` does not scroll. On a window shorter than about 19
-  rows, `placeContextSized` clamps the menu to row 0 and its bottom rows
-  fall off the screen. The editor right-click menu has the same limit;
-  nobody has run into it yet.
+  The tab menu is now 16 rows inside cats, 17 on a grouped tab (19 with
+  the border); tab groups added "Add to group…" and "Remove from group"
+  in `2026-0930-2025-tab-groups`. `editorContextModal` does not scroll.
+  On a window shorter than about 21 rows, `placeContextSized` clamps the
+  menu to row 0 and its bottom rows fall off the screen. The editor
+  right-click menu has the same limit; nobody has run into it yet.
+
+- **N-040** · raised `2026-0930-2025-tab-groups` · value low
+  Tab groups have never been checked by hand in a real terminal. The
+  run-ced emulator draws no underlines, so the member underline (plain,
+  `tabbar.go`) has only been seen in tests. Look at it in tmux, cats and
+  macOS Terminal.app, and check that the chip reads well on a light
+  theme (`tabGroupChipFG` picks BG or Text by contrast).
+
+- **N-041** · raised `2026-0930-2025-tab-groups` · value low
+  `.claude/skills/run-ced/SKILL.md` recipes open the command palette
+  with `{esc}a`. That is the AI namespace now; the palette is `Esc k`.
+  A script following the doc types its query into the open buffer.
+  Also check the "Leaders worth knowing" line.
+
+- **N-042** · raised `2026-0930-2025-tab-groups` · value low
+  Tab group extras left out of the first cut:
+  - choosing a group's colour (groups get distinct ones automatically)
+  - creating a folder group from the file tree's folder context menu
+    (today it starts from a tab in that folder)
+  - a COLOURED member underline, if a capability check can tell which
+    terminals take the colon-form SGR 58
 
 ## Roadmap
 

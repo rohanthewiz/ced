@@ -149,9 +149,18 @@ func (e *customActionDoneEvent) When() time.Time { return e.when }
 // tabRect remembers where each tab was drawn so click handling can hit-test
 // against the actual rendered geometry rather than re-deriving it.
 type tabRect struct {
-	Index    int
+	Index int
+	// X, Width are the tab's BODY. Width is 0 for a tab folded into a
+	// collapsed group: it still gets a rect so "+N" counts only tabs
+	// scrolled off the strip, but the rect can never be hit.
 	X, Width int
-	CloseX   int // Cell column of the × close button.
+	// ChipX, ChipW are the group chip drawn in front of the body, when
+	// this tab carries it (tabgroups.go); ChipW is 0 otherwise. Group is
+	// the tab's group (nil when ungrouped), which the painter also uses
+	// for the member underline.
+	ChipX, ChipW int
+	Group        *tabGroup
+	CloseX       int // Cell column of the × close button.
 	// MarkerX is the leading status slot (⊘ / ⚠ / ●, see reconcile.go).
 	// It is a rect rather than a redundant "+1" in two places because it
 	// is a click target now: the ⚠ re-raises the conflict prompt a
@@ -288,6 +297,13 @@ func builtinMenuGroups() []menuGroup {
 			// The ≡ twin of the tab menu's row (tabcontext.go): every
 			// tab but the active one, unsaved tabs kept.
 			{label: "Close other tabs", action: (*App).menuCloseOtherTabs, enabled: (*App).hasMultipleTabs},
+			// Tab groups (tabgroups.go): the ≡ twins of the tab menu's
+			// "Add to group…" and of the chip's right-click menu, which
+			// a terminal that swallows the right button never shows.
+			// "Tab groups…" stays clickable with none and says how to
+			// make one.
+			{label: "Add tab to group…", action: (*App).menuAddActiveTabToGroup, enabled: (*App).hasTab},
+			{label: "Tab groups…", action: (*App).menuTabGroups, enabled: alwaysTrue},
 			{label: "Revert file", action: (*App).menuRevert, enabled: (*App).hasRevert},
 			{action: (*App).menuToggleAutoSave, enabled: alwaysTrue, labelFor: (*App).autoSaveToggleLabel},
 			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
@@ -1227,6 +1243,10 @@ type App struct {
 	dragSplitOffset int
 	lastClick       clickRecord
 	lastTabRects    []tabRect
+	// tabGroups are the tab strip's groups in creation order
+	// (tabgroups.go). Empty for anyone who never made one, which keeps
+	// every grouping pass a no-op.
+	tabGroups []*tabGroup
 
 	// statusSegs is the status bar's clickable spans, re-stamped by
 	// every drawStatusBar the same way lastTabRects tracks the tab
@@ -4369,6 +4389,9 @@ func (a *App) closeTab(idx int) {
 	// Likewise the disk-conflict record: keyed by tab pointer, it would
 	// otherwise outlive the buffer it describes (reconcile.go).
 	a.reconcileForgetTab(a.tabs[idx])
+	// And its tab-group membership, also keyed by pointer; an ad-hoc
+	// group losing its last tab goes with it (tabgroups.go).
+	a.tabGroupsForgetTab(a.tabs[idx])
 	// And a completion popup anchored into the buffer that is about to
 	// disappear. completionSync would close it on the next event anyway,
 	// but the list would draw once against a tab that no longer exists

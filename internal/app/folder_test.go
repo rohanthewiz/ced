@@ -592,3 +592,38 @@ func TestRestoreSession_ActiveFileVanished(t *testing.T) {
 		t.Fatalf("activeTab = %d, want 1 (the last tab that did open)", a.activeTab)
 	}
 }
+
+// TestSession_TabGroupsSurviveRecordAndRestore pins the session wiring
+// for tab groups end to end: recordSession writes them beside the tabs,
+// and restoreSession brings them back AFTER the tabs (ad-hoc membership
+// resolves against what reopened) — and still on the early return for a
+// folder with no tabs, where only a folder group can come back.
+func TestSession_TabGroupsSurviveRecordAndRestore(t *testing.T) {
+	a, root := groupTestApp(t)
+	store := seedSessionStore(a)
+	a.newTabGroup("api", filepath.Join(root, "api"))
+	a.addTabToGroup(tabByName(t, a, "c.go"), a.newTabGroup("mine", ""))
+	a.recordSession()
+
+	b := newTestApp(t, root)
+	b.sessionStore = store
+	b.restoreSession()
+	if len(b.tabGroups) != 2 {
+		t.Fatalf("restored %d groups, want 2", len(b.tabGroups))
+	}
+	if g := b.tabGroupOf(tabByName(t, b, "c.go")); g == nil || g.name != "mine" {
+		t.Errorf("c.go group = %+v, want mine", g)
+	}
+
+	// No tabs at all: the folder group (a rule) still comes back.
+	empty := &session.Store{}
+	empty.Record(session.Entry{Root: root, Groups: []session.TabGroup{
+		{Name: "api", Folder: filepath.Join(root, "api")},
+	}})
+	c := newTestApp(t, root)
+	c.sessionStore = empty
+	c.restoreSession()
+	if len(c.tabGroups) != 1 || c.tabGroups[0].name != "api" {
+		t.Errorf("groups with no tabs = %+v, want the api folder group", c.tabGroups)
+	}
+}

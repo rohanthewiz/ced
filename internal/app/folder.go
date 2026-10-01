@@ -140,6 +140,9 @@ func (a *App) recordSession() {
 	// in flight, and the case where session restore is off but the user
 	// turns it on later.
 	e.Layout = a.encodeToolLayout()
+	// Tab groups ride the same write; membership is stored by path and
+	// re-resolved against whichever tabs come back (tabgroups.go).
+	e.Groups = a.encodeTabGroups()
 	a.sessionStore.Record(e)
 	a.saveSessionStore()
 }
@@ -171,6 +174,11 @@ func (a *App) restoreSession() {
 	// file but I keep the terminal on the left here" is a real and
 	// ordinary state to leave a project in.
 	a.applyToolLayout(e.Layout)
+	// Groups come back LAST, on every return path below: ad-hoc
+	// membership resolves against the tabs that actually reopened, and a
+	// folder group is restored even with no tabs at all — it is a rule
+	// the next file opened under its folder will join.
+	defer a.restoreTabGroups(e.Groups)
 	if len(e.Tabs) == 0 {
 		return
 	}

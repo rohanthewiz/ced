@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-046**
+**Next ID: N-047**
 
 ## Open
 
@@ -158,6 +158,13 @@ plus the LSP work done in the seeding session itself
   binds F-keys yet) or a ⌘ chord (must be pressed in a real browser
   first, per the ⌘ allowlist rule) would make stepping through them
   practical. Decide which, then add it as a second door.
+
+- **N-046** · raised `2026-1003-1533-change-bar-popup` · value low
+  CLAUDE.md's Commits rule says "no Co-Authored-By Claude", but the user
+  said (2026-10-03) the trailer is fine for personal projects. Offered
+  to reword the rule (allow the trailer, keep banning the "Generated
+  with Claude Code" footer); no answer yet. Until then the rule and the
+  user disagree, and a fresh session will follow the file.
 
 ## Roadmap
 

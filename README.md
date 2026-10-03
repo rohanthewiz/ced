@@ -57,6 +57,11 @@ The goals, in order:
 - **Mouse-driven everything** — click to place cursor, drag to select,
   scroll wheel scrolls, double-click selects a word, drag past the edge
   to auto-scroll a selection.
+- **Change bars** — lines that differ from the last commit get a bar in
+  the gutter (green added, blue changed, red `▁` where lines were
+  removed). Rest the pointer on a bar — or click it — and a popup shows
+  that change's diff; the scroll wheel scrolls it when it's long.
+  `Esc h` / `Esc H` jump between changes.
 - **Syntax highlighting** for dozens of languages via Chroma.
 - **Code intelligence from the language servers you already have** —
   diagnostics, go to definition, references, rename, code actions,

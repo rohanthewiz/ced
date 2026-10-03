@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,9 +75,42 @@ index 000..111 100644
 		t.Fatalf("hunk count: got %d (%+v), want %d", len(hunks), hunks, len(want))
 	}
 	for i, w := range want {
-		if hunks[i] != w {
+		if hunkPos(hunks[i]) != hunkPos(w) {
 			t.Errorf("hunk %d: got %+v, want %+v", i, hunks[i], w)
 		}
+	}
+}
+
+// hunkPosT is a hunk's comparable position fields; diffHunk itself
+// stopped being comparable when it grew the Body slice.
+type hunkPosT struct {
+	Start, End int
+	Kind       diffKind
+	Top        bool
+}
+
+// hunkPos strips a hunk down to its position, so the coordinate tests
+// can keep comparing with !=.
+func hunkPos(h diffHunk) hunkPosT {
+	return hunkPosT{Start: h.Start, End: h.End, Kind: h.Kind, Top: h.Top}
+}
+
+// TestParseUnifiedDiff_KeepsHunkBodies pins what the change popup reads:
+// each hunk's own -/+ lines, verbatim, never the file header's ---/+++
+// lines, and git's "\ No newline" note kept with the hunk it follows.
+func TestParseUnifiedDiff_KeepsHunkBodies(t *testing.T) {
+	diff := []byte("--- a/f.txt\n+++ b/f.txt\n" +
+		"@@ -2 +2 @@\n-old\n+new\n" +
+		"@@ -9,0 +10,1 @@\n+tail\n\\ No newline at end of file\n")
+	hunks := parseUnifiedDiff(diff)
+	if len(hunks) != 2 {
+		t.Fatalf("hunk count = %d, want 2", len(hunks))
+	}
+	if got := strings.Join(hunks[0].Body, "|"); got != "-old|+new" {
+		t.Errorf("first body = %q, want -old|+new", got)
+	}
+	if got := strings.Join(hunks[1].Body, "|"); got != "+tail|\\ No newline at end of file" {
+		t.Errorf("second body = %q", got)
 	}
 }
 
@@ -88,7 +122,7 @@ func TestParseUnifiedDiff_TopOfFileDeletion(t *testing.T) {
 	if len(hunks) != 1 {
 		t.Fatalf("hunk count: got %d, want 1", len(hunks))
 	}
-	if hunks[0] != (diffHunk{Start: 0, End: 0, Kind: diffDeleted}) {
+	if hunkPos(hunks[0]) != (hunkPosT{Start: 0, End: 0, Kind: diffDeleted, Top: true}) {
 		t.Fatalf("got %+v, want boundary at line 0", hunks[0])
 	}
 }

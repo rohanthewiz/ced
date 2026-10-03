@@ -70,6 +70,7 @@ func (a *App) closeAllModals() {
 	// that arrives after it.
 	a.closeHoverDwell()
 	a.closeDiagTip()
+	a.closeHunkTip()
 }
 
 // anyModalOpen reports whether any overlay surface is on screen. Used by

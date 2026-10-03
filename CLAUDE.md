@@ -96,6 +96,7 @@ internal/app/
   mcp.go skills.go plugins.go plugincmd.go plugindeco.go
   git*.go compare.go           Git panel/log/commit/receipt/status; compare panel
   gitrestore.go               Restore one file to HEAD (tree/tab/≡ Git rows)
+  hunktip.go                  Change-bar popup: a hunk's diff, scrollable
   terminal.go termdiag.go runexec.go openineditor.go
   autosave.go format.go validate.go syntax.go zipops.go
   folder.go favorites.go favmanage.go recentlocations.go remote.go
@@ -511,6 +512,25 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   colour, `(+N more)`; caret line ONLY; replaces that line's inlay note;
   stamped every frame before Render (`Tab.SetCaretNote`, rev + caret
   guarded). The no-motion-terminal door: clicking the underline shows it.
+
+### Change-bar popup (app/hunktip.go, gitdiff.go)
+- Text = the gutter's own `-U0` diff: `diffHunk.Body` keeps each hunk's
+  `-`/`+`/`\` lines (collected only after an accepted header), so no
+  fork on hover. `diffHunk` is no longer comparable — tests compare
+  `hunkPos`.
+- Target = the MARK cell on a line's FIRST screen row; refused where the
+  cell shows a diagnostic dot (`diagsAtCell` non-empty). Dwell
+  (`diagTipDelay`) + click door (`hunkGutterPress`, after
+  `diagGutterPress`; second click closes via `pressClosed`).
+- The one ENTERABLE passive popup: `noteHunkTipPointer` runs FIRST among
+  the pointer hooks and claims motion/wheel inside its box (keeps the
+  dwell layers off the code under it). Wheel inside scrolls the box
+  only, even when it fits; wheel elsewhere closes and falls through.
+  Keys, presses, resize, `openModal` close it; draw hides it for another
+  tab (`hunkTip.path`).
+- Code clipped (`clipRunes`), never wrapped; tabs → 4 cells; body capped
+  at `hunkTipMaxRows` then scrolls, announced by ▴/▾ on its own border
+  and "a–b of n" in the bottom border. NOT an overflow-marker surface.
 
 ### Data formats (internal/format/kinds.go, inprocess.go, validate.go, app/validate.go)
 - `format.kindFor` is the ONE table for formatter + in-process pass +

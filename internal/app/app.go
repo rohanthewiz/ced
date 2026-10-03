@@ -1212,6 +1212,12 @@ type App struct {
 	// diagtip.go.
 	diagTip diagTipState
 
+	// hunkTip is the popup that shows a change's diff when the pointer
+	// rests on (or clicks) its bar in the git gutter; the wheel scrolls
+	// it. Passive, armed on every host — it reads the gutter's own
+	// cached diff, no fork. See hunktip.go.
+	hunkTip hunkTipState
+
 	// overflowClick is the last press that landed on a ▴/▾ marker: one
 	// click pages that way, a second at the same cell runs to the end.
 	// It is kept beside lastClick rather than folded into it because the
@@ -2101,6 +2107,7 @@ func (a *App) handleEvent(ev tcell.Event) {
 		// the wrong symbol. Dismiss rather than reposition.
 		a.closeHoverDwell()
 		a.closeDiagTip()
+		a.closeHunkTip()
 	case *tcell.EventKey:
 		a.handleKey(e)
 	case *tcell.EventPaste:
@@ -2134,6 +2141,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleOverflowTipTick(e)
 	case *diagTipEvent:
 		a.handleDiagTipTick(e)
+	case *hunkTipEvent:
+		a.handleHunkTipTick(e)
 	case *gitDiffEvent:
 		a.handleGitDiff(e)
 	case *gitBlameEvent:
@@ -2751,6 +2760,7 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// Non-consuming — the key then does what it always did.
 	a.closeHoverDwell()
 	a.closeDiagTip()
+	a.closeHunkTip()
 	// The commit receipt goes the same way and for the same reason: it
 	// is chrome nobody asked for, so the first thing the user does next
 	// takes it down — and, like the ghost text, it must never cost them
@@ -3283,6 +3293,15 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
+	// The change popup goes FIRST among the pointer layers: it is the
+	// one the pointer may travel into (to scroll it), so motion and wheel
+	// inside its box are claimed before the dwell layers below could
+	// wake up on the code it covers. Outside the box it only arms or
+	// dismisses and lets the event through. See hunktip.go.
+	if a.noteHunkTipPointer(x, y, btn) {
+		return
+	}
+
 	// Dwell bookkeeping runs before any routing below, because it is
 	// about the POINTER rather than about what the pointer is over: a
 	// motion re-arms the clock, and anything with a button down cancels
@@ -3685,6 +3704,13 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			// the blame press: that column is inside the gutter band and
 			// its verb is the more specific one.
 			if a.diagGutterPress(x, y) {
+				return
+			}
+			// A press on a change bar opens that hunk's diff at once —
+			// the same no-motion door for the change popup
+			// (hunktip.go). After the diagnostic press: on a line with a
+			// dot, the dot is what the mark cell shows.
+			if a.hunkGutterPress(x, y) {
 				return
 			}
 			a.editorPress(x, y)
@@ -5145,6 +5171,10 @@ func (a *App) draw() {
 	// The diagnostic tooltip is the same kind of passive chrome, anchored
 	// into the editor body. Always called so a hidden tip clears its rect.
 	a.drawDiagTip()
+
+	// The change popup, last of the editor's passive boxes: when it is
+	// up it closed the others, and it is the one the pointer is inside.
+	a.drawHunkTip()
 
 	// The commit receipt shares that passive layer: above the panels
 	// (it is a report about what just happened, so nothing may cover

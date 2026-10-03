@@ -50,9 +50,21 @@ const (
 // hunk has Start == End pointing at the line the content was removed
 // after; there's no cell for text that no longer exists, so the
 // boundary line carries the mark.
+//
+// Body keeps the hunk's own `-` / `+` lines (and git's "\ No newline"
+// notes) verbatim, prefix included, for the change popup (hunktip.go):
+// the gutter answers WHERE a file changed, and Body is what lets
+// hovering the bar answer WHAT changed without a second git run. With
+// -U0 there are no context lines, so Body is exactly the change.
+//
+// Top marks a deletion git reported at "+0,0": the removed lines were
+// the very first ones, which the clamped boundary (line 0) can't say on
+// its own — line 0 is also "after the first line" for a gap below it.
 type diffHunk struct {
 	Start, End int
 	Kind       diffKind
+	Top        bool
+	Body       []string
 }
 
 // parseUnifiedDiff extracts hunks from `git diff -U0` output. With
@@ -68,17 +80,32 @@ type diffHunk struct {
 // Counts default to 1 when the ",count" suffix is omitted (git's
 // shorthand for single-line hunks). Malformed lines are skipped —
 // best-effort all the way down.
+//
+// Body lines are collected only AFTER a header has been accepted: the
+// file header's "--- a/f" / "+++ b/f" come before the first @@ and must
+// not be mistaken for a removed / added line, and a malformed header
+// (skipped) must not lend its body to the hunk before it.
 func parseUnifiedDiff(out []byte) []diffHunk {
 	var hunks []diffHunk
+	inHunk := false
 	for _, raw := range bytes.Split(out, []byte{'\n'}) {
 		line := string(raw)
 		if len(line) < 4 || line[0] != '@' || line[1] != '@' {
+			if inHunk && line != "" {
+				switch line[0] {
+				case '-', '+', '\\':
+					h := &hunks[len(hunks)-1]
+					h.Body = append(h.Body, line)
+				}
+			}
 			continue
 		}
+		inHunk = false
 		_, oldCount, newStart, newCount, ok := parseHunkHeader(line)
 		if !ok {
 			continue
 		}
+		inHunk = true
 		switch {
 		case newCount == 0:
 			// git reports the 1-based line BEFORE the gap on the new
@@ -87,7 +114,7 @@ func parseUnifiedDiff(out []byte) []diffHunk {
 			if boundary < 0 {
 				boundary = 0
 			}
-			hunks = append(hunks, diffHunk{Start: boundary, End: boundary, Kind: diffDeleted})
+			hunks = append(hunks, diffHunk{Start: boundary, End: boundary, Kind: diffDeleted, Top: newStart == 0})
 		case oldCount == 0:
 			hunks = append(hunks, diffHunk{Start: newStart - 1, End: newStart - 1 + newCount - 1, Kind: diffAdded})
 		default:

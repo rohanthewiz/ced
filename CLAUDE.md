@@ -141,7 +141,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `App` directly, so menu sections start expanded and inlay hints off.
 
 ### Commits
-- No "Generated with Claude Code" trailers, no Co-Authored-By Claude.
+- `Co-Authored-By: Claude …` trailers are fine. No "Generated with
+  Claude Code" footer.
 - Don't ask for commit-message approval — commit directly when asked.
 
 ## Cross-cutting rules

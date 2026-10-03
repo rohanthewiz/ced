@@ -159,13 +159,6 @@ plus the LSP work done in the seeding session itself
   first, per the ⌘ allowlist rule) would make stepping through them
   practical. Decide which, then add it as a second door.
 
-- **N-046** · raised `2026-1003-1533-change-bar-popup` · value low
-  CLAUDE.md's Commits rule says "no Co-Authored-By Claude", but the user
-  said (2026-10-03) the trailer is fine for personal projects. Offered
-  to reword the rule (allow the trailer, keep banning the "Generated
-  with Claude Code" footer); no answer yet. Until then the rule and the
-  user disagree, and a fresh session will follow the file.
-
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.
@@ -215,6 +208,11 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-03, `2026-1003-1533-change-bar-popup` —
+  **N-046** CLAUDE.md's Commits rule now allows `Co-Authored-By: Claude`
+  trailers (user's call); the "Generated with Claude Code" footer stays
+  banned.
 
 - closed 2026-10-03, `2026-1003-1222-wrapped-scroll-ceiling` —
   **N-045** wrapped scroll ceiling in rows: `MaxScroll` hands a wrapped

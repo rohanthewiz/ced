@@ -95,6 +95,7 @@ internal/app/
   copilot*.go chatcomposer.go chatagent.go chatarchive.go summarize.go gonotes.go
   mcp.go skills.go plugins.go plugincmd.go plugindeco.go
   git*.go compare.go           Git panel/log/commit/receipt/status; compare panel
+  gitrestore.go               Restore one file to HEAD (tree/tab/≡ Git rows)
   terminal.go termdiag.go runexec.go openineditor.go
   autosave.go format.go validate.go syntax.go zipops.go
   folder.go favorites.go favmanage.go recentlocations.go remote.go
@@ -252,13 +253,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `onTab` (switchToTab first); the rest act in place. Order: Reveal,
   uncommitted changes (`gitPanelRevealFile`), git history
   (`gitLogShowFile`, `p:` filter, field NOT focused), compare, Preview
-  (markdown only), Format, Validate (`validateFile`), Move/Copy to
-  split → (only when `InCats`, like the ≡ Cats group), Add to group…,
+  (markdown only), Format, Validate (`validateFile`), Restore (`restoreFile`),
+  Move/Copy to split → (only when `InCats`, like the ≡ Cats group), Add to group…,
   Remove from group <name> (grouped tabs only), Zip, copy paths,
   Close tab, Close other tabs (KEEPS dirty tabs). Rows call the same
   verbs as their ≡ twins: Nav "Reveal file in tree", File "Validate
   file" / "Close other tabs", Git "Show file's uncommitted changes" /
-  "Show file's git history", Cats "Move to split →" ("Open in split →"
+  "Show file's git history" / "Restore file (discard changes)…", Cats "Move to split →" ("Open in split →"
   is Copy). Splits (`catsSplitTab`) SAVE a dirty tab first; Move closes
   the tab only on the host's answer (`catsKindSplitMoved`) and keeps it
   if edited meanwhile. `closeTab` decrements `activeTab` for a tab
@@ -631,6 +632,14 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (openPicker); targets fall back to the highlighted row; ticks pruned on
   refresh; no-op rows omitted. Writes via `runGitCmd`; Discard/Delete
   confirm.
+- **Restore (gitrestore.go)**: one verb `restoreFile` behind three
+  doors — tree "Git restore…" (repo files only), tab menu, ≡ Git
+  "Restore file (discard changes)…". `checkout HEAD --` (same as the
+  panel's Discard: work tree AND index). Probes synchronously, confirms
+  with the loss sized (numstat, staged, unsaved edits); untracked/new
+  and clean files flash instead. An open tab adopts via
+  `ReloadUndoable` (one Undo back); reconcile is held off the path with
+  `formatRunBegin/End`, released on both outcomes.
 - Commit of a selection stages first (`gitCommitFiles`, `runGitCmdSeq`);
   every commit goes through `gitCommitFiles`.
 - Agent-drafted messages: a visible chat turn claimed by generation +
@@ -894,8 +903,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 162 group
-  actions + 15 headers (179), height 185, dividers `[2, 5, 182]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 163 group
+  actions + 15 headers (180), height 186, dividers `[2, 5, 183]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

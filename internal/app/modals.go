@@ -998,6 +998,15 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	if n != a.tree.Root {
 		items = append(items, contextItem{label: "Rename", action: ctxRename})
 		items = append(items, contextItem{label: "Delete", action: ctxDelete})
+		// Git restore (gitrestore.go) sits under Delete — the other row
+		// that throws a file's content away — and only on a file in a
+		// repository, Paste's conditional-row rule: outside git the verb
+		// cannot mean anything. Not gated on the dirty snapshot: it can
+		// lag a save by 10s, and the verb's flash already answers "no
+		// changes".
+		if !n.IsDir && a.gitIsRepo {
+			items = append(items, contextItem{label: "Git restore…", action: ctxGitRestore})
+		}
 		// Copying the root is gated out with Rename/Delete — every
 		// possible paste destination is inside it, so the copy could
 		// never be used.

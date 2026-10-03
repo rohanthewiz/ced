@@ -99,7 +99,7 @@ func TestTabContext_RightClickOpensTheTabMenu(t *testing.T) {
 		labels = append(labels, it.label)
 	}
 	want := "Reveal in file tree|Show uncommitted changes|Show git history|Compare with clipboard|" +
-		"Format file|Validate file|Add to group…|Zip file|Copy relative path|Copy absolute path|Close tab|Close other tabs"
+		"Format file|Validate file|Restore (discard changes)…|Add to group…|Zip file|Copy relative path|Copy absolute path|Close tab|Close other tabs"
 	if got := strings.Join(labels, "|"); got != want {
 		t.Errorf("rows = %s, want %s", got, want)
 	}

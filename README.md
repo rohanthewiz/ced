@@ -437,6 +437,10 @@ Then:
   - *Compare with clipboard*, *Preview* (markdown files), *Format file*.
   - *Validate file* — ced's own JSON check plus whatever the language
     server last reported; the caret lands on the first error.
+  - *Restore (discard changes)…* — puts the file back the way the last
+    commit has it (staged changes too), after a confirm that says how
+    many lines go. An open tab reloads, and one Undo brings your text
+    back. Also on the file tree's right-click (*Git restore…*).
   - *Move to split →* / *Copy to split →* (inside cats) — open the file
     in a pane beside this one; Move then closes the tab here. An
     unsaved tab is saved first, since the second editor reads the disk.
@@ -449,7 +453,7 @@ Then:
   it in place. Every row is also a ≡ row for terminals that swallow the
   right button: Nav → *Reveal file in tree*, File → *Validate file* /
   *Close other tabs*, Git → *Show file's uncommitted changes* / *Show
-  file's git history*, Cats → *Move to split →* / *Open in split →*.
+  file's git history* / *Restore file (discard changes)…*, Cats → *Move to split →* / *Open in split →*.
 - **Tab groups.** *Add to group…* on a tab starts or joins a group
   named with up to 4 letters or digits. There are two kinds:
   - **Folder** — every open file under that folder belongs, including

@@ -679,6 +679,12 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Git status…", action: (*App).menuGitStatus, enabled: (*App).hasGitStatusReport},
 			{label: "Stage file", action: (*App).menuGitStageFile, enabled: (*App).hasStageableFile},
 			{label: "Unstage file", action: (*App).menuGitUnstageFile, enabled: (*App).hasUnstageableFile},
+			// The tree's "Git restore…" and the tab menu's Restore row,
+			// for the active tab (gitrestore.go). With Stage / Unstage
+			// because it is the third thing done to one file's changes.
+			// Gated like the "Show file's…" rows, not on the dirty
+			// snapshot — the verb's flash answers "nothing to restore".
+			{label: "Restore file (discard changes)…", action: (*App).menuGitRestoreFile, enabled: (*App).hasGitFileTab},
 			{label: "Commit staged", action: (*App).menuGitCommit, enabled: (*App).hasGitStaged},
 			// Keyboard twin of the panel's Suggest row — the chat agent
 			// drafts the message for the panel's selection, or for the

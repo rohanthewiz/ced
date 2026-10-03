@@ -19,6 +19,7 @@
 //	             │ ▸ Preview                 │   (markdown only)
 //	             │ ▸ Format file             │   change / check it
 //	             │ ▸ Validate file           │
+//	             │ ▸ Restore…                │   throw edits away (gitrestore.go)
 //	             │ ▸ Move to split →         │   place it (inside cats
 //	             │ ▸ Copy to split →         │   only)
 //	             │ ▸ Add to group…           │   group it (tabgroups.go)
@@ -45,7 +46,7 @@
 //   - **Every verb is an existing one.** Each row calls the same code
 //     as its ≡ row, so the two doors cannot drift; the only new verbs
 //     are the three that had no door at all (one file's changes, one
-//     file's history, Validate) and Move to split.
+//     file's history, Validate), Move to split, and Restore.
 //   - **Rows capture the *editor.Tab, never its index.** An index goes
 //     stale the moment any tab before it closes; the pointer is resolved
 //     back to an index when the row runs (tabIndexOf).
@@ -56,7 +57,8 @@
 //     right button is often swallowed): Reveal is ≡ Nav "Reveal file in
 //     tree"; Close other tabs and Validate file sit in ≡ File; the git
 //     pair is ≡ Git "Show file's uncommitted changes" / "Show file's git
-//     history"; Move to split is ≡ Cats "Move to split →" and Copy to
+//     history"; Restore is ≡ Git "Restore file (discard changes)…"
+//     (and the tree's "Git restore…"); Move to split is ≡ Cats "Move to split →" and Copy to
 //     split is its "Open in split →"; the rest were already there. The
 //     twins act on the ACTIVE tab.
 //   - **Close other tabs keeps unsaved tabs** and says how many. Closing
@@ -142,6 +144,10 @@ func (a *App) tabContextItems(t *editor.Tab) []editorContextItem {
 	items = append(items,
 		editorContextItem{label: "Format file", action: onTab(t, (*App).formatActiveFile), enabled: isTextFile},
 		editorContextItem{label: "Validate file", action: onTab(t, (*App).validateFile), enabled: isTextFile},
+		// Acts in place: its answer is a confirm, then a reload of
+		// THIS tab's buffer that the user can undo whether or not the
+		// tab is in front (gitrestore.go).
+		editorContextItem{label: "Restore (discard changes)…", action: func(app *App) { app.restoreFile(t.Path) }, enabled: inRepo},
 	)
 	// The splits (catssplit.go) appear only inside cats, like the ≡ Cats
 	// group that holds their twins: no plain terminal can split, so the

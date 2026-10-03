@@ -242,3 +242,46 @@ func TestSoftWrap_CaretOnRowBoundaryPaintedOnce(t *testing.T) {
 		t.Fatal("the caret was also painted past the end of row 0")
 	}
 }
+
+// TestSoftWrap_MaxScrollCountsRows pins the wrapped ceiling in display
+// rows: ten 50-rune lines are three rows each, so in a 20-row pane
+// (overscroll 10) the deepest start that still shows 10 rows is line 6 —
+// where the line formula answered 10-20+10 = 0. One row per line must
+// still give the unwrapped formula's answer.
+func TestSoftWrap_MaxScrollCountsRows(t *testing.T) {
+	text := strings.TrimSuffix(strings.Repeat(strings.Repeat("x", 50)+"\n", 10), "\n")
+	tab, _ := newWrappedTab(t, text, 20)
+	if got := tab.MaxScroll(20); got != 6 {
+		t.Fatalf("MaxScroll(20) = %d, want 6", got)
+	}
+
+	short := strings.TrimSuffix(strings.Repeat("x\n", 200), "\n")
+	tab, _ = newWrappedTab(t, short, 20)
+	if got := tab.MaxScroll(20); got != 190 {
+		t.Fatalf("one row per line: MaxScroll(20) = %d, want 190 (200 - 20 + 10)", got)
+	}
+
+	tiny, _ := newWrappedTab(t, "x", 20)
+	if got := tiny.MaxScroll(20); got != 0 {
+		t.Fatalf("file shorter than the pane: MaxScroll = %d, want 0", got)
+	}
+}
+
+// TestSoftWrap_CaretBelowLineCeilingStaysOnScreen is the N-045 bug: a
+// wrapped file of few long lines overflowing the pane. EnsureVisible put
+// the caret on line 8 at the bottom row (ScrollY 2), then the old
+// line-indexed clamp pulled ScrollY back to 0 and the caret rendered off
+// screen.
+func TestSoftWrap_CaretBelowLineCeilingStaysOnScreen(t *testing.T) {
+	text := strings.TrimSuffix(strings.Repeat(strings.Repeat("x", 50)+"\n", 10), "\n")
+	tab, scr := newWrappedTab(t, text, 20)
+	tab.MoveCursorTo(Position{Line: 8, Col: 0}, false)
+	tab.Render(scr, theme.Default(), 0, 0, wrapTestW, 20)
+
+	if tab.ScrollY != 2 {
+		t.Fatalf("ScrollY = %d, want 2 (minimal scroll to the caret's row)", tab.ScrollY)
+	}
+	if !tab.CursorLineVisible(20) {
+		t.Fatal("caret line is off screen after Render")
+	}
+}

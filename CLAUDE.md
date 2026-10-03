@@ -355,6 +355,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   line mapping must ask `HitTest`**, never `ScrollY + row`.
 - `wrapW` cached from last render. Rows wrap one cell short of the pane.
   Up/Down step by screen row when wrapped. No leader.
+- The scroll CEILING counts rows when wrapped (`MaxScroll` →
+  `maxScrollWrapped`, same overscroll as unwrapped); a line-count
+  ceiling clamps ScrollY back above the caret on files of few long lines
+  (`TestSoftWrap_CaretBelowLineCeilingStaysOnScreen`).
 
 ### Find, replace, go to line (editor/find.go, replace.go, app/find.go, goto.go)
 - ONE scanner (`matchCols`); case folding per rune (`foldRunes`).

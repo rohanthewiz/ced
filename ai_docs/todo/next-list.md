@@ -159,15 +159,6 @@ plus the LSP work done in the seeding session itself
   first, per the ⌘ allowlist rule) would make stepping through them
   practical. Decide which, then add it as a second door.
 
-- **N-045** · raised `2026-1003-1204-jump-margin` · value medium
-  `Tab.MaxScroll` is LINE-indexed (`LineCount - viewH + overscroll`) even
-  when the tab soft-wraps. A wrapped file with few but long lines (e.g.
-  10 lines of 3 rows each in a 20-row pane) gets MaxScroll 0, so
-  clampScroll pulls ScrollY back to 0 after EnsureVisible scrolled — a
-  caret on line 8 sits off screen and the last rows are unreachable.
-  Found while testing the jump margin (`jumpmargin_test.go` had to use 40
-  lines to dodge it). Fix: a wrapped ceiling in row units.
-
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.
@@ -217,6 +208,13 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-03, `2026-1003-1222-wrapped-scroll-ceiling` —
+  **N-045** wrapped scroll ceiling in rows: `MaxScroll` hands a wrapped
+  tab to `maxScrollWrapped`, which walks up from EOF until
+  `viewH - overscroll` display rows are counted (one row per line gives
+  the old formula). Pinned by
+  `TestSoftWrap_CaretBelowLineCeilingStaysOnScreen`.
 
 - closed 2026-10-01, `2026-1001-0055-bookmark-labels` —
   **N-044** the four bookmark extras:

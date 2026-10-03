@@ -1602,10 +1602,20 @@ func (t *Tab) scrollXCeiling() (max int, known bool) {
 // counts (app/overflow.go) floor at zero for exactly that reason — a
 // viewport parked inside the pad has nothing below it, not a negative
 // number of lines.
+//
+// A soft-wrapped tab answers in the same terms but counts DISPLAY rows
+// (maxScrollWrapped): a line-count ceiling there let a file of a few long
+// lines clamp ScrollY back above a caret that EnsureVisible had just
+// scrolled to, leaving the caret and the file's last rows unreachable.
 func (t *Tab) MaxScroll(viewH int) int {
 	overscroll := viewH / 2
 	if overscroll < 3 {
 		overscroll = 3
+	}
+	// wrapW is the width the last Render measured; Render sets it before
+	// it clamps, so the ceiling matches the frame being drawn.
+	if t.wrapW > 0 {
+		return t.maxScrollWrapped(t.wrapW, viewH-overscroll)
 	}
 	max := t.Buffer.LineCount() - viewH + overscroll
 	if max < 0 {

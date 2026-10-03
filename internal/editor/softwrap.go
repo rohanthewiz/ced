@@ -240,6 +240,38 @@ func (t *Tab) ensureVisibleWrapped(width, viewH int) {
 	t.ScrollY = top
 }
 
+// maxScrollWrapped is MaxScroll's ceiling in row units: the deepest line
+// ScrollY may start at while at least `keep` display rows of the file are
+// still on screen below it — the unwrapped rule ("viewH - overscroll
+// lines still showing") with rows in place of lines. One row per line
+// reproduces the unwrapped formula exactly.
+//
+// Walked up from the END of the file and stopped once `keep` rows are
+// counted, so the cost is a screenful of layouts however long the file.
+// A file with fewer rows than `keep` has no travel at all (0), as a short
+// unwrapped file does. `keep` is floored at 1 so the last line can never
+// scroll off the top (the unwrapped formula lets a 1–2 row pane do that;
+// nothing relies on it).
+//
+// Why it must be in rows: any line-count ceiling is wrong as soon as
+// lines cost several rows. EnsureVisible (row units) can legitimately put
+// ScrollY at line 2 of a 10-line file whose 30 rows overflow a 20-row
+// pane; a line ceiling of 10-20+10 = 0 then clamped it straight back,
+// and the caret on line 8 rendered off screen.
+func (t *Tab) maxScrollWrapped(width, keep int) int {
+	if keep < 1 {
+		keep = 1
+	}
+	rows := 0
+	for l := t.Buffer.LineCount() - 1; l >= 0; l-- {
+		rows += t.lineRows(l, width)
+		if rows >= keep {
+			return l
+		}
+	}
+	return 0
+}
+
 // centerOnCursorWrapped is CenterOnCursor in row units: as many whole
 // lines above the caret's line as fit in half the view, counting the rows
 // of the caret's own line that sit above the caret.

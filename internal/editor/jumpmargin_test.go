@@ -208,3 +208,18 @@ func TestJumpMargin_WrappedCountsRows(t *testing.T) {
 		t.Fatalf("ScrollY = %d, want 26", tab.ScrollY)
 	}
 }
+
+// TestJumpMargin_WrappedShortFile is the wrapped margin on a file of few
+// long lines — the shape N-045's line-indexed ceiling used to clamp back
+// to ScrollY 0. Ten 3-row lines, jump to line 8: minimal is ScrollY 2,
+// the margin makes it 4 (12 rows above, the file's last 5 rows below).
+func TestJumpMargin_WrappedShortFile(t *testing.T) {
+	text := strings.TrimSuffix(strings.Repeat(strings.Repeat("x", 50)+"\n", 10), "\n")
+	tab, scr := newWrappedTab(t, text, jmViewH)
+	tab.MoveCursorTo(Position{Line: 8, Col: 0}, false)
+	tab.MarkJump()
+	tab.Render(scr, theme.Default(), 0, 0, wrapTestW, jmViewH)
+	if tab.ScrollY != 4 {
+		t.Fatalf("ScrollY = %d, want 4", tab.ScrollY)
+	}
+}

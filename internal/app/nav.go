@@ -160,6 +160,7 @@ func (a *App) gotoNavLoc(loc navLoc) bool {
 		return false
 	}
 	t.MoveCursorTo(loc.pos, false) // Clamp inside guards a since-shrunk file
+	t.MarkJump()
 	return true
 }
 

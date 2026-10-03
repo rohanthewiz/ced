@@ -286,6 +286,7 @@ func (m *findAllModal) jumpToSelected(a *App) {
 		return // the open failed and already flashed why
 	}
 	tab.MoveCursorTo(editor.Position{Line: r.line, Col: r.col}, false)
+	tab.MarkJump() // an on-screen edge-row hit still gets context
 	// Centered rather than merely scrolled into view, for the reason the
 	// in-file preview centers: a minimal scroll parks the line on the
 	// last row, showing everything before it and nothing after, which is

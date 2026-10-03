@@ -690,6 +690,7 @@ func (a *App) problemsJump(idx int) {
 	// outlive the line it describes (the server lags the buffer by a
 	// debounce plus a type-check), and landing near beats not landing.
 	t.MoveCursorTo(editorPosFor(t, r.start), false)
+	t.MarkJump() // an on-screen edge-row landing still gets context
 	if _, _, ew, eh := a.editorRect(); !t.CursorLineVisible(eh) {
 		t.CenterOnCursor(ew, eh)
 	}

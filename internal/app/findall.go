@@ -597,9 +597,11 @@ func (m *findAllModal) preview(a *App) {
 		tab.FindIndex = ri // paint this hit as the current one
 	}
 	tab.MoveCursorTo(editor.Position{Line: r.line, Col: r.col}, false)
-	// Left alone, the on-screen case still gets Render's EnsureVisible
-	// off the cursorMoved flag MoveCursorTo just set — a vertical no-op
-	// that keeps a long line's column in view.
+	// Left alone, the on-screen case still gets Render's reveal off the
+	// flags set here: the jump margin nudges a hit sitting on the view's
+	// top or bottom row inward (otherwise a vertical no-op), and the
+	// column rule keeps a long line's match in view.
+	tab.MarkJump()
 	if _, _, ew, eh := a.editorRect(); !tab.CursorLineVisible(eh) {
 		tab.CenterOnCursor(ew, eh)
 	}

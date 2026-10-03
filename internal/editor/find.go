@@ -263,7 +263,9 @@ func (t *Tab) FocusCurrentMatch() {
 	// Jumping to a hit is an explicit navigation, so it drops secondary
 	// carets for the same reason MoveCursorTo does.
 	t.Carets = nil
-	t.cursorMoved = true
+	// A hit is a jump: it lands with context around it rather than on
+	// the view's edge row (jumpmargin.go).
+	t.MarkJump()
 }
 
 // FindNext advances FindIndex by one (wrapping at the end) and moves

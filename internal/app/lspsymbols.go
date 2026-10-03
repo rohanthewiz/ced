@@ -134,6 +134,7 @@ func (a *App) goToSymbol(path string, s lsp.Symbol) {
 		a.recordNav(from)
 	}
 	t.MoveCursorTo(editorPosFor(t, s.Pos), false)
+	t.MarkJump() // an on-screen edge-row landing still gets context
 	// Center an off-screen landing, leave an on-screen one alone — the
 	// goToLine / find-all policy. A minimal scroll parks a declaration on
 	// the last row, which answers "where is it?" but not "what does it

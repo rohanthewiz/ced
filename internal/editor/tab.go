@@ -95,6 +95,12 @@ type Tab struct {
 	// every redraw — EnsureVisible would snap us back to the cursor.
 	cursorMoved bool
 
+	// jumpReveal marks the pending cursorMoved as a JUMP (MarkJump,
+	// FocusCurrentMatch): Render then reveals the caret with JumpMargin
+	// rows of context instead of minimally. One-shot, consumed with
+	// cursorMoved — see jumpmargin.go.
+	jumpReveal bool
+
 	// Undo / redo stacks plus the original on-open snapshot used by
 	// RevertFile. See undo.go for the push / coalescing rules and the
 	// public Undo / Redo / RevertFile entry points.
@@ -917,6 +923,7 @@ func (t *Tab) RestoreView(cursor, anchor Position, scrollY, scrollX int) {
 	t.Anchor = t.Buffer.Clamp(anchor)
 	t.ScrollY, t.ScrollX = scrollY, scrollX
 	t.cursorMoved = false
+	t.jumpReveal = false
 }
 
 // CursorLineVisible reports whether the cursor's line falls inside a
@@ -969,6 +976,7 @@ func (t *Tab) CenterOnCursor(viewW, viewH int) {
 		t.ScrollY = 0
 	}
 	t.cursorMoved = false
+	t.jumpReveal = false // centered already carries more context than the margin
 }
 
 // gutterCols is the full width to the left of the code: the line
@@ -1068,10 +1076,18 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	}
 	// Only re-center on the cursor if the cursor moved this tick. Doing it
 	// every render fights the user when they scroll with the wheel.
+	// A jump (find hit, definition, nav retrace) reveals with a context
+	// margin so it doesn't land on the very top or bottom row; ordinary
+	// motion keeps the minimal scroll (jumpmargin.go).
 	if t.cursorMoved {
-		t.EnsureVisible(w, h)
+		if t.jumpReveal {
+			t.EnsureVisibleMargin(w, h, JumpMargin)
+		} else {
+			t.EnsureVisible(w, h)
+		}
 		t.cursorMoved = false
 	}
+	t.jumpReveal = false
 	t.clampScroll(h)
 
 	bg := th.BG

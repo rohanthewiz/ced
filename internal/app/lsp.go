@@ -708,6 +708,7 @@ func (a *App) lspJumpTo(fromPath string, fromPos editor.Position, target string,
 		a.recordNav(navLoc{path: fromPath, pos: fromPos})
 	}
 	t.MoveCursorTo(editorPosFor(t, at), false)
+	t.MarkJump() // land with context, not on the view's edge row
 	return true
 }
 

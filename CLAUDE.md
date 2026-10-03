@@ -57,6 +57,7 @@ internal/editor/
   wordhl.go symbolhl.go       Word highlight; server-resolved symbol uses
   linenote.go bracket.go      End-of-line notes (inlay hints); brace matcher
   bookmark.go                 Line bookmarks: content-diff re-anchoring, gutter flag
+  jumpmargin.go               Context margin a jump lands with (MarkJump)
   ghost.go                    Ghost-text display form + render-row splice
 internal/diff/diff.go         Patience line differ + unified rendering
 internal/search/search.go     Project-wide text search over the finder index
@@ -215,6 +216,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   mode copied; read-only dir falls back to in-place. `WriteFileAtomic`
   is exported for other writers — don't copy it.
 - **Scroll clamp** allows overscroll (`max(viewH/2, 3)`) — intentional.
+- **Jump margin (jumpmargin.go)**: a JUMP (find hit via
+  `FocusCurrentMatch`, `lspJumpTo`, nav retrace, goto, the peek/list
+  landings) calls `MarkJump`, and Render reveals with `JumpMargin` (5,
+  capped at viewH/4) rows of context instead of the minimal scroll.
+  Plain motion and clicks stay minimal. One-shot, cleared with
+  `cursorMoved`; never pads past EOF into overscroll.
 - **One frame per input burst (inputburst.go)**: wheel/motion bursts
   defer frames only while more input is queued, capped at ~30fps. Don't
   restore the unconditional per-event draw.

@@ -603,6 +603,53 @@ func TestDefinitionJumpAndBack(t *testing.T) {
 	}
 }
 
+// TestDefinitionJumpLandsWithContext pins the jump margin on the go-to
+// landing every definition-style verb shares (lspJumpTo): a target below
+// the view used to be parked on the editor's last row, the identifier
+// found and nothing after it; now JumpMargin rows of code show below it.
+func TestDefinitionJumpLandsWithContext(t *testing.T) {
+	a, _, goPath := newLSPTestApp(t)
+	otherPath := filepath.Join(a.rootDir, "other.go")
+	var b strings.Builder
+	b.WriteString("package main\n")
+	for i := 0; i < 300; i++ {
+		fmt.Fprintf(&b, "// filler %d\n", i)
+	}
+	b.WriteString("func helper() {}\n")
+	for i := 0; i < 50; i++ {
+		fmt.Fprintf(&b, "// after %d\n", i)
+	}
+	if err := os.WriteFile(otherPath, []byte(b.String()), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a.openFile(goPath)
+	origin := editor.Position{Line: 0, Col: 0}
+	a.handleLSPDefinition(&lspDefinitionEvent{
+		when: time.Now(), fromPath: goPath, fromPos: origin,
+		locs: []lsp.Location{{URI: lsp.PathToURI(otherPath),
+			Range: lsp.Range{Start: lsp.Position{Line: 301, Character: 5}}}},
+	})
+	a.draw()
+
+	tab := a.activeTabPtr()
+	if tab.Path != otherPath || tab.Cursor.Line != 301 {
+		t.Fatalf("landed at %s line %d, want %s line 301", tab.Path, tab.Cursor.Line, otherPath)
+	}
+	_, _, _, eh := a.editorRect()
+	want := editor.JumpMargin
+	if q := eh / 4; want > q {
+		want = q
+	}
+	if want == 0 {
+		t.Fatalf("editor only %d rows tall; test needs room for a margin", eh)
+	}
+	row := tab.Cursor.Line - tab.ScrollY
+	if below := eh - 1 - row; below != want {
+		t.Fatalf("definition sits %d rows above the editor's bottom edge, want %d (ScrollY %d, editor %d rows)",
+			below, want, tab.ScrollY, eh)
+	}
+}
+
 // TestDefinitionNoResult pins the empty-answer UX: a flash, no jump,
 // no nav-stack garbage.
 func TestDefinitionNoResult(t *testing.T) {

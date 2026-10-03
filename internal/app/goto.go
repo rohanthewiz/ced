@@ -123,6 +123,9 @@ func (a *App) goToLine(line, col int) {
 	// MoveCursorTo would otherwise leave the caret past its end.
 	pos := tab.Buffer.Clamp(editor.Position{Line: line, Col: col})
 	tab.MoveCursorTo(pos, false)
+	// Off-screen centers; on-screen but on an edge row gets the jump
+	// margin from Render instead (CenterOnCursor clears the mark).
+	tab.MarkJump()
 	if _, _, ew, eh := a.editorRect(); !tab.CursorLineVisible(eh) {
 		tab.CenterOnCursor(ew, eh)
 	}

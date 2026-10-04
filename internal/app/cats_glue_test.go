@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
+
 	"github.com/rohanthewiz/ced/internal/cats"
 )
 
@@ -433,4 +435,24 @@ func TestCatsCloseReleasesThePane(t *testing.T) {
 
 	b := newTestApp(t, t.TempDir())
 	b.catsClose() // no reporter, no stream: must not panic
+}
+
+// A git operation that stopped on conflicts raises the Conflicts panel,
+// which is not a modal — so its "blocked" report rides the panel's own
+// unseen mark, and the user's next key returns the editor to idle.
+func TestCatsReportsBlockedOnAnUnseenConflictStop(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	s := withHookSpy(t, a)
+	a.catsAfterEvent()
+	s.next() // the initial idle
+
+	a.conflictPanel.unseen = "cherry-pick stopped on conflicts"
+	a.catsAfterEvent()
+	if got := s.next(); got.Params.State != cats.StateBlocked || got.Params.CustomStatus != "cherry-pick stopped on conflicts" {
+		t.Fatalf("got state=%q status=%q", got.Params.State, got.Params.CustomStatus)
+	}
+	a.handleEvent(keyEvent(tcell.KeyRune, 'j'))
+	if got := s.next(); got.Params.State != cats.StateIdle {
+		t.Fatalf("after a key: %q", got.Params.State)
+	}
 }

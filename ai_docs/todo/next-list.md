@@ -31,7 +31,7 @@ plus the LSP work done in the seeding session itself
   Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
 - Open and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-047**
+**Next ID: N-055**
 
 ## Open
 
@@ -159,6 +159,54 @@ plus the LSP work done in the seeding session itself
   first, per the ⌘ allowlist rule) would make stepping through them
   practical. Decide which, then add it as a second door.
 
+- **N-047** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
+  The conflict UI has only been driven through `run-ced`'s emulator. Hand
+  check in tmux, cats and macOS Terminal.app: the side washes' contrast
+  (light themes especially), a real mouse click on the `<<<<<<<` lens,
+  and the cats "blocked" badge firing on a stop (`conflictPanel.unseen`).
+
+- **N-048** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
+  The git log panel still cherry-picks ONE commit (Actions ▾). Ticking
+  several commits in the log and picking them together would be the
+  log-side twin of the cherry-pick dialog, which only lists one branch
+  against HEAD.
+
+- **N-049** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
+  No side-by-side view of a conflict block (VS Code's "Compare changes",
+  a 3-way merge editor). The washes show both sides in place; comparing
+  current vs incoming vs base for one block would need the compare panel
+  to take two arbitrary texts instead of "buffer vs something".
+
+- **N-050** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
+  The marker grammar (editor/conflict.go) matches only git's default
+  conflict-marker-size of 7. A repo setting the `conflict-marker-size`
+  gitattribute gets no washes or lens, and its files never read as
+  "no markers left" (the stage rows' disk scan has the same rule).
+
+- **N-051** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
+  Cherry-pick dialog extras left out: a filter field for long lists
+  (capped at 300, announced), picking a MERGE commit (needs `-m <parent>`;
+  merges are hidden and the summary says so), and a per-commit diff
+  preview (today: the files it touches, and which overlap HEAD's side).
+
+- **N-052** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
+  Conflicted files are red in the tree and counted in the status bar's ⚠,
+  but the TAB BAR doesn't mark a conflicted tab. Left over from the 4.3
+  follow-ups (`2026-0812-2058-cats-native-phase4-3`), of which the
+  `--skip` row and the tree marking are now done.
+
+- **N-053** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
+  The Conflicts panel rescans every unmerged file WITHOUT an open tab
+  from disk on each refresh (open, the 10s tick while it's up, every
+  finished git command). Fine for dozens of files; a rebase leaving
+  hundreds unmerged would pay for it. A per-file mtime cache would fix it.
+
+- **N-054** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
+  The theme package's header comments say Normalize derives "the other
+  twenty-nine" keys (theme.go, palette.go, load_test.go); the table has
+  33 derived keys now (31 before this session's two conflict washes). An
+  instance of N-003's doc drift.
+
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.
@@ -203,7 +251,10 @@ Wanted, but not next. Parked, not declined.
 - **N-025** · declined `2026-0921-0906-lsp-experience` — semantic tokens (would fight
   the Chroma grid brace matching reads), LSP formatting (format.go covers
   it), code lens (needs virtual rows), folding (no fold model), and
-  IN-LINE inlay hints (linenote.go's header has the bill).
+  IN-LINE inlay hints (linenote.go's header has the bill). Since
+  `2026-1003-2042-cherry-pick-and-conflicts-ui`, editor/lens.go offers a
+  clickable END-OF-LINE lens (`LensSource`), so an LSP code lens would no
+  longer need virtual rows — still declined, but that reason is gone.
 
 ## Closed
 

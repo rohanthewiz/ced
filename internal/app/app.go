@@ -730,6 +730,21 @@ func builtinMenuGroups() []menuGroup {
 			// Dim on a clean repo, which is the overwhelming case, so the
 			// row doubles as a signal that something is parked.
 			{label: "Resolve conflicts…", action: (*App).menuGitResolveConflicts, enabled: (*App).hasGitConflict},
+			// The in-editor resolver's keyboard doors (conflictview.go):
+			// the lens's verbs for the block under the caret, and a walk
+			// over every conflict block in every unmerged file.
+			{label: "Resolve conflict at caret…", action: (*App).menuResolveConflictAtCaret, enabled: (*App).hasConflictAtCaret},
+			{label: "Next conflict", action: (*App).menuNextConflict, enabled: (*App).hasConflictsToWalk},
+			{label: "Previous conflict", action: (*App).menuPrevConflict, enabled: (*App).hasConflictsToWalk},
+			// The Conflicts tool window (conflictpanel.go). Enabled on any
+			// repo, not only a parked one: the panel says "nothing to
+			// resolve" rather than the row going dim, and it is where a
+			// stash-pop conflict found later would show up.
+			{action: (*App).menuToggleConflictPanel, enabled: (*App).hasGitRepo, labelFor: (*App).conflictPanelToggleLabel},
+			// Multi-commit cherry-pick from another branch (cherrypick.go)
+			// — the log panel's one-commit verb, at the size the job
+			// usually is. Last, beside the conflict rows its stops lead to.
+			{label: "Cherry-pick from branch…", action: (*App).menuCherryPickFromBranch, enabled: (*App).hasGitRepo},
 		}},
 		// The AI block: a parent with no rows of its own, so its three
 		// systems stay one fold apart. Everything under it talks to
@@ -1319,6 +1334,12 @@ type App struct {
 	// verbs walk the same list without needing it on screen.
 	problems problemsState
 
+	// conflictPanel is the Conflicts tool window's state (conflictpanel.go):
+	// the parked operation, its unmerged files, and the cats "unseen stop"
+	// mark. Named for the panel because `conflicts` is the disk-reconcile
+	// map's.
+	conflictPanel conflictPanelState
+
 	// projectSearchSeq generation-stamps "Find in project" runs so a
 	// result launched before the user changed their mind can't open a
 	// list over whatever they're doing now. See projectsearch.go.
@@ -1536,6 +1557,13 @@ type App struct {
 	// above: it gates the "Resolve conflicts…" menu row, whose enabled()
 	// runs on every menu draw. See gitconflict.go.
 	gitConflicted map[string]bool
+
+	// gitOp / gitDir mirror the snapshot's in-progress operation
+	// ("cherry-pick", "merge", …, "" for none) and absolute git dir. Read
+	// by the status bar's ⚠ segment on every draw and by the Conflicts
+	// panel's header, so both must be field reads (conflictpanel.go).
+	gitOp  string
+	gitDir string
 
 	// gitUpstream / gitAhead / gitBehind / gitHasRemote mirror the
 	// tracking half of the same snapshot: HEAD's upstream in short form
@@ -1963,6 +1991,7 @@ func (a *App) refreshGitStatus() {
 	a.gitHasStash = st.HasStash
 	a.gitStagedFiles = st.StagedFiles
 	a.gitConflicted = st.ConflictedFiles
+	a.gitOp, a.gitDir = st.InProgress, st.GitDir
 	// The tracking facts follow the same snapshot, including the reset
 	// on a non-repo: a stale "↑3" outliving the folder it described
 	// would be a status bar lying about a repo the user has left.
@@ -1973,10 +2002,15 @@ func (a *App) refreshGitStatus() {
 	if !st.IsRepo {
 		a.tree.DirtyFiles = nil
 		a.tree.DirtyFolders = nil
+		a.tree.ConflictFiles, a.tree.ConflictFolders = nil, nil
 		a.gitBranch = ""
 	} else {
 		a.tree.DirtyFiles = st.DirtyFiles
 		a.tree.DirtyFolders = dirtyFolderSet(st.DirtyFiles, a.rootDir)
+		// Unmerged files in the error colour, folders rolled up the same
+		// way dirty ones are (conflictpanel.go's "parked repo" signal).
+		a.tree.ConflictFiles = st.ConflictedFiles
+		a.tree.ConflictFolders = dirtyFolderSet(st.ConflictedFiles, a.rootDir)
 		a.gitBranch = st.Branch
 	}
 	// The git panel mirrors the same status snapshot — refreshing it
@@ -1988,6 +2022,11 @@ func (a *App) refreshGitStatus() {
 	// a commit, cherry-pick, or outside-the-editor fetch shows up on the
 	// next tick without a dedicated refresh path.
 	a.refreshGitLogCommits()
+	// The Conflicts panel too, for the same reason: a resolve staged from
+	// a terminal, or a continue run there, shows up on the next tick.
+	if a.conflictPanel.open {
+		a.refreshConflictPanel()
+	}
 }
 
 // startTreeRefresh launches a goroutine that posts a treeRefreshEvent every
@@ -2109,10 +2148,16 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.closeDiagTip()
 		a.closeHunkTip()
 	case *tcell.EventKey:
+		// Any key means the user is at the keyboard and has seen the
+		// stop that put the Conflicts panel up (conflictpanel.go).
+		a.conflictPanel.unseen = ""
 		a.handleKey(e)
 	case *tcell.EventPaste:
 		a.handlePaste(e)
 	case *tcell.EventMouse:
+		if e.Buttons()&(tcell.Button1|tcell.Button2|tcell.Button3) != 0 {
+			a.conflictPanel.unseen = "" // a click, not a pointer drifting by
+		}
 		a.handleMouse(e)
 	case *tcell.EventFocus:
 		// Read only Focused. tcell's NewEventFocus leaves the embedded
@@ -2187,6 +2232,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleCommitReceiptExpire(e)
 	case *gitPushRefsEvent:
 		a.handleGitPushRefs(e)
+	case *cherryPickLoadEvent:
+		a.handleCherryPickLoad(e)
 	case *termOutputEvent:
 		a.handleTermOutput()
 	case *termDoneEvent:
@@ -3401,6 +3448,9 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		if a.tryProblemsContextClick(x, y) {
 			return
 		}
+		if a.tryConflictPanelContextClick(x, y) {
+			return
+		}
 		if a.tryGitLogContextClick(x, y) {
 			return
 		}
@@ -3640,6 +3690,10 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// reason theirs do.
 		case a.problemsContains(x, y):
 			a.dragMode = a.problemsPress(x, y)
+		// The Conflicts panel shares the strip; its header is the generic
+		// one, routed above by toolHeaderAt, so this is the body only.
+		case a.conflictPanelContains(x, y):
+			a.conflictPanelPress(x, y)
 		// The pinned find-all panel took its rows/columns out of the
 		// editor band, so its hit-test runs before the catch-all — the
 		// same reason the git panel's does. Clicks elsewhere first drop
@@ -3711,6 +3765,13 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			// (hunktip.go). After the diagnostic press: on a line with a
 			// dot, the dot is what the mark cell shows.
 			if a.hunkGutterPress(x, y) {
+				return
+			}
+			// A press on a conflict lens button settles that block
+			// (conflictview.go). The lens sits past the line's end, where
+			// a press would otherwise park the caret at end-of-line, and
+			// starts no drag for the blame press's reason.
+			if a.conflictLensPress(x, y) {
 				return
 			}
 			a.editorPress(x, y)
@@ -3795,6 +3856,10 @@ func (a *App) scrollAt(x, y, delta int) {
 	}
 	if a.problemsContains(x, y) {
 		a.problemsScroll(delta)
+		return
+	}
+	if a.conflictPanelContains(x, y) {
+		a.conflictPanelScroll(delta)
 		return
 	}
 	if a.chatPanelContains(x, y) {
@@ -4269,7 +4334,12 @@ func (a *App) wireTab(t *editor.Tab) {
 	t.DecoSources = append(t.DecoSources,
 		gitDiffSource{app: a}, gitBlameSource{app: a},
 		validateSource{app: a},
-		pluginDecoSource{app: a}, lspDiagSource{app: a})
+		pluginDecoSource{app: a}, lspDiagSource{app: a},
+		// Merge-conflict washes and lenses (conflictview.go). Last of
+		// the app's sources: its row washes and verb buttons belong to
+		// nobody else, and its marker-row span should sit over the
+		// diagnostics a compiler raises about the marker itself.
+		conflictSource{app: a})
 	// The matching-word highlight is a built-in source gated by a per-tab
 	// flag, so the preference has to ride along at open time (wordhl.go).
 	t.WordHighlight = a.wordHLEnabled
@@ -5105,6 +5175,9 @@ func (a *App) draw() {
 	}
 	if a.problems.open {
 		a.drawProblems()
+	}
+	if a.conflictPanel.open {
+		a.drawConflictPanel()
 	}
 	if a.term.open {
 		a.drawTermPanel()

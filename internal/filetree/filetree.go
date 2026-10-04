@@ -94,6 +94,15 @@ type Tree struct {
 	DirtyFiles   map[string]bool
 	DirtyFolders map[string]bool
 
+	// ConflictFiles / ConflictFolders are the UNMERGED subset, by the same
+	// absolute-path keys: files a stopped cherry-pick / merge / rebase left
+	// conflicted, and the folders holding them. They render in the error
+	// colour, over the dirty one, so a parked repository is visible in the
+	// tree as well as in the status bar — and a collapsed folder still
+	// says "something in here is in conflict". nil means none.
+	ConflictFiles   map[string]bool
+	ConflictFolders map[string]bool
+
 	// IconsEnabled toggles the Nerd Font glyph that prefixes each row.
 	// Set by App.loadUserConfig at startup based on the user's
 	// config.json + auto-detection. Off means the row is rendered with
@@ -409,8 +418,9 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		active := item.Node.IsDir && item.Node.Path == t.ActiveFolder
 		activeFile := !item.Node.IsDir && t.ActiveFile != "" && item.Node.Path == t.ActiveFile
 		dirty := t.isDirty(item.Node)
+		conflicted := t.isConflicted(item.Node)
 		selected := t.Focused && t.Selected != nil && item.Node == t.Selected
-		drawNodeRow(scr, th, x, listTop+row, w, item, active, activeFile, dirty, t.IconsEnabled, t.ExecMarks, selected, t.IsMarked(item.Node))
+		drawNodeRow(scr, th, x, listTop+row, w, item, active, activeFile, dirty, conflicted, t.IconsEnabled, t.ExecMarks, selected, t.IsMarked(item.Node))
 		if start, k := t.filterSpan(item.Node); k > 0 {
 			paintFilterMatch(scr, th, x, listTop+row, w, nameColumn(item, t.IconsEnabled, t.ExecMarks)+start, k)
 		}
@@ -440,6 +450,18 @@ func (t *Tree) isDirty(n *Node) bool {
 	return t.DirtyFiles[n.Path]
 }
 
+// isConflicted reports whether a node is (or, for a folder, contains) an
+// unmerged file. False for every node when no conflict set is loaded.
+func (t *Tree) isConflicted(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	if n.IsDir {
+		return t.ConflictFolders[n.Path]
+	}
+	return t.ConflictFiles[n.Path]
+}
+
 // drawNodeRow renders one tree row with proper indent, chevron, and color.
 // active=true marks this folder as the editor's current working folder
 // (the New File default), and is drawn bold + accent-tinted so the user
@@ -457,7 +479,8 @@ func (t *Tree) isDirty(n *Node) bool {
 // the private-use glyphs. When execMarks=true an executable regular
 // file additionally gets a trailing '*' (ls -F style, mirroring a
 // directory's '/'), drawn in the row's own colour so it never competes
-// with the git-dirty highlight.
+// with the git-dirty highlight. conflicted=true marks an unmerged file (or
+// a folder holding one) and outranks dirty with the theme's error colour.
 //
 // When icons are enabled the row is rendered in three segments
 // (prefix → glyph → name) so the glyph can take its own per-language
@@ -465,7 +488,7 @@ func (t *Tree) isDirty(n *Node) bool {
 // styling. That's the visual cue you find in nvim-tree and friends:
 // a quick eye-scan picks out Go from Ruby from Markdown without
 // reading any text.
-func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, active, activeFile, dirty, withIcons, execMarks, selected, marked bool) {
+func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, active, activeFile, dirty, conflicted, withIcons, execMarks, selected, marked bool) {
 	bg := th.SidebarBG
 	// The keyboard cursor paints the whole row on the Selection color —
 	// the same highlight every list in the editor uses — so the fg
@@ -485,6 +508,8 @@ func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, a
 	//      "metadata, not source" without disappearing
 	//   3. active folder → Accent, so the current target is loud
 	//   4. dirty → Modified, so uncommitted work always stands out
+	//   5. conflicted → Error, because an unmerged file blocks every commit
+	//      until it is settled — louder than "changed"
 	//
 	// Active/dirty deliberately override the dotfile dimming — a
 	// modified .env or the active .github/ folder is still the most
@@ -503,6 +528,9 @@ func drawNodeRow(scr tcell.Screen, th theme.Theme, x, y, w int, item flatNode, a
 	}
 	if dirty {
 		fg = th.Modified
+	}
+	if conflicted {
+		fg = th.Error
 	}
 	rowStyle := tcell.StyleDefault.Background(bg).Foreground(fg)
 	if active || activeFile {

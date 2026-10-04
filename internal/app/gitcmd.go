@@ -230,6 +230,16 @@ func (a *App) runGitCmdSeqEnv(label string, env []string, cmds [][]string) {
 // through: a child environment and a success hook, either of which may
 // be nil.
 func (a *App) runGitCmdSeqFull(label string, env []string, onOK func(*App), cmds [][]string) {
+	a.runGitCmdSeqHook(label, env, nil, onOK, cmds)
+}
+
+// runGitCmdSeqHook is the sequence launcher with BOTH outcome hooks, on
+// runGitCmdFull's terms. The failure hook sees whichever command in the
+// set failed, which for the conflict resolver's stage-then-continue is
+// the continue — and a continue that stops on the NEXT commit's conflict
+// is exactly the failure that wants the Conflicts panel rather than a
+// wall of stderr (gitconflict.go).
+func (a *App) runGitCmdSeqHook(label string, env []string, onFail func(*App, *gitCmdDoneEvent) bool, onOK func(*App), cmds [][]string) {
 	if a.screen == nil || a.rootDir == "" || len(cmds) == 0 {
 		return
 	}
@@ -241,7 +251,7 @@ func (a *App) runGitCmdSeqFull(label string, env []string, onOK func(*App), cmds
 			cmd.Env = env
 			out, err := cmd.CombinedOutput()
 			if err != nil {
-				_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out})
+				_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out, onFail: onFail})
 				return
 			}
 		}

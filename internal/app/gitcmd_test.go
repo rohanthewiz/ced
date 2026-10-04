@@ -407,3 +407,23 @@ func TestMenuGitStash_PushThenPop(t *testing.T) {
 		t.Fatal("popped entry should be gone — Pop stash must dim again")
 	}
 }
+
+// TestRunGitCmdSeqHook_FailureReachesTheHook pins the sequence runner's
+// failure hook: a failing command in the set stops the set and hands its
+// event to onFail, which can claim it so no error modal opens.
+func TestRunGitCmdSeqHook_FailureReachesTheHook(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	writeCommit(t, repo, "f.txt", "one\n", "base")
+	a := newTestApp(t, repo)
+	a.rootDir = repo
+	var claimed string
+	a.runGitCmdSeqHook("Two steps", nil, func(app *App, e *gitCmdDoneEvent) bool {
+		claimed = e.label
+		return true
+	}, nil, [][]string{{"status"}, {"no-such-subcommand"}})
+	pumpAppEvents(t, a, func() bool { return claimed != "" })
+	if claimed != "Two steps" || a.modal != nil {
+		t.Errorf("claimed=%q modal=%T", claimed, a.modal)
+	}
+}

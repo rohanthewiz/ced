@@ -263,6 +263,17 @@ func (a *App) statusRightSegments() []statusSegment {
 			segs = append(segs, statusSegment{text: s, onClick: (*App).menuGitPush})
 		}
 	}
+	// A parked repository (conflictpanel.go): the standing ⚠ that says a
+	// cherry-pick / merge / rebase is stopped, and the door to the panel
+	// that finishes it. AFTER the branch, because segments drop from the
+	// front on a narrow window and this one outlives the branch name — a
+	// repo you cannot commit in is the more urgent fact.
+	if s := a.conflictStatusSegment(); s != "" {
+		if len(segs) > 0 {
+			segs = append(segs, statusSegment{text: " ·"})
+		}
+		segs = append(segs, statusSegment{text: " " + s, onClick: (*App).menuToggleConflictPanel})
+	}
 	// Two-cell gap so the branch name never reads as part of the button.
 	segs = append(segs,
 		statusSegment{text: "  "},

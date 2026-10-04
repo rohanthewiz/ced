@@ -88,6 +88,12 @@ type Theme struct {
 	GitModified tcell.Color
 	GitDeleted  tcell.Color
 
+	// ConflictCurrent / ConflictIncoming wash the two sides of a merge
+	// conflict's rows (app/conflictview.go). Marker rows and a diff3 base
+	// section are blended from these at paint time rather than stated.
+	ConflictCurrent  tcell.Color
+	ConflictIncoming tcell.Color
+
 	// LSP diagnostics — underline tint + gutter mark per severity.
 	// Errors reuse the red family, warnings amber, info/hint the calm
 	// blue, so severity reads at a glance without a legend. DiagError
@@ -163,6 +169,10 @@ func Default() Theme {
 		GitAdded:    tcell.NewRGBColor(0x9e, 0xce, 0x6a),
 		GitModified: tcell.NewRGBColor(0x7a, 0xa2, 0xf7),
 		GitDeleted:  tcell.NewRGBColor(0xf7, 0x76, 0x8e),
+
+		// Conflict sides — 22% green / 22% mauve over the background.
+		ConflictCurrent:  tcell.NewRGBColor(0x37, 0x42, 0x35),
+		ConflictIncoming: tcell.NewRGBColor(0x3d, 0x37, 0x54),
 
 		// Diagnostics — Tokyo Night red / amber / cyan-blue.
 		DiagError:   tcell.NewRGBColor(0xf7, 0x76, 0x8e),

@@ -138,6 +138,20 @@ func derivations() []derivation {
 		{"git-modified", func(p Palette) string { return p["accent"] }},
 		{"git-deleted", func(p Palette) string { return p["err"] }},
 
+		// Merge-conflict regions (app/conflictview.go): whole-row washes
+		// telling the two sides of a conflict apart. Current is the ok
+		// green — the side you already have. Incoming is the soft accent
+		// (the keyword mauve), NOT the accent: the selection is the only
+		// blue fill in the editor body, and a conflict tinted near it
+		// would read as a huge selection. 22% is deliberately louder than
+		// the line highlight's 6% — "keep it ambient" is how a tint ships
+		// invisible, and these rows are the thing the user came to fix.
+		{"conflict-current", func(p Palette) string { return mix(p["bg"], p["ok"], conflictWash) }},
+		// The incoming hue is CHOSEN rather than aliased: a theme whose
+		// accent is itself green makes accent-soft an olive that washes to
+		// the same grey as the separator row — see conflictIncomingHue.
+		{"conflict-incoming", func(p Palette) string { return mix(p["bg"], conflictIncomingHue(p), conflictWash) }},
+
 		// LSP diagnostics reuse the same three, so severity reads at a
 		// glance without a legend.
 		{"diag-error", func(p Palette) string { return p["err"] }},
@@ -272,6 +286,9 @@ func ToTheme(p Palette) Theme {
 		GitModified: c("git-modified"),
 		GitDeleted:  c("git-deleted"),
 
+		ConflictCurrent:  c("conflict-current"),
+		ConflictIncoming: c("conflict-incoming"),
+
 		DiagError:   c("diag-error"),
 		DiagWarning: c("diag-warning"),
 		DiagInfo:    c("diag-info"),
@@ -367,6 +384,63 @@ func mix(a, b string, t float64) string {
 // needs to read as "the brighter sibling" of another (accent-soft,
 // syn-operator) rather than as a wash over the surface.
 func lighten(c string, t float64) string { return mix(c, "#ffffff", t) }
+
+// The conflict washes' strengths. conflictWash is what both sides are
+// mixed over the background at; conflictSepWash is the neutral text wash
+// app/conflictview.go paints the `=======` row in. Stated here because the
+// incoming hue is chosen AGAINST both — keep the two files in step.
+const (
+	conflictWash    = 0.22
+	conflictSepWash = 0.16
+	// conflictHueMinStep is how far (largest channel difference) the
+	// incoming wash must sit from each neighbour to read as its own region.
+	conflictHueMinStep = 10
+)
+
+// conflictIncomingHue picks the colour the incoming side of a merge
+// conflict is washed in. The current side is always ok — "the side you
+// have" is the green one in every theme — so it is the incoming side that
+// has to find a hue of its own, and the test is the property the reader
+// needs: its WASH must stand clear of the current side's wash and of the
+// neutral separator row.
+//
+// accent-soft (the keyword mauve) is tried first and wins in most themes.
+// It fails where the theme's accent is itself green (accent-soft comes out
+// an olive) or muted (it washes to the separator's grey); then warn, err
+// and finally accent are tried — accent last because the blue fill is the
+// selection's. Failing all, the candidate that came closest is used.
+func conflictIncomingHue(p Palette) string {
+	cur := mix(p["bg"], p["ok"], conflictWash)
+	sep := mix(p["bg"], p["fg"], conflictSepWash)
+	cands := []string{p["accent-soft"], p["warn"], p["err"], p["accent"]}
+	best, bestScore := cands[0], -1
+	for _, c := range cands {
+		w := mix(p["bg"], c, conflictWash)
+		score := min(channelDist(w, cur), channelDist(w, sep))
+		if score >= conflictHueMinStep {
+			return c
+		}
+		if score > bestScore {
+			best, bestScore = c, score
+		}
+	}
+	return best
+}
+
+// channelDist is the largest per-channel difference between two colors.
+func channelDist(a, b string) int {
+	ar, ag, ab := rgb(a)
+	br, bg, bb := rgb(b)
+	return max(absInt(ar-br), absInt(ag-bg), absInt(ab-bb))
+}
+
+// absInt is the integer absolute value.
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
 
 // darken moves a color toward black by t.
 func darken(c string, t float64) string { return mix(c, "#000000", t) }

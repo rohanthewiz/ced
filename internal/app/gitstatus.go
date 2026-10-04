@@ -74,6 +74,16 @@ type gitStatus struct {
 	// a snapshot up to ten seconds old is fine for enabling a row and far
 	// too stale to run `git add` against.
 	ConflictedFiles map[string]bool
+	// GitDir is the repository's absolute git directory (.git, or the
+	// worktree's private dir), and InProgress the operation parked in it
+	// — "cherry-pick", "merge", "revert", "rebase", or "" for none. Both
+	// ride the rev-parse the snapshot already runs (one fork answers
+	// toplevel AND git dir), and InProgress is a handful of stats against
+	// it, so "is the repo parked?" is free on the 10-second tick. It
+	// feeds the status bar's ⚠ segment and the Conflicts panel's header
+	// — the answer to "nothing on screen says the repo is stopped".
+	GitDir     string
+	InProgress string
 }
 
 // loadGitStatus inspects rootDir and returns the set of dirty file paths
@@ -90,11 +100,15 @@ func loadGitStatus(rootDir string) gitStatus {
 	// we're in a git work tree at all (non-zero exit otherwise) and
 	// gives us the absolute path of the repo root, which is the prefix
 	// every porcelain path is reported relative to.
-	topBytes, err := exec.Command("git", "-C", rootDir, "rev-parse", "--show-toplevel").Output()
+	//
+	// --absolute-git-dir rides the same fork: rev-parse prints one answer
+	// per line in argument order, and the git dir is what the in-progress
+	// detection stats against (gitconflict.go's table).
+	topBytes, err := exec.Command("git", "-C", rootDir, "rev-parse", "--show-toplevel", "--absolute-git-dir").Output()
 	if err != nil {
 		return gitStatus{}
 	}
-	toplevel := strings.TrimRight(string(topBytes), "\n\r")
+	toplevel, gitDir := splitRevParseDirs(topBytes)
 	if toplevel == "" {
 		return gitStatus{}
 	}
@@ -104,7 +118,8 @@ func loadGitStatus(rootDir string) gitStatus {
 		// We *are* in a repo (rev-parse succeeded) but couldn't read
 		// status. Mark the result as a repo with no known dirty files
 		// so the caller at least knows we tried.
-		return gitStatus{IsRepo: true, DirtyFiles: map[string]bool{}, Branch: loadGitBranch(rootDir)}
+		return gitStatus{IsRepo: true, DirtyFiles: map[string]bool{}, Branch: loadGitBranch(rootDir),
+			GitDir: gitDir, InProgress: gitOpFromGitDir(gitDir)}
 	}
 
 	upstream, ahead, behind := loadGitTracking(rootDir)
@@ -126,7 +141,25 @@ func loadGitStatus(rootDir string) gitStatus {
 		// repo anyone actually works in.
 		HasRemote:       upstream != "" || len(loadGitRemotes(rootDir)) > 0,
 		ConflictedFiles: conflictPorcelainSet(out, toplevel),
+		GitDir:          gitDir,
+		InProgress:      gitOpFromGitDir(gitDir),
 	}
+}
+
+// splitRevParseDirs reads `rev-parse --show-toplevel --absolute-git-dir`
+// output: the toplevel on the first line, the git dir on the second.
+// Either may come back empty (a bare repo has no toplevel), which the
+// caller reads as "not a work tree" for the first and "nothing parked"
+// for the second.
+func splitRevParseDirs(out []byte) (toplevel, gitDir string) {
+	lines := strings.Split(strings.TrimRight(string(out), "\n\r"), "\n")
+	if len(lines) > 0 {
+		toplevel = strings.TrimRight(lines[0], "\r")
+	}
+	if len(lines) > 1 {
+		gitDir = strings.TrimRight(lines[1], "\r")
+	}
+	return toplevel, gitDir
 }
 
 // loadGitTracking reports HEAD's upstream in short form plus how far

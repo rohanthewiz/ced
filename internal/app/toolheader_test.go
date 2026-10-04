@@ -333,3 +333,21 @@ func TestBottomTree_ClicksStillLandOnTheRightRow(t *testing.T) {
 		t.Errorf("row under the root maps to %v, want the first child %q", got, want.Name)
 	}
 }
+
+// TestToolHeaderTitle_ConflictsCountsWhatIsLeft pins the Conflicts
+// panel's header count: files left while unmerged, "ready to continue"
+// once an operation has nothing unmerged, and the bare name otherwise.
+func TestToolHeaderTitle_ConflictsCountsWhatIsLeft(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	if got := a.toolHeaderTitle(toolConflicts); got != " Conflicts " {
+		t.Errorf("idle: %q", got)
+	}
+	a.conflictPanel.info.op = "merge"
+	if got := a.toolHeaderTitle(toolConflicts); got != " Conflicts · ready to continue " {
+		t.Errorf("parked, clean: %q", got)
+	}
+	a.conflictPanel.files = []conflictFile{{rel: "a"}, {rel: "b"}}
+	if got := a.toolHeaderTitle(toolConflicts); got != " Conflicts · 2 left " {
+		t.Errorf("parked, unmerged: %q", got)
+	}
+}

@@ -411,3 +411,19 @@ func TestEditorContext_PreviewRowTogglesIn(t *testing.T) {
 		t.Error("the Preview row did not turn the preview on")
 	}
 }
+
+// TestEditorContextLeadsWithConflictRows pins the conflict rows' place:
+// a right-click inside a live conflict opens with the ways to settle it,
+// ahead of the code vocabulary; outside one they are absent.
+func TestEditorContextLeadsWithConflictRows(t *testing.T) {
+	a, _ := conflictTestApp(t, "a.go")
+	m := openEditorContextAt(t, a, 8, 2) // inside the block (line 2: current side)
+	if m.items[0].label != "Accept current" || m.items[1].label != "Accept incoming" {
+		t.Errorf("first rows = %q, %q", m.items[0].label, m.items[1].label)
+	}
+	a.closeModal()
+	m = openEditorContextAt(t, a, 8, 0) // line 0: outside
+	if contextRowIndex(m, "Accept") >= 0 {
+		t.Error("conflict rows offered outside a conflict")
+	}
+}

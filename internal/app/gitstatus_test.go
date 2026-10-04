@@ -608,3 +608,30 @@ func TestLoadGitStatus_Conflicted(t *testing.T) {
 		t.Errorf("after abort: %d conflicted files, want 0", n)
 	}
 }
+
+// TestSplitRevParseDirs pins the two-answer parse, including the bare
+// repository shape (no toplevel line content) and trailing CRs.
+func TestSplitRevParseDirs(t *testing.T) {
+	top, dir := splitRevParseDirs([]byte("/repo\r\n/repo/.git\r\n"))
+	if top != "/repo" || dir != "/repo/.git" {
+		t.Errorf("got %q %q", top, dir)
+	}
+	if top, dir := splitRevParseDirs([]byte("/repo\n")); top != "/repo" || dir != "" {
+		t.Errorf("one line: %q %q", top, dir)
+	}
+}
+
+// TestLoadGitStatus_InProgressOperation pins the free detection: the
+// snapshot carries the git dir and names a parked cherry-pick, and a clean
+// repo names none.
+func TestLoadGitStatus_InProgressOperation(t *testing.T) {
+	repo := cherryPickConflictRepo(t)
+	st := loadGitStatus(repo)
+	if st.InProgress != "cherry-pick" || st.GitDir != filepath.Join(repo, ".git") {
+		t.Errorf("InProgress=%q GitDir=%q", st.InProgress, st.GitDir)
+	}
+	gitRun(t, repo, "cherry-pick", "--abort")
+	if st := loadGitStatus(repo); st.InProgress != "" {
+		t.Errorf("after abort: InProgress=%q", st.InProgress)
+	}
+}

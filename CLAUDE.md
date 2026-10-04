@@ -59,6 +59,7 @@ internal/editor/
   bookmark.go                 Line bookmarks: content-diff re-anchoring, gutter flag
   jumpmargin.go               Context margin a jump lands with (MarkJump)
   ghost.go                    Ghost-text display form + render-row splice
+  conflict.go lens.go         Conflict-marker blocks + resolvers; clickable end-of-line lens
 internal/diff/diff.go         Patience line differ + unified rendering
 internal/search/search.go     Project-wide text search over the finder index
 internal/lsp/                 JSON-RPC client (LSP + ACP/ndjson), workspaceedit,
@@ -96,6 +97,9 @@ internal/app/
   mcp.go skills.go plugins.go plugincmd.go plugindeco.go
   git*.go compare.go           Git panel/log/commit/receipt/status; compare panel
   gitrestore.go               Restore one file to HEAD (tree/tab/≡ Git rows)
+  gitconflict.go gitopstate.go  Conflict picker + stop hook; parked-op / unmerged reads
+  conflictview.go conflictpanel.go  In-editor conflict washes/lens/verbs; Conflicts tool window
+  cherrypick.go               Multi-commit cherry-pick dialog
   hunktip.go                  Change-bar popup: a hunk's diff, scrollable
   terminal.go termdiag.go runexec.go openineditor.go
   autosave.go format.go validate.go syntax.go zipops.go
@@ -234,7 +238,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   bracket < selection < find. Gutter precedence: git < validate < plugin
   < LSP (glyphs: validate `◇`, plugin `◆`, LSP `●`). Exceptions that are
   PAINTED not decorated: ghost text, secondary carets, end-of-line notes,
-  the bookmark line-number flag.
+  the bookmark line-number flag. Two optional source interfaces extend a
+  DecorationSource: `LineWashSource` (whole-row bg, gutter and past-EOL
+  included; replaces the caret-line highlight, later source wins) and
+  `LensSource` (clickable end-of-line buttons: full → short labels → shed
+  from the right, never cut; outranks both notes on its line; Render
+  STAMPS `lensHits`, `Tab.LensAt` reads them — reset at Render's top).
 - **Identity-preserving tree refresh**: `reload` keeps survivor `*Node`s
   and their `Expanded` state.
 - **External-change reconcile** (each tree tick): clean + changed →
@@ -661,6 +670,38 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   and clean files flash instead. An open tab adopts via
   `ReloadUndoable` (one Undo back); reconcile is held off the path with
   `formatRunBegin/End`, released on both outcomes.
+- **Conflicts (editor/conflict.go, app/conflictview.go, conflictpanel.go,
+  gitopstate.go)**: strict markers (exactly 7 chars + space/EOL; `=======`
+  alone), unclosed openers are text; scan memoized per EditRev. Sides are
+  CURRENT/INCOMING (positional — git's ours/theirs flips in a rebase).
+  Resolve = one structural undo step, bottom-up for all-blocks; never
+  stages. The view (washes + lens, `conflictSource` in wireTab) is GATED on
+  `a.gitConflicted[path]` — marker fixtures stay quiet. Lens IDs carry
+  `conflictLensTag`; the block is re-checked by its opener line at click.
+  Panel = tool window `toolConflicts` (generic header), furniture: op line
+  (Continue/Skip/Abort/⟳, right-aligned via `layoutButtonsRight`), sides
+  line, file rows with state buttons. Op + files RE-DERIVED each refresh;
+  only the "marked resolved since this stop" list is remembered (keyed by
+  op + stopped commit). Open files' counts are read LIVE from the buffer
+  (`conflictFileCount`) — a reload/undo/keystroke must never leave a
+  stale row. Presence conflicts (DU/UD/AU/UA/DD) get Keep/Delete and never
+  count as "ready". Staging saves via `saveForStaging` — NO format-on-save
+  or plugin hooks (they'd race add→continue). The stop hook
+  (`gitConflictFailHook`) raises the panel + opens the first block, and
+  claims the event only when files are unmerged (else git's message
+  modal). Continue/skip use the hook too (a continue can stop on the next
+  commit); `gitConflictAfterStep` closes the panel when the op ends.
+  `conflictPanel.unseen` is the cats "blocked" mark for a stop (the panel
+  isn't a modal), cleared by the next key/click in handleEvent. Status bar
+  ⚠ segment + tree error colour read the snapshot (`gitOp` rides the
+  existing rev-parse via `--absolute-git-dir`). The picker stays as the
+  keyboard door.
+- **Cherry-pick dialog (cherrypick.go)**: `HEAD...src --right-only
+  --cherry-mark --no-merges`, capped (announced); `=` rows shown dimmed and
+  unpickable; ⚠ = touches a file HEAD changed since the merge base. Loaded
+  off-loop, seq-checked. Applied OLDEST FIRST in one `git cherry-pick`;
+  `-x` dropped with `--no-commit`. Refused (panel shown) while an op is
+  parked. Alt chords a/x/s/b are the button twins.
 - Commit of a selection stages first (`gitCommitFiles`, `runGitCmdSeq`);
   every commit goes through `gitCommitFiles`.
 - Agent-drafted messages: a visible chat turn claimed by generation +
@@ -700,7 +741,7 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   its ≡ show row opens a picker. No leader.
 
 ### Tool windows + layout (app/toolwindow.go, tool*.go, splitter.go)
-- Every panel (tree, git panels, problems, compare, terminal, chat) is a
+- Every panel (tree, git panels, conflicts, problems, compare, terminal, chat) is a
   tool window on one of three edges; ONE visible per edge
   (`claimDock`). The bottom edge spans the whole width; side docks stop
   above it (`dockSplitterHit` is row-aware).
@@ -909,6 +950,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   Picker keeps the current theme. ≡ View rows.
 - When adding a color, check it against the background AND its
   neighbours — "ambient, keep it quiet" ships invisible colors.
+  `conflict-incoming` is CHOSEN, not aliased (`conflictIncomingHue`): the
+  first of accent-soft/warn/err/accent whose wash clears both the current
+  wash and the separator grey (`TestDerive_ConflictWashesAreVisibleAndDistinct`).
 
 ### Menu (≡) and leaders
 - Groups in `builtinMenuGroups`; `menuLayout` recomputes geometry every
@@ -924,8 +968,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 163 group
-  actions + 15 headers (180), height 186, dividers `[2, 5, 183]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 168 group
+  actions + 15 headers (185), height 191, dividers `[2, 5, 188]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

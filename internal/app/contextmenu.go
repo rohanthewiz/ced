@@ -69,6 +69,7 @@ func (a *App) tryEditorContextClick(x, y int) bool {
 	if (a.gitPanel.open && a.gitPanelContains(x, y)) ||
 		(a.gitLog.open && a.gitLogContains(x, y)) ||
 		a.problemsContains(x, y) ||
+		a.conflictPanelContains(x, y) ||
 		(a.compare.open && a.comparePanelContains(x, y)) ||
 		(a.term.open && a.termPanelContains(x, y)) ||
 		(a.chat.open && a.chatPanelContains(x, y)) ||
@@ -211,6 +212,14 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 			action:  func(app *App) { app.startProjectSearch(word, app.findOptions()) },
 			enabled: (*App).hasProjectSearch,
 		})
+	}
+	// A click inside a live merge conflict leads with the ways to settle
+	// it (conflictview.go) — the right-click twin of the lens, and the one
+	// door to "both, incoming first" / "neither", which the lens has no
+	// room for. Prepended rather than appended: on a conflict, choosing a
+	// side is what the right-click is for.
+	if rows := a.conflictContextItems(); len(rows) > 0 {
+		items = append(rows, items...)
 	}
 	return items
 }

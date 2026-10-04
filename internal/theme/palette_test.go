@@ -380,3 +380,64 @@ func channelDistance(a, b string) int {
 	}
 	return d
 }
+
+// TestDerive_ConflictWashesAreVisibleAndDistinct pins the two conflict
+// washes in every built-in: visibly off the background (a quiet tint
+// ships invisible), visibly apart from each other (two sides that look
+// the same are not two sides), and not the selection colour (the blue
+// fill is the selection's alone).
+func TestDerive_ConflictWashesAreVisibleAndDistinct(t *testing.T) {
+	for _, spec := range Builtins() {
+		p, _ := Normalize(spec.Colors)
+		bg, cur, inc, sel := p["bg"], p["conflict-current"], p["conflict-incoming"], p["selection"]
+		if cur == "" || inc == "" {
+			t.Fatalf("%s: conflict washes were not derived", spec.Name)
+		}
+		for name, c := range map[string]string{"current": cur, "incoming": inc} {
+			if d := channelDistance(bg, c); d < 8 {
+				t.Errorf("%s: conflict-%s %s is only %d off bg %s", spec.Name, name, c, d, bg)
+			}
+			if c == sel {
+				t.Errorf("%s: conflict-%s is the selection colour", spec.Name, name)
+			}
+		}
+		if d := channelDistance(cur, inc); d < 8 {
+			t.Errorf("%s: the two sides are only %d apart (%s vs %s)", spec.Name, d, cur, inc)
+		}
+		// The separator row is a neutral 16% text wash (app/conflictview.go);
+		// the incoming side must not read as more separator.
+		if d := channelDistance(inc, mix(bg, p["fg"], conflictSepWash)); d < 8 {
+			t.Errorf("%s: conflict-incoming %s is only %d off the neutral separator", spec.Name, inc, d)
+		}
+	}
+}
+
+// TestConflictIncomingHue_GreenAccentTheme is the regression for a host
+// theme whose accent is green: accent-soft comes out a grey olive, and
+// aliasing it washed the incoming side to the separator's grey. The hue
+// must fall through to a real colour (here: warn).
+func TestConflictIncomingHue_GreenAccentTheme(t *testing.T) {
+	p, err := Normalize(Palette{
+		"bg": "#1f2420", "fg": "#d6ddd6", "muted": "#9db0a2", "line": "#38403a",
+		"accent": "#4db380", "ok": "#81c784", "warn": "#e0b050", "err": "#e57373",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hue := conflictIncomingHue(p); hue != p["warn"] {
+		t.Errorf("incoming hue = %s, want warn %s (accent-soft is %s)", hue, p["warn"], p["accent-soft"])
+	}
+	if d := channelDistance(p["conflict-incoming"], mix(p["bg"], p["fg"], conflictSepWash)); d < 8 {
+		t.Errorf("incoming wash %s is %d off the separator", p["conflict-incoming"], d)
+	}
+}
+
+// TestConflictIncomingHue_PrefersAccentSoft pins the default branch: a
+// theme whose accent-soft is a distinct, saturated colour keeps it.
+func TestConflictIncomingHue_PrefersAccentSoft(t *testing.T) {
+	spec, _ := Find(Builtins(), DefaultName)
+	p, _ := Normalize(spec.Colors)
+	if hue := conflictIncomingHue(p); hue != p["accent-soft"] {
+		t.Errorf("hue = %s, want accent-soft %s", hue, p["accent-soft"])
+	}
+}

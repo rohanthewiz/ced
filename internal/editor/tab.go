@@ -249,6 +249,15 @@ type Tab struct {
 	// See linenote.go.
 	caretNote caretNote
 
+	// conflictScan memoizes the conflict-marker scan against EditRev.
+	// See conflict.go.
+	conflictScan conflictCache
+
+	// lensHits are the clickable end-of-line lens buttons as of the LAST
+	// RENDER, in render-relative cells — stamped by the paint pass so the
+	// hit-test reads exactly what was drawn. See lens.go.
+	lensHits []LensHit
+
 	// bookmarks are the tab's bookmarked lines, sorted and unique;
 	// bmLines / bmRev are the snapshot of the buffer they were last
 	// placed against, which the next reconcile diffs the buffer with.
@@ -1044,6 +1053,10 @@ func (t *Tab) EnsureVisible(viewW, viewH int) {
 // highlighting, selection, cursor) into the rectangle (x, y, w, h).
 // Image tabs delegate to renderImage instead of drawing text.
 func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
+	// The lens hit rects describe ONE frame. Cleared before any early
+	// return, so a preview or an image frame can never leave clickable
+	// buttons behind from the source view it replaced (lens.go).
+	t.lensHits = t.lensHits[:0]
 	if t.IsImage() {
 		t.renderImage(scr, th, x, y, w, h)
 		return
@@ -1140,6 +1153,11 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	// wrap. `row` is the screen row the next painted row lands on, so the
 	// loop ends at whichever runs out first — the viewport or the buffer.
 	liveNotes := t.LiveLineNotes()
+	// Whole-row tints and end-of-line buttons, gathered once per frame
+	// from the same window as the spans (decoration.go, lens.go). Both
+	// are nil on a tab no source cares about, which is nearly all of them.
+	washes := t.collectLineWashes(th, t.ScrollY, t.ScrollY+h-1)
+	lenses := t.collectLenses(th, t.ScrollY, t.ScrollY+h-1)
 	caretLines := t.caretLineSet()
 	// Bookmarks are reconciled against the buffer here, once per frame,
 	// so an edit that moved them is reflected in the very frame it lands
@@ -1157,6 +1175,11 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		lineBg := bg
 		if isCursorLine {
 			lineBg = th.LineHL
+		}
+		// A wash owns the whole row, caret line included — the source
+		// picks a caret-line variant itself when it wants one.
+		if c, ok := washes[lineIdx]; ok {
+			lineBg = c
 		}
 		lineBgStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Text)
 
@@ -1386,9 +1409,14 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 			// past the pane: there is no empty room, and the `›` above
 			// already owns the last cell. See linenote.go.
 			// The caret's note, when there is one, takes the slot instead.
+			// A lens set outranks both notes on its line: an action you can
+			// take beats a remark you can read (lens.go).
 			if lastRow {
 				if used := visualCol - scrollVisual; used >= 0 && used <= contentW {
-					if n, ok := t.liveCaretNote(lineIdx); ok {
+					if set := lenses[lineIdx]; len(set) > 0 &&
+						t.paintLens(scr, th, lineIdx, set, cy, contentX, contentW, used, lineBg, x, y) {
+						// The buttons took the note slot.
+					} else if n, ok := t.liveCaretNote(lineIdx); ok {
 						paintCaretNote(scr, n, cy, contentX, contentW, used, lineBg)
 					} else if liveNotes != nil {
 						paintLineNote(scr, th, liveNotes[lineIdx], cy, contentX, contentW, used, lineBg)

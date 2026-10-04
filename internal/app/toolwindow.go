@@ -98,13 +98,14 @@ import "sort"
 type toolID string
 
 const (
-	toolProject  toolID = "project"  // the file tree
-	toolGit      toolID = "git"      // the changes panel
-	toolGitLog   toolID = "gitlog"   // the history browser
-	toolProblems toolID = "problems" // the diagnostics worklist
-	toolCompare  toolID = "compare"  // the diff panel
-	toolTerminal toolID = "terminal" // the embedded grsh strip
-	toolChat     toolID = "chat"     // the ACP chat panel
+	toolProject   toolID = "project"   // the file tree
+	toolGit       toolID = "git"       // the changes panel
+	toolGitLog    toolID = "gitlog"    // the history browser
+	toolConflicts toolID = "conflicts" // the merge-conflict control room
+	toolProblems  toolID = "problems"  // the diagnostics worklist
+	toolCompare   toolID = "compare"   // the diff panel
+	toolTerminal  toolID = "terminal"  // the embedded grsh strip
+	toolChat      toolID = "chat"      // the ACP chat panel
 )
 
 // dockSide names one of the window's three edges. Same string-not-int
@@ -275,6 +276,21 @@ func init() {
 			setOpen: func(a *App, v bool) { a.gitLog.open = v },
 			show:    func(a *App) bool { a.openGitLogTool(); return true },
 			hide:    func(a *App) { a.closeGitLogTool() },
+		},
+		{
+			// The third git tool (conflictpanel.go), beside the other two.
+			// The first tool born after the generic header existed, so it
+			// wears that header rather than painting its own: its title
+			// and ✕ are exactly the generic ones, and the height drag on
+			// the bottom edge comes free.
+			id: toolConflicts, title: "Conflicts", defDock: dockBottom,
+			minW: toolMinSideCols, minH: conflictPanelMinHeight,
+			autoW:   func(a *App) int { return a.width / 3 },
+			autoH:   func(a *App) int { return minInt(a.height/3, conflictPanelMaxHeight) },
+			isOpen:  func(a *App) bool { return a.conflictPanel.open },
+			setOpen: func(a *App, v bool) { a.conflictPanel.open = v },
+			show:    func(a *App) bool { a.openConflictPanelTool(); return true },
+			hide:    func(a *App) { a.closeConflictPanelTool() },
 		},
 		{
 			id: toolProblems, title: "Problems", defDock: dockBottom,

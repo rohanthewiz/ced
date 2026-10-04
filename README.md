@@ -50,8 +50,9 @@ The goals, in order:
 
 - **VS Code-shaped layout** — file tree on the left, tab bar across the
   top, editor in the middle, status bar at the bottom.
-- **Tool windows** — the file tree, git panel, git log, problems list,
-  compare view, terminal and chat each dock **left, right or bottom**,
+- **Tool windows** — the file tree, git panel, git log, conflicts panel,
+  problems list, compare view, terminal and chat each dock **left, right
+  or bottom**,
   and the arrangement is remembered per project. See
   [Tool windows](#tool-windows).
 - **Mouse-driven everything** — click to place cursor, drag to select,
@@ -62,6 +63,13 @@ The goals, in order:
   removed). Rest the pointer on a bar — or click it — and a popup shows
   that change's diff; the scroll wheel scrolls it when it's long.
   `Esc h` / `Esc H` jump between changes.
+- **Cherry-picking and merge conflicts** — pick several commits from
+  another branch in one dialog (already-applied ones marked, likely
+  conflicts flagged `⚠`). When a cherry-pick, merge, revert or rebase
+  stops, the conflicts open tinted by side with clickable **Accept
+  current · Accept incoming · Accept both** buttons, and a Conflicts
+  panel shows the operation, its progress, and Continue / Skip / Abort.
+  See [Cherry-picking and merge conflicts](#cherry-picking-and-merge-conflicts).
 - **Syntax highlighting** for dozens of languages via Chroma.
 - **Code intelligence from the language servers you already have** —
   diagnostics, go to definition, references, rename, code actions,
@@ -253,8 +261,8 @@ ced --help       # print short usage
 ### Tool windows
 
 Every panel that isn't the editor is a **tool window**: the file tree,
-the git changes panel, the git log, the problems list, the compare view,
-the terminal, and the chat. Each one lives on an edge of the
+the git changes panel, the git log, the conflicts panel, the problems
+list, the compare view, the terminal, and the chat. Each one lives on an edge of the
 window — **left, right, or bottom** — and you can move it to another.
 
 A fresh project starts with the file tree on the left and the editor
@@ -891,6 +899,90 @@ only for a git repository (or a folder that already has a `.ced/`).
 Anywhere else, e.g. `ced ~`, the lists last for the session and leave
 nothing behind. If the history can't be written, say in a read-only
 checkout, both `≡` rows read **(not saved)** and clicking one says why.
+
+### Cherry-picking and merge conflicts
+
+**Cherry-pick from branch…** (`≡` → Git, or `Esc k` → "cherry-pick")
+asks which branch to pick from, most recently committed first, then lists
+what that branch has that yours doesn't:
+
+```
+┌ Cherry-pick onto main ──────────────────────────────────────────── esc ┐
+│ From  ‹ feature/parser ›                                  alt+b change │
+│ 3 commits not on main · merges hidden · applied oldest first           │
+│ [x] 70ec301 ⚠ Split on whitespace                    Dev  2 hours ago  │
+│ [ ] 7c37b7b   Add lexer stub                         Dev  2 hours ago  │
+│ [x] 683e1dc ⚠ Reject empty input                     Dev  2 hours ago  │
+│ touches parse.go · ⚠ parse.go also changed on main — may conflict      │
+│ [ ] -x  note the origin in each message   [ ] stage only, don't commit │
+│ [ Select all ]                           [ Cancel ]  [ Cherry-pick 2 ] │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+- **`Space`** ticks a commit (or click its box); **`Enter`** picks the
+  ticked ones — or, with nothing ticked, the highlighted one.
+- Ticked commits are always applied **oldest first**, whatever order you
+  ticked them in, as one `git cherry-pick`.
+- **`[=]`** marks a commit whose change is already on your branch under
+  another hash (an earlier cherry-pick); it can't be ticked.
+- **`⚠`** marks a commit that touches a file your branch has also
+  changed since the two split — not a promise of a conflict, a hint.
+- `alt+x` adds git's "(cherry picked from …)" line, `alt+s` stages the
+  changes without committing (for squashing several into one), `alt+a`
+  ticks everything, `alt+b` switches branch.
+
+The git log's own **Actions ▾ → Cherry-pick** still picks a single commit.
+
+**When something ced runs stops on a conflict** — a cherry-pick or
+revert, or a `--continue` that hits the next commit's conflict — ced
+puts up the **Conflicts** panel and opens the first conflicted file at
+its first conflict. A merge, rebase or `stash pop` run in a terminal
+shows up as a `⚠` in the status bar instead; click it for the same
+panel.
+
+```
+  10 <<<<<<< HEAD  Accept current · Accept incoming · Accept both
+  11         return []string{}, nil              ← current side (green)
+  12 =======
+  13         return nil, errEmpty                ← incoming side (tinted)
+  14 >>>>>>> 683e1dc (Reject empty input)
+─ Conflicts · 1 left ───────────────────────────────────────────────── ✕ ─
+ ⚠ Cherry-pick 1 of 3 · 683e1dc “Reject empty input”   [ Continue ] [ Skip ] [ Abort ] ⟳
+   current = main (HEAD) · incoming = 683e1dc
+ ● parse.go  1 conflict · both modified               [ All current ] [ All incoming ]
+```
+
+- **In the file**, each side of a conflict is tinted, and the
+  `<<<<<<<` line carries the verbs. Click one and that conflict becomes
+  that side — one `Undo` puts the markers back. Right-click inside a
+  conflict for two more: *both, incoming first* and *neither*. With
+  `merge.conflictStyle=diff3` there's an *Accept base* too.
+- **"Current" is the branch you're on, "incoming" is what's being
+  applied.** The panel's second line spells that out per operation —
+  in a rebase they're the other way round from what most people expect,
+  and that line says so.
+- **Each file row** offers what that file needs: *All current / All
+  incoming* while it has conflicts, **Mark resolved** once it has none
+  (it saves the file first, exactly as you see it, then `git add`s it),
+  or **Keep / Delete** when one side deleted the file. Right-click a row
+  for *Use current/incoming version of the whole file* — which, unlike
+  *All current*, also throws away the other side's non-conflicting
+  changes to that file.
+- **Continue** is dimmed — and says what's in the way when clicked —
+  until every file is settled. When the only thing left is marking
+  marker-free files resolved, it becomes **Resolve all & continue**.
+  **Skip** drops the stopped commit (it asks first); **Abort** puts
+  everything back the way it was before the operation started.
+- When the operation finishes, the panel closes itself.
+
+While a repository is stopped mid-operation, the status bar says so
+(`⚠ cherry-pick: 1 conflict`, click it for the panel) and conflicted
+files show red in the file tree.
+
+Keyboard doors, all under `≡` → Git (and so in the `Esc k` palette):
+**Resolve conflicts…** (every verb above as a picker), **Resolve
+conflict at caret…**, **Next conflict** / **Previous conflict** (which
+walk on into the next conflicted file), and **Show conflicts panel**.
 
 ## Code intelligence (language servers)
 

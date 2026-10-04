@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // TestGitOpFromGitDir pins the detection table, including the ordering
@@ -430,13 +432,14 @@ func TestGitConflictFailHook_DeclinesWhenNothingParked(t *testing.T) {
 	}
 }
 
-// TestGitConflictFailHook_OpensPickerOnRealConflict is the automatic
-// path, against a real stopped cherry-pick: the hook claims the failure,
-// the picker names the operation and the file, and the row it offers
-// first actually opens that file as a tab — the point of the whole
-// feature being that the conflict is visible in the editor rather than
-// described in a modal.
-func TestGitConflictFailHook_OpensPickerOnRealConflict(t *testing.T) {
+// TestGitConflictFailHook_RaisesPanelOnRealConflict is the automatic
+// path, against a real stopped cherry-pick: the hook claims the failure
+// WITHOUT taking the modal slot, the Conflicts panel comes up naming the
+// operation and the file, the conflicted file opens with the caret on
+// its first block — the point being that the conflict is visible in the
+// editor rather than described in a modal — and cats hears "blocked"
+// until the user's next key.
+func TestGitConflictFailHook_RaisesPanelOnRealConflict(t *testing.T) {
 	requireGit(t)
 	repo := initRepo(t)
 	writeCommit(t, repo, "f.txt", "one\ntwo\nthree\n", "base")
@@ -451,22 +454,66 @@ func TestGitConflictFailHook_OpensPickerOnRealConflict(t *testing.T) {
 	if !gitConflictFailHook(a, &gitCmdDoneEvent{label: "Cherry-pick side"}) {
 		t.Fatal("hook declined a failure that left a cherry-pick parked")
 	}
-	m, ok := a.modal.(*paletteModal)
-	if !ok {
-		t.Fatalf("hook opened %T, want the conflict picker", a.modal)
+	if a.modal != nil {
+		t.Fatalf("hook opened %T — a stop should raise the panel, not a modal", a.modal)
 	}
-	if !strings.Contains(m.title, "Cherry-pick conflict") || !strings.Contains(m.title, "1 file") {
-		t.Errorf("picker title = %q, want the operation and the count", m.title)
+	if !a.conflictPanel.open {
+		t.Fatal("the Conflicts panel is not open after the stop")
 	}
-	if !hasRowLabel(m.items, "Open f.txt") {
-		t.Errorf("rows = %v, want an Open row for the conflicted file", rowLabels(m.items))
+	if title := a.conflictOpTitle(); !strings.HasPrefix(title, "Cherry-pick") || !strings.Contains(title, "side edits") {
+		t.Errorf("operation line = %q, want the operation and the stopped commit's subject", title)
+	}
+	if len(a.conflictPanel.files) != 1 || a.conflictPanel.files[0].rel != "f.txt" {
+		t.Errorf("panel files = %+v, want [f.txt]", a.conflictPanel.files)
 	}
 	// The dirty colors and gutters describe a work tree git has just
 	// rewritten, so the failure path must refresh rather than return.
 	if !a.gitConflicted[filepath.Join(repo, "f.txt")] {
 		t.Errorf("snapshot not refreshed after the conflict: %v", a.gitConflicted)
 	}
+	tab := a.activeTabPtr()
+	if tab == nil || tab.Path != filepath.Join(repo, "f.txt") {
+		t.Fatalf("active tab = %v, want f.txt opened at its conflict", tab)
+	}
+	if line := tab.Buffer.Lines[tab.Cursor.Line]; !strings.HasPrefix(line, "<<<<<<<") {
+		t.Errorf("caret on %q, want the first block's opener", line)
+	}
+	if a.conflictPanel.unseen == "" {
+		t.Error("no cats blocked mark for a stop nobody has looked at yet")
+	}
+	if state, _ := a.catsSelfState(); state != "blocked" {
+		t.Errorf("cats state = %q, want blocked", state)
+	}
+}
 
+// TestOpenGitConflictPicker_RealConflict pins the KEYBOARD door, which
+// the panel did not replace: on a parked cherry-pick the picker names the
+// operation and the count, and its first row opens the file.
+func TestOpenGitConflictPicker_RealConflict(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	writeCommit(t, repo, "f.txt", "one\ntwo\nthree\n", "base")
+	gitRun(t, repo, "checkout", "-q", "-b", "side")
+	writeCommit(t, repo, "f.txt", "one\nSIDE\nthree\n", "side edits the middle")
+	gitRun(t, repo, "checkout", "-q", "main")
+	writeCommit(t, repo, "f.txt", "one\nMAIN\nthree\n", "main edits the middle")
+	gitRunAllowFail(t, repo, "cherry-pick", "side")
+
+	a := newTestApp(t, repo)
+	a.rootDir = repo
+	a.openGitConflictPicker()
+	m, ok := a.modal.(*paletteModal)
+	if !ok {
+		t.Fatalf("opened %T, want the conflict picker", a.modal)
+	}
+	if !strings.Contains(m.title, "Cherry-pick conflict") || !strings.Contains(m.title, "1 file") {
+		t.Errorf("picker title = %q, want the operation and the count", m.title)
+	}
+	for _, want := range []string{"Open f.txt", "Show conflicts panel", "Skip this commit…", "Abort the cherry-pick…"} {
+		if !hasRowLabel(m.items, want) {
+			t.Errorf("rows = %v, want %q", rowLabels(m.items), want)
+		}
+	}
 	m.items[0].run(a)
 	tab := a.activeTabPtr()
 	if tab == nil || tab.Path != filepath.Join(repo, "f.txt") {
@@ -585,4 +632,80 @@ func gitRunAllowFail(t *testing.T, cwd string, args ...string) {
 func gitCmdT(t *testing.T, repo string, args ...string) *exec.Cmd {
 	t.Helper()
 	return exec.Command("git", append([]string{"-C", repo}, args...)...)
+}
+
+// TestGitConflictItems_PresenceConflictRows pins the picker's handling of
+// a modify/delete conflict against real git: Keep and Delete rows that
+// name which side removed the file, and no stage-and-continue row while
+// that decision is pending — a marker scan would otherwise call the file
+// "ready" and staging it would silently keep it.
+func TestGitConflictItems_PresenceConflictRows(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	writeCommit(t, repo, "g.txt", "keep\n", "base")
+	gitRun(t, repo, "checkout", "-q", "-b", "side")
+	gitRun(t, repo, "rm", "-q", "g.txt")
+	gitRun(t, repo, "commit", "-q", "-m", "side deletes g")
+	gitRun(t, repo, "checkout", "-q", "main")
+	writeCommit(t, repo, "g.txt", "keep\nmore\n", "main edits g")
+	gitRunAllowFail(t, repo, "cherry-pick", "side")
+
+	a := newTestApp(t, repo)
+	a.rootDir = repo
+	root, rels := gitConflictedPaths(repo)
+	labels := rowLabels(a.gitConflictItems("cherry-pick", root, rels))
+	got := strings.Join(labels, "|")
+	for _, want := range []string{"Keep g.txt (deleted in incoming)", "Delete g.txt (deleted in incoming)", "Skip this commit…"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rows %q missing %q", got, want)
+		}
+	}
+	if strings.Contains(got, "and continue") || strings.Contains(got, "Stage") {
+		t.Errorf("rows %q offer to stage a keep/delete decision", got)
+	}
+}
+
+// TestSplitPresence pins the split: presence conflicts leave both lists.
+func TestSplitPresence(t *testing.T) {
+	r, p := splitPresence([]string{"a", "gone"}, []string{"b", "gone2"},
+		map[string]string{"gone": "UD", "gone2": "DU"})
+	if strings.Join(r, ",") != "a" || strings.Join(p, ",") != "b" {
+		t.Errorf("ready=%v pending=%v", r, p)
+	}
+}
+
+// TestGitConflictAfterStep pins the finish: with nothing parked and
+// nothing unmerged the panel is put away and the flash says the operation
+// finished; still parked, it stays.
+func TestGitConflictAfterStep(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	a.showTool(toolConflicts)
+	a.gitOp = "cherry-pick"
+	gitConflictAfterStep("cherry-pick")(a)
+	if !a.conflictPanel.open {
+		t.Fatal("the panel closed while the operation is still parked")
+	}
+	a.gitOp = ""
+	gitConflictAfterStep("cherry-pick")(a)
+	if a.conflictPanel.open || a.statusMsg != "Cherry-pick finished" {
+		t.Errorf("open=%v flash=%q", a.conflictPanel.open, a.statusMsg)
+	}
+}
+
+// TestSaveConflictTabs pins the save-before-stage rule: a dirty open tab
+// among the files about to be staged is written first.
+func TestSaveConflictTabs(t *testing.T) {
+	a, paths := conflictTestApp(t, "a.go")
+	tab := a.activeTabPtr()
+	tab.ResolveAllConflicts(editor.ChooseCurrent)
+	if !a.saveConflictTabs(a.rootDir, []string{"a.go"}) {
+		t.Fatal("save refused")
+	}
+	if tab.Dirty {
+		t.Error("the tab is still dirty")
+	}
+	if fileHasConflictMarkers(paths[0]) {
+		t.Error("the resolution never reached the disk git add will read")
+	}
 }

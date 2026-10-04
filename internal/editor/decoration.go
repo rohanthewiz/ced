@@ -165,6 +165,47 @@ func (t *Tab) collectAnnotations(th theme.Theme, firstLine, lastLine int) (int, 
 	return 0, nil
 }
 
+// LineWashSource is a DecorationSource that also tints WHOLE ROWS: the
+// returned colour replaces the line's background across the full width
+// of the pane, past the end of the text and through the gutter, on every
+// screen row of the line.
+//
+// A fourth primitive for the same reason LineAnnotation is a third: a
+// Span can only restyle cells the buffer owns, so a span-painted region
+// stops at each line's last character and a block of short lines reads
+// as a ragged comb rather than a region. Merge conflicts are the first
+// user — "these seven lines are the incoming side" is a statement about
+// rows, not characters.
+//
+// The wash REPLACES the caret line's highlight rather than mixing with
+// it; a source that wants the caret line told apart returns a different
+// colour for it (the source can see t.Cursor). Spans still apply over
+// the wash, so selection and find hits stay visible inside a washed
+// region. When several sources wash one line, the later source wins.
+type LineWashSource interface {
+	DecorationSource
+	LineWashes(t *Tab, th theme.Theme, firstLine, lastLine int) map[int]tcell.Color
+}
+
+// collectLineWashes gathers the row tints for the visible window. nil
+// when no source washes anything, which is every tab not mid-conflict.
+func (t *Tab) collectLineWashes(th theme.Theme, firstLine, lastLine int) map[int]tcell.Color {
+	var out map[int]tcell.Color
+	for _, src := range t.DecoSources {
+		ws, ok := src.(LineWashSource)
+		if !ok {
+			continue
+		}
+		for line, c := range ws.LineWashes(t, th, firstLine, lastLine) {
+			if out == nil {
+				out = make(map[int]tcell.Color)
+			}
+			out[line] = c
+		}
+	}
+	return out
+}
+
 // DecorationSource produces spans and gutter marks for the visible line
 // window [firstLine, lastLine]. Sources are consulted once per render,
 // so producers whose data is expensive to compute (git diffs, LSP

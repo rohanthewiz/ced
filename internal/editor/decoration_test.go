@@ -497,3 +497,61 @@ func TestRender_ExternalSpanUnderlines(t *testing.T) {
 		t.Fatal("cells outside the span must stay un-underlined")
 	}
 }
+
+// stubWasher tints fixed lines and paints nothing else.
+type stubWasher struct {
+	stubSource
+	washes map[int]tcell.Color
+}
+
+// LineWashes returns the fixed tints.
+func (s stubWasher) LineWashes(*Tab, theme.Theme, int, int) map[int]tcell.Color { return s.washes }
+
+// TestRender_LineWashFillsTheWholeRow pins the primitive's reason to
+// exist: the tint covers the cells past the end of the text (where a Span
+// cannot reach) and the gutter, and only on the washed line.
+func TestRender_LineWashFillsTheWholeRow(t *testing.T) {
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	defer scr.Fini()
+	scr.SetSize(40, 4)
+
+	wash := tcell.NewRGBColor(0x20, 0x40, 0x20)
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer("ab\ncd\nef")
+	tab.Cursor = Position{Line: 1}
+	tab.DecoSources = []DecorationSource{stubWasher{washes: map[int]tcell.Color{1: wash}}}
+	tab.Render(scr, theme.Default(), 0, 0, 40, 4)
+	scr.Show()
+
+	cells, w, _ := scr.GetContents()
+	for _, x := range []int{0, gutterWidth + 1, 30} { // gutter, text, past the end
+		if _, bg, _ := cells[1*w+x].Style.Decompose(); bg != wash {
+			t.Errorf("row 1 col %d: bg %v, want the wash", x, bg)
+		}
+	}
+	if _, bg, _ := cells[0*w+30].Style.Decompose(); bg == wash {
+		t.Error("the wash leaked onto an unwashed line")
+	}
+}
+
+// TestCollectLineWashes_LaterSourceWins pins the precedence rule spans
+// and marks share.
+func TestCollectLineWashes_LaterSourceWins(t *testing.T) {
+	a, b := tcell.NewRGBColor(1, 1, 1), tcell.NewRGBColor(2, 2, 2)
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer("x")
+	tab.DecoSources = []DecorationSource{
+		stubWasher{washes: map[int]tcell.Color{0: a}},
+		stubWasher{washes: map[int]tcell.Color{0: b}},
+	}
+	if got := tab.collectLineWashes(theme.Default(), 0, 0); got[0] != b {
+		t.Errorf("wash = %v, want the later source's", got[0])
+	}
+	tab.DecoSources = []DecorationSource{stubSource{}}
+	if got := tab.collectLineWashes(theme.Default(), 0, 0); got != nil {
+		t.Errorf("no washer should mean a nil map, got %v", got)
+	}
+}

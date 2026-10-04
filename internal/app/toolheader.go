@@ -139,6 +139,9 @@ func (a *App) toolHeaderTitle(id toolID) string {
 			title += " · " + itoa(n) + " marked"
 		}
 	}
+	if id == toolConflicts {
+		title += a.conflictPanelHeaderTitle()
+	}
 	return title + " "
 }
 

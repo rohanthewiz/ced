@@ -462,6 +462,14 @@ func (a *App) catsSelfState() (state, status string) {
 	if a.modal != nil && a.cats.asking != "" {
 		return cats.StateBlocked, a.cats.asking
 	}
+	// A git operation that stopped on conflicts used to ask through a
+	// modal; it now raises the Conflicts panel, which is furniture, so
+	// its question is marked explicitly and lasts until the next key or
+	// click (conflictpanel.go). Same priority as a modal question: it is
+	// the other state that will not resolve itself.
+	if a.conflictPanel.unseen != "" {
+		return cats.StateBlocked, a.conflictPanel.unseen
+	}
 	if a.cats.runActive > 0 {
 		// A run outranks the other two working states because it is the one
 		// the user deliberately walked away from — the whole reason the wait

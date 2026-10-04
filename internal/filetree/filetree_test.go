@@ -1881,3 +1881,34 @@ func TestHideLabel_ContentWidthDropsTheLabel(t *testing.T) {
 		t.Errorf("ContentWidth = %d without the label, want less than %d", without, with)
 	}
 }
+
+// TestRender_ConflictedFileUsesErrorColor pins the unmerged highlight: a
+// file in ConflictFiles renders in the error colour even when it is also
+// dirty (which every unmerged file is), and its folder rolls up the same.
+func TestRender_ConflictedFileUsesErrorColor(t *testing.T) {
+	root := mkTree(t)
+	tr, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	alpha := findChild(tr.Root, "alpha")
+	if err := alpha.reload(); err != nil {
+		t.Fatalf("reload alpha: %v", err)
+	}
+	alpha.Expanded = true
+	inner := findChild(alpha, "inner.go")
+	tr.DirtyFiles = map[string]bool{inner.Path: true}
+	tr.ConflictFiles = map[string]bool{inner.Path: true}
+	tr.ConflictFolders = map[string]bool{alpha.Path: true}
+
+	cells, w := renderAndCollect(t, tr, 40, 20)
+	for _, name := range []string{"inner.go", "alpha"} {
+		rowY := findRowY(cells, w, 20, name)
+		if rowY < 0 {
+			t.Fatalf("could not find %s row", name)
+		}
+		if !rowHasColor(cells, w, rowY, theme.Default().Error) {
+			t.Errorf("%s row not drawn in the error colour", name)
+		}
+	}
+}

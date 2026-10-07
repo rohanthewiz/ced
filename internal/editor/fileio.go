@@ -155,6 +155,18 @@ func (t *Tab) encode() []byte {
 	return append(append([]byte(nil), utf8BOM...), text...)
 }
 
+// EncodedBytes is the buffer exactly as a save would write it — encode
+// with the file's own BOM and line ending — WITHOUT writing it.
+//
+// Exported for the app's file copy (app/copypaste.go): copying a file
+// whose tab holds unsaved edits copies what the user is looking at, and
+// a second serialiser out there would be the one that forgot CRLF. The
+// slice is freshly allocated, so it can be handed to another goroutine
+// while the buffer keeps changing.
+func (t *Tab) EncodedBytes() []byte {
+	return t.encode()
+}
+
 // WriteFileAtomic writes data to path via a temp file in the same
 // directory plus a rename, so a crash or a full disk can never leave a
 // half-written file where the user's work used to be.

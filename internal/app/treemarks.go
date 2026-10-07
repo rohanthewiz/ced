@@ -318,6 +318,12 @@ func (a *App) treeMarkActionItems(targets []*filetree.Node) []paletteItem {
 		add("Copy "+what+" for paste", func(app *App) {
 			app.copyPathsToFileClip(paths)
 		})
+		// The whole set into a typed folder anywhere on disk, in one
+		// gesture (copyto.go) — the door for "somewhere the tree can't
+		// point at", which Paste is not.
+		add("Copy "+what+" to…", func(app *App) {
+			app.promptCopyTo(paths)
+		})
 		add("Zip "+what+"…", func(app *App) {
 			app.startZipSet(paths)
 		})

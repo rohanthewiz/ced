@@ -372,7 +372,7 @@ func TestOpenTreeContext_Folder(t *testing.T) {
 	if contextOf(a) == nil {
 		t.Fatal("context should open")
 	}
-	wantLabels := []string{"New File", "New Folder", "Rename", "Delete", "Copy", "Zip",
+	wantLabels := []string{"New File", "New Folder", "Rename", "Delete", "Copy", "Copy to…", "Zip",
 		"Copy rel path", "Copy abs path", "Select", "Add to favorites…", "Open in $EDITOR"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("folder context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))
@@ -404,7 +404,7 @@ func TestOpenTreeContext_File(t *testing.T) {
 		t.Fatal("file node not in tree")
 	}
 	a.openTreeContext(node, 5, 5)
-	wantLabels := []string{"Rename", "Delete", "Copy", "Zip", "Copy rel path", "Copy abs path",
+	wantLabels := []string{"Rename", "Delete", "Copy", "Copy to…", "Zip", "Copy rel path", "Copy abs path",
 		"Soft Wrap", "Select", "Open in $EDITOR"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("file context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))
@@ -416,12 +416,13 @@ func TestOpenTreeContext_File(t *testing.T) {
 	}
 }
 
-// TestOpenTreeContext_Root offers the two create rows and the clipboard
-// rows — Rename / Delete on the project root would be a footgun.
+// TestOpenTreeContext_Root offers the two create rows, Copy to… (a root
+// copy can land outside the project, unlike a clipboard Copy) and the
+// clipboard rows — Rename / Delete on the project root would be a footgun.
 func TestOpenTreeContext_Root(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.openTreeContext(a.tree.Root, 5, 5)
-	wantLabels := []string{"New File", "New Folder", "Zip", "Copy rel path", "Copy abs path",
+	wantLabels := []string{"New File", "New Folder", "Copy to…", "Zip", "Copy rel path", "Copy abs path",
 		"Add to favorites…", "Open in $EDITOR"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("root context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))

@@ -103,6 +103,7 @@ internal/app/
   hunktip.go                  Change-bar popup: a hunk's diff, scrollable
   terminal.go termdiag.go runexec.go openineditor.go
   autosave.go format.go validate.go syntax.go zipops.go
+  copypaste.go copyto.go      File clipboard Copy/Paste; Copy to… a typed folder (one engine)
   folder.go favorites.go favmanage.go recentlocations.go remote.go
   bookmarks.go                Project-wide bookmarks: park/adopt, verbs, persistence
   cats_glue.go hostident.go theme.go
@@ -385,7 +386,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 
 ### Search history (history/searches.go, app/searchhistory.go)
 - Lists per KIND (`find` shared by find bar / Find all / Find in
-  project; `replace`; `symbol`), MRU, exact dedupe, `MaxSearches` 25,
+  project; `replace`; `symbol`; plus `copyto` — Copy to…'s folders, the
+  one kind that is not a search), MRU, exact dedupe, `MaxSearches` 25,
   in `.ced/history.bytdb` (`search_history`, same add-don't-overwrite
   write as recent files). Recorded where a search RUNS (`showFindAll`,
   `startProjectSearch`, `startWorkspaceSymbols`, find bar Enter/close,
@@ -788,6 +790,20 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   relative to the common parent (`commonParentDir` by segment); paste
   plans reserve names (`uniquePastePathExcept`). Partial sets reported.
   No Discard row. Delete clears the set.
+- **Copy to… (copyto.go)**: copy into a TYPED folder anywhere on disk
+  (Paste only reaches folders the tree shows). Doors: tree right-click
+  (root included), ≡ File "Copy file to…" / "Copy folder (…) to…"
+  (project when no subfolder), marks picker "Copy N items to…". Shares
+  Paste's engine: `planCopyInto` (plan before writing, names reserved,
+  folder-into-itself refused after `resolveExisting` on both sides) →
+  `runCopyPlan` → `pasteDoneEvent` (`into` set = Copy to… receipt naming
+  the destination and any " as <new name>"). The destination is a
+  FOLDER, never "copy as": an existing file is refused; a missing folder
+  is created only after a confirm, and refusals run BEFORE that confirm.
+  Never overwrites. Both verbs copy an open dirty tab's BUFFER
+  (`dirtyBufferOverlay` → `Tab.EncodedBytes`), never saving it. Field
+  seeded with the last destination (`history.CopyDestinations`, recorded
+  when a copy runs, display form).
 
 ### Overflow markers (app/overflow.go)
 - `▴`/`▾` in the LAST column of a viewport's first/last row on every
@@ -968,8 +984,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 168 group
-  actions + 15 headers (185), height 191, dividers `[2, 5, 188]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 170 group
+  actions + 15 headers (187), height 193, dividers `[2, 5, 190]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

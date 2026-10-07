@@ -188,3 +188,19 @@ func mustOpen(t *testing.T, root string) *sql.DB {
 	t.Cleanup(func() { db.Close() })
 	return db
 }
+
+// TestCopyDestinations_IsItsOwnList is the smoke test for the one kind
+// that is not a search: a Copy to… folder lands in its own list and
+// never in the find list beside it.
+func TestCopyDestinations_IsItsOwnList(t *testing.T) {
+	h := New(t.TempDir())
+	h.RecordSearch(SearchFind, "needle")
+	h.RecordSearch(CopyDestinations, "~/backup")
+	h.RecordSearch(CopyDestinations, "/srv/app")
+	if got, want := h.Searches(CopyDestinations), []string{"/srv/app", "~/backup"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("copy destinations = %q, want %q", got, want)
+	}
+	if got := h.Searches(SearchFind); !reflect.DeepEqual(got, []string{"needle"}) {
+		t.Fatalf("find list = %q, want [needle]", got)
+	}
+}

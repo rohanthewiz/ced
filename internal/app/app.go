@@ -311,7 +311,15 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuRenameFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).renameFolderLabel},
 			{action: (*App).menuDeleteFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).deleteFolderLabel},
 			{label: "Copy file", action: (*App).menuCopyFile, enabled: (*App).hasFileTab},
+			// Copy to… (copyto.go): the same copy into a TYPED folder,
+			// anywhere on disk — Paste can only land where the tree
+			// points. Each sits under its clipboard sibling so the pair
+			// reads as "copy it here later" / "copy it there now". The
+			// folder row is always live: with no active subfolder it
+			// copies the whole project, which Copy folder cannot.
+			{label: "Copy file to…", action: (*App).menuCopyFileTo, enabled: (*App).hasFileTab},
 			{action: (*App).menuCopyFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).copyFolderLabel},
+			{action: (*App).menuCopyFolderTo, enabled: alwaysTrue, labelFor: (*App).copyFolderToLabel},
 			{action: (*App).menuPasteItem, enabled: (*App).hasFileClip, labelFor: (*App).pasteItemLabel},
 			{label: "Zip file", action: (*App).menuZipFile, enabled: (*App).hasFileTab},
 			{action: (*App).menuZipFolder, enabled: alwaysTrue, labelFor: (*App).zipFolderLabel},

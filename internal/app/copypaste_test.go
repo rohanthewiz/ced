@@ -622,3 +622,221 @@ func TestStartPaste_SetReservesNamesInOrder(t *testing.T) {
 		t.Fatalf("destination holds %v, want two distinct names", names)
 	}
 }
+
+// TestWriteNewFile_NeverClobbers pins the overlay writer to
+// copyFileContents' contract: a new file gets the bytes and the mode, an
+// existing name is refused rather than overwritten.
+func TestWriteNewFile_NeverClobbers(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "run.sh")
+	if err := writeNewFile(dst, []byte("echo hi\n"), 0o755); err != nil {
+		t.Fatalf("writeNewFile: %v", err)
+	}
+	info, err := os.Stat(dst)
+	if err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("mode = %v (err %v), want 0755", info.Mode().Perm(), err)
+	}
+	if err := writeNewFile(dst, []byte("clobbered"), 0o644); err == nil {
+		t.Fatal("writing over an existing file should fail")
+	}
+	if got, _ := os.ReadFile(dst); string(got) != "echo hi\n" {
+		t.Fatalf("existing file changed: %q", got)
+	}
+}
+
+// TestCopyTreeWith_OverlayReplacesDiskBytes pins the unsaved-buffer
+// overlay: an overlaid file is written from the overlay (and counted),
+// the others from disk, and the disk mode survives either way.
+func TestCopyTreeWith_OverlayReplacesDiskBytes(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "pkg")
+	if err := os.Mkdir(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	edited := filepath.Join(src, "edited.sh")
+	plain := filepath.Join(src, "plain.txt")
+	if err := os.WriteFile(edited, []byte("on disk\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(plain, []byte("plain\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(t.TempDir(), "pkg")
+	n, err := copyTreeWith(src, dst, map[string][]byte{edited: []byte("in the buffer\n")})
+	if err != nil {
+		t.Fatalf("copyTreeWith: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("buffered = %d, want 1", n)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dst, "edited.sh")); string(got) != "in the buffer\n" {
+		t.Fatalf("overlaid file = %q, want the buffer", got)
+	}
+	if info, _ := os.Stat(filepath.Join(dst, "edited.sh")); info.Mode().Perm() != 0o755 {
+		t.Fatalf("overlaid file lost its mode: %v", info.Mode().Perm())
+	}
+	if got, _ := os.ReadFile(filepath.Join(dst, "plain.txt")); string(got) != "plain\n" {
+		t.Fatalf("plain file = %q, want the disk bytes", got)
+	}
+}
+
+// TestResolveExisting_ResolvesTheExistingPrefix pins the guard's helper
+// on a path whose tail does not exist yet: the existing prefix is
+// symlink-resolved (t.TempDir lives under a symlink on macOS) and the
+// missing remainder kept as typed.
+func TestResolveExisting_ResolvesTheExistingPrefix(t *testing.T) {
+	dir := t.TempDir()
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := resolveExisting(filepath.Join(dir, "not", "yet")), filepath.Join(real, "not", "yet"); got != want {
+		t.Fatalf("resolveExisting = %q, want %q", got, want)
+	}
+	if got := resolveExisting(dir); got != real {
+		t.Fatalf("resolveExisting(existing) = %q, want %q", got, real)
+	}
+}
+
+// TestCopyIntoOwnSubtree_SeesThroughSymlinks is the reason the guard
+// resolves: a destination spelled through a link into the source is
+// still the source's own subtree, and copying there would walk forever.
+func TestCopyIntoOwnSubtree_SeesThroughSymlinks(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(filepath.Join(src, "inner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(filepath.Join(src, "inner"), link); err != nil {
+		t.Fatal(err)
+	}
+	if pasteIntoOwnSubtree(src, link) {
+		t.Fatal("precondition: the spelled paths should not look nested")
+	}
+	if !copyIntoOwnSubtree(src, link) {
+		t.Fatal("a link into the source must count as its subtree")
+	}
+	if !copyIntoOwnSubtree(src, filepath.Join(link, "new")) {
+		t.Fatal("a not-yet-created folder under that link must count too")
+	}
+	if copyIntoOwnSubtree(src, root) {
+		t.Fatal("the source's parent is not its subtree")
+	}
+}
+
+// TestPlanCopyInto_ReservesNamesAndReportsMissing pins the shared
+// planner: same-named sources get distinct names, a vanished source is
+// reported rather than refusing the set, and a folder into itself
+// refuses the whole plan.
+func TestPlanCopyInto_ReservesNamesAndReportsMissing(t *testing.T) {
+	root := t.TempDir()
+	one := filepath.Join(root, "one", "same.txt")
+	two := filepath.Join(root, "two", "same.txt")
+	for _, p := range []string{one, two} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dest := t.TempDir()
+	plan, missing, err := planCopyInto([]string{one, two, filepath.Join(root, "gone.txt")}, dest)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(plan) != 2 || plan[0].dest == plan[1].dest {
+		t.Fatalf("plan = %+v, want two distinct destinations", plan)
+	}
+	if len(missing) != 1 || missing[0] != "gone.txt" {
+		t.Fatalf("missing = %v, want [gone.txt]", missing)
+	}
+	if _, _, err := planCopyInto([]string{root}, filepath.Join(root, "one")); err != errCopyIntoSelf {
+		t.Fatalf("folder into itself: err = %v, want errCopyIntoSelf", err)
+	}
+}
+
+// TestDirtyBufferOverlay_OnlyDirtyTabsUnderTheSources pins what the
+// overlay snapshots: a dirty tab at or under a source, never a clean tab
+// and never a dirty one elsewhere.
+func TestDirtyBufferOverlay_OnlyDirtyTabsUnderTheSources(t *testing.T) {
+	root := t.TempDir()
+	in := filepath.Join(root, "pkg", "in.txt")
+	clean := filepath.Join(root, "pkg", "clean.txt")
+	out := filepath.Join(root, "out.txt")
+	for _, p := range []string{in, clean, out} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("disk\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := newTestApp(t, root)
+	for _, p := range []string{in, clean, out} {
+		a.openFile(p)
+	}
+	for _, tab := range a.tabs {
+		if tab.Path == in || tab.Path == out {
+			tab.InsertString("edit ")
+		}
+	}
+	got := a.dirtyBufferOverlay([]string{filepath.Join(root, "pkg")})
+	if len(got) != 1 {
+		t.Fatalf("overlay = %v, want only in.txt", got)
+	}
+	if string(got[in]) != "edit disk\n" {
+		t.Fatalf("overlay[in] = %q, want the buffer", got[in])
+	}
+	if a.dirtyBufferOverlay([]string{filepath.Join(root, "nowhere")}) != nil {
+		t.Fatal("no dirty tab under the sources should give a nil overlay")
+	}
+}
+
+// TestStartPaste_CopiesTheUnsavedBuffer is the bug the overlay fixes for
+// Paste too: a file with unsaved edits used to paste as its stale disk
+// copy. Now the copy holds the buffer, the original stays dirty and
+// unsaved, and the flash says the copy carries edits the file does not.
+func TestStartPaste_CopiesTheUnsavedBuffer(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "notes.txt")
+	if err := os.WriteFile(src, []byte("saved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(root, "dest")
+	if err := os.Mkdir(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, root)
+	a.openFile(src)
+	tab := a.activeTabPtr()
+	tab.InsertString("unsaved ")
+
+	a.copyToFileClip(src)
+	a.startPaste(dest)
+	a.handlePasteDone(waitForPasteEvent(t, a))
+
+	if got, _ := os.ReadFile(filepath.Join(dest, "notes.txt")); string(got) != "unsaved saved\n" {
+		t.Fatalf("pasted copy = %q, want the buffer", got)
+	}
+	if got, _ := os.ReadFile(src); string(got) != "saved\n" {
+		t.Fatalf("original on disk changed: %q", got)
+	}
+	if !tab.Dirty {
+		t.Fatal("the original tab must stay dirty — a copy is not a save")
+	}
+	if !strings.Contains(a.statusMsg, "with unsaved edits") {
+		t.Fatalf("flash = %q, want the unsaved-edits note", a.statusMsg)
+	}
+}
+
+// TestBufferedNote pins the flash suffix: silent at zero, singular and
+// counted forms otherwise.
+func TestBufferedNote(t *testing.T) {
+	cases := map[int]string{0: "", 1: " (with unsaved edits)", 3: " (3 with unsaved edits)"}
+	for n, want := range cases {
+		if got := bufferedNote(n); got != want {
+			t.Errorf("bufferedNote(%d) = %q, want %q", n, got, want)
+		}
+	}
+}

@@ -1013,6 +1013,10 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 		// never be used.
 		items = append(items, contextItem{label: "Copy", action: ctxCopy})
 	}
+	// Copy to… (copyto.go) copies into a typed folder anywhere on disk,
+	// so — unlike Copy — the root is a legal source: its copy just has to
+	// land outside it, which the verb checks.
+	items = append(items, contextItem{label: "Copy to…", action: ctxCopyTo})
 	// Paste appears only once something has been copied — a permanently
 	// dimmed row would just be noise in a popup this small. The root is
 	// allowed: pasting into the project root is the common case.

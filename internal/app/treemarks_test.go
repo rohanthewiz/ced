@@ -220,7 +220,7 @@ func TestTreeMarkActionItems_RowsForASet(t *testing.T) {
 
 	for _, want := range []string{
 		"Open 2 items", "Copy relative path of 2 items", "Copy absolute path of 2 items",
-		"Copy 2 items for paste", "Zip 2 items…", "Delete 2 items…",
+		"Copy 2 items for paste", "Copy 2 items to…", "Zip 2 items…", "Delete 2 items…",
 		"Clear selection (2)", "Select all visible rows",
 	} {
 		if !strings.Contains(labels, want) {
@@ -419,6 +419,31 @@ func TestTreeMarkCopyForPaste_ArmsTheWholeSet(t *testing.T) {
 	}
 	if got := a.pasteItemLabel(); !strings.Contains(got, "2 items") {
 		t.Fatalf("paste label = %q, want the count", got)
+	}
+}
+
+// TestTreeMarkCopyTo_CopiesTheWholeSet pins the selection's Copy to…
+// row: one prompt for the set, and every marked item lands in the typed
+// folder — one outside the project, which Paste could never reach.
+func TestTreeMarkCopyTo_CopiesTheWholeSet(t *testing.T) {
+	a, idx := markApp(t)
+	a.tree.SetMark(idx["a.txt"], true)
+	a.tree.SetMark(idx["sub"], true)
+	actionItem(t, a.treeMarkActionItems(a.treeMarkTargets()), "Copy 2 items to…").run(a)
+
+	pm := promptOf(a)
+	if pm == nil || pm.title != "Copy 2 items to folder" {
+		t.Fatalf("prompt = %+v", pm)
+	}
+	dest := t.TempDir()
+	pm.field = newTextField(dest)
+	pm.submit(a)
+	a.handlePasteDone(waitForPasteEvent(t, a))
+
+	for _, rel := range []string{"a.txt", "sub/x.txt", "sub/y.txt"} {
+		if _, err := os.Stat(filepath.Join(dest, rel)); err != nil {
+			t.Errorf("%s not copied: %v", rel, err)
+		}
 	}
 }
 

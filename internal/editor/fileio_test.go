@@ -341,3 +341,36 @@ func TestHumanBytes(t *testing.T) {
 		}
 	}
 }
+
+// TestEncodedBytes_IsWhatASaveWouldWrite pins the export the app's file
+// copy leans on: the unsaved buffer comes back with the file's own BOM
+// and CRLF re-emitted, and asking for it writes nothing — the file on
+// disk and the tab's dirty flag are both left alone.
+func TestEncodedBytes_IsWhatASaveWouldWrite(t *testing.T) {
+	orig := append(append([]byte(nil), utf8BOM...), []byte("one\r\ntwo\r\n")...)
+	path := writeTemp(t, "win.txt", orig)
+	tab, err := NewTab(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab.Cursor = Position{Line: 0, Col: 3}
+	tab.Anchor = tab.Cursor
+	tab.InsertRune('!')
+
+	got := tab.EncodedBytes()
+	want := string(utf8BOM) + "one!\r\ntwo\r\n"
+	if string(got) != want {
+		t.Fatalf("EncodedBytes = %q, want %q", got, want)
+	}
+	if disk, _ := os.ReadFile(path); string(disk) != string(orig) {
+		t.Fatalf("EncodedBytes touched the file: %q", disk)
+	}
+	if !tab.Dirty {
+		t.Fatal("EncodedBytes must not mark the tab saved")
+	}
+	// A fresh slice each call: mutating one must not reach the next.
+	got[len(got)-1] = 'X'
+	if again := tab.EncodedBytes(); string(again) != want {
+		t.Fatalf("EncodedBytes shares memory between calls: %q", again)
+	}
+}

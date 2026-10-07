@@ -120,6 +120,10 @@ func histNoun(kind string) string {
 		return "replacements"
 	case history.SearchSymbol:
 		return "symbol searches"
+	case history.CopyDestinations:
+		// Copy to…'s folder list (copyto.go) — the one kind that is not a
+		// search, so "recent searches" would misname it.
+		return "destinations"
 	}
 	return "searches"
 }

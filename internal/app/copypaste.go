@@ -29,10 +29,23 @@
 // Big folders can take seconds to copy, so the paste itself runs in a
 // goroutine and posts a pasteDoneEvent back to the main loop — the
 // same pattern as zips, formatters, and custom actions.
+//
+// Paste can only land in a folder the tree shows. Copy to… (copyto.go)
+// is the door to anywhere else on disk; it skips the clipboard but runs
+// the SAME plan and goroutine (planCopyInto → runCopyPlan), so the two
+// verbs share their naming, refusals and failure cleanup:
+//
+//	Copy ─▶ fileClipPaths ─▶ Paste ──┐
+//	                                 ├─▶ planCopyInto ─▶ runCopyPlan ─▶ pasteDoneEvent
+//	Copy to… ─▶ prompt (folder) ─────┘     (main loop)     (goroutine)    (main loop)
+//
+// Both read an open tab's unsaved BUFFER rather than its stale file
+// (dirtyBufferOverlay), so a copy holds what the user is looking at.
 
 package app
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -60,11 +73,27 @@ const (
 // can name the file or folder that appeared, plus how many items the
 // paste covered — a set's flash says "Pasted 4 items", and the first
 // destination alone would under-report it.
+//
+// Copy to… (copyto.go) runs through the same goroutine and posts the
+// same event; into is what tells the two apart on the main loop.
 type pasteDoneEvent struct {
 	when  time.Time
 	dest  string
 	count int
 	err   error
+
+	// into is the destination FOLDER when the run came from Copy to…,
+	// empty for a paste. A paste lands in a folder the tree is showing,
+	// so its flash only has to name the new item; a Copy to… usually
+	// lands somewhere off screen, so its flash is the only receipt and
+	// has to say where.
+	into string
+	// src is the source behind dest, so a one-item Copy to… can say when
+	// the copy had to take another name ("as main copy.go").
+	src string
+	// buffered counts files written from an open tab's unsaved buffer
+	// rather than from disk (copyTreeWith), so the flash can say so.
+	buffered int
 }
 
 // When satisfies the tcell.Event interface.
@@ -98,6 +127,23 @@ func copyFileContents(src, dst string, perm os.FileMode) (err error) {
 	return err
 }
 
+// writeNewFile writes data to a new file dst with the given
+// permissions — copyFileContents for bytes already in hand (an open
+// tab's unsaved buffer). Same O_EXCL never-clobber contract.
+func writeNewFile(dst string, data []byte, perm os.FileMode) (err error) {
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := out.Close(); err == nil {
+			err = cerr
+		}
+	}()
+	_, err = out.Write(data)
+	return err
+}
+
 // copyTree recursively copies the file or directory at src to dst,
 // which must not exist yet. Symlinks are recreated as links (not
 // followed) — following could loop, or silently pull in content from
@@ -105,35 +151,56 @@ func copyFileContents(src, dst string, perm os.FileMode) (err error) {
 // mirroring writeZipEntry's rules for the same reasons. On failure the
 // caller is expected to remove the partial dst (startPaste does).
 func copyTree(src, dst string) error {
+	_, err := copyTreeWith(src, dst, nil)
+	return err
+}
+
+// copyTreeWith is copyTree with an OVERLAY: regular files whose clean
+// path is a key of overlay are written from those bytes instead of from
+// disk. The overlay is the unsaved content of open tabs
+// (dirtyBufferOverlay), so a copy holds what the user is looking at —
+// the house rule that any text sent somewhere reads the open tab's
+// buffer before the disk. Only files the walk FINDS on disk are
+// overlaid: a tab whose file was deleted is not resurrected into the
+// copy. buffered counts the overlaid files, for the flash.
+//
+// The file's mode still comes from disk — the buffer has none, and a
+// script copied without its +x would be a quiet loss.
+func copyTreeWith(src, dst string, overlay map[string][]byte) (buffered int, err error) {
 	info, err := os.Lstat(src)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	switch {
 	case info.IsDir():
 		if err := os.Mkdir(dst, info.Mode().Perm()); err != nil {
-			return err
+			return 0, err
 		}
 		entries, err := os.ReadDir(src)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		for _, e := range entries {
-			if err := copyTree(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())); err != nil {
-				return err
+			n, err := copyTreeWith(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()), overlay)
+			buffered += n
+			if err != nil {
+				return buffered, err
 			}
 		}
-		return nil
+		return buffered, nil
 	case info.Mode()&os.ModeSymlink != 0:
 		target, err := os.Readlink(src)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		return os.Symlink(target, dst)
+		return 0, os.Symlink(target, dst)
 	case info.Mode().IsRegular():
-		return copyFileContents(src, dst, info.Mode().Perm())
+		if data, ok := overlay[filepath.Clean(src)]; ok {
+			return 1, writeNewFile(dst, data, info.Mode().Perm())
+		}
+		return 0, copyFileContents(src, dst, info.Mode().Perm())
 	default:
-		return nil
+		return 0, nil
 	}
 }
 
@@ -192,6 +259,94 @@ func pasteIntoOwnSubtree(src, destDir string) bool {
 		return true
 	}
 	return strings.HasPrefix(destDir, src+string(filepath.Separator))
+}
+
+// copyIntoOwnSubtree is pasteIntoOwnSubtree asked twice: of the paths as
+// spelled, and again after resolving symlinks on BOTH sides (the house
+// confinement rule). A paste only ever targets a tree folder, but Copy
+// to… takes a typed path, and "~/link" pointing into the folder being
+// copied is the same infinite walk wearing a different name — as is
+// macOS's /tmp vs /private/tmp. resolveExisting copes with a destination
+// that Copy to… has not created yet.
+func copyIntoOwnSubtree(src, destDir string) bool {
+	if pasteIntoOwnSubtree(src, destDir) {
+		return true
+	}
+	return pasteIntoOwnSubtree(resolveExisting(src), resolveExisting(destDir))
+}
+
+// resolveExisting is filepath.EvalSymlinks for a path whose tail may not
+// exist yet: the deepest ancestor that DOES exist is resolved and the
+// missing remainder appended as typed. EvalSymlinks alone fails on the
+// whole path the moment one component is missing, which would let a
+// to-be-created destination under a symlink slip past the guard.
+func resolveExisting(p string) string {
+	p = filepath.Clean(p)
+	var rest []string
+	for cur := p; ; {
+		if r, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(append([]string{r}, rest...)...)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			// Nothing on the way up resolved (a relative path in a
+			// vanished cwd): the spelling as given is all there is.
+			return p
+		}
+		rest = append([]string{filepath.Base(cur)}, rest...)
+		cur = parent
+	}
+}
+
+// errCopyIntoSelf is planCopyInto's one refusal: a folder copied into
+// its own subtree. The callers word it ("paste" / "copy").
+var errCopyIntoSelf = errors.New("a folder can't be copied into itself")
+
+// copyPlanItem is one source and the collision-free path its copy will
+// take.
+type copyPlanItem struct{ src, dest string }
+
+// planCopyInto plans copying every source in srcs into destDir, BEFORE
+// anything is written — the way a workspace edit validates before it
+// writes, so every refusal is a main-loop answer the user gets
+// immediately, and a set is never half-copied because its third item was
+// a folder copied into itself. Names are reserved in order
+// (uniquePastePathExcept), so two items with the same basename can't
+// both claim "name copy.ext".
+//
+// Sources that no longer exist are returned in missing (by basename)
+// rather than refusing the set; the caller decides how to report them.
+// destDir need not exist yet: every name in a missing folder is free.
+func planCopyInto(srcs []string, destDir string) (plan []copyPlanItem, missing []string, err error) {
+	taken := map[string]bool{}
+	for _, src := range srcs {
+		info, lerr := os.Lstat(src)
+		if lerr != nil {
+			missing = append(missing, filepath.Base(src))
+			continue
+		}
+		if info.IsDir() && copyIntoOwnSubtree(src, destDir) {
+			return nil, nil, errCopyIntoSelf
+		}
+		dest := uniquePastePathExcept(destDir, filepath.Base(src), info.IsDir(), taken)
+		taken[dest] = true
+		plan = append(plan, copyPlanItem{src: src, dest: dest})
+	}
+	return plan, missing, nil
+}
+
+// bufferedNote is the flash suffix that owns up to a copy made from
+// unsaved buffers: the copy holds edits the original file on disk does
+// not, and a user comparing the two deserves to know why.
+func bufferedNote(n int) string {
+	switch {
+	case n <= 0:
+		return ""
+	case n == 1:
+		return " (with unsaved edits)"
+	default:
+		return fmt.Sprintf(" (%d with unsaved edits)", n)
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -294,25 +449,12 @@ func (a *App) startPaste(destDir string) {
 	// edit validates before it writes: every refusal below is a main-loop
 	// answer the user gets immediately, and a set that is half-pasted
 	// because the third item was a folder pasted into itself is the
-	// failure nobody notices. Names are reserved in order, so two items
-	// with the same basename can't both claim "name copy.ext".
-	type pastePlan struct{ src, dest string }
-	var plan []pastePlan
-	var missing []string
-	taken := map[string]bool{}
-	for _, src := range a.fileClipPaths {
-		info, err := os.Lstat(src)
-		if err != nil {
-			missing = append(missing, filepath.Base(src))
-			continue
-		}
-		if info.IsDir() && pasteIntoOwnSubtree(src, destDir) {
-			a.flash("Can't paste a folder into itself")
-			return
-		}
-		dest := uniquePastePathExcept(destDir, filepath.Base(src), info.IsDir(), taken)
-		taken[dest] = true
-		plan = append(plan, pastePlan{src: src, dest: dest})
+	// failure nobody notices. planCopyInto is shared with Copy to…
+	// (copyto.go), so the two verbs can never disagree about names.
+	plan, missing, perr := planCopyInto(a.fileClipPaths, destDir)
+	if perr != nil {
+		a.flash("Can't paste a folder into itself")
+		return
 	}
 	if len(plan) == 0 {
 		// Every copied source vanished; disarm so the Paste row doesn't
@@ -331,13 +473,54 @@ func (a *App) startPaste(destDir string) {
 	} else {
 		a.flash("Pasting " + fileClipLabel(a.fileClipPaths) + "…")
 	}
+	a.runCopyPlan(plan, a.dirtyBufferOverlay(a.fileClipPaths), "")
+}
+
+// dirtyBufferOverlay snapshots, ON THE MAIN LOOP, the unsaved content of
+// every open tab whose file is one of srcs or lives under one of them —
+// the overlay copyTreeWith writes in place of the disk bytes. Nil when no
+// such tab is dirty, which is the common case and costs nothing.
+//
+// Snapshotted rather than saved: a save would run format-on-save and the
+// plugin hooks, and leave the original tab clean — side effects nobody
+// asked a copy for. The original stays exactly as dirty as it was.
+func (a *App) dirtyBufferOverlay(srcs []string) map[string][]byte {
+	var out map[string][]byte
+	for _, t := range a.tabs {
+		if t == nil || !t.Dirty || t.Path == "" {
+			continue
+		}
+		for _, s := range srcs {
+			// tabPathRemoved is "is this tab at or under that path" —
+			// the delete verbs' question, and exactly this one too.
+			if tabPathRemoved(filepath.Clean(t.Path), filepath.Clean(s)) {
+				if out == nil {
+					out = map[string][]byte{}
+				}
+				out[filepath.Clean(t.Path)] = t.EncodedBytes()
+				break
+			}
+		}
+	}
+	return out
+}
+
+// runCopyPlan copies plan off the main loop and posts ONE pasteDoneEvent
+// when it ends — the copy engine shared by Paste and Copy to…. into is
+// empty for a paste and the destination folder for Copy to…, carried
+// through so handlePasteDone knows which receipt to flash.
+//
+// overlay is read by the goroutine only; the caller built it on the main
+// loop and never touches it again, so no lock is needed.
+func (a *App) runCopyPlan(plan []copyPlanItem, overlay map[string][]byte, into string) {
 	scr := a.screen
 	go func() {
 		var err error
-		done := 0
-		last := ""
+		done, buffered := 0, 0
+		last, lastSrc := "", ""
 		for _, p := range plan {
-			if cerr := copyTree(p.src, p.dest); cerr != nil {
+			n, cerr := copyTreeWith(p.src, p.dest, overlay)
+			if cerr != nil {
 				// Remove the partial copy so a failed paste can't leave
 				// a half-populated folder wearing the destination's
 				// name. Safe: uniquePastePath guaranteed dest didn't
@@ -349,10 +532,12 @@ func (a *App) startPaste(destDir string) {
 				break
 			}
 			done++
-			last = p.dest
+			buffered += n
+			last, lastSrc = p.dest, p.src
 		}
 		_ = scr.PostEvent(&pasteDoneEvent{
 			when: time.Now(), dest: last, count: done, err: err,
+			into: into, src: lastSrc, buffered: buffered,
 		})
 	}()
 }
@@ -362,6 +547,11 @@ func (a *App) startPaste(destDir string) {
 // appears in the tree and finder without waiting for the 10-second tick.
 func (a *App) handlePasteDone(e *pasteDoneEvent) {
 	if e == nil {
+		return
+	}
+	if e.into != "" {
+		// A Copy to… run: its receipt names the destination (copyto.go).
+		a.handleCopyToDone(e)
 		return
 	}
 	if e.err != nil {
@@ -376,10 +566,10 @@ func (a *App) handlePasteDone(e *pasteDoneEvent) {
 	}
 	a.workspaceChanged()
 	if e.count > 1 {
-		a.flash(fmt.Sprintf("Pasted %d items", e.count))
+		a.flash(fmt.Sprintf("Pasted %d items", e.count) + bufferedNote(e.buffered))
 		return
 	}
-	a.flash("Pasted " + filepath.Base(e.dest))
+	a.flash("Pasted " + filepath.Base(e.dest) + bufferedNote(e.buffered))
 }
 
 // -----------------------------------------------------------------------------

@@ -27,11 +27,17 @@ plus the LSP work done in the seeding session itself
 - **Open** is what we intend to pick up next. **Roadmap** is wanted but not
   soon — parked, not declined. **Non-goals** is what we are likely never to
   do, kept so it stays visibly declined.
-- **Nothing leaves Open or Roadmap without a line in another section.**
-  Done → Closed. Declined → Non-goals. Merged → Closed as `merged into N-xxx`.
-- Open and Roadmap stay in **ID order**. Never renumber, never delete.
+- **Validate** sits directly below Open: items whose remaining work is purely
+  testing (a hand check in a real terminal or app, a run on real data or
+  hardware, or a test to write or repair), with no product change planned. A
+  check that finds a defect raises it as a new Open item; an Open item whose
+  fix has landed but is unchecked moves to Validate.
+- **Nothing leaves Open, Validate or Roadmap without a line in another
+  section.** Done → Closed. Declined → Non-goals. Merged → Closed as
+  `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
+- Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-055**
+**Next ID: N-057**
 
 ## Open
 
@@ -60,41 +66,12 @@ plus the LSP work done in the seeding session itself
   Homebrew installs. True up to v0.3.0, false for anything released after
   the tap was removed; tweak if N-001 (now Roadmap) ever ships a release.
 
-- **N-010** · raised `2026-0921-0801-lsp-diagnostic-messages` · value low
-  Try the diagnostic pointer tooltip in a REAL terminal (plain tmux, cats,
-  macOS Terminal.app): do motion events reach it, does 250ms feel right.
-  `run-ced` CAN send motion (SGR button 35, `{esc}[<35{semi}X{semi}YM`)
-  and the tooltip opens on the underline in the real binary
-  (2026-09-30); what stays is a person's hand check. Value lowered from
-  medium: the caret-line note (`diagnote.go`) now answers in a terminal
-  with no motion at all, so the tooltip is no longer the only mouse door.
-
-- **N-013** · raised `2026-0921-0906-lsp-experience` · value medium
-  **Most non-Go language servers have never been run.** clangd WAS, on
-  2026-09-21 through the real binary (`run-ced`, a three-file C project):
-  diagnostics, go to definition (into the header), hover, completion and
-  inlay notes (`» n: 3 · by: 4`, on by default) all work. Still
-  registered from documentation only: typescript-language-server,
-  rust-analyzer, pyright/basedpyright/pylsp and zls — none is installed
-  on the dev machine. The TypeScript inlay-hint `preferences` in
-  `initOptions` are the least certain part — typescript-language-server
-  may want them via `workspace/didChangeConfiguration` instead.
-
 - **N-016** · raised `2026-0921-0906-lsp-experience` · value low
   Inlay hints for servers that take their hint settings through
   `workspace/configuration` rather than `initializationOptions` (pyright).
   The auto-responder answers every configuration request with `{}`, so
   those servers never switch hints on. Contingent on N-013 showing it
   matters.
-
-- **N-026** · raised `2026-0921-0932-next-list-run` · value low
-  cats-side: `"KeyA"` is now in `CMD_TO_PANE` (cats `bd18905`,
-  `cmd/catway/web/js/20-keys.js`; the cost to a shell was checked first
-  and is nil: a legacy pane fails the kitty gate). What's left is a HAND
-  CHECK that ⌘A actually reaches a ced pane in Chrome and in the cats mac
-  app, the lesson ⌘E taught (`ed4962c`; Chrome resolved its ⌘E as a menu
-  item and never dispatched it). Both are expected to deliver it; close
-  on confirmation.
 
 - **N-036** · raised `2026-0929-1929-readme-recent-files-and-locations` · value low
   The README's leader-key table is missing top-level leaders that are
@@ -114,14 +91,6 @@ plus the LSP work done in the seeding session itself
   the pointer tooltip (the release arrives as a motion report on the
   same cell and arms the dwell). Harmless, slightly redundant.
 
-- **N-038** · raised `2026-0930-2002-tab-menu-file-verbs` · value low
-  Tab menu "Move to split →" / "Copy to split →" have only run against
-  the test's fake control socket (`withCtlSpy`). The real binary drew the
-  rows inside cats, but no hand check has clicked one and watched the
-  pane appear and the tab close. Also open: whether a `↓` pair is
-  wanted. It was left out to keep the menu at 15 rows (≡ Cats still has
-  "Open in split ↓").
-
 - **N-039** · raised `2026-0930-2002-tab-menu-file-verbs` · value low
   The tab menu is now 16 rows inside cats, 17 on a grouped tab (19 with
   the border); tab groups added "Add to group…" and "Remove from group"
@@ -129,13 +98,6 @@ plus the LSP work done in the seeding session itself
   On a window shorter than about 21 rows, `placeContextSized` clamps the
   menu to row 0 and its bottom rows fall off the screen. The editor
   right-click menu has the same limit; nobody has run into it yet.
-
-- **N-040** · raised `2026-0930-2025-tab-groups` · value low
-  Tab groups have never been checked by hand in a real terminal. The
-  run-ced emulator draws no underlines, so the member underline (plain,
-  `tabbar.go`) has only been seen in tests. Look at it in tmux, cats and
-  macOS Terminal.app, and check that the chip reads well on a light
-  theme (`tabGroupChipFG` picks BG or Text by contrast).
 
 - **N-041** · raised `2026-0930-2025-tab-groups` · value low
   `.claude/skills/run-ced/SKILL.md` recipes open the command palette
@@ -158,12 +120,6 @@ plus the LSP work done in the seeding session itself
   binds F-keys yet) or a ⌘ chord (must be pressed in a real browser
   first, per the ⌘ allowlist rule) would make stepping through them
   practical. Decide which, then add it as a second door.
-
-- **N-047** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
-  The conflict UI has only been driven through `run-ced`'s emulator. Hand
-  check in tmux, cats and macOS Terminal.app: the side washes' contrast
-  (light themes especially), a real mouse click on the `<<<<<<<` lens,
-  and the cats "blocked" badge firing on a stop (`conflictPanel.unseen`).
 
 - **N-048** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
   The git log panel still cherry-picks ONE commit (Actions ▾). Ticking
@@ -206,6 +162,76 @@ plus the LSP work done in the seeding session itself
   twenty-nine" keys (theme.go, palette.go, load_test.go); the table has
   33 derived keys now (31 before this session's two conflict washes). An
   instance of N-003's doc drift.
+
+- **N-055** · raised `2026-1007-1604-copy-to-folder` · value low
+  The tab right-click menu has no "Copy to…" row. Left out on purpose
+  because that menu's row order is pinned (CLAUDE.md, tabcontext.go);
+  ≡ File "Copy file to…" covers the active tab today. Add it if copying a
+  NON-active tab elsewhere turns out to be wanted.
+
+## Validate
+
+Items whose remaining work is purely testing: hand checks in a real terminal
+or app, runs on real data or hardware, and tests to write or repair. No
+product change is planned unless a check finds a defect, which is then raised
+as a new Open item. Split out of Open on 2026-10-07; each item kept its ID
+and `raised`.
+
+- **N-010** · raised `2026-0921-0801-lsp-diagnostic-messages` · value low
+  Try the diagnostic pointer tooltip in a REAL terminal (plain tmux, cats,
+  macOS Terminal.app): do motion events reach it, does 250ms feel right.
+  `run-ced` CAN send motion (SGR button 35, `{esc}[<35{semi}X{semi}YM`)
+  and the tooltip opens on the underline in the real binary
+  (2026-09-30); what stays is a person's hand check. Value lowered from
+  medium: the caret-line note (`diagnote.go`) now answers in a terminal
+  with no motion at all, so the tooltip is no longer the only mouse door.
+
+- **N-013** · raised `2026-0921-0906-lsp-experience` · value medium
+  **Most non-Go language servers have never been run.** clangd WAS, on
+  2026-09-21 through the real binary (`run-ced`, a three-file C project):
+  diagnostics, go to definition (into the header), hover, completion and
+  inlay notes (`» n: 3 · by: 4`, on by default) all work. Still
+  registered from documentation only: typescript-language-server,
+  rust-analyzer, pyright/basedpyright/pylsp and zls — none is installed
+  on the dev machine. The TypeScript inlay-hint `preferences` in
+  `initOptions` are the least certain part — typescript-language-server
+  may want them via `workspace/didChangeConfiguration` instead.
+
+- **N-026** · raised `2026-0921-0932-next-list-run` · value low
+  cats-side: `"KeyA"` is now in `CMD_TO_PANE` (cats `bd18905`,
+  `cmd/catway/web/js/20-keys.js`; the cost to a shell was checked first
+  and is nil: a legacy pane fails the kitty gate). What's left is a HAND
+  CHECK that ⌘A actually reaches a ced pane in Chrome and in the cats mac
+  app, the lesson ⌘E taught (`ed4962c`; Chrome resolved its ⌘E as a menu
+  item and never dispatched it). Both are expected to deliver it; close
+  on confirmation.
+
+- **N-038** · raised `2026-0930-2002-tab-menu-file-verbs` · value low
+  Tab menu "Move to split →" / "Copy to split →" have only run against
+  the test's fake control socket (`withCtlSpy`). The real binary drew the
+  rows inside cats, but no hand check has clicked one and watched the
+  pane appear and the tab close. Also open: whether a `↓` pair is
+  wanted. It was left out to keep the menu at 15 rows (≡ Cats still has
+  "Open in split ↓").
+
+- **N-040** · raised `2026-0930-2025-tab-groups` · value low
+  Tab groups have never been checked by hand in a real terminal. The
+  run-ced emulator draws no underlines, so the member underline (plain,
+  `tabbar.go`) has only been seen in tests. Look at it in tmux, cats and
+  macOS Terminal.app, and check that the chip reads well on a light
+  theme (`tabGroupChipFG` picks BG or Text by contrast).
+
+- **N-047** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
+  The conflict UI has only been driven through `run-ced`'s emulator. Hand
+  check in tmux, cats and macOS Terminal.app: the side washes' contrast
+  (light themes especially), a real mouse click on the `<<<<<<<` lens,
+  and the cats "blocked" badge firing on a stop (`conflictPanel.unseen`).
+
+- **N-056** · raised `2026-1007-1604-copy-to-folder` · value low
+  Copy to… was driven in the real binary only in a NON-repo scratch
+  project (history memory-only). Hand check in a git repo: the field is
+  seeded with the last destination after a restart, and the ▾ / Up
+  dropdown lists and forgets destinations (`history.CopyDestinations`).
 
 ## Roadmap
 

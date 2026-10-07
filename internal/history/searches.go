@@ -44,6 +44,13 @@ const (
 	SearchReplace = "replace"
 	// SearchSymbol is a workspace-symbol query sent to a language server.
 	SearchSymbol = "symbol"
+	// CopyDestinations is not a search: it is the folders a file or
+	// folder was copied to with Copy to… (app/copyto.go). It rides these
+	// lists because it wants exactly their shape — a short per-project
+	// MRU of single-line strings the user typed and will want again, with
+	// the same dropdown to recall them — and a second table for it would
+	// be this file again under another name.
+	CopyDestinations = "copyto"
 )
 
 // MaxSearches caps each kind's list. A history dropdown is scanned by eye,

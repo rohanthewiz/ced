@@ -474,3 +474,20 @@ func TestSearchHistory_ReachesTheDatabase(t *testing.T) {
 		t.Fatalf("loaded = %q", got)
 	}
 }
+
+// TestHistNoun_NamesEachList pins the dropdown's title noun per kind —
+// in particular that Copy to…'s folder list, the one kind that is not a
+// search, is not called "recent searches".
+func TestHistNoun_NamesEachList(t *testing.T) {
+	cases := map[string]string{
+		history.SearchFind:       "searches",
+		history.SearchReplace:    "replacements",
+		history.SearchSymbol:     "symbol searches",
+		history.CopyDestinations: "destinations",
+	}
+	for kind, want := range cases {
+		if got := histNoun(kind); got != want {
+			t.Errorf("histNoun(%q) = %q, want %q", kind, got, want)
+		}
+	}
+}

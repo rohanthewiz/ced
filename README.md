@@ -91,11 +91,23 @@ The goals, in order:
   another edge entirely.
 - **Multi-select in the file tree** — click the left edge of a row (or
   press `Space` with the tree focused) to tick it, then act on the whole
-  set at once: open, copy the paths, copy for paste, zip into one
-  archive, delete, or stage/unstage in git. The verb list is
+  set at once: open, copy the paths, copy for paste, copy to another
+  folder, zip into one archive, delete, or stage/unstage in git. The verb list is
   ≡ **File ▸ Selected items…** or the tree's
   right-click menu; `*` ticks or clears every visible row, and
   shift-click extends a run where your terminal reports it.
+- **Copy files and folders anywhere** — right-click a file or folder
+  in the tree and pick **Copy to…**, type a destination folder
+  (absolute, `~/path`, or relative to the project), and the file or
+  the whole folder is copied there — into another project, a backup
+  folder, anywhere on disk. Nothing is ever overwritten: a name that is
+  already taken gets ` copy` added, as Paste does. A folder that
+  doesn't exist yet is created after you confirm. The prompt starts on
+  the last place you copied to, and `↑` or the `▾` lists the recent
+  ones. A file with unsaved edits is copied as you see it, and the
+  file itself is not saved. The same verb is ≡ **File ▸ Copy file to…** /
+  **Copy folder (…) to…** (the whole project when no folder is active),
+  and **Copy N items to…** for a tree selection.
 - **Type to find in the file tree** — with the tree focused, type any
   part of a name: every row in the current folder (and the folders
   expanded below it) containing it lights up, and the cursor jumps to the
@@ -485,8 +497,9 @@ Then:
   for the action menu — including New file, Rename, Delete.
 - If your terminal forwards Button3, right-click on a file or folder
   in the tree opens a per-item context menu (New File on folders,
-  Rename, Delete). macOS Terminal + tmux often swallows right-click,
-  so all of those actions also live in the main `≡` menu.
+  Rename, Delete, Copy / Paste, Copy to…). macOS Terminal + tmux often
+  swallows right-click, so all of those actions also live in the main
+  `≡` menu.
 - Drag the splitter between a side panel and the editor to resize it,
   or a bottom panel's header rule to change its height. Click a panel's
   `✕` to put it away — see [Tool windows](#tool-windows).

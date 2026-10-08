@@ -175,6 +175,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   used by both draw and hit-test; single-line input = `textField`. Don't
   add per-modal fields to App. `openModal` replaces rather than refuses,
   so unprompted arrivals must DECLINE an occupied slot.
+- **Anchored context menus scroll** (`editorContextModal` and the tree's
+  `contextModal` share `ctxScroll`, contextmenu.go): placed by the
+  CLIPPED height, ▲/▼ on the borders, wheel, arrows reveal, a press on
+  a marked border pages. Row↔screen mapping only via `ctxScroll.pointer`.
 - After any workspace mutation call `a.workspaceChanged()`.
 - **Read the open tab's BUFFER before disk** whenever text is sent
   somewhere (chat, notes, compare, reference context, workspace edits).

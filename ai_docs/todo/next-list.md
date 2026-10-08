@@ -78,16 +78,6 @@ plus the LSP work done in the seeding session itself
   locations). Some may be documented in their own sections; the table
   is what's short. An instance of N-003.
 
-- **N-039** · raised `2026-0930-2002-tab-menu-file-verbs` · value low
-  The tab menu is now 14 rows outside cats and 16 inside, 17 on a
-  grouped tab, 18 on a grouped markdown tab (20 with the border); tab
-  groups added "Add to group…" and "Remove from group" in
-  `2026-0930-2025-tab-groups`, then Restore and Copy to… (N-055) one row
-  each. `editorContextModal` still does not scroll. On a window shorter
-  than about 22 rows, `placeContextSized` clamps the menu to row 0 and
-  its bottom rows fall off the screen. The editor
-  right-click menu has the same limit; nobody has run into it yet.
-
 - **N-041** · raised `2026-0930-2025-tab-groups` · value low
   `.claude/skills/run-ced/SKILL.md` recipes open the command palette
   with `{esc}a`. That is the AI namespace now; the palette is `Esc k`.
@@ -289,6 +279,16 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-08, `2026-1008-1815-context-menus-scroll` —
+  **N-039** anchored context menus scroll when taller than the window.
+  `editorContextModal` (editor, tab, tab-group, problems, git log,
+  conflicts) and the tree's `contextModal` share `ctxScroll`
+  (contextmenu.go): `placeContextSized` places by the CLIPPED height,
+  ▲/▼ on the borders, wheel scrolls, arrows reveal, a press on a marked
+  border pages. Premise corrected: ced draws nothing below `minHeight`
+  (24), so the tab/tree menus fit today; the editor menu (conflict + cats
+  + bookmark + search rows) is what actually overflowed.
 
 - closed 2026-10-08, `2026-1008-1803-diag-note-off-switch` —
   **N-037** the caret-line diagnostic note has an off switch: ≡ View

@@ -986,6 +986,10 @@ type contextModal struct {
 	node  *filetree.Node
 	items []contextItem
 	hover int
+	// scroll is the clipped-popup window, shared with the editor's menu
+	// (ctxScroll, contextmenu.go) — a file's row list runs past 20, so a
+	// short window would otherwise hide the "take it outside" family.
+	scroll ctxScroll
 }
 
 // openTreeContext opens the context menu near (x, y) for node n. The items
@@ -1199,17 +1203,20 @@ func (a *App) placeContext(x, y, count int) (int, int) {
 	return cx, cy
 }
 
-// rect returns the on-screen rectangle of the context menu.
+// rect returns the on-screen rectangle of the context menu, clipped to
+// the window (ctxMenuRows).
 func (m *contextModal) rect(a *App) (x, y, w, h int) {
 	w = m.w
 	if w == 0 {
 		w = contextMenuWidth
 	}
-	return m.x, m.y, w, len(m.items) + 2
+	return m.x, m.y, w, a.ctxMenuRows(m.y, len(m.items)) + 2
 }
 
-// handleKey processes keyboard input for the context menu.
+// handleKey processes keyboard input for the context menu. The arrows
+// scroll a clipped popup just enough to keep the hovered row in view.
 func (m *contextModal) handleKey(a *App, ev *tcell.EventKey) {
+	_, _, _, mh := m.rect(a)
 	switch ev.Key() {
 	case tcell.KeyEsc:
 		a.closeModal()
@@ -1217,10 +1224,12 @@ func (m *contextModal) handleKey(a *App, ev *tcell.EventKey) {
 		if m.hover < len(m.items)-1 {
 			m.hover++
 		}
+		m.scroll.reveal(m.hover, len(m.items), mh-2)
 	case tcell.KeyUp:
 		if m.hover > 0 {
 			m.hover--
 		}
+		m.scroll.reveal(m.hover, len(m.items), mh-2)
 	case tcell.KeyEnter:
 		m.activate(a)
 	}
@@ -1228,21 +1237,19 @@ func (m *contextModal) handleKey(a *App, ev *tcell.EventKey) {
 
 // handleMouse processes mouse input for the context menu. Hovering
 // a row highlights it; clicking activates. Any click outside the popup
-// dismisses it.
+// dismisses it. Row mapping, the wheel and border paging are
+// ctxScroll.pointer's, shared with the editor's menu.
 func (m *contextModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	mx, my, mw, mh := m.rect(a)
-	if x >= mx && x < mx+mw && y > my && y < my+mh-1 {
-		m.hover = y - my - 1
-	}
-	if btn&tcell.Button1 == 0 {
-		return
-	}
-	if x < mx || x >= mx+mw || y < my || y >= my+mh {
+	row, act, dismiss := m.scroll.pointer(x, y, btn, mx, my, mw, mh, len(m.items))
+	if dismiss {
 		a.closeModal()
 		return
 	}
-	if y > my && y < my+mh-1 {
-		m.hover = y - my - 1
+	if row >= 0 {
+		m.hover = row
+	}
+	if act {
 		m.activate(a)
 	}
 }
@@ -1275,8 +1282,13 @@ func (m *contextModal) draw(a *App) {
 	fillRect(a.screen, mx, my, mw, mh, bgStyle)
 	drawBorder(a.screen, mx, my, mw, mh, borderStyle)
 
-	for i, item := range m.items {
-		cy := my + 1 + i
+	// Only the scrolled window is painted; the border markers announce
+	// whatever it leaves out.
+	rows := mh - 2
+	top := m.scroll.offset(len(m.items), rows)
+	for i := top; i < top+rows && i < len(m.items); i++ {
+		item := m.items[i]
+		cy := my + 1 + (i - top)
 		hovered := i == m.hover
 		if hovered {
 			for cx := mx + 1; cx < mx+mw-1; cx++ {
@@ -1289,6 +1301,7 @@ func (m *contextModal) draw(a *App) {
 			drawAt(a.screen, mx+4, cy, item.label, bgStyle)
 		}
 	}
+	a.drawCtxScrollMarks(mx, my, mw, mh, top, len(m.items), chevStyle)
 
 	a.screen.HideCursor()
 }

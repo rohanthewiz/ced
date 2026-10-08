@@ -277,6 +277,14 @@ type Config struct {
 	// ambient text nobody typed. Persisted by the ≡ View toggle.
 	InlayHints bool
 
+	// DiagNote controls the caret-line diagnostic note: the worst
+	// problem under the caret, painted after the end of its line
+	// (app/diagnote.go). Defaults to on — it is the one diagnostic door
+	// that works with no pointer motion and nothing to learn. Off is
+	// here for people who would rather ask (Esc-i, the gutter click,
+	// the pointer tooltip) than be told. Persisted by the ≡ View toggle.
+	DiagNote bool
+
 	// Copilot controls whether the editor runs the GitHub Copilot
 	// sidecar (copilot-language-server). Defaults to on because the
 	// binary is only ever spawned when the user has installed it —
@@ -406,7 +414,7 @@ const (
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true, Terminal: TerminalAuto}
+	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, DiagNote: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true, Terminal: TerminalAuto}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -430,6 +438,7 @@ type fileFormat struct {
 	TreeAutoFit   string `json:"treeautofit,omitempty"`
 	WordHL        string `json:"wordhl,omitempty"`
 	InlayHints    string `json:"inlayhints,omitempty"`
+	DiagNote      string `json:"diagnote,omitempty"`
 	Copilot       string `json:"copilot,omitempty"`
 	Suggestions   string `json:"suggestions,omitempty"`
 	ChatModel     string `json:"chatmodel,omitempty"`
@@ -743,6 +752,20 @@ func Load(path string) (Config, error) {
 		)
 	}
 
+	switch strings.ToLower(strings.TrimSpace(ff.DiagNote)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.DiagNote = true
+	case "off":
+		cfg.DiagNote = false
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: diagnote must be \"on\" or \"off\" (got %q)",
+			path, ff.DiagNote,
+		)
+	}
+
 	switch strings.ToLower(strings.TrimSpace(ff.Copilot)) {
 	case "":
 		// field omitted — keep default
@@ -966,6 +989,16 @@ func SaveInlayHints(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "inlayhints", val)
+}
+
+// SaveDiagNote persists the caret-line diagnostic note preference into
+// the config file at path. See saveKey for the round-trip guarantees.
+func SaveDiagNote(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "diagnote", val)
 }
 
 // SaveCopilot persists the Copilot-sidecar preference into the config

@@ -61,11 +61,6 @@ plus the LSP work done in the seeding session itself
   cats-side decision: should a BLOCKED editor count toward the AGENTS
   attention tally? Currently it does not.
 
-- **N-009** · raised `2026-0914-1114-homebrew-removed` · value low
-  `.claude/commands/summary-of-downloads.md` says download counts include
-  Homebrew installs. True up to v0.3.0, false for anything released after
-  the tap was removed; tweak if N-001 (now Roadmap) ever ships a release.
-
 - **N-016** · raised `2026-0921-0906-lsp-experience` · value low
   Inlay hints for servers that take their hint settings through
   `workspace/configuration` rather than `initializationOptions` (pyright).
@@ -83,20 +78,14 @@ plus the LSP work done in the seeding session itself
   locations). Some may be documented in their own sections; the table
   is what's short. An instance of N-003.
 
-- **N-037** · raised `2026-0930-1910-diagnostic-caret-note` · value low
-  The caret-line diagnostic note (`diagnote.go`) has no off switch. Left
-  out because a ≡ View row means re-pinning the menu-layout tests, and
-  the note shows only on the caret's line. Related nit: on a host that
-  DOES report motion, a click on the underline shows both the note and
-  the pointer tooltip (the release arrives as a motion report on the
-  same cell and arms the dwell). Harmless, slightly redundant.
-
 - **N-039** · raised `2026-0930-2002-tab-menu-file-verbs` · value low
-  The tab menu is now 16 rows inside cats, 17 on a grouped tab (19 with
-  the border); tab groups added "Add to group…" and "Remove from group"
-  in `2026-0930-2025-tab-groups`. `editorContextModal` does not scroll.
-  On a window shorter than about 21 rows, `placeContextSized` clamps the
-  menu to row 0 and its bottom rows fall off the screen. The editor
+  The tab menu is now 14 rows outside cats and 16 inside, 17 on a
+  grouped tab, 18 on a grouped markdown tab (20 with the border); tab
+  groups added "Add to group…" and "Remove from group" in
+  `2026-0930-2025-tab-groups`, then Restore and Copy to… (N-055) one row
+  each. `editorContextModal` still does not scroll. On a window shorter
+  than about 22 rows, `placeContextSized` clamps the menu to row 0 and
+  its bottom rows fall off the screen. The editor
   right-click menu has the same limit; nobody has run into it yet.
 
 - **N-041** · raised `2026-0930-2025-tab-groups` · value low
@@ -160,8 +149,11 @@ plus the LSP work done in the seeding session itself
 - **N-054** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
   The theme package's header comments say Normalize derives "the other
   twenty-nine" keys (theme.go, palette.go, load_test.go); the table has
-  33 derived keys now (31 before this session's two conflict washes). An
-  instance of N-003's doc drift.
+  33 derived keys now (31 before this session's two conflict washes). The
+  totals drifted too: "thirty-five" (palette.go, builtin.go,
+  palette_test.go, load_test.go) is 41 now (8 core + 33). Re-checked
+  2026-10-08 by counting `derivations()`. An instance of N-003's doc
+  drift.
 
 ## Validate
 
@@ -186,8 +178,13 @@ and `raised`.
   diagnostics, go to definition (into the header), hover, completion and
   inlay notes (`» n: 3 · by: 4`, on by default) all work. Still
   registered from documentation only: typescript-language-server,
-  rust-analyzer, pyright/basedpyright/pylsp and zls — none is installed
-  on the dev machine. The TypeScript inlay-hint `preferences` in
+  rust-analyzer, pyright/basedpyright/pylsp and zls — none RUNS on the
+  dev machine. (2026-10-08: `~/.cargo/bin/rust-analyzer` exists but is
+  rustup's proxy with the component missing — it exits "Unknown binary
+  'rust-analyzer' in official toolchain". `rustup component add
+  rust-analyzer` would make it the cheapest server to check next. Until
+  then ced's look-up finds it and the server dies on start, which should
+  degrade silently; worth confirming on the way.) The TypeScript inlay-hint `preferences` in
   `initOptions` are the least certain part — typescript-language-server
   may want them via `workspace/didChangeConfiguration` instead.
 
@@ -251,6 +248,11 @@ Wanted, but not next. Parked, not declined.
   release`; bump past the latest tag first. The `cats-plugin.toml` sed in
   `release.yml` (N-004) is still unrun.
 
+- **N-009** · raised `2026-0914-1114-homebrew-removed` · value low
+  `.claude/commands/summary-of-downloads.md` says download counts include
+  Homebrew installs. True up to v0.3.0, false for anything released after
+  the tap was removed; tweak if N-001 (now Roadmap) ever ships a release.
+
 - **N-017** · raised `2026-0909-1845-tree-multi-select` · value low
   Tree marks: a cross-folder "select all matching" (tick every
   `*_test.go`). The finder answers the question differently today.
@@ -287,6 +289,18 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-08, `2026-1008-1803-diag-note-off-switch` —
+  **N-037** the caret-line diagnostic note has an off switch: ≡ View
+  "Hide / Show diagnostic note" beside the inlay-hints row, persisted as
+  `"diagnote"` (default on; `userconfig.SaveDiagNote`). Held inverted as
+  `App.diagNoteOff` so tests that build App directly keep the note. The
+  nit is fixed too: while the note is on, a press stamps the diag-tip
+  pointer cell, so the click's release (a same-cell motion report) no
+  longer arms a tooltip saying the same thing; while off, it still arms
+  (the click's only answer). Menu pins re-pinned (174 actions, 197).
+  Pinned by `TestDiagNote_OffSwitch`,
+  `TestDiagNote_ClickReleaseArmsNoTooltipWhileOn`, `TestDiagNoteKey`.
 
 - closed 2026-10-08, `2026-1008-1750-tab-menu-copy-to` —
   **N-055** the tab right-click menu has a "Copy to…" row, after Zip

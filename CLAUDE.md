@@ -526,6 +526,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   colour, `(+N more)`; caret line ONLY; replaces that line's inlay note;
   stamped every frame before Render (`Tab.SetCaretNote`, rev + caret
   guarded). The no-motion-terminal door: clicking the underline shows it.
+  Off switch: ≡ View row + `"diagnote"` (default on), held INVERTED as
+  `diagNoteOff` so a directly built App keeps the note; off still stamps
+  an empty note. While ON, a press stamps the diag-tip pointer cell so
+  its release (a same-cell motion report) arms no redundant tooltip;
+  while OFF the release arms it as before (the click's only answer).
 
 ### Change-bar popup (app/hunktip.go, gitdiff.go)
 - Text = the gutter's own `-U0` diff: `diffHunk.Body` keeps each hunk's
@@ -1005,8 +1010,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 173 group
-  actions + 15 headers (190), height 196, dividers `[2, 5, 193]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 174 group
+  actions + 15 headers (191), height 197, dividers `[2, 5, 194]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

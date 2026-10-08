@@ -42,6 +42,21 @@
 // both cannot fit and "broken" outranks "is an int". Re-stamped before
 // every frame from diagsFor, the cache every other diagnostic surface
 // reads; nothing here is scheduled, so an idle editor stays idle.
+//
+// # The off switch
+//
+// ≡ View "Hide diagnostic note" / config `"diagnote": "off"`. Default
+// on: the note is the only door that needs neither motion reports nor
+// knowing a chord, and it is quiet by construction (one line, one
+// sentence). Off is for people who would rather ask than be told; the
+// other doors (Esc-i, the gutter click, the pointer tooltip, Problems)
+// keep working, and the caret line gets its inlay note back.
+//
+// While the note is ON, a click on an underline is already answered
+// beside the caret, so the pointer tooltip does not ALSO open on the
+// press's release (see noteDiagPointer). While it is OFF that release
+// is the click's only answer on a motion-reporting host, so it arms
+// the tooltip as before.
 
 package app
 
@@ -50,6 +65,7 @@ import (
 
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // stampDiagCaretNote installs (or clears) the caret-line diagnostic
@@ -59,7 +75,9 @@ func (a *App) stampDiagCaretNote(t *editor.Tab) {
 		return
 	}
 	text, sev := "", 0
-	if t.Path != "" && !t.IsImage() && !t.IsMarkdownView() {
+	// Off still STAMPS (an empty note): that is what clears a note left
+	// by the frame before the switch, with no per-tab sweep to forget.
+	if !a.diagNoteOff && t.Path != "" && !t.IsImage() && !t.IsMarkdownView() {
 		text, sev = diagCaretNoteText(diagsAtCaret(t, a.diagsFor(t.Path)))
 	}
 	t.SetCaretNote(t.Cursor.Line, text, diagSeverityColor(a.theme, sev))
@@ -111,4 +129,33 @@ func diagCaretNoteText(ds []lsp.Diagnostic) (string, int) {
 		text += fmt.Sprintf("  (+%d more)", n)
 	}
 	return text, sev
+}
+
+// menuToggleDiagNote is the ≡ View row.
+func (a *App) menuToggleDiagNote() {
+	a.closeMenu()
+	a.setDiagNote(a.diagNoteOff)
+}
+
+// setDiagNote is the single write path for the preference: state, flash,
+// config. Nothing else to clear — stampDiagCaretNote runs before every
+// frame and stamps an empty note while the switch is off.
+func (a *App) setDiagNote(on bool) {
+	a.diagNoteOff = !on
+	if on {
+		a.flash("Diagnostic note on")
+	} else {
+		a.flash("Diagnostic note off")
+	}
+	if err := userconfig.SaveDiagNote(userconfig.DefaultPath(), on); err != nil {
+		a.flash("config: " + err.Error())
+	}
+}
+
+// diagNoteToggleLabel names the row by what clicking it does.
+func (a *App) diagNoteToggleLabel() string {
+	if a.diagNoteOff {
+		return "Show diagnostic note"
+	}
+	return "Hide diagnostic note"
 }

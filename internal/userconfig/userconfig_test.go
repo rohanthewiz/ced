@@ -1637,6 +1637,48 @@ func TestInlayHintsKey(t *testing.T) {
 	}
 }
 
+// TestDiagNoteKey pins the diagnote key end to end: on by default, both
+// values recognised, a typo REPORTED rather than ignored, and a save that
+// round-trips without dropping keys it does not model.
+func TestDiagNoteKey(t *testing.T) {
+	if !Defaults().DiagNote {
+		t.Fatal("Defaults().DiagNote = false, want true")
+	}
+	for body, want := range map[string]bool{
+		`{"diagnote":"on"}`:  true,
+		`{"diagnote":"off"}`: false,
+		`{}`:                 true,
+	} {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil || cfg.DiagNote != want {
+			t.Errorf("Load(%s) = %v, %v; want %v", body, cfg.DiagNote, err, want)
+		}
+	}
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"diagnote":"maybe"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Error("a bad value should be reported")
+	}
+
+	if err := os.WriteFile(p, []byte("{\n  \"future-key\": 42\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveDiagNote(p, false); err != nil {
+		t.Fatalf("SaveDiagNote: %v", err)
+	}
+	cfg, err := Load(p)
+	data, _ := os.ReadFile(p)
+	if err != nil || cfg.DiagNote || !strings.Contains(string(data), "future-key") {
+		t.Errorf("round trip: cfg=%v err=%v file=%s", cfg.DiagNote, err, data)
+	}
+}
+
 // TestLoadTerminal pins the "terminal" key's two halves: keywords fold
 // to their canonical spelling (blank and absent mean auto), and any
 // other value is a command line kept verbatim — case and inner spacing

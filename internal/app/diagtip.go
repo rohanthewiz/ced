@@ -107,6 +107,15 @@ func (a *App) noteDiagPointer(x, y int, btn tcell.ButtonMask) bool {
 			a.diagTipContains(x, y)
 		a.diagTip.pressClosed = a.diagTip.open && x == a.diagTip.ax && y == a.diagTip.ay
 		a.closeDiagTip()
+		// The button RELEASE arrives next as a motion report on this same
+		// cell. With the caret-line note on, the press has already been
+		// answered beside the caret (diagnote.go), so stamp the cell: the
+		// release then reads as a repeat below and arms nothing, rather
+		// than opening a tooltip that says the same thing again. With the
+		// note off, leave it — the dwell is then the click's only answer.
+		if !a.diagNoteOff {
+			a.diagTip.x, a.diagTip.y = x, y
+		}
 		return hit
 	}
 	if x == a.diagTip.x && y == a.diagTip.y {

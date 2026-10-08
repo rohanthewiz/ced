@@ -1061,7 +1061,9 @@ palette:
 - **Diagnostics** — a dot in the gutter and an underline on the span,
   with counts in the status bar. **Put the caret on the marked line** —
   click the underline, or arrow onto it — and the message appears after
-  the line in the problem's colour. For the full list on a line, **click
+  the line in the problem's colour (*Hide diagnostic note* under
+  ≡ **View**, or `"diagnote": "off"` in config.json, turns that off).
+  For the full list on a line, **click
   the gutter** mark, rest the pointer on the dot or the underline, or
   press `Esc i`. `Esc !` opens the
   **Problems** panel for the whole project; *Next / Previous problem*

@@ -11,8 +11,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
+
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
+	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
 // editorRowText returns the drawn screen row holding buffer line `line`
@@ -108,5 +111,67 @@ func TestDiagsAtCaret(t *testing.T) {
 	tab.Cursor = editor.Position{Line: 1, Col: 0}
 	if got := diagsAtCaret(tab, all); len(got) != 0 {
 		t.Errorf("clean line = %v, want none", got)
+	}
+}
+
+// TestDiagNote_OffSwitch pins N-037's toggle: off takes the note off the
+// caret line on the very next frame, the row's label offers the way
+// back, the choice is persisted, and on brings the note back.
+func TestDiagNote_OffSwitch(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a, _, _, _ := diagTipTestApp(t)
+	tab := a.activeTabPtr()
+	tab.MoveCursorTo(editor.Position{Line: 2, Col: 0}, false)
+	a.draw()
+	if a.diagNoteToggleLabel() != "Hide diagnostic note" {
+		t.Errorf("default label = %q", a.diagNoteToggleLabel())
+	}
+
+	a.setDiagNote(false)
+	a.draw()
+	if row := editorRowText(t, a, 2); strings.Contains(row, "redeclared") {
+		t.Errorf("note still painted while off: %q", row)
+	}
+	if a.diagNoteToggleLabel() != "Show diagnostic note" {
+		t.Errorf("off label = %q", a.diagNoteToggleLabel())
+	}
+	if cfg, err := userconfig.Load(userconfig.DefaultPath()); err != nil || cfg.DiagNote {
+		t.Errorf("persisted DiagNote = %v, %v; want off", cfg.DiagNote, err)
+	}
+
+	a.setDiagNote(true)
+	a.draw()
+	if row := editorRowText(t, a, 2); !strings.Contains(row, "main redeclared") {
+		t.Errorf("note not back after on: %q", row)
+	}
+}
+
+// TestDiagNote_ClickReleaseArmsNoTooltipWhileOn pins N-037's nit: the
+// release of a click on an underline arrives as a motion report on the
+// same cell. With the note on, the click is already answered beside the
+// caret, so that release must arm no tooltip; with the note off it is
+// the click's only answer and arms as before.
+func TestDiagNote_ClickReleaseArmsNoTooltipWhileOn(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a, _, codeX, rowY := diagTipTestApp(t)
+
+	a.noteDiagPointer(codeX, rowY, tcell.Button1)
+	before := a.diagTip.seq
+	a.noteDiagPointer(codeX, rowY, tcell.ButtonNone)
+	if a.diagTip.seq != before {
+		t.Error("note on: the click's release armed the tooltip")
+	}
+	// Real travel still arms: the stamp covers the release, nothing more.
+	a.noteDiagPointer(codeX+1, rowY, tcell.ButtonNone)
+	if a.diagTip.seq == before {
+		t.Error("note on: moving along the underline armed nothing")
+	}
+
+	a.setDiagNote(false)
+	a.noteDiagPointer(codeX, rowY, tcell.Button1)
+	before = a.diagTip.seq
+	a.noteDiagPointer(codeX, rowY, tcell.ButtonNone)
+	if a.diagTip.seq == before {
+		t.Error("note off: the click's release should arm the tooltip")
 	}
 }

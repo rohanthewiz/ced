@@ -480,6 +480,10 @@ func builtinMenuGroups() []menuGroup {
 			// terminal rows spends the above-the-fold budget
 			// TestMenuLayout_TerminalRowsAboveTheFold pins.
 			{action: (*App).menuToggleInlayHints, enabled: alwaysTrue, labelFor: (*App).inlayHintsToggleLabel},
+			// The caret-line diagnostic note (diagnote.go) shares the
+			// inlay notes' end-of-line slot, so its switch sits beside
+			// theirs, below the fold for the same budget reason.
+			{action: (*App).menuToggleDiagNote, enabled: alwaysTrue, labelFor: (*App).diagNoteToggleLabel},
 			// The Find-all list's edge. Here rather than in Search
 			// because it's a layout preference like the terminal dock
 			// above it — and because it's the only keyboard path to the
@@ -1178,6 +1182,12 @@ type App struct {
 	// inlayEnabled mirrors the persisted "inlayhints" preference;
 	// setInlayHints is its single write path. See lspinlay.go.
 	inlayEnabled bool
+
+	// diagNoteOff mirrors the persisted "diagnote" preference INVERTED,
+	// so the zero value is the default (note on): tests build App
+	// directly and keep the note without seeding a flag. setDiagNote is
+	// its single write path. See diagnote.go.
+	diagNoteOff bool
 
 	// toolLayoutState is the TOOL WINDOW layout: which edge each panel
 	// is docked to and how big it is there. It is the thing remembered
@@ -1969,6 +1979,7 @@ func (a *App) loadUserConfig() {
 	a.autoSaveDelay = cfg.AutoSaveDelay
 	a.wordHLEnabled = cfg.WordHL
 	a.inlayEnabled = cfg.InlayHints
+	a.diagNoteOff = !cfg.DiagNote
 	a.applyWordHighlight() // no-op at startup; matters when the config is re-read
 	a.findAllDockRight = cfg.FindAllDock == userconfig.FindAllDockRight
 	a.blameBands = cfg.BlameStyle != userconfig.BlameStyleCompact

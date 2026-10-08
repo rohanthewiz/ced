@@ -25,6 +25,7 @@
 //	             │ ▸ Add to group…           │   group it (tabgroups.go)
 //	             │ ▸ Remove from group api   │   (grouped tabs only)
 //	             │ ▸ Zip file                │   copy it out
+//	             │ ▸ Copy to…                │   (copyto.go)
 //	             │ ▸ Copy relative path      │
 //	             │ ▸ Copy absolute path      │
 //	             │ ▸ Close tab               │   make it go away
@@ -39,8 +40,9 @@
 //     format, validate) bring it forward first (onTab) — a diff or a
 //     caret on a problem in a tab nobody can see is an answer shown
 //     nowhere. Rows whose answer is a flash, a panel or a file on disk
-//     (close, zip, copy path, git changes / history, the splits) act in
-//     place, so tidying a background tab never drags it forward. Reveal
+//     (close, zip, Copy to…, copy path, git changes / history, the
+//     splits) act in place, so tidying a background tab never drags it
+//     forward. Reveal
 //     opens the file by nature (RevealPath): the selected tree row and
 //     the active tab are meant to agree.
 //   - **Every verb is an existing one.** Each row calls the same code
@@ -59,8 +61,8 @@
 //     pair is ≡ Git "Show file's uncommitted changes" / "Show file's git
 //     history"; Restore is ≡ Git "Restore file (discard changes)…"
 //     (and the tree's "Git restore…"); Move to split is ≡ Cats "Move to split →" and Copy to
-//     split is its "Open in split →"; the rest were already there. The
-//     twins act on the ACTIVE tab.
+//     split is its "Open in split →"; Copy to… is ≡ File "Copy file
+//     to…"; the rest were already there. The twins act on the ACTIVE tab.
 //   - **Close other tabs keeps unsaved tabs** and says how many. Closing
 //     several dirty tabs would mean a queue of save/discard dialogs from
 //     one click, and the single modal slot cannot stack them; the dirty
@@ -171,6 +173,11 @@ func (a *App) tabContextItems(t *editor.Tab) []editorContextItem {
 	}
 	items = append(items,
 		editorContextItem{label: "Zip file", action: func(app *App) { app.startZip(t.Path) }, enabled: hasPath},
+		// The ≡ File row only reaches the ACTIVE tab; this one copies a
+		// background tab without bringing it forward — the answer is a
+		// prompt and then a file somewhere else on disk. An unsaved
+		// buffer is copied as shown (copypaste.go's overlay), never saved.
+		editorContextItem{label: "Copy to…", action: func(app *App) { app.promptCopyTo([]string{t.Path}) }, enabled: hasPath},
 		editorContextItem{label: "Copy relative path", action: func(app *App) {
 			app.copyPathToSystemClipboard(app.relativePathFor(t.Path), "relative path")
 		}, enabled: hasPath},

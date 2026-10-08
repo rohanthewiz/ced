@@ -26,6 +26,7 @@
 // overwrites anything either.
 //
 //	tree right-click "Copy to…" ─┐
+//	tab right-click "Copy to…" ──┤
 //	≡ File "Copy file to…" ──────┤
 //	≡ File "Copy folder … to…" ──┼─▶ promptCopyTo ─▶ copyToTyped ─┬─▶ startCopyTo ─▶ runCopyPlan
 //	Selected items "Copy N to…" ─┘    (▾ recent)     (resolve)    └─▶ confirm "Create folder" ─┘

@@ -99,7 +99,7 @@ func TestTabContext_RightClickOpensTheTabMenu(t *testing.T) {
 		labels = append(labels, it.label)
 	}
 	want := "Reveal in file tree|Show uncommitted changes|Show git history|Compare with clipboard|" +
-		"Format file|Validate file|Restore (discard changes)…|Add to group…|Zip file|Copy relative path|Copy absolute path|Close tab|Close other tabs"
+		"Format file|Validate file|Restore (discard changes)…|Add to group…|Zip file|Copy to…|Copy relative path|Copy absolute path|Close tab|Close other tabs"
 	if got := strings.Join(labels, "|"); got != want {
 		t.Errorf("rows = %s, want %s", got, want)
 	}
@@ -329,6 +329,31 @@ func TestTabContext_ZipActsInPlace(t *testing.T) {
 	a.handleEvent(e)
 	if _, err := os.Stat(paths[1] + ".zip"); err != nil {
 		t.Errorf("no b.go.zip beside b.go: %v", err)
+	}
+}
+
+// TestTabContext_CopyToCopiesTheClickedTabInPlace pins N-055's row: Copy
+// to… on a BACKGROUND tab copies that tab's file (its unsaved buffer, as
+// the ≡ twin would) and leaves the active tab in front.
+func TestTabContext_CopyToCopiesTheClickedTabInPlace(t *testing.T) {
+	a, paths := tabMenuTestApp(t)
+	elsewhere := t.TempDir()
+	a.tabs[1].InsertString("// edited\n")
+
+	_, sy, _ := a.tabStripRect()
+	rightClick(a, tabRectFor(t, a, paths[1]).X+2, sy)
+	runTabMenuRow(t, a, "Copy to…")
+	submitCopyTo(t, a, elsewhere)
+	a.handlePasteDone(waitForPasteEvent(t, a))
+
+	if a.activeTabPtr().Path != paths[0] {
+		t.Errorf("active = %s, want a.go still", a.activeTabPtr().Path)
+	}
+	if got := readString(t, filepath.Join(elsewhere, "b.go")); got != "// edited\npackage x\n" {
+		t.Errorf("copy = %q, want b.go's buffer", got)
+	}
+	if _, err := os.Stat(filepath.Join(elsewhere, "a.go")); err == nil {
+		t.Error("copied the active tab instead of the clicked one")
 	}
 }
 

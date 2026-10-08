@@ -163,12 +163,6 @@ plus the LSP work done in the seeding session itself
   33 derived keys now (31 before this session's two conflict washes). An
   instance of N-003's doc drift.
 
-- **N-055** · raised `2026-1007-1604-copy-to-folder` · value low
-  The tab right-click menu has no "Copy to…" row. Left out on purpose
-  because that menu's row order is pinned (CLAUDE.md, tabcontext.go);
-  ≡ File "Copy file to…" covers the active tab today. Add it if copying a
-  NON-active tab elsewhere turns out to be wanted.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -293,6 +287,15 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-08, `2026-1008-1750-tab-menu-copy-to` —
+  **N-055** the tab right-click menu has a "Copy to…" row, after Zip
+  file (copy-it-out group). It acts IN PLACE on the clicked tab
+  (`promptCopyTo` with that tab's path), so a background tab is copied
+  without coming forward; an unsaved buffer is copied as shown, never
+  saved. ≡ File "Copy file to…" is its twin. Order pin updated
+  (`TestTabContext_RightClickOpensTheTabMenu`, CLAUDE.md); pinned by
+  `TestTabContext_CopyToCopiesTheClickedTabInPlace`.
 
 - closed 2026-10-08, `2026-1008-1737-popup-width-rule` —
   **N-058** checked: nothing overflowed. problems.go, gitlogactions.go,

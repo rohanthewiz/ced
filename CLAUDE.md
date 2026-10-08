@@ -268,10 +268,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (`gitLogShowFile`, `p:` filter, field NOT focused), compare, Preview
   (markdown only), Format, Validate (`validateFile`), Restore (`restoreFile`),
   Move/Copy to split → (only when `InCats`, like the ≡ Cats group), Add to group…,
-  Remove from group <name> (grouped tabs only), Zip, copy paths,
+  Remove from group <name> (grouped tabs only), Zip, Copy to…, copy paths,
   Close tab, Close other tabs (KEEPS dirty tabs). Rows call the same
   verbs as their ≡ twins: Nav "Reveal file in tree", File "Validate
-  file" / "Close other tabs", Git "Show file's uncommitted changes" /
+  file" / "Close other tabs" / "Copy file to…", Git "Show file's uncommitted changes" /
   "Show file's git history" / "Restore file (discard changes)…", Cats "Move to split →" ("Open in split →"
   is Copy). Splits (`catsSplitTab`) SAVE a dirty tab first; Move closes
   the tab only on the host's answer (`catsKindSplitMoved`) and keeps it
@@ -794,7 +794,7 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   No Discard row. Delete clears the set.
 - **Copy to… (copyto.go)**: copy into a TYPED folder anywhere on disk
   (Paste only reaches folders the tree shows). Doors: tree right-click
-  (root included), ≡ File "Copy file to…" / "Copy folder (…) to…"
+  (root included), tab right-click (acts in place), ≡ File "Copy file to…" / "Copy folder (…) to…"
   (project when no subfolder), marks picker "Copy N items to…". Shares
   Paste's engine: `planCopyInto` (plan before writing, names reserved,
   folder-into-itself refused after `resolveExisting` on both sides) →

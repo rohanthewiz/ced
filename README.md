@@ -97,7 +97,7 @@ The goals, in order:
   right-click menu; `*` ticks or clears every visible row, and
   shift-click extends a run where your terminal reports it.
 - **Copy files and folders anywhere** — right-click a file or folder
-  in the tree and pick **Copy to…**, type a destination folder
+  in the tree (or a tab) and pick **Copy to…**, type a destination folder
   (absolute, `~/path`, or relative to the project), and the file or
   the whole folder is copied there — into another project, a backup
   folder, anywhere on disk. Nothing is ever overwritten: a name that is
@@ -510,8 +510,9 @@ Then:
     in a pane beside this one; Move then closes the tab here. An
     unsaved tab is saved first, since the second editor reads the disk.
   - *Add to group…* / *Remove from group* — see tab groups below.
-  - *Zip file*, *Copy relative / absolute path*, *Close tab*, *Close
-    other tabs* (unsaved tabs are kept).
+  - *Zip file*, *Copy to…* (into any folder on disk — see above),
+    *Copy relative / absolute path*, *Close tab*, *Close other tabs*
+    (unsaved tabs are kept).
 
   Rows that show you something about the file (compare, preview,
   format, validate) bring the tab to the front first; the rest act on

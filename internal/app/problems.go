@@ -719,15 +719,7 @@ func (a *App) tryProblemsContextClick(x, y int) bool {
 	a.problemsSelectRow(idx, false)
 
 	items := a.problemsContextItems()
-	w := contextMenuWidth
-	for _, it := range items {
-		if lw := runeLen(it.label) + 6; lw > w {
-			w = lw
-		}
-	}
-	if w > a.width {
-		w = a.width
-	}
+	w := a.editorContextMenuWidth(items)
 	cx, cy := a.placeContextSized(x, y, len(items), w)
 	a.openModal(&editorContextModal{x: cx, y: cy, w: w, items: items})
 	return true

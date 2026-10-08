@@ -1149,14 +1149,29 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 // the code behind it. contextMenuWidth stays the floor so the common
 // popup keeps the shape users know; the screen width is the ceiling.
 func (a *App) contextMenuWidthFor(items []contextItem) int {
-	w := contextMenuWidth
+	widest := 0
 	for _, it := range items {
-		if lw := runeLen(it.label) + 6; lw > w { // border+chevron+padding
-			w = lw
-		}
+		widest = max(widest, runeLen(it.label))
 	}
-	if a.width > 0 && w > a.width {
-		w = a.width
+	return a.contextMenuWidthForLabel(widest)
+}
+
+// contextMenuWidthForLabel is the ONE sizing rule for every anchored
+// popup (tree, editor, tab, tab group, problems, git log, conflicts),
+// given the rune width of its widest label. Each chassis has its own row
+// type, so each keeps a tiny adapter that finds the widest label and
+// hands it here; the arithmetic lives once so the menus cannot drift
+// apart again (they were seven hand copies, some clamping to a zero
+// a.width and some not).
+//
+//	│ ▸ label │   border(1) + pad(1) + chevron(1) + pad(1) + label + pad(1) + border(1)
+//
+// 0 width (a hand-built App in a test, before any resize) is "unknown",
+// not "zero columns": the clamp only applies once the screen is measured.
+func (a *App) contextMenuWidthForLabel(widest int) int {
+	w := max(contextMenuWidth, widest+6)
+	if a.width > 0 {
+		w = min(w, a.width)
 	}
 	return w
 }

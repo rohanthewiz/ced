@@ -552,13 +552,7 @@ func (a *App) tabGroupContextItems(g *tabGroup) []editorContextItem {
 // so it never covers the chip it describes.
 func (a *App) openTabGroupMenu(g *tabGroup, x, y int) {
 	items := a.tabGroupContextItems(g)
-	w := contextMenuWidth
-	for _, it := range items {
-		if lw := runeLen(it.label) + 6; lw > w { // border+chevron+padding
-			w = lw
-		}
-	}
-	w = min(w, a.width)
+	w := a.editorContextMenuWidth(items)
 	cx, cy := a.placeContextSized(x, y+1, len(items), w)
 	a.openModal(&editorContextModal{x: cx, y: cy, w: w, items: items})
 }

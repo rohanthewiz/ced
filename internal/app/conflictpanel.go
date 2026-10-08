@@ -618,11 +618,7 @@ func (a *App) tryConflictPanelContextClick(x, y int) bool {
 	if len(items) == 0 {
 		return true
 	}
-	w := contextMenuWidth
-	for _, it := range items {
-		w = max(w, runeLen(it.label)+6)
-	}
-	w = min(w, a.width)
+	w := a.editorContextMenuWidth(items)
 	cx, cy := a.placeContextSized(x, y, len(items), w)
 	a.openModal(&editorContextModal{x: cx, y: cy, w: w, items: items})
 	return true

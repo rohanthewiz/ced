@@ -93,13 +93,7 @@ func (a *App) tryTabContextClick(x, y int) bool {
 			continue
 		}
 		items := a.tabContextItems(a.tabs[r.Index])
-		w := contextMenuWidth
-		for _, it := range items {
-			if lw := runeLen(it.label) + 6; lw > w { // border+chevron+padding
-				w = lw
-			}
-		}
-		w = min(w, a.width)
+		w := a.editorContextMenuWidth(items)
 		// Anchored one row BELOW the strip so the menu never covers the
 		// tab it describes.
 		cx, cy := a.placeContextSized(x, y+1, len(items), w)

@@ -56,6 +56,20 @@ type editorContextModal struct {
 	hover int
 }
 
+// editorContextMenuWidth sizes an editorContextModal to its widest label
+// via the shared rule (contextMenuWidthForLabel, modals.go). Every opener
+// of this chassis — editor, preview, tab, tab group, problems, git log,
+// conflicts — goes through it, including the one-row preview menu whose
+// label fits the floor today: a fixed width is only right until someone
+// renames the row.
+func (a *App) editorContextMenuWidth(items []editorContextItem) int {
+	widest := 0
+	for _, it := range items {
+		widest = max(widest, runeLen(it.label))
+	}
+	return a.contextMenuWidthForLabel(widest)
+}
+
 // tryEditorContextClick opens the context menu when (x, y) lands in the
 // editor body over a text tab. Returns true when it consumed the event,
 // so the caller knows not to fall back to the ≡ menu. Points inside any
@@ -106,15 +120,7 @@ func (a *App) tryEditorContextClick(x, y int) bool {
 	}
 
 	items := a.editorContextItems(tab)
-	w := contextMenuWidth
-	for _, it := range items {
-		if lw := runeLen(it.label) + 6; lw > w { // border+chevron+padding
-			w = lw
-		}
-	}
-	if w > a.width {
-		w = a.width
-	}
+	w := a.editorContextMenuWidth(items)
 	cx, cy := a.placeContextSized(x, y, len(items), w)
 	a.openModal(&editorContextModal{x: cx, y: cy, w: w, items: items})
 	return true
@@ -408,10 +414,7 @@ func (a *App) openPreviewContext(x, y int) {
 	items := []editorContextItem{
 		{label: "Stop Preview", action: (*App).toggleMarkdownView, enabled: alwaysTrue},
 	}
-	w := contextMenuWidth
-	if w > a.width {
-		w = a.width
-	}
+	w := a.editorContextMenuWidth(items)
 	cx, cy := a.placeContextSized(x, y, len(items), w)
 	a.openModal(&editorContextModal{x: cx, y: cy, w: w, items: items})
 }

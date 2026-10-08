@@ -169,13 +169,6 @@ plus the LSP work done in the seeding session itself
   ≡ File "Copy file to…" covers the active tab today. Add it if copying a
   NON-active tab elsewhere turns out to be wanted.
 
-- **N-058** · raised `2026-1008-1724-tree-open-finder-terminal-shell-cmd` · value low
-  The tree popup was sized to its widest label (`contextMenuWidthFor`)
-  because rows like "Add to favorites…" ran over its right border. The
-  other popups that still take the fixed `contextMenuWidth` (problems.go,
-  gitlogactions.go, conflictpanel.go, contextmenu.go:411) were not
-  checked for the same overflow; size them the same way if any is.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -300,6 +293,16 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-08, `2026-1008-1737-popup-width-rule` —
+  **N-058** checked: nothing overflowed. problems.go, gitlogactions.go,
+  conflictpanel.go (and tabcontext.go, tabgroups.go, the editor menu)
+  already grew to their widest label — `contextMenuWidth` was only the
+  loop's floor; the one truly fixed popup, the preview's "Stop Preview"
+  (contextmenu.go), fits it (12 + 6 ≤ 19). The seven hand copies of the
+  sizing loop now share `contextMenuWidthForLabel` (modals.go) via
+  `contextMenuWidthFor` / `editorContextMenuWidth`, the preview menu
+  included, so they can't drift.
 
 - closed 2026-10-03, `2026-1003-1533-change-bar-popup` —
   **N-046** CLAUDE.md's Commits rule now allows `Co-Authored-By: Claude`

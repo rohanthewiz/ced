@@ -427,3 +427,27 @@ func TestEditorContextLeadsWithConflictRows(t *testing.T) {
 		t.Error("conflict rows offered outside a conflict")
 	}
 }
+
+// TestEditorContextMenuWidth_SharesTheTreeRule pins every editor-chassis
+// popup (editor, preview, tab, group, problems, git log, conflicts) to
+// the tree popup's sizing: the classic width as a floor, grown to the
+// widest label, clamped to a measured screen — so no row can run over
+// the right border and the menus can't drift apart again.
+func TestEditorContextMenuWidth_SharesTheTreeRule(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	if got := a.editorContextMenuWidth([]editorContextItem{{label: "Stop Preview"}}); got != contextMenuWidth {
+		t.Fatalf("short label: width %d, want the floor %d", got, contextMenuWidth)
+	}
+	long := "Delete (both sides deleted it)"
+	items := []editorContextItem{{label: "Copy path"}, {label: long}}
+	if got := a.editorContextMenuWidth(items); got != runeLen(long)+6 {
+		t.Fatalf("long label: width %d, want %d", got, runeLen(long)+6)
+	}
+	if got, want := a.editorContextMenuWidth(items), a.contextMenuWidthFor([]contextItem{{label: long}}); got != want {
+		t.Fatalf("editor chassis %d != tree chassis %d for the same label", got, want)
+	}
+	a.width = 15
+	if got := a.editorContextMenuWidth(items); got != 15 {
+		t.Fatalf("narrow screen: width %d, want 15", got)
+	}
+}

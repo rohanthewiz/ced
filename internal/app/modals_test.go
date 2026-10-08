@@ -1158,3 +1158,16 @@ func TestConfirmModal_BodyAccessor(t *testing.T) {
 		t.Errorf("empty body rows = %d, want 1", got)
 	}
 }
+
+// TestContextMenuWidthForLabel_UnmeasuredScreenKeepsTheFloor checks the
+// shared rule treats a zero a.width as "not measured yet" rather than
+// clamping the popup to zero columns.
+func TestContextMenuWidthForLabel_UnmeasuredScreenKeepsTheFloor(t *testing.T) {
+	a := &App{}
+	if got := a.contextMenuWidthForLabel(3); got != contextMenuWidth {
+		t.Fatalf("unmeasured, short: width %d, want %d", got, contextMenuWidth)
+	}
+	if got := a.contextMenuWidthForLabel(30); got != 36 {
+		t.Fatalf("unmeasured, long: width %d, want 36", got)
+	}
+}

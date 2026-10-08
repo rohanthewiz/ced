@@ -978,7 +978,7 @@ type contextItem struct {
 // contextModal is the small right-click popup over the file tree,
 // anchored at (x, y) and acting on node.
 type contextModal struct {
-	x, y  int
+	x, y int
 	// w is the popup's width, sized to its widest label at open
 	// (contextMenuWidthFor). 0 — a hand-built modal in a test — reads as
 	// contextMenuWidth.

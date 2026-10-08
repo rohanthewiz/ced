@@ -274,7 +274,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-10-08, no session doc (commit "run-ced: palette is Esc k, not Esc a (N-041)") —
+- closed 2026-10-08, `2026-1008-1825-run-ced-palette-leader` —
   **N-041** the run-ced recipes open the palette with `{esc}k`, in
   SKILL.md and in the capture tool's `-help-script` text. "Leaders worth
   knowing" now says `k` palette, adds `?`, and warns that `a` is the AI

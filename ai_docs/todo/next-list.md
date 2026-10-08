@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-059**
+**Next ID: N-060**
 
 ## Open
 
@@ -100,12 +100,6 @@ plus the LSP work done in the seeding session itself
   log-side twin of the cherry-pick dialog, which only lists one branch
   against HEAD.
 
-- **N-049** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
-  No side-by-side view of a conflict block (VS Code's "Compare changes",
-  a 3-way merge editor). The washes show both sides in place; comparing
-  current vs incoming vs base for one block would need the compare panel
-  to take two arbitrary texts instead of "buffer vs something".
-
 - **N-050** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
   The marker grammar (editor/conflict.go) matches only git's default
   conflict-marker-size of 7. A repo setting the `conflict-marker-size`
@@ -138,6 +132,14 @@ plus the LSP work done in the seeding session itself
   palette_test.go, load_test.go) is 41 now (8 core + 33). Re-checked
   2026-10-08 by counting `derivations()`. An instance of N-003's doc
   drift.
+
+- **N-059** · raised `2026-1008-1837-conflict-compare-sides` · value medium
+  The compare panel (and the git panel's diff, which shares the row
+  painter `drawAt`) draws a TAB as one cell, so tab-indented code — every
+  Go file — loses its indentation depth in the diff: `\t\treturn nil`
+  reads as ` return nil`. Seen in the real binary on a Go conflict's
+  Compare sides. Expand tabs (the hunk popup uses 4 cells) before
+  clipping, keeping the leading `+`/`-`/space column.
 
 ## Validate
 
@@ -273,6 +275,15 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-08, `2026-1008-1837-conflict-compare-sides` —
+  **N-049** a conflict block's sides diff in the
+  compare panel ("Compare sides": a lens button, a right-click row, ≡ Git
+  "Compare conflict sides…"). The panel takes two arbitrary texts now
+  (`compareTexts`); a diff3 block offers current ↔ incoming, base ↔
+  current and base ↔ incoming. Not a 3-way merge editor — a unified diff
+  of one pair at a time, with ⟳ re-reading the block and double-click
+  landing on the buffer line.
 
 - closed 2026-10-08, `2026-1008-1825-run-ced-palette-leader` —
   **N-041** the run-ced recipes open the palette with `{esc}k`, in

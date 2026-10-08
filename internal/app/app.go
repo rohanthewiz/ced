@@ -757,6 +757,10 @@ func builtinMenuGroups() []menuGroup {
 			// the lens's verbs for the block under the caret, and a walk
 			// over every conflict block in every unmerged file.
 			{label: "Resolve conflict at caret…", action: (*App).menuResolveConflictAtCaret, enabled: (*App).hasConflictAtCaret},
+			// The block's two sides diffed in the compare panel
+			// (conflictcompare.go) — the keyboard twin of the lens's
+			// "Compare" button, which is the first one a narrow pane sheds.
+			{label: "Compare conflict sides…", action: (*App).menuCompareConflictAtCaret, enabled: (*App).hasConflictAtCaret},
 			{label: "Next conflict", action: (*App).menuNextConflict, enabled: (*App).hasConflictsToWalk},
 			{label: "Previous conflict", action: (*App).menuPrevConflict, enabled: (*App).hasConflictsToWalk},
 			// The Conflicts tool window (conflictpanel.go). Enabled on any

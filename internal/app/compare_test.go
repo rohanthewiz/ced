@@ -305,3 +305,30 @@ func TestCompareRefresh_RediffsPastedSide(t *testing.T) {
 			strings.Join(a.compare.lines, "\n"))
 	}
 }
+
+// TestCompareTexts_ResetsTheSource pins the general form's contract: two
+// arbitrary texts are diffed old → new, and whatever source the PREVIOUS
+// comparison remembered (a file to re-read, a jump target) is dropped —
+// a ⟳ after a two-text compare must not re-read the earlier file.
+func TestCompareTexts_ResetsTheSource(t *testing.T) {
+	a := seedCompareApp(t, map[string]string{
+		"mine.txt":  "one\n",
+		"other.txt": "two\n",
+	}, "mine.txt")
+	a.compareWithFile(filepath.Join(a.rootDir, "other.txt"))
+	a.compare.newLineBase = 7
+
+	a.compareTexts("left", []string{"x", "y"}, "right", []string{"x", "z"})
+	joined := strings.Join(a.compare.lines, "\n")
+	if !strings.Contains(joined, "--- left") || !strings.Contains(joined, "-y") || !strings.Contains(joined, "+z") {
+		t.Fatalf("diff does not read old→new:\n%s", joined)
+	}
+	if a.compare.oldPath != "" || a.compare.oldLines != nil || a.compare.newPath != "" ||
+		a.compare.newLineBase != 0 || a.compare.conflict != nil {
+		t.Errorf("source survived: %+v", a.compare)
+	}
+	a.compareRefresh() // nothing to re-run: the diff stays as it is
+	if got := strings.Join(a.compare.lines, "\n"); got != joined {
+		t.Errorf("refresh replaced a sourceless diff:\n%s", got)
+	}
+}

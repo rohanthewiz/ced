@@ -63,7 +63,8 @@ import (
 //
 //	bit 20     tag
 //	bits 4–19  block index (65536 blocks — no real file comes close)
-//	bits 0–3   editor.ConflictChoice
+//	bits 0–3   editor.ConflictChoice, or conflictCompareLens (0xf) for
+//	           the "Compare" button, which settles nothing
 const conflictLensTag = 1 << 20
 
 // conflictLensID packs a block index and a choice into a tagged lens ID.
@@ -202,7 +203,9 @@ func conflictRegionColor(th theme.Theme, r editor.ConflictRegion) tcell.Color {
 // Lenses puts the verbs on each visible block's opener, most-wanted
 // first so a narrow pane sheds the rarer ones (editor/lens.go). Accept
 // base appears only on a diff3 block — on a two-way block it would be a
-// button that refuses.
+// button that refuses. "Compare" goes last: it is a look, not a
+// decision, so it is the first button a narrow pane gives up — its
+// right-click and ≡ twins stay (conflictcompare.go).
 func (s conflictSource) Lenses(t *editor.Tab, th theme.Theme, first, last int) map[int][]editor.Lens {
 	blocks := s.visibleBlocks(t, first, last)
 	if len(blocks) == 0 {
@@ -227,6 +230,8 @@ func (s conflictSource) Lenses(t *editor.Tab, th theme.Theme, first, last int) m
 			set = append(set, editor.Lens{Label: editor.ChooseBase.Label(), Short: "Base",
 				FG: th.Text, ID: conflictLensID(idx, editor.ChooseBase)})
 		}
+		set = append(set, editor.Lens{Label: "Compare sides", Short: "Compare",
+			FG: th.Text, ID: conflictLensID(idx, conflictCompareLens)})
 		out[b.Start] = set
 	}
 	return out
@@ -285,6 +290,10 @@ func (a *App) conflictLensPress(x, y int) bool {
 	}
 	blocks := t.Conflicts()
 	if idx < 0 || idx >= len(blocks) || blocks[idx].Start != hit.Line {
+		return true
+	}
+	if choice == conflictCompareLens {
+		a.compareConflictBlock(t, idx)
 		return true
 	}
 	a.resolveConflictBlock(t, idx, choice)
@@ -434,6 +443,18 @@ func (a *App) conflictContextItems() []editorContextItem {
 			enabled: alwaysTrue,
 		})
 	}
+	// The look before the choice, after the choices: the rows above are
+	// what the menu was opened for. The ellipsis only where a picker
+	// follows — a diff3 block asks which pair.
+	label := "Compare sides"
+	if b.HasBase() {
+		label += "…"
+	}
+	out = append(out, editorContextItem{
+		label:   label,
+		action:  func(app *App) { app.compareConflictBlock(t, idx) },
+		enabled: alwaysTrue,
+	})
 	return out
 }
 

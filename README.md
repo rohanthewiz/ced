@@ -1011,6 +1011,12 @@ panel.
   that side — one `Undo` puts the markers back. Right-click inside a
   conflict for two more: *both, incoming first* and *neither*. With
   `merge.conflictStyle=diff3` there's an *Accept base* too.
+- **Compare sides** (the last button on the `<<<<<<<` line, also on
+  the right-click menu) diffs the conflict's two sides in the compare
+  panel, so a one-line difference inside a long block stands out. With
+  `diff3` it asks which pair: the two sides, or *base ↔ current* /
+  *base ↔ incoming* — what each side changed. Double-click a `+` line
+  to jump to it in the file; ⟳ re-reads the conflict after you edit it.
 - **"Current" is the branch you're on, "incoming" is what's being
   applied.** The panel's second line spells that out per operation —
   in a rebase they're the other way round from what most people expect,
@@ -1035,7 +1041,7 @@ files show red in the file tree.
 
 Keyboard doors, all under `≡` → Git (and so in the `Esc k` palette):
 **Resolve conflicts…** (every verb above as a picker), **Resolve
-conflict at caret…**, **Next conflict** / **Previous conflict** (which
+conflict at caret…**, **Compare conflict sides…**, **Next conflict** / **Previous conflict** (which
 walk on into the next conflicted file), and **Show conflicts panel**.
 
 ## Code intelligence (language servers)

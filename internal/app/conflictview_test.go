@@ -103,7 +103,7 @@ func TestConflictSource_GatedOnGit(t *testing.T) {
 		t.Error("the two sides share one colour")
 	}
 	lenses := src.Lenses(tab, a.theme, 0, 10)
-	if set := lenses[1]; len(set) != 3 || set[0].Label != "Accept current" {
+	if set := lenses[1]; len(set) != 4 || set[0].Label != "Accept current" || set[3].Label != "Compare sides" {
 		t.Errorf("opener lens = %+v", lenses[1])
 	}
 }
@@ -188,7 +188,7 @@ func TestConflictContextItems_OnlyInsideABlock(t *testing.T) {
 	for i, r := range rows {
 		labels[i] = r.label
 	}
-	want := "Accept current|Accept incoming|Accept both|Accept both, incoming first|Accept neither"
+	want := "Accept current|Accept incoming|Accept both|Accept both, incoming first|Accept neither|Compare sides"
 	if got := strings.Join(labels, "|"); got != want {
 		t.Errorf("rows = %s", got)
 	}

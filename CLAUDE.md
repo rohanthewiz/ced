@@ -705,7 +705,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   modal). Continue/skip use the hook too (a continue can stop on the next
   commit); `gitConflictAfterStep` closes the panel when the op ends.
   `conflictPanel.unseen` is the cats "blocked" mark for a stop (the panel
-  isn't a modal), cleared by the next key/click in handleEvent. Status bar
+  isn't a modal), cleared by the next key/click in handleEvent.
+  Compare sides (conflictcompare.go): the compare panel, not a merge
+  editor; applied side is NEW (current → incoming; base is old on both
+  diff3 pairs, which a picker chooses between). Lens button LAST (shed
+  first; nibble `conflictCompareLens` 0xf, never a ConflictChoice),
+  right-click row, ≡ Git "Compare conflict sides…". ⟳ re-finds the block
+  by OPENER LINE; gone → flash, old diff kept. Status bar
   ⚠ segment + tree error colour read the snapshot (`gitOp` rides the
   existing rev-parse via `--absolute-git-dir`). The picker stays as the
   keyboard door.
@@ -747,7 +753,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   with the cut named; declines an occupied modal slot.
 
 ### Compare panel (internal/diff, app/compare.go)
-- Active buffer is always the NEW side. Pure-Go patience diff; LCS only
+- Active buffer is the NEW side for every file/paste source. Two-slice
+  sources (selection vs paste, conflict sides) go through `compareTexts`,
+  the general form, which RESETS the source fields — callers set
+  `oldPath`/`newPath`/`newLineBase`/`conflict` after it. Pure-Go patience diff; LCS only
   within `lcsCellBudget`. `SplitLines` adds no phantom line. Buffers over
   disk, except a file vs. itself (saved copy). Pasted text is a source
   (armed paste target). ⟳ re-reads via `compare.oldPath`. Tool window;
@@ -1014,8 +1023,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 174 group
-  actions + 15 headers (191), height 197, dividers `[2, 5, 194]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 175 group
+  actions + 15 headers (192), height 198, dividers `[2, 5, 195]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

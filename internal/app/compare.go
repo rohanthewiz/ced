@@ -19,6 +19,12 @@
 //     panel — maps a display row straight to a line in the tab, and a
 //     double-click jumps there for free. It also reads the way the
 //     question is asked ("what have I got that the saved copy hasn't?").
+//     Two sources compare TWO SLICES instead of the whole buffer — a
+//     selection against a paste, and the sides of one conflict block
+//     (conflictcompare.go) — and both go through compareTexts, the
+//     general form. The conflict sides are still lines OF the tab, so
+//     they keep the double-click by naming where the "+" side starts
+//     (newLineBase); the selection is a snapshot and has no such home.
 //   - THE LEFT SIDE COMES FROM THE BUFFER, not the disk copy, whenever
 //     the file is open. Comparing the stale on-disk text of the file you
 //     just edited is the one answer that would be quietly wrong — the
@@ -94,6 +100,18 @@ type compareState struct {
 	// the round trip through a relative rendering.
 	oldPath  string
 	oldLines []string
+
+	// newLineBase is the buffer line the "+" side's FIRST line sits on
+	// in the tab at newPath. Zero for a whole-buffer compare; a conflict
+	// compare's new side is a slice starting mid-file, and without the
+	// offset a double-click would land that many lines too high.
+	newLineBase int
+
+	// conflict is set when the two sides came from one conflict block,
+	// so ⟳ re-reads that block from the buffer rather than re-diffing
+	// the whole file against a slice of itself. nil for every other
+	// source.
+	conflict *compareConflict
 
 	lines  []string
 	scroll int
@@ -262,25 +280,43 @@ func (a *App) compareWithText(label, text string) {
 	a.runCompare(label, "", diff.SplitLines(text))
 }
 
-// runCompare is the single place a comparison is computed and installed,
-// so every source produces the same shape of result and the same header.
+// runCompare diffs the WHOLE active buffer (the new side) against
+// oldLines, and records where the old side came from so ⟳ can re-read
+// it. The buffer-vs-something form every file and paste source uses.
 func (a *App) runCompare(oldLabel, oldPath string, oldLines []string) {
 	tab := a.activeTabPtr()
 	if tab == nil || tab.Buffer == nil {
 		return
 	}
-	newLines := diff.SplitLines(tab.Buffer.String())
+	a.compareTexts(oldLabel, oldLines, a.compareNewLabel(), diff.SplitLines(tab.Buffer.String()))
+	// Source bookkeeping AFTER compareTexts, which resets it: the
+	// general form knows nothing about where either text came from.
+	a.compare.oldPath = oldPath
+	a.compare.oldLines = oldLines
+	a.compare.newPath = tab.Path
+}
+
+// compareTexts is the single place a comparison is computed and
+// installed — two arbitrary texts, old and new — so every source
+// produces the same shape of result and the same header. It RESETS the
+// source fields (oldPath, oldLines, newPath, newLineBase, conflict):
+// a caller that has a source to remember sets them after this returns,
+// and one that doesn't gets a comparison ⟳ and double-click leave
+// alone, never one that inherits the previous comparison's file.
+func (a *App) compareTexts(oldLabel string, oldLines []string, newLabel string, newLines []string) {
 	edits := diff.Diff(oldLines, newLines)
 	added, removed := diff.Stats(edits)
 
 	a.compare.awaitPaste = false
 	a.compare.selPending = nil // any ordinary compare supersedes an armed selection
 	a.compare.oldLabel = oldLabel
-	a.compare.oldPath = oldPath
-	a.compare.oldLines = oldLines
-	a.compare.newLabel = a.compareNewLabel()
-	a.compare.newPath = tab.Path
-	a.compare.lines = diff.Unified(edits, oldLabel, a.compare.newLabel, compareContext)
+	a.compare.oldPath = ""
+	a.compare.oldLines = nil
+	a.compare.newLabel = newLabel
+	a.compare.newPath = ""
+	a.compare.newLineBase = 0
+	a.compare.conflict = nil
+	a.compare.lines = diff.Unified(edits, oldLabel, newLabel, compareContext)
 	a.compare.identical = len(a.compare.lines) == 0
 	a.compare.added, a.compare.remove = added, removed
 	a.compare.scroll = 0
@@ -425,29 +461,12 @@ func (a *App) compareSelectionWithPaste() {
 // compareTextWithSelection resolves an armed selection compare: the
 // arrived text is the old side, the snapshot the new. Deliberately NOT
 // routed through runCompare — that reads the whole buffer as the new
-// side. oldLines stays nil so ⟳ has nothing to re-run: neither side of
-// a snapshot-vs-snapshot diff can be refreshed into anything but lies.
+// side. compareTexts leaves no source behind, so ⟳ has nothing to
+// re-run: neither side of a snapshot-vs-snapshot diff can be refreshed
+// into anything but lies.
 func (a *App) compareTextWithSelection(oldLabel, text string) {
-	newLines := a.compare.selPending
-	oldLines := diff.SplitLines(text)
-	edits := diff.Diff(oldLines, newLines)
-	added, removed := diff.Stats(edits)
-
-	a.compare.awaitPaste = false
-	a.compare.selPending = nil
-	a.compare.oldLabel = oldLabel
-	a.compare.oldPath = ""
-	a.compare.oldLines = nil
-	a.compare.newLabel = "selection"
-	a.compare.newPath = ""
-	a.compare.lines = diff.Unified(edits, oldLabel, "selection", compareContext)
-	a.compare.identical = len(a.compare.lines) == 0
-	a.compare.added, a.compare.remove = added, removed
-	a.compare.scroll = 0
-	a.openComparePanel()
-	if a.compare.identical {
-		a.flash("No differences")
-	}
+	newLines := a.compare.selPending // read before compareTexts clears it
+	a.compareTexts(oldLabel, diff.SplitLines(text), "selection", newLines)
 }
 
 // -----------------------------------------------------------------------------
@@ -599,9 +618,12 @@ func (a *App) comparePanelPress(x, y int) (dragMode string) {
 // NOW — a diff is a snapshot and the buffer moves under it with every
 // keystroke. A file-backed old side is RE-READ (it may have moved too);
 // a pasted one re-diffs the lines it's holding, since there is nothing
-// to read it from again.
+// to read it from again. A conflict compare re-reads its BLOCK — both
+// sides are buffer text, and either may have been edited since.
 func (a *App) compareRefresh() {
 	switch {
+	case a.compare.conflict != nil:
+		a.compareConflictRefresh()
 	case a.compare.oldPath != "":
 		a.compareWithFile(a.compare.oldPath)
 	case a.compare.oldLines != nil:
@@ -621,6 +643,9 @@ func (a *App) compareJumpToRow(idx int) {
 	if !ok {
 		return
 	}
+	// diffTargetLine counts within the "+" TEXT; a side that starts
+	// mid-file (a conflict block's) is shifted onto its buffer line.
+	line += a.compare.newLineBase
 	a.openFile(a.compare.newPath)
 	t := a.activeTabPtr()
 	if t == nil || t.Path != a.compare.newPath {

@@ -979,6 +979,10 @@ type contextItem struct {
 // anchored at (x, y) and acting on node.
 type contextModal struct {
 	x, y  int
+	// w is the popup's width, sized to its widest label at open
+	// (contextMenuWidthFor). 0 — a hand-built modal in a test — reads as
+	// contextMenuWidth.
+	w     int
 	node  *filetree.Node
 	items []contextItem
 	hover int
@@ -1112,6 +1116,14 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	// which is what keeps Run in terminal… last, where its own rule puts
 	// it.
 	items = append(items, contextItem{label: a.openInEditorLabel(), action: ctxOpenInEditor})
+	// The rest of the "take it outside ced" family, under its first
+	// member and on the same unconditional footing: every node, root
+	// included, because a folder (or a file's folder) is what each acts
+	// on. A refusal (no desktop over SSH, a missing path) is a flash, not
+	// a missing row. hostopen.go, openterminal.go, entrycmd.go.
+	items = append(items, contextItem{label: fileManagerLabel(), action: ctxRevealInFileManager})
+	items = append(items, contextItem{label: "Open in terminal", action: ctxOpenTerminal})
+	items = append(items, contextItem{label: "Shell command…", action: ctxEntryCommand})
 
 	// Run sits LAST, and only on a file the tree has already marked
 	// executable (runexec.go). Appended rather than placed at the top for
@@ -1125,8 +1137,28 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 		items = append(items, contextItem{label: "Run in terminal…", action: ctxRunExecutable})
 	}
 
-	cx, cy := a.placeContext(x, y, len(items))
-	a.openModal(&contextModal{x: cx, y: cy, node: n, items: items})
+	w := a.contextMenuWidthFor(items)
+	cx, cy := a.placeContextSized(x, y, len(items), w)
+	a.openModal(&contextModal{x: cx, y: cy, w: w, node: n, items: items})
+}
+
+// contextMenuWidthFor sizes the tree popup to its widest label, the
+// editor menu's rule (contextmenu.go). The fixed contextMenuWidth leaves
+// 14 cells after the chevron, and rows like "Add to favorites…" or a
+// long "Open in <editor>" used to run over the right border and onto
+// the code behind it. contextMenuWidth stays the floor so the common
+// popup keeps the shape users know; the screen width is the ceiling.
+func (a *App) contextMenuWidthFor(items []contextItem) int {
+	w := contextMenuWidth
+	for _, it := range items {
+		if lw := runeLen(it.label) + 6; lw > w { // border+chevron+padding
+			w = lw
+		}
+	}
+	if a.width > 0 && w > a.width {
+		w = a.width
+	}
+	return w
 }
 
 // placeContext picks an on-screen origin for the context menu. Anchors on
@@ -1154,7 +1186,11 @@ func (a *App) placeContext(x, y, count int) (int, int) {
 
 // rect returns the on-screen rectangle of the context menu.
 func (m *contextModal) rect(a *App) (x, y, w, h int) {
-	return m.x, m.y, contextMenuWidth, len(m.items) + 2
+	w = m.w
+	if w == 0 {
+		w = contextMenuWidth
+	}
+	return m.x, m.y, w, len(m.items) + 2
 }
 
 // handleKey processes keyboard input for the context menu.

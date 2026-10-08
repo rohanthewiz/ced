@@ -102,6 +102,7 @@ internal/app/
   cherrypick.go               Multi-commit cherry-pick dialog
   hunktip.go                  Change-bar popup: a hunk's diff, scrollable
   terminal.go termdiag.go runexec.go openineditor.go
+  hostopen.go openterminal.go entrycmd.go  Open in Finder / terminal; {{DIR_ENTRY}} shell command
   autosave.go format.go validate.go syntax.go zipops.go
   copypaste.go copyto.go      File clipboard Copy/Paste; Copy to… a typed folder (one engine)
   folder.go favorites.go favmanage.go recentlocations.go remote.go
@@ -386,8 +387,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 
 ### Search history (history/searches.go, app/searchhistory.go)
 - Lists per KIND (`find` shared by find bar / Find all / Find in
-  project; `replace`; `symbol`; plus `copyto` — Copy to…'s folders, the
-  one kind that is not a search), MRU, exact dedupe, `MaxSearches` 25,
+  project; `replace`; `symbol`; plus `copyto` — Copy to…'s folders — and
+  `entrycmd` — Shell command…'s templates, the two kinds that are not
+  searches), MRU, exact dedupe, `MaxSearches` 25,
   in `.ced/history.bytdb` (`search_history`, same add-don't-overwrite
   write as recent files). Recorded where a search RUNS (`showFindAll`,
   `startProjectSearch`, `startWorkspaceSymbols`, find bar Enter/close,
@@ -934,6 +936,25 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   Tier 0 stages it in the terminal (absolute path). Row names the editor;
   always shown, refusal teaches. Sits above "Run in terminal…"
   (`TestTreeContextRunRowOnlyForExecutables`).
+- **Open in Finder / terminal / Shell command… (hostopen.go,
+  openterminal.go, entrycmd.go)**: tree rows under "Open in $EDITOR" on
+  every node (root included) + ≡ File twins on `openInEditorTarget`.
+  All host exec goes through ONE seam, `hostRun` (Setsid; refused in
+  newTestApp), via `hostRunAsync` — read on the main loop, only a
+  PROMPT failure (`hostFailWindow`) is posted back. Env/OS via
+  `hostEnv`/`hostGOOS`. Finder: file → `open -R`, folder → `open`;
+  Linux `xdg-open` on the folder; no $DISPLAY/$WAYLAND_DISPLAY = a
+  flashed reason. Terminal: `"terminal"` config key (hand-edited, no ≡
+  row) — auto = cats → tmux (`split-window -v -c`) → ced panel;
+  "cats"/"tmux" fall back to the panel WITH a flash; other values are a
+  `sh -c` command line run from the folder with `{{DIR}}` expanded. A
+  file means its parent folder. In the panel the cd is SUBMITTED
+  (`runInTermPanel`), staged only while the panel is busy. Shell
+  command: `{{DIR_ENTRY}}` (entry) / `{{DIR}}` (folder), absolute +
+  `shellArg`-quoted, quoted placeholders replaced whole, none → path
+  appended; runs (not stages) in ced's panel at every tier; history kind
+  `entrycmd` stores the TEMPLATE. The tree popup is sized to its widest
+  label (`contextMenuWidthFor`).
 - **CLI (main.go)**: ONE parser — `parseArgs` runs the real `cli.App`
   into a `cliResult`. `actionDone` default. `helpText` is the help
   template (no backticks). Explicit `--version/-v/-V`; `OnUsageError`
@@ -984,8 +1005,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 170 group
-  actions + 15 headers (187), height 193, dividers `[2, 5, 190]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 173 group
+  actions + 15 headers (190), height 196, dividers `[2, 5, 193]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

@@ -82,6 +82,18 @@
 //	{"commitmsgtrailer": "off"}
 //	                        // never add it. The commit prompt's chip
 //	                        // overrides this for one commit either way.
+//	{"terminal": "auto"}    // default; "Open in terminal" (tree right-
+//	                        // click, ≡ File) uses a cats pane inside
+//	                        // cats, a tmux split inside tmux, else ced's
+//	                        // own terminal panel
+//	{"terminal": "ced"}     // always ced's own terminal panel
+//	{"terminal": "cats"}    // a cats pane (falls back to ced's panel
+//	{"terminal": "tmux"}    // / a tmux split  when not inside one)
+//	{"terminal": "open -a Ghostty {{DIR}}"}
+//	                        // anything else is a COMMAND LINE run by
+//	                        // sh from inside the folder, with {{DIR}}
+//	                        // replaced by the folder's quoted path. No ≡
+//	                        // row — hand-edited only.
 //	{"theme": "<name>"}     // named color theme ("tokyo-night" — the
 //	                        // default — "darcula", "solarized-light", …,
 //	                        // or a user theme from themes/*.json). Not
@@ -369,13 +381,32 @@ type Config struct {
 	// not a config-load failure that stops the editor starting.
 	// Persisted by the ≡ theme picker.
 	Theme string
+
+	// Terminal is where "Open in terminal" opens one: TerminalAuto (the
+	// default, already resolved from a blank key), one of the keyword
+	// values, or a command line run by sh with {{DIR}} expanded. Not
+	// validated beyond the keyword fold: a command line is the user's own
+	// shell text, and the only honest test of it is running it — which
+	// the verb does, and reports, at click time (app/openterminal.go).
+	// Hand-edited only, like AutoSaveDelay: the keyword half could be a
+	// picker, but the command-line half — the reason the key exists —
+	// cannot, and a picker that edits half a setting hides the other half.
+	Terminal string
 }
+
+// The keyword values of "terminal". Anything else is a command line.
+const (
+	TerminalAuto = "auto"
+	TerminalCed  = "ced"
+	TerminalCats = "cats"
+	TerminalTmux = "tmux"
+)
 
 // Defaults returns a Config populated with the values used when no
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true}
+	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true, Terminal: TerminalAuto}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -409,6 +440,7 @@ type fileFormat struct {
 	Remote        string `json:"remote,omitempty"`
 	Session       string `json:"session,omitempty"`
 	Theme         string `json:"theme,omitempty"`
+	Terminal      string `json:"terminal,omitempty"`
 
 	// The tag is lowercase like every other key here. encoding/json
 	// matches field tags case-INSENSITIVELY, so the camelCase spelling
@@ -846,7 +878,26 @@ func Load(path string) (Config, error) {
 	cfg.ChatModel = strings.TrimSpace(ff.ChatModel)
 	cfg.ChatAgent = strings.ToLower(strings.TrimSpace(ff.ChatAgent))
 	cfg.Theme = strings.ToLower(strings.TrimSpace(ff.Theme))
+	cfg.Terminal = parseTerminal(ff.Terminal)
 	return cfg, nil
+}
+
+// parseTerminal resolves the "terminal" value. Keywords are matched
+// case-insensitively (the rule every on/off key follows) and come back in
+// their canonical spelling; a blank value is the default. Anything else is
+// a command line and is returned with only its outer whitespace trimmed —
+// folding its case would break `open -a Ghostty`, and it is never an
+// error, because whether a command works is a question only running it
+// can answer.
+func parseTerminal(s string) string {
+	v := strings.TrimSpace(s)
+	switch strings.ToLower(v) {
+	case "", TerminalAuto:
+		return TerminalAuto
+	case TerminalCed, TerminalCats, TerminalTmux:
+		return strings.ToLower(v)
+	}
+	return v
 }
 
 // SaveAutoSave persists the auto-save preference into the config file

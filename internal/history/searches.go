@@ -51,6 +51,12 @@ const (
 	// the same dropdown to recall them — and a second table for it would
 	// be this file again under another name.
 	CopyDestinations = "copyto"
+	// EntryCommands is not a search either: it is the command TEMPLATES
+	// run on a tree entry with Shell command… (app/entrycmd.go), kept
+	// with their {{DIR_ENTRY}} placeholder so a recalled one works on
+	// whatever entry is clicked next. Same shape, same reason as
+	// CopyDestinations.
+	EntryCommands = "entrycmd"
 )
 
 // MaxSearches caps each kind's list. A history dropdown is scanned by eye,

@@ -426,6 +426,9 @@ names what it will run rather than the variable:
 │ …                    │
 │ Add to favorites…    │   ← folders
 │ Open in nvim         │   ← always, files and folders alike
+│ Open in Finder       │   ← "Open file manager" off macOS
+│ Open in terminal     │
+│ Shell command…       │
 │ Run in terminal…     │   ← executables
 └──────────────────────┘
 ```
@@ -440,6 +443,43 @@ full-screen editor needs a real terminal, but `code`, `subl` and
 With neither variable set the row still appears, reading
 `Open in $EDITOR`, and tells you what to set rather than quietly going
 missing.
+
+### Open in Finder, Open in terminal, Shell command…
+
+Three more rows under it, on every file and folder (root included), each
+with a `≡` → File twin that acts on the active file or, with none open,
+the project:
+
+- **Open in Finder** reveals a file (selected in its folder) or opens a
+  folder. Off macOS it reads **Open file manager** and uses `xdg-open`;
+  on a box with no desktop (`$DISPLAY` unset — the usual SSH case) it
+  says so instead.
+- **Open in terminal** opens a shell in the entry's folder (a file means
+  its parent). Which terminal is the `"terminal"` key in
+  `~/.config/ced/config.json`:
+
+  ```json
+  { "terminal": "auto" }                     // default: a cats pane inside cats,
+                                             // a tmux split inside tmux,
+                                             // else ced's own terminal panel
+  { "terminal": "ced" }                      // always ced's terminal panel
+  { "terminal": "tmux" }                     // tmux split-window (or "cats")
+  { "terminal": "open -a Ghostty {{DIR}}" }  // anything else: your own command
+  ```
+
+  A custom command runs under `sh` from inside the folder, with `{{DIR}}`
+  replaced by the folder's path (quoted) — `open -a iTerm {{DIR}}`,
+  `kitty --directory {{DIR}}`, `wezterm start --cwd {{DIR}}`,
+  `tmux new-window -c {{DIR}}`. `"tmux"` / `"cats"` outside tmux / cats
+  fall back to ced's panel and say why.
+- **Shell command…** asks for a command and runs it in ced's terminal
+  panel with **`{{DIR_ENTRY}}`** replaced by the entry's path — e.g.
+  `ls -la {{DIR_ENTRY}}`, `du -sh {{DIR_ENTRY}}`. `{{DIR}}` is the
+  entry's folder (`cd {{DIR}} && make`); with neither placeholder the path
+  is appended (`wc -l` → `wc -l <file>`). Paths go in absolute and
+  shell-quoted, so don't add quotes of your own (a quoted
+  `"{{DIR_ENTRY}}"` is handled anyway). The prompt remembers your
+  commands *as templates* — Up or `▾` recalls one for the next entry.
 
 Bare `ced` always opens the current directory — `cd myproj && ced` means
 what it says. What comes back with you is the **tabs**: each folder

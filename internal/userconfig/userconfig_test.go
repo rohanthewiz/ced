@@ -1636,3 +1636,42 @@ func TestInlayHintsKey(t *testing.T) {
 		t.Errorf("round trip: cfg=%v err=%v file=%s", cfg.InlayHints, err, data)
 	}
 }
+
+// TestLoadTerminal pins the "terminal" key's two halves: keywords fold
+// to their canonical spelling (blank and absent mean auto), and any
+// other value is a command line kept verbatim — case and inner spacing
+// included, since `open -a Ghostty` is not `open -a ghostty`.
+func TestLoadTerminal(t *testing.T) {
+	cases := map[string]string{
+		`{}`:                                        TerminalAuto,
+		`{"terminal":""}`:                           TerminalAuto,
+		`{"terminal":"Auto"}`:                       TerminalAuto,
+		`{"terminal":" TMUX "}`:                     TerminalTmux,
+		`{"terminal":"ced"}`:                        TerminalCed,
+		`{"terminal":"cats"}`:                       TerminalCats,
+		`{"terminal":"  open -a Ghostty {{DIR}} "}`: "open -a Ghostty {{DIR}}",
+	}
+	for body, want := range cases {
+		t.Run(body, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			cfg, err := Load(p)
+			if err != nil {
+				t.Fatalf("Load(%s): %v", body, err)
+			}
+			if cfg.Terminal != want {
+				t.Fatalf("Load(%s).Terminal = %q, want %q", body, cfg.Terminal, want)
+			}
+		})
+	}
+}
+
+// TestDefaults_TerminalIsAuto pins the no-config answer, so a machine
+// with no config.json still gets the cats → tmux → panel ladder.
+func TestDefaults_TerminalIsAuto(t *testing.T) {
+	if got := Defaults().Terminal; got != TerminalAuto {
+		t.Fatalf("Defaults().Terminal = %q, want %q", got, TerminalAuto)
+	}
+}

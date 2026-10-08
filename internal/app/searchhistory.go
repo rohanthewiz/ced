@@ -124,6 +124,9 @@ func histNoun(kind string) string {
 		// Copy to…'s folder list (copyto.go) — the one kind that is not a
 		// search, so "recent searches" would misname it.
 		return "destinations"
+	case history.EntryCommands:
+		// Shell command…'s templates (entrycmd.go).
+		return "commands"
 	}
 	return "searches"
 }

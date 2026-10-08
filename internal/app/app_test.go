@@ -114,6 +114,18 @@ func newTestApp(t *testing.T, root string) *App {
 	prevEditorEnv := editorEnv
 	editorEnv = func(string) string { return "" }
 	t.Cleanup(func() { editorEnv = prevEditorEnv })
+	// The host-integration verbs (hostopen.go, openterminal.go): read an
+	// EMPTY environment, so a developer running the suite inside tmux or
+	// over SSH cannot change which branch "Open in terminal" takes, and
+	// refuse every exec, so no test can open a Finder window, split the
+	// developer's tmux pane, or run a configured terminal command. Tests
+	// that assert on a command swap in a recorder.
+	prevHostEnv, prevHostRun := hostEnv, hostRun
+	hostEnv = func(string) string { return "" }
+	hostRun = func(string, []string) ([]byte, error) {
+		return nil, errors.New("host exec disabled in tests")
+	}
+	t.Cleanup(func() { hostEnv, hostRun = prevHostEnv, prevHostRun })
 	// Match the shipped default (config "session" is on): the App is
 	// built by hand here, so the zero value would put every test in a
 	// state the product never ships in.
@@ -382,7 +394,7 @@ func TestMenuModalRect_Centered(t *testing.T) {
 	// The menu (141 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 193
+	a.height = 196
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -2031,16 +2043,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 193 {
-		t.Errorf("modalHeight = %d, want 193", h)
+	if h != 196 {
+		t.Errorf("modalHeight = %d, want 196", h)
 	}
-	if got := len(items); got != 187 {
-		t.Errorf("row count = %d, want 187 (2 top-zone + 170 group actions + 15 headers)", got)
+	if got := len(items); got != 190 {
+		t.Errorf("row count = %d, want 190 (2 top-zone + 173 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (190) — headers separate the
+	// one setting off the headerless Quit group (193) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 190}
+	wantDiv := []int{2, 5, 193}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2624,8 +2636,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 196 { // 193 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 196", h)
+	if h != 199 { // 196 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 199", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -3079,7 +3091,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 193
+	a.height = 196
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

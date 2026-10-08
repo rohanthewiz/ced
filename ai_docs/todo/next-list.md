@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-057**
+**Next ID: N-059**
 
 ## Open
 
@@ -169,6 +169,13 @@ plus the LSP work done in the seeding session itself
   ≡ File "Copy file to…" covers the active tab today. Add it if copying a
   NON-active tab elsewhere turns out to be wanted.
 
+- **N-058** · raised `2026-1008-1724-tree-open-finder-terminal-shell-cmd` · value low
+  The tree popup was sized to its widest label (`contextMenuWidthFor`)
+  because rows like "Add to favorites…" ran over its right border. The
+  other popups that still take the fixed `contextMenuWidth` (problems.go,
+  gitlogactions.go, conflictpanel.go, contextmenu.go:411) were not
+  checked for the same overflow; size them the same way if any is.
+
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -232,6 +239,14 @@ and `raised`.
   project (history memory-only). Hand check in a git repo: the field is
   seeded with the last destination after a restart, and the ▾ / Up
   dropdown lists and forgets destinations (`history.CopyDestinations`).
+
+- **N-057** · raised `2026-1008-1724-tree-open-finder-terminal-shell-cmd` · value low
+  The new tree rows' host branches have only run behind the `hostRun`
+  seam. Hand check: "Open in Finder" really reveals a file (`open -R`)
+  and opens a folder; "Open in terminal" with `"terminal": "tmux"` (or
+  auto) inside real tmux splits a pane in the folder (no tmux on the dev
+  machine); a custom command (`open -a Ghostty {{DIR}}`) opens there.
+  The cats branch and ced's panel branch DID run in the real binary.
 
 ## Roadmap
 

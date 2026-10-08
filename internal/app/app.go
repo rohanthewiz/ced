@@ -345,6 +345,17 @@ func builtinMenuGroups() []menuGroup {
 			// exported a variable", which a dimmed row cannot say and a
 			// flash can. The label names the variable in that state.
 			{action: (*App).menuOpenInEditor, enabled: alwaysTrue, labelFor: (*App).openInEditorLabel},
+			// The other three "hand it to something outside ced" verbs,
+			// twins of the tree's right-click rows and on the same target
+			// (active file, else the root). Always live: each one's
+			// failure is a reason the user can act on — no desktop over
+			// SSH, a busy panel — which a flash can say and a dimmed row
+			// cannot. "Open in terminal" picks its terminal from the
+			// "terminal" config key (openterminal.go); Shell command… runs
+			// a {{DIR_ENTRY}} template in ced's panel (entrycmd.go).
+			{action: (*App).menuRevealInFileManager, enabled: alwaysTrue, labelFor: func(*App) string { return fileManagerLabel() }},
+			{label: "Open in terminal", action: (*App).menuOpenTerminal, enabled: alwaysTrue},
+			{action: (*App).menuEntryCommand, enabled: alwaysTrue, labelFor: (*App).entryCommandLabel},
 			// The file tree's multi-selection (treemarks.go). A File row
 			// because every verb behind it is a file verb, and the path
 			// that survives a terminal which swallows right-click — the
@@ -1525,6 +1536,11 @@ type App struct {
 	// See gitcommitmsg.go.
 	commitTrailer bool
 
+	// terminalPref is config.json's "terminal": which terminal "Open in
+	// terminal" opens — "auto", "ced", "cats", "tmux", or a command line
+	// (openterminal.go). "" (a hand-built App) reads as auto.
+	terminalPref string
+
 	// conflicts is the open set of "the file changed under you" records,
 	// keyed by the tab holding the stale buffer. A tab present here has
 	// an unresolved disk conflict: it wears the ⚠ marker in the strip,
@@ -1969,6 +1985,7 @@ func (a *App) loadUserConfig() {
 	a.plugins.enabled = cfg.Plugins
 	a.sessionEnabled = cfg.Session
 	a.remote.enabled = cfg.Remote
+	a.terminalPref = cfg.Terminal
 	// Themes last: loadThemes and applyThemeName both flash on failure,
 	// and a color problem is the least urgent thing in this function —
 	// letting it land last keeps a more important message visible.

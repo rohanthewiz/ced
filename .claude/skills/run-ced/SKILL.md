@@ -137,10 +137,11 @@ in one frame.
 1500@;400@{esc};120@{esc};800@SNAP;300@{esc}q
 
 # command palette, filtered
-1500@;400@{esc}a;500@theme;800@SNAP;300@{esc};300@{esc}q
+1500@;400@{esc}k;500@theme;800@SNAP;300@{esc};300@{esc}q
 
-# theme picker, then pick the 3rd row and photograph the result
-1500@;400@{esc}a;500@theme;800@{enter};700@{down x2};500@SNAP;400@{enter};900@SNAP
+# theme picker ("theme:" — plain "theme" ranks Reload themes first),
+# then pick the 3rd row and photograph the result
+1500@;400@{esc}k;500@theme:;800@{enter};700@{down x2};500@SNAP;400@{enter};900@SNAP
 
 # git panel / git log / terminal
 1500@;500@{esc}g;900@SNAP;400@{esc}q
@@ -148,9 +149,11 @@ in one frame.
 1500@;600@{esc}`;900@SNAP;400@{esc}q
 ```
 
-Leaders worth knowing: `p` find file, `a` palette, `t` sidebar, `f` find
+Leaders worth knowing: `p` find file, `k` palette, `t` sidebar, `f` find
 in file, `g` git panel, `L` git log, `` ` `` terminal, `w` close tab,
-`s` save, `q` quit. The menu's shortcut column is the source of truth.
+`s` save, `q` quit, `?` key bindings. `a` is NOT the palette — it opens
+the AI namespace, and the next key is read as an AI verb. The menu's
+shortcut column is the source of truth.
 
 ## Showing the user
 

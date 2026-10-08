@@ -159,7 +159,7 @@ except for these tokens:
     {up} {down} {left} {right} {home} {end} {pgup} {pgdn}
     {esc}x          ced's leader form — e.g. {esc}p is "find file",
                     {esc}q quit, {esc}t sidebar, {esc}` + "`" + ` terminal,
-                    {esc}g git panel, {esc}L git log, {esc}a palette
+                    {esc}g git panel, {esc}L git log, {esc}k palette
     {down x12}      repeat a key N times
 
 {lf} is a BARE line feed, as opposed to {enter}'s carriage return. The
@@ -184,10 +184,10 @@ Examples
     1500@;300@{esc}p;500@main.go;700@{enter};900@{down x12};900@SNAP;400@{esc}q
 
   open the ≡ menu:
-    1500@;400@{esc}{esc};700@SNAP;300@{esc};300@{esc}q
+    1500@;400@{esc};120@{esc};800@SNAP;300@{esc}q
 
   open the theme picker and pick the 3rd row:
-    1500@;400@{esc}a;500@theme;800@{enter};700@{down x2};600@SNAP;400@{enter};900@SNAP
+    1500@;400@{esc}k;500@theme:;800@{enter};700@{down x2};600@SNAP;400@{enter};900@SNAP
 
   show the git panel:
     1500@;500@{esc}g;900@SNAP;400@{esc}q

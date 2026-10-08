@@ -78,12 +78,6 @@ plus the LSP work done in the seeding session itself
   locations). Some may be documented in their own sections; the table
   is what's short. An instance of N-003.
 
-- **N-041** · raised `2026-0930-2025-tab-groups` · value low
-  `.claude/skills/run-ced/SKILL.md` recipes open the command palette
-  with `{esc}a`. That is the AI namespace now; the palette is `Esc k`.
-  A script following the doc types its query into the open buffer.
-  Also check the "Leaders worth knowing" line.
-
 - **N-042** · raised `2026-0930-2025-tab-groups` · value low
   Tab group extras left out of the first cut:
   - choosing a group's colour (groups get distinct ones automatically)
@@ -279,6 +273,17 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-08, no session doc (commit "run-ced: palette is Esc k, not Esc a (N-041)") —
+  **N-041** the run-ced recipes open the palette with `{esc}k`, in
+  SKILL.md and in the capture tool's `-help-script` text. "Leaders worth
+  knowing" now says `k` palette, adds `?`, and warns that `a` is the AI
+  namespace. Found while checking with the real binary: the theme-picker
+  recipe's filter `theme` ranks "Reload themes" first, so its `{enter}`
+  reloaded themes — now `theme:`. The `-help-script` ≡ menu example sent
+  `{esc}{esc}` in one write (folds into Alt+Esc, opens nothing); it now
+  splits the two Escs like SKILL.md's recipe. All three recipes re-run
+  against `bin/ced`.
 
 - closed 2026-10-08, `2026-1008-1815-context-menus-scroll` —
   **N-039** anchored context menus scroll when taller than the window.

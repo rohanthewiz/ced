@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-063**
+**Next ID: N-064**
 
 ## Open
 
@@ -160,12 +160,6 @@ and `raised`.
   (light themes especially), a real mouse click on the `<<<<<<<` lens,
   and the cats "blocked" badge firing on a stop (`conflictPanel.unseen`).
 
-- **N-056** · raised `2026-1007-1604-copy-to-folder` · value low
-  Copy to… was driven in the real binary only in a NON-repo scratch
-  project (history memory-only). Hand check in a git repo: the field is
-  seeded with the last destination after a restart, and the ▾ / Up
-  dropdown lists and forgets destinations (`history.CopyDestinations`).
-
 - **N-057** · raised `2026-1008-1724-tree-open-finder-terminal-shell-cmd` · value low
   The new tree rows' host branches have only run behind the `hostRun`
   seam. Hand check: "Open in Finder" really reveals a file (`open -R`)
@@ -255,6 +249,24 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-11, `SESSIONSTEM4` —
+  **N-063** (raised and fixed in the same session, found by N-056's
+  check) the search-history dropdown clipped Copy to… destinations at
+  the END, so two folders under one long parent drew as identical rows.
+  `histDropLabel` (searchhistory.go) clips destinations from the front
+  (`chatFitPath`), searches and command templates still at the end.
+  Pinned by `TestHistDropLabel_DestinationsKeepTheirTail`; re-checked in
+  the real binary (`…/v56dest/two`, `…/v56dest/one`).
+
+- closed 2026-10-11, `SESSIONSTEM4` —
+  **N-056** checked in the real binary in a git repo (`run-ced`, four
+  restarts): a copy records its destination in `.ced/history.bytdb`
+  (`.ced/` kept out of `git status`); the next process seeds the field
+  with it; Up opens the dropdown listing both destinations, newest
+  first; Delete forgets the highlighted one and the forgetting survives
+  a restart (field then seeded with the survivor). The check found
+  N-063, fixed alongside.
 
 - closed 2026-10-11, `SESSIONSTEM4` —
   **N-062** (raised and fixed in the same session, found by N-059's

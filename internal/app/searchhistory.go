@@ -113,6 +113,19 @@ func (g histGeom) contains(x, y int) bool {
 	return g.ok() && x >= g.x && x < g.x+g.w && y >= g.y && y < g.y+g.h
 }
 
+// histDropLabel fits one dropdown row to w cells. Searches and command
+// templates keep their HEAD (what was typed first is what is recognised);
+// Copy to… destinations keep their TAIL, because a path's last segments
+// are what tell two folders apart — clipped at the end, two siblings under
+// one long parent drew as the same row (N-063, found driving the real
+// binary). chatFitPath is the shared left-clip.
+func histDropLabel(kind, item string, w int) string {
+	if kind == history.CopyDestinations {
+		return chatFitPath(item, w)
+	}
+	return elide(item, w)
+}
+
 // histNoun is what a kind's list is called in the title and the flash.
 func histNoun(kind string) string {
 	switch kind {
@@ -407,7 +420,7 @@ func (a *App) drawHistDrop(d *histDrop, g histGeom) {
 				a.screen.SetContent(cx, ry, ' ', nil, rowSt)
 			}
 		}
-		drawAt(a.screen, g.x+2, ry, elide(d.items[i], textW), rowSt)
+		drawAt(a.screen, g.x+2, ry, histDropLabel(d.kind, d.items[i], textW), rowSt)
 		drawAt(a.screen, g.x+g.w-1-histDropForgetW+1, ry, "×", xSt)
 	}
 

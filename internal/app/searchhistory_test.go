@@ -491,3 +491,22 @@ func TestHistNoun_NamesEachList(t *testing.T) {
 		}
 	}
 }
+
+// TestHistDropLabel_DestinationsKeepTheirTail pins N-063: two Copy to…
+// destinations under one long parent must stay distinguishable in a
+// narrow dropdown, so paths clip from the front; searches still clip at
+// the end.
+func TestHistDropLabel_DestinationsKeepTheirTail(t *testing.T) {
+	long := "/private/tmp/some/very/long/parent/folder/"
+	one := histDropLabel(history.CopyDestinations, long+"one", 20)
+	two := histDropLabel(history.CopyDestinations, long+"two", 20)
+	if one == two || !strings.HasSuffix(one, "/one") || !strings.HasPrefix(one, "…") {
+		t.Errorf("destination labels = %q / %q, want distinct front-clipped tails", one, two)
+	}
+	if runeLen(one) != 20 {
+		t.Errorf("label width = %d, want 20", runeLen(one))
+	}
+	if got := histDropLabel(history.SearchFind, "a fairly long search query", 10); got != "a fairly …" {
+		t.Errorf("search label = %q, want end-clipped", got)
+	}
+}

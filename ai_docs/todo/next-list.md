@@ -263,7 +263,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-10-11, `SESSIONSTEM2` —
+- closed 2026-10-11, `2026-1011-2152-n050-n053-n048-marker-size-scan-cache-log-ticks` —
   **N-048** the git log panel ticks several commits (leading-cell click,
   or Actions ▾ "Tick …") and cherry-picks them together: "Cherry-pick N
   ticked commits onto <branch>…" leads the Actions picker, confirms with
@@ -273,7 +273,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   (real repo, ticked newest first, lands oldest first), the parked-op
   refusal, the draw (✓ + "N ticked" title) and the row order tests.
 
-- closed 2026-10-11, `SESSIONSTEM2` —
+- closed 2026-10-11, `2026-1011-2152-n050-n053-n048-marker-size-scan-cache-log-ticks` —
   **N-053** the Conflicts panel's refresh reuses a file's last disk scan
   while its size, nanosecond mtime and marker length are unchanged
   (`conflictCountCached`, `conflictPanelState.diskScans`, rebuilt from
@@ -283,7 +283,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   (same-stat rewrite stays cached, the gate reads fresh, an mtime move
   rescans).
 
-- closed 2026-10-11, `SESSIONSTEM2` —
+- closed 2026-10-11, `2026-1011-2152-n050-n053-n048-marker-size-scan-cache-log-ticks` —
   **N-050** the conflict grammar takes a marker length
   (`editor.ParseConflictsSized`, `Tab.SetConflictMarkerSize`; memo keyed
   on revision AND size). The git snapshot asks `git check-attr --stdin -z

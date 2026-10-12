@@ -68,16 +68,6 @@ plus the LSP work done in the seeding session itself
   those servers never switch hints on. Contingent on N-013 showing it
   matters.
 
-- **N-036** · raised `2026-0929-1929-readme-recent-files-and-locations` · value low
-  The README's leader-key table is missing top-level leaders that are
-  bound in leader.go: `Esc b` (switch tab), `Esc ,` / `Esc .`,
-  `Esc o` / `Esc O` (back / forward), `Esc T` (focus tree), `Esc Z`
-  (redo), `Esc v` (markdown preview), `Esc h` / `Esc H` (next / previous
-  change), `Esc A` (blame), `Esc g` (git panel), `Esc L` (git log),
-  `Esc S` (git log search), `` Esc ` `` (terminal) and `Esc ~` (terminal
-  locations). Some may be documented in their own sections; the table
-  is what's short. An instance of N-003.
-
 - **N-042** · raised `2026-0930-2025-tab-groups` · value low
   Tab group extras left out of the first cut:
   - choosing a group's colour (groups get distinct ones automatically)
@@ -292,6 +282,14 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-11, `2026-1011-next-list-run` —
+  **N-036** the README hotkey table now lists all 20 missing top-level
+  leaders (`Esc z/Z T , . b o O \` ~ v h H A g L S`, plus rows for the
+  `Esc a` / `Esc x` / `Esc C` prefixes). `TestREADME_LeaderTableListsEveryBinding`
+  (leader_test.go) fails when a binding in `leaderBindings()` or the
+  static AI table has no row — it reported exactly those 20 before the
+  README change.
 
 - closed 2026-10-11, `2026-1011-next-list-run` —
   **N-054** the theme package's comments no longer state key counts

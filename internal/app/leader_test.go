@@ -680,3 +680,62 @@ func TestChordMissNamesItsNamespace(t *testing.T) {
 		t.Errorf("flash = %q, want the AI namespace named", a.statusMsg)
 	}
 }
+
+// TestREADME_LeaderTableListsEveryBinding pins the README's hotkey tables
+// to leader.go: every top-level binding (prefixes included) and every
+// static AI sub-binding must have a table row. The README is the only
+// documentation, and a leader that lands without its row is invisible to
+// anyone who doesn't open `Esc ?`. Dynamic namespaces (plugins, cats) are
+// skipped below the prefix — their keys depend on the machine.
+func TestREADME_LeaderTableListsEveryBinding(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("read README: %v", err)
+	}
+	// Only table rows count: prose mentions don't make a key findable
+	// in the place people look it up.
+	var rows []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(line, "|") {
+			rows = append(rows, line)
+		}
+	}
+	// documented reports whether some row's FIRST cell names the chord.
+	// The cell is matched with its closing backtick so `Esc a` is not
+	// satisfied by `Esc a c`; the backtick key itself is written as
+	// "`` Esc ` ``" and so ends in a space instead.
+	documented := func(chord string) bool {
+		for _, row := range rows {
+			cells := strings.SplitN(row, "|", 3)
+			if len(cells) < 3 {
+				continue
+			}
+			cell := strings.TrimSpace(cells[1])
+			if cell == "`"+chord+"`" || cell == "`` "+chord+" ``" {
+				return true
+			}
+		}
+		return false
+	}
+	keyName := func(r rune) string {
+		if r == ' ' {
+			return "Space"
+		}
+		return string(r)
+	}
+	for _, b := range leaderBindings() {
+		chord := "Esc " + keyName(b.key)
+		if !documented(chord) {
+			t.Errorf("README hotkey table has no row for %q (%s)", chord, b.label)
+		}
+		if b.sub == nil {
+			continue
+		}
+		for _, s := range b.sub {
+			sub := chord + " " + keyName(s.key)
+			if !documented(sub) {
+				t.Errorf("README hotkey table has no row for %q (%s)", sub, s.label)
+			}
+		}
+	}
+}

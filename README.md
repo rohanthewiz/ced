@@ -563,12 +563,22 @@ within half a second tap one of the letters below.
 | `Esc s`     | Save                 |
 | `Esc u`     | Undo                 |
 | `Esc r`     | Redo                 |
+| `Esc z`     | Undo (same as `Esc u`) |
+| `Esc Z`     | Redo (same as `Esc r`) |
 | `Esc w`     | Close tab            |
 | `Esc q`     | Quit                 |
 | `Esc n`     | New file             |
 | `Esc t`     | Toggle file tree     |
+| `Esc T`     | Focus file tree      |
+| `Esc ,`     | Previous tab         |
+| `Esc .`     | Next tab             |
+| `Esc b`     | Switch tab…          |
+| `Esc o`     | Back (where you were before the last jump) |
+| `Esc O`     | Forward              |
 | `Esc =`     | Grow panel           |
 | `Esc -`     | Shrink panel         |
+| `` Esc ` `` | Terminal             |
+| `Esc ~`     | Terminal locations (clickable `file:line` in its output) |
 | `Esc /`     | Toggle line comment  |
 | `Esc f`     | Find in file         |
 | `Esc F`     | Find all in file (list every match) |
@@ -592,6 +602,16 @@ within half a second tap one of the letters below.
 | `Esc Space` | Completions          |
 | `Esc !`     | Problems panel       |
 | `Esc %`     | Go to matching bracket |
+| `Esc v`     | Markdown preview     |
+| `Esc h`     | Next change (git)    |
+| `Esc H`     | Previous change (git) |
+| `Esc A`     | Blame                |
+| `Esc g`     | Git panel            |
+| `Esc L`     | Git log              |
+| `Esc S`     | Search git history   |
+| `Esc a`     | AI prefix (table below) |
+| `Esc x`     | Plugin prefix (below) |
+| `Esc C`     | Cats prefix (inside cats) |
 
 A lone `Esc` is harmless — if you don't follow it with a bound key
 within the window, your next keystroke goes to the editor as normal,

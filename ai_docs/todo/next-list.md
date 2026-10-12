@@ -277,14 +277,14 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-10-11, `2026-1011-next-list-run` —
+- closed 2026-10-11, `2026-1011-2142-n054-n036-n052-theme-counts-readme-leaders-conflicted-tabs` —
   **N-052** a conflicted (unmerged) file's TAB label is drawn in
   `theme.Error`, the tree's rule for the same file, active or not
   (`tabGitConflicted`, tabbar.go, reading `a.gitConflicted`). The colour
   sits on the label, not the marker slot, which keeps the disk state
   (⊘ / ⚠ / ●). Pinned by `TestDrawTabBar_ConflictedTabLabelIsError`.
 
-- closed 2026-10-11, `2026-1011-next-list-run` —
+- closed 2026-10-11, `2026-1011-2142-n054-n036-n052-theme-counts-readme-leaders-conflicted-tabs` —
   **N-036** the README hotkey table now lists all 20 missing top-level
   leaders (`Esc z/Z T , . b o O ~ v h H A g L S`, backtick, plus rows for the
   `Esc a` / `Esc x` / `Esc C` prefixes). `TestREADME_LeaderTableListsEveryBinding`
@@ -292,7 +292,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   static AI table has no row — it reported exactly those 20 before the
   README change.
 
-- closed 2026-10-11, `2026-1011-next-list-run` —
+- closed 2026-10-11, `2026-1011-2142-n054-n036-n052-theme-counts-readme-leaders-conflicted-tabs` —
   **N-054** the theme package's comments no longer state key counts
   ("the other twenty-nine", "thirty-five" — really 33 derived, 41 in
   all, counted from `derivations()`). Reworded count-free ("every other

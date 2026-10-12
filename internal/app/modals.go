@@ -1105,6 +1105,15 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	if n.IsDir {
 		items = append(items, contextItem{label: "Add to favorites…", action: ctxAddFavorite})
 	}
+	// Tab groups (tabgroups.go): a FOLDER group is a rule about a
+	// directory, so the directory's own row is its natural door — before
+	// this a folder group could only be started from a tab already open
+	// in it. Not on the root: a group of every open file groups nothing.
+	// ≡ twin: File → "Tab groups…" offers the active folder.
+	if n.IsDir && n != a.tree.Root {
+		label, run := a.tabGroupFolderItem(n.Path)
+		items = append(items, contextItem{label: label, action: func(app *App, _ *filetree.Node) { run(app) }})
+	}
 	// Open in $EDITOR (openineditor.go) is ALWAYS offered —
 	// menuCopilotAuth's rule rather than Paste's. Paste hides because its
 	// precondition is something the user just did and can plainly see;

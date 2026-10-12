@@ -75,10 +75,11 @@ plus the LSP work done in the seeding session itself
 - **N-042** · raised `2026-0930-2025-tab-groups` · value low
   Tab group extras left out of the first cut:
   - choosing a group's colour (groups get distinct ones automatically)
-  - creating a folder group from the file tree's folder context menu
-    (today it starts from a tab in that folder)
   - a COLOURED member underline, if a capability check can tell which
     terminals take the colon-form SGR 58
+  (Creating a folder group from the tree's folder context menu was done
+  in `SESSIONSTEM3`: "New tab group…" on any non-root folder, ≡ twin at
+  the end of File → "Tab groups…".)
 
 - **N-043** · raised `2026-0930-2056-bookmarks` · value medium
   Bookmarks have no keyboard door: the leader table is out of letters,

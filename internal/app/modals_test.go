@@ -373,7 +373,7 @@ func TestOpenTreeContext_Folder(t *testing.T) {
 		t.Fatal("context should open")
 	}
 	wantLabels := []string{"New File", "New Folder", "Rename", "Delete", "Copy", "Copy to…", "Zip",
-		"Copy rel path", "Copy abs path", "Select", "Add to favorites…", "Open in $EDITOR",
+		"Copy rel path", "Copy abs path", "Select", "Add to favorites…", "New tab group…", "Open in $EDITOR",
 		fileManagerLabel(), "Open in terminal", "Shell command…"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("folder context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))

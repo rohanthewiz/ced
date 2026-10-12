@@ -633,6 +633,11 @@ func (a *App) openAddToGroup(t *editor.Tab) {
 // creates it with t in it. folder is "" for an ad-hoc group. A refused
 // name flashes why and re-asks with what was typed, so a five-letter
 // attempt costs one Backspace rather than starting over.
+//
+// t may be nil for a FOLDER group (the tree's folder row and the ≡ twin,
+// tabGroupFolderItem): a folder group is a rule, so it needs no starting
+// tab — it takes every open file under the folder now, and every one
+// opened there later.
 func (a *App) promptNewTabGroup(t *editor.Tab, folder, seed string) {
 	hint := fmt.Sprintf("ad-hoc group · up to %d letters or digits", tabGroupNameMax)
 	title := "New tab group"
@@ -646,11 +651,16 @@ func (a *App) promptNewTabGroup(t *editor.Tab, folder, seed string) {
 			app.promptNewTabGroup(t, folder, name)
 			return
 		}
-		if app.tabIndexOf(t) < 0 {
+		if t != nil && app.tabIndexOf(t) < 0 {
 			return
 		}
+		if t == nil && folder == "" {
+			return // an ad-hoc group with no tab would be born empty
+		}
 		g := app.newTabGroup(name, folder)
-		app.addTabToGroup(t, g)
+		if t != nil {
+			app.addTabToGroup(t, g)
+		}
 		if folder != "" {
 			app.flash(fmt.Sprintf("Group %s: %s open under %s", name,
 				plural(len(app.tabGroupMembers(g)), "tab", "tabs"), app.tabGroupFolderLabel(folder)))
@@ -712,21 +722,60 @@ func (a *App) menuAddActiveTabToGroup() {
 // menuTabGroups is ≡ File "Tab groups…": a picker of the groups, then a
 // picker of the chosen group's menu rows — the keyboard door to the
 // chip's right-click menu (macOS Terminal + tmux often swallow the right
-// button). With no groups it says how to make one rather than dimming.
+// button). It ends with "New folder group: <active folder>…" when the
+// tree's active folder is a subfolder no group claims — the ≡ twin of
+// the tree's folder row. With nothing to offer it says how to make a
+// group rather than dimming.
 func (a *App) menuTabGroups() {
 	a.closeMenu()
-	if len(a.tabGroups) == 0 {
-		a.flash("No tab groups — right-click a tab → Add to group…, or ≡ File → Add tab to group…")
-		return
-	}
-	items := make([]paletteItem, 0, len(a.tabGroups))
+	items := make([]paletteItem, 0, len(a.tabGroups)+1)
 	for _, g := range a.tabGroups {
 		items = append(items, paletteItem{
 			label: fmt.Sprintf("%s  %s", g.name, a.tabGroupDescribe(g)),
 			run:   func(app *App) { app.tabGroupActionsPicker(g) },
 		})
 	}
+	if a.hasActiveSubfolder() && a.tabGroupForFolder(a.activeFolder) == nil {
+		dir := a.activeFolder
+		items = append(items, paletteItem{
+			label: "New folder group: " + a.tabGroupFolderLabel(dir) + "…",
+			run:   func(app *App) { app.promptNewFolderTabGroup(dir) },
+		})
+	}
+	if len(items) == 0 {
+		a.flash("No tab groups — right-click a tab → Add to group…, or a folder in the tree → New tab group…")
+		return
+	}
 	a.openPicker("Tab groups", items)
+}
+
+// tabGroupForFolder returns the folder group whose rule is exactly dir,
+// or nil. Folder rules are unique per folder (openAddToGroup only offers
+// an unclaimed one), so there is at most one.
+func (a *App) tabGroupForFolder(dir string) *tabGroup {
+	for _, g := range a.tabGroups {
+		if g.isFolder() && g.folder == dir {
+			return g
+		}
+	}
+	return nil
+}
+
+// promptNewFolderTabGroup starts a folder group for dir with no starting
+// tab, seeded with a name derived from the folder's own.
+func (a *App) promptNewFolderTabGroup(dir string) {
+	a.promptNewTabGroup(nil, dir, a.uniqueTabGroupName(tabGroupNameFrom(filepath.Base(dir))))
+}
+
+// tabGroupFolderItem is the tree's folder-row entry into tab groups:
+// "New tab group…" for an unclaimed folder, or the claiming group's own
+// menu ("Tab group <name>…") when one already exists — one row either
+// way, so the popup never offers to create a duplicate rule.
+func (a *App) tabGroupFolderItem(dir string) (label string, run func(*App)) {
+	if g := a.tabGroupForFolder(dir); g != nil {
+		return "Tab group " + g.name + "…", func(app *App) { app.tabGroupActionsPicker(g) }
+	}
+	return "New tab group…", func(app *App) { app.promptNewFolderTabGroup(dir) }
 }
 
 // tabGroupActionsPicker shows g's menu rows as a picker. Dimmed rows are

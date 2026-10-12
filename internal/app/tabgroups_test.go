@@ -531,10 +531,12 @@ func TestStripScrolledIntoAGroup_FirstDrawnMemberCarriesTheChip(t *testing.T) {
 	}
 }
 
-// TestMenuTabGroups pins the ≡ door: with no groups it says how to make
-// one; with groups it lists them and drills into the group's rows.
+// TestMenuTabGroups pins the ≡ door: with no groups (and no subfolder to
+// offer) it says how to make one; with groups it lists them and drills
+// into the group's rows.
 func TestMenuTabGroups(t *testing.T) {
 	a, root := groupTestApp(t)
+	a.activeFolder = a.rootDir
 	a.menuTabGroups()
 	if !strings.Contains(a.statusMsg, "Add to group") {
 		t.Errorf("flash = %q, want how to make a group", a.statusMsg)
@@ -597,5 +599,58 @@ func TestTabGroups_SessionRoundTrip(t *testing.T) {
 	}
 	if g := b.tabGroupOf(tabByName(t, b, "c.go")); g == nil || g.name != "mine" {
 		t.Errorf("c.go group = %+v, want mine", g)
+	}
+}
+
+// TestFolderTabGroup_TreeRowAndMenuTwin pins N-042's folder door: the
+// tree's folder row starts a folder group with no tab needed (it claims
+// the files already open under it), the same row then names the group
+// instead of offering a duplicate, the root gets no row, and ≡ File "Tab
+// groups…" offers the active subfolder as its twin.
+func TestFolderTabGroup_TreeRowAndMenuTwin(t *testing.T) {
+	a, root := groupTestApp(t)
+	api := filepath.Join(root, "api")
+
+	label, run := a.tabGroupFolderItem(api)
+	if label != "New tab group…" {
+		t.Fatalf("unclaimed folder row = %q", label)
+	}
+	run(a)
+	pm := promptOf(a)
+	if pm == nil {
+		t.Fatalf("modal = %T, want the name prompt", a.modal)
+	}
+	submitPrompt(t, a, pm, "api")
+	g := a.tabGroupForFolder(api)
+	if g == nil || g.name != "api" {
+		t.Fatalf("no folder group for api/ (groups %v)", a.tabGroups)
+	}
+	if n := len(a.tabGroupMembers(g)); n != 2 {
+		t.Errorf("folder group claims %d open tabs, want b.go and d.go", n)
+	}
+	if label, _ := a.tabGroupFolderItem(api); label != "Tab group api…" {
+		t.Errorf("claimed folder row = %q, want the group's own menu", label)
+	}
+
+	// The root never gets the row.
+	a.openTreeContext(a.tree.Root, 5, 5)
+	for _, it := range contextOf(a).items {
+		if strings.Contains(it.label, "tab group") || strings.Contains(it.label, "Tab group") {
+			t.Errorf("root context offers %q", it.label)
+		}
+	}
+	a.closeModal()
+
+	// ≡ twin: an unclaimed active subfolder is offered at the end.
+	other := filepath.Join(root, "web")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a.activeFolder = other
+	a.menuTabGroups()
+	pickByLabel(t, a, "New folder group: ")
+	submitPrompt(t, a, promptOf(a), "web")
+	if a.tabGroupForFolder(other) == nil {
+		t.Error("the ≡ twin did not create the web/ folder group")
 	}
 }

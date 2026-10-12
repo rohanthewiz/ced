@@ -523,7 +523,9 @@ Then:
 - **Tab groups.** *Add to group…* on a tab starts or joins a group
   named with up to 4 letters or digits. There are two kinds:
   - **Folder** — every open file under that folder belongs, including
-    ones you open later.
+    ones you open later. Start one from a tab (*Add to group…*), or
+    right-click the folder in the tree → *New tab group…* (≡ File →
+    *Tab groups…* offers the tree's active folder too).
   - **Ad-hoc** — tabs you pick by hand.
 
   A group's tabs sit together behind a coloured chip (` api `) and are

@@ -297,7 +297,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   colours come from the syntax palette (read at paint time). Chip left
   click folds, right click = group menu (`tabGroupContextItems`, shared
   with the ≡ File "Tab groups…" picker); ≡ File "Add tab to group…" is
-  the tab row's twin. Persisted in `session.Entry.Groups` by path;
+  the tab row's twin. A folder group can start with NO tab: the tree's
+  folder row (not the root) "New tab group…" / "Tab group <name>…"
+  (`tabGroupFolderItem`), ≡ twin = the active subfolder's row at the
+  end of "Tab groups…". Persisted in `session.Entry.Groups` by path;
   `restoreTabGroups` is DEFERRED in `restoreSession` so it runs after
   the tabs, and still runs on the no-tabs return.
 - Labels are the basename until another OPEN tab collides, then grow by

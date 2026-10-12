@@ -1167,6 +1167,8 @@ func (a *App) drawGitPanelDiffRow(row, x, ry, w int) {
 	}
 	line := a.gitPanel.diffLines[idx]
 	st := gitPanelDiffStyle(line, a.theme)
+	// Tabs expanded before the clip, which counts cells.
+	line = diffDisplayLine(line)
 	if runeLen(line) > w {
 		line = string([]rune(line)[:w-1]) + "…"
 	}
@@ -1210,6 +1212,48 @@ func gitPanelStatusColor(code string, th theme.Theme) tcell.Color {
 	default:
 		return th.GitModified
 	}
+}
+
+// diffDisplayLine readies one unified-diff line for a row painter:
+// tabs expanded to stops every hunkTipTabWidth cells (the hunk popup's
+// width, so every diff surface indents alike) and stray carriage
+// returns dropped. drawAt draws a tab as ONE cell, so without this a
+// tab-indented file (every Go file) loses its depth — `\t\treturn nil`
+// would read as ` return nil`. Must run BEFORE clipping, since the
+// clip counts cells.
+//
+// The `+`/`-`/space column is kept verbatim and the stops are counted
+// from the cell AFTER it, so code lines up with the source's own tab
+// stops (a mid-line tab before a trailing comment lands where it does
+// in the editor) and the prefix never eats into the first stop:
+//
+//	"+\t\tx"  →  "+" + "    " + "    " + "x"
+//	"@@ …\t…" →  no prefix column; stops counted from cell 0
+func diffDisplayLine(line string) string {
+	line = strings.TrimRight(line, "\r")
+	if !strings.ContainsRune(line, '\t') {
+		return line // the common case: nothing to rewrite, no allocation
+	}
+	prefix := ""
+	if c := line[0]; c == '+' || c == '-' || c == ' ' {
+		prefix, line = line[:1], line[1:]
+	}
+	var b strings.Builder
+	b.Grow(len(prefix) + len(line) + 4*hunkTipTabWidth)
+	b.WriteString(prefix)
+	col := 0 // cells written since the prefix column
+	for _, r := range line {
+		if r == '\t' {
+			// Pad to the next stop; a tab already at a stop is a full one.
+			pad := hunkTipTabWidth - col%hunkTipTabWidth
+			b.WriteString(strings.Repeat(" ", pad))
+			col += pad
+			continue
+		}
+		b.WriteRune(r)
+		col++
+	}
+	return b.String()
 }
 
 // gitPanelDiffStyle colors one unified-diff line: additions green,

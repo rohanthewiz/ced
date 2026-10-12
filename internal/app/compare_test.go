@@ -221,6 +221,24 @@ func TestComparePanel_DrawsHeaderAndDiff(t *testing.T) {
 	}
 }
 
+// TestComparePanel_KeepsTabIndentation is N-059's regression: the
+// panel drew a tab as one cell, so Go code lost its depth. Two tabs
+// must reach the screen as two hunkTipTabWidth runs after the prefix.
+func TestComparePanel_KeepsTabIndentation(t *testing.T) {
+	a := seedCompareApp(t, map[string]string{
+		"mine.go":  "func f() {\n\tif x {\n\t\treturn nil\n\t}\n}\n",
+		"other.go": "func f() {\n\tif x {\n\t\treturn err\n\t}\n}\n",
+	}, "mine.go")
+	a.compareWithFile(filepath.Join(a.rootDir, "other.go"))
+	a.drawComparePanel()
+	if !screenHasText(t, a, "+        return nil") {
+		t.Error("tab indentation collapsed in the compare body")
+	}
+	if !screenHasText(t, a, "     if x {") {
+		t.Error("context line lost its tab indentation")
+	}
+}
+
 // TestCompare_RefusesBinaryAndOversize keeps the panel's read guards in
 // step with the editor's own open guards — a file ced won't open has no
 // lines worth diffing either.

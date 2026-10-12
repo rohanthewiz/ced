@@ -133,14 +133,6 @@ plus the LSP work done in the seeding session itself
   2026-10-08 by counting `derivations()`. An instance of N-003's doc
   drift.
 
-- **N-059** · raised `2026-1008-1837-conflict-compare-sides` · value medium
-  The compare panel (and the git panel's diff, which shares the row
-  painter `drawAt`) draws a TAB as one cell, so tab-indented code — every
-  Go file — loses its indentation depth in the diff: `\t\treturn nil`
-  reads as ` return nil`. Seen in the real binary on a Go conflict's
-  Compare sides. Expand tabs (the hunk popup uses 4 cells) before
-  clipping, keeping the leading `+`/`-`/space column.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -217,6 +209,16 @@ and `raised`.
   auto) inside real tmux splits a pane in the folder (no tmux on the dev
   machine); a custom command (`open -a Ghostty {{DIR}}`) opens there.
   The cats branch and ced's panel branch DID run in the real binary.
+
+- **N-059** · raised `2026-1008-1837-conflict-compare-sides` · value medium
+  The compare panel, git panel diff and git log detail drew a TAB as one
+  cell, so tab-indented code lost its depth. FIXED in
+  `2026-1011-2016-compare-tab-expansion`: `diffDisplayLine` (gitpanel.go)
+  expands tabs to 4-cell stops after the `+`/`-`/space column, before the
+  clip, in all three painters; pinned by
+  `TestComparePanel_KeepsTabIndentation`. Hand check left: in the real
+  binary, a Go conflict's Compare sides, the git panel diff of a Go file,
+  and a git log commit detail all show tab indentation at full depth.
 
 ## Roadmap
 

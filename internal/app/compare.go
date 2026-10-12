@@ -720,6 +720,8 @@ func (a *App) drawComparePanel() {
 		}
 		line := a.compare.lines[idx]
 		st := gitPanelDiffStyle(line, th)
+		// Tabs expanded before the clip, which counts cells.
+		line = diffDisplayLine(line)
 		if runeLen(line) > pw-3 {
 			line = string([]rune(line)[:pw-4]) + "…"
 		}

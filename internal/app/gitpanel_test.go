@@ -982,3 +982,30 @@ func TestSamePath_LooksThroughSymlinks(t *testing.T) {
 		t.Error("different files matched")
 	}
 }
+
+// TestDiffDisplayLine_ExpandsTabsAfterThePrefixColumn pins N-059: a
+// tab-indented diff line keeps its depth (one tab = hunkTipTabWidth
+// cells), the +/-/space column survives verbatim, stops are counted
+// from the cell after it, and lines with no prefix column expand from
+// cell 0.
+func TestDiffDisplayLine_ExpandsTabsAfterThePrefixColumn(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"+\t\treturn nil", "+        return nil"},
+		{"-\tx := 1", "-    x := 1"},
+		{" \tctx", "     ctx"},
+		// Mid-line tab pads to the next stop, not a fixed width.
+		{"+ab\tc", "+ab  c"},
+		{"+abcd\te", "+abcd    e"},
+		// No prefix column: stops from cell 0.
+		{"\tmsg", "    msg"},
+		// Nothing to expand; CR dropped either way.
+		{"+plain", "+plain"},
+		{"+crlf\r", "+crlf"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := diffDisplayLine(c.in); got != c.want {
+			t.Errorf("diffDisplayLine(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

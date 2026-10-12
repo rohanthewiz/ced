@@ -50,7 +50,11 @@ plus the LSP work done in the seeding session itself
   the gutter click), a Features bullet, the LSP hotkey rows and Select
   all. What stays open is the standing problem — nothing fails when a
   feature lands without its README paragraph. (Value lowered from medium
-  with the backlog cleared.)
+  with the backlog cleared.) Since
+  `2026-1011-2142-n054-n036-n052-theme-counts-readme-leaders-conflicted-tabs`
+  the LEADER table is pinned (`TestREADME_LeaderTableListsEveryBinding`:
+  every top-level binding and every static `Esc a` sub-binding needs a
+  row); prose sections and ≡ rows are still unguarded.
 
 - **N-005** · raised `2026-0913-1919-cats-plugin` · value low
   cats-side decision: should two ced launch paths share ONE sidebar group

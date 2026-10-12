@@ -83,9 +83,15 @@ func (a *App) hasGitLogOpen() bool {
 // deliberate: the two "apply this commit elsewhere" verbs first (the
 // log's bread and butter), then the branch-motion verbs, then creation,
 // then the read-only copies.
+//
+// With commits ticked (gitlogticks.go), the set's two rows lead: picking
+// the set is the gesture the ticks were made for. The per-commit Tick row
+// sits after the apply pair — it is the keyboard door to building the
+// set, and the context menu's.
 func (a *App) gitLogActionItems(c gitLogCommit) []paletteItem {
 	branch := a.gitLogBranchLabel()
-	return []paletteItem{
+	items := a.gitLogTickedItems(branch)
+	return append(items, []paletteItem{
 		{label: "Cherry-pick " + c.Short + " onto " + branch + "…", run: func(app *App) {
 			app.confirmGitLogApply(c, "Cherry-pick", "onto "+branch,
 				"cherry-pick", c.Hash)
@@ -94,6 +100,7 @@ func (a *App) gitLogActionItems(c gitLogCommit) []paletteItem {
 			app.confirmGitLogApply(c, "Revert", "on "+branch+" — a new commit undoing it",
 				"revert", "--no-edit", c.Hash)
 		}},
+		a.gitLogTickItem(c),
 		{label: "Reset " + branch + " to " + c.Short + "…", run: func(app *App) {
 			app.openGitLogResetPicker(c)
 		}},
@@ -112,7 +119,7 @@ func (a *App) gitLogActionItems(c gitLogCommit) []paletteItem {
 		}},
 		{label: "Copy hash", run: func(app *App) { app.gitLogCopyHash(c) }},
 		{label: "Copy message", run: func(app *App) { app.gitLogCopyMessage(c) }},
-	}
+	}...)
 }
 
 // confirmGitLogApply is the gate in front of cherry-pick and revert: a

@@ -1005,7 +1005,12 @@ what that branch has that yours doesn't:
   changes without committing (for squashing several into one), `alt+a`
   ticks everything, `alt+b` switches branch.
 
-The git log's own **Actions ▾ → Cherry-pick** still picks a single commit.
+The git log can pick a set too, from any branch it shows: click a
+commit's leftmost cell (or **Actions ▾ → Tick …**) to tick it — a `✓`
+appears and the header counts the set — then **Actions ▾ → Cherry-pick
+N ticked commits onto …**. The confirm lists them, and they go in
+oldest first, in one `git cherry-pick`. Ticks survive a history search
+and clear when the pick succeeds; **Clear ticks** drops them by hand.
 
 **When something ced runs stops on a conflict** — a cherry-pick or
 revert, or a `--continue` that hits the next commit's conflict — ced

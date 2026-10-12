@@ -88,12 +88,6 @@ plus the LSP work done in the seeding session itself
   first, per the ⌘ allowlist rule) would make stepping through them
   practical. Decide which, then add it as a second door.
 
-- **N-048** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
-  The git log panel still cherry-picks ONE commit (Actions ▾). Ticking
-  several commits in the log and picking them together would be the
-  log-side twin of the cherry-pick dialog, which only lists one branch
-  against HEAD.
-
 - **N-051** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
   Cherry-pick dialog extras left out: a filter field for long lists
   (capped at 300, announced), picking a MERGE commit (needs `-m <parent>`;
@@ -268,6 +262,16 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-11, `SESSIONSTEM2` —
+  **N-048** the git log panel ticks several commits (leading-cell click,
+  or Actions ▾ "Tick …") and cherry-picks them together: "Cherry-pick N
+  ticked commits onto <branch>…" leads the Actions picker, confirms with
+  the list, runs one `git cherry-pick` oldest first (order from a
+  streamed `rev-list` walk, so same-second commits keep parent-before-
+  child). New gitlogticks.go; pinned by `TestGitLogTicks_CherryPickEndToEnd`
+  (real repo, ticked newest first, lands oldest first), the parked-op
+  refusal, the draw (✓ + "N ticked" title) and the row order tests.
 
 - closed 2026-10-11, `SESSIONSTEM2` —
   **N-053** the Conflicts panel's refresh reuses a file's last disk scan

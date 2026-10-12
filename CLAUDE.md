@@ -755,7 +755,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   FILE share it (`disambiguateBlameAuthors`, in the parser) — no knob.
 - Git log (Esc-L): tool window; `--all`, capped 400; Actions picker
   (only `reset --hard` confirms); selection kept by hash; refresh rides
-  `refreshGitStatus`.
+  `refreshGitStatus`. Ticks (gitlogticks.go): the leading blank cell,
+  keyed by hash holding the row, NEVER pruned against the (possibly
+  filtered) list; set rows lead the Actions picker only while ticked;
+  order = a streamed `rev-list` walk (parents never before children),
+  not dates; one `cherry-pick`, refused while an op is parked; cleared
+  on success only.
 - Git status report (≡ Git + panel Actions): long format with
   `color.status=false`, `advice.statusHints=false`; capped to the window
   with the cut named; declines an occupied modal slot.

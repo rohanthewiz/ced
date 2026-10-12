@@ -105,6 +105,11 @@ type gitLogState struct {
 	// "closed", so the panel behaves exactly as it did before the bar
 	// existed until something opens it.
 	filter gitLogFilter
+	// ticked is the multi-commit selection (gitlogticks.go), keyed by
+	// full hash and holding the row as it was when ticked — so a tick
+	// survives a search that hides its row, and the confirm can still
+	// name it. Session-only, like the tree's marks.
+	ticked map[string]gitLogCommit
 }
 
 // gitLogShowEvent carries one commit's freshly-fetched `git show` text
@@ -652,6 +657,12 @@ func (a *App) gitLogClick(x, y int) {
 		a.lastClick = clickRecord{x: x, y: y, when: now}
 		return
 	}
+	// The leading cell is the tick zone (gitlogticks.go); a press there
+	// toggles the row's tick and leaves the highlight where it was, the
+	// tree gutter's rule.
+	if x == px && a.gitLogTickPress(a.gitLog.listScroll+row) {
+		return
+	}
 	a.gitLogSelect(a.gitLog.listScroll + row)
 }
 
@@ -853,6 +864,9 @@ func (a *App) drawGitLog() {
 	default:
 		title += " commits "
 	}
+	if n := len(a.gitLog.ticked); n > 0 {
+		title += "· " + itoa(n) + " ticked "
+	}
 	if tx := searchBtn.x + searchBtn.w; tx+runeLen(title) <= copyBtn.x {
 		drawAt(a.screen, tx, py, title, titleSt)
 	}
@@ -925,6 +939,12 @@ func (a *App) drawGitLogListRow(row, px, ry, listW int) {
 		mark = "●"
 	}
 	drawAt(a.screen, px, ry, " "+mark+" ", tcell.StyleDefault.Background(bg).Foreground(th.GitAdded))
+	// The leading blank cell doubles as the tick (gitlogticks.go) — the
+	// tree marks' trick: a multi-selection that costs no column.
+	if _, ok := a.gitLog.ticked[c.Hash]; ok {
+		a.screen.SetContent(px, ry, gitLogTickGlyph, nil,
+			tcell.StyleDefault.Background(bg).Foreground(th.Accent).Bold(true))
+	}
 	drawAt(a.screen, px+3, ry, c.Short, hashSt)
 	subjX := px + 3 + runeLen(c.Short) + 1
 

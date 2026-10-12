@@ -32,6 +32,7 @@ func TestGitLogActionItems_Inventory(t *testing.T) {
 	want := []string{
 		"Cherry-pick abc1234 onto main…",
 		"Revert abc1234…",
+		"Tick abc1234 for a multi-commit cherry-pick",
 		"Reset main to abc1234…",
 		"Checkout abc1234 (detached HEAD)",
 		"Create branch at abc1234…",

@@ -52,7 +52,7 @@ const DefaultName = "tokyo-night"
 // Spec is a named theme: the metadata a picker shows plus the (possibly
 // sparse) palette behind it. Colors is kept sparse on purpose — it is
 // what a user's file literally said, so writing a Spec back out doesn't
-// bloat an eight-line theme into thirty-five lines of derived values.
+// bloat an eight-line theme into a full page of derived values.
 type Spec struct {
 	// Name is the stable id used in config.json and on the command line.
 	// Lowercase, hyphenated, unique within a registry.

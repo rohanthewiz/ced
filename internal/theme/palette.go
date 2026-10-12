@@ -12,10 +12,10 @@
 // The whole design turns on one idea: **only eight keys are required**.
 // A theme author states `bg fg muted line accent ok warn err` — the
 // background, the text, the two quieter greys, the accent, and the three
-// semantic signal colors — and Normalize fills the other twenty-nine in
+// semantic signal colors — and Normalize fills every other key in
 // a fixed dependency order (`selection` is a 32% accent wash over `bg`,
 // `syn-string` is `ok`, `git-deleted` is `err`, …). That keeps a
-// hand-written user theme eight lines long instead of thirty-five, and
+// hand-written user theme eight lines long instead of forty-odd, and
 // it means adding a new color key to the editor never invalidates a
 // theme file somebody already wrote: the new key just derives.
 //

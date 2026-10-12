@@ -267,7 +267,7 @@ func TestEncode_RoundTrips(t *testing.T) {
 
 // TestEncode_SparseStaysSparse pins the other half of Encode's contract:
 // full=false writes back exactly what the author stated, so re-saving an
-// eight-line theme doesn't balloon it to thirty-five.
+// eight-line theme doesn't balloon it to the full palette.
 func TestEncode_SparseStaysSparse(t *testing.T) {
 	spec := Spec{Name: "tiny", Label: "Tiny", Dark: true, Colors: minimal()}
 	out, err := Encode(spec, false)
@@ -286,7 +286,7 @@ func TestEncode_SparseStaysSparse(t *testing.T) {
 // TestEncode_CanonicalKeyOrder pins that generated files read core-first
 // rather than in Go's map order, which is what makes a written theme
 // file navigable by a human: the eight keys they'll actually edit are at
-// the top, above the twenty-nine they mostly won't.
+// the top, above the derived ones they mostly won't.
 func TestEncode_CanonicalKeyOrder(t *testing.T) {
 	spec, _ := Find(Builtins(), DefaultName)
 	out, err := Encode(spec, true)

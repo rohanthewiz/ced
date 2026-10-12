@@ -124,15 +124,6 @@ plus the LSP work done in the seeding session itself
   finished git command). Fine for dozens of files; a rebase leaving
   hundreds unmerged would pay for it. A per-file mtime cache would fix it.
 
-- **N-054** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
-  The theme package's header comments say Normalize derives "the other
-  twenty-nine" keys (theme.go, palette.go, load_test.go); the table has
-  33 derived keys now (31 before this session's two conflict washes). The
-  totals drifted too: "thirty-five" (palette.go, builtin.go,
-  palette_test.go, load_test.go) is 41 now (8 core + 33). Re-checked
-  2026-10-08 by counting `derivations()`. An instance of N-003's doc
-  drift.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -301,6 +292,14 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-11, `2026-1011-next-list-run` —
+  **N-054** the theme package's comments no longer state key counts
+  ("the other twenty-nine", "thirty-five" — really 33 derived, 41 in
+  all, counted from `derivations()`). Reworded count-free ("every other
+  key", "the full palette", "forty-odd") in theme.go, palette.go,
+  builtin.go, palette_test.go and load_test.go so the next derived key
+  can't make them drift again. Theme tests pass.
 
 - closed 2026-10-08, `2026-1008-1837-conflict-compare-sides` —
   **N-049** a conflict block's sides diff in the

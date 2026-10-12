@@ -6,7 +6,7 @@
 // =============================================================================
 
 // Tests for the color model: hex parsing, the blend helpers, and the
-// derivation table that turns eight stated colors into thirty-five. The
+// derivation table that turns eight stated colors into the full palette. The
 // derivation table is the load-bearing part of the whole feature — it's
 // what lets a user write an eight-line theme file — so the tests here
 // lean on "a minimal palette produces a complete, sane theme" rather
@@ -49,7 +49,7 @@ func TestNormalize_FillsEveryKeyFromTheCoreEight(t *testing.T) {
 // TestNormalize_LeavesInputUntouched pins that a sparse theme stays
 // sparse. Specs hold what the author wrote, and Encode writes that back
 // — mutating the input here would silently expand every user's
-// eight-line file into thirty-five lines the first time it loaded.
+// eight-line file into the full palette the first time it loaded.
 func TestNormalize_LeavesInputUntouched(t *testing.T) {
 	in := minimal()
 	if _, err := Normalize(in); err != nil {

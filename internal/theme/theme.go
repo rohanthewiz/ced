@@ -13,7 +13,7 @@
 //     Default(), the Tokyo Night palette ced has always shipped with.
 //   - palette.go — the color model: a flat map of canonical keys, of
 //     which only eight are required, and a derivation table that fills
-//     the other twenty-nine.
+//     every other key.
 //   - builtin.go / load.go — ten named themes, and the registry that
 //     merges them with the user's own ~/.config/ced/themes/*.json.
 //

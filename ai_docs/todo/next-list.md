@@ -133,13 +133,6 @@ plus the LSP work done in the seeding session itself
   2026-10-08 by counting `derivations()`. An instance of N-003's doc
   drift.
 
-- **N-061** · raised `2026-1011-2044-commit-receipt-push-button` · value low
-  The commit receipt's 7s expiry keeps running while the pointer rests
-  on the panel, so a slow reach for its new `[ Push <branch>… ]` button
-  can lose the race. Holding the expiry while the pointer is inside the
-  box (re-arm on leave) would fix it — the receipt already sees motion
-  in handleMouse but passes it through untouched.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -234,6 +227,22 @@ and `raised`.
   in a repo with a remote, the receipt shows the button under the
   message, a click opens the push dialog for the current branch, and a
   key still dismisses the receipt without being eaten.
+
+- **N-061** · raised `2026-1011-2044-commit-receipt-push-button` · value low
+  The commit receipt's 7s expiry keeps running while the pointer rests
+  on the panel, so a slow reach for its new `[ Push <branch>… ]` button
+  can lose the race. Holding the expiry while the pointer is inside the
+  box (re-arm on leave) would fix it — the receipt already sees motion
+  in handleMouse but passes it through untouched. FIXED in
+  `2026-1011-2107-commit-receipt-hover-hold`: `noteCommitReceiptPointer`
+  (gitcommitreceipt.go), called ahead of handleMouse's routing, holds
+  the expiry on entering the drawn box (seq bump strands the armed tick)
+  and re-arms a full 7s on leaving — only the inside→outside transition
+  re-arms. Never claims an event.
+  Pinned by `TestCommitReceipt_PointerInsideHoldsExpiry` and
+  `TestCommitReceipt_ReplacementIsNotHeld`. Hand check left: in the real
+  binary, commit, rest the pointer on the receipt past 7s (it stays),
+  move off (it goes ~7s later).
 
 ## Roadmap
 

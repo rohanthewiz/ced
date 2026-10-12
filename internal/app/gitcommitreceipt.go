@@ -62,6 +62,14 @@
 // without being consumed (no key could be bound here without breaking
 // that), and the keyboard door to the same dialog is the ≡ Git row.
 //
+// The window is HELD while the pointer rests inside the panel, and
+// starts over (a full commitReceiptFor) when it leaves. A fixed window
+// races the reader: a slow reach for the push button, or a long push
+// output being read line by line, could lose the panel under the
+// pointer at the exact moment it was being used. Holding is pure
+// bookkeeping on motion the panel already sees — nothing is claimed, so
+// motion still reaches the dwell layers beneath (noteCommitReceiptPointer).
+//
 //	┌──────────────────────────────────────┐
 //	│ Committed                    any key │
 //	├──────────────────────────────────────┤
@@ -166,6 +174,14 @@ type commitReceiptState struct {
 	// hoverdwell generation trick, and what makes "commit twice quickly"
 	// leave the SECOND receipt up for its full window.
 	seq int
+	// held is true while the pointer rests inside the panel and the
+	// expiry is suspended — no timer for this receipt is live, because
+	// entering bumped seq past the one that was armed. Leaving re-arms.
+	// Tracked as a flag, rather than re-derived from the pointer, so
+	// that only the inside→outside TRANSITION re-arms: every motion
+	// outside the box re-arming would push the expiry back forever for a
+	// user just moving the mouse over their code.
+	held bool
 	// box is the rectangle the last draw stamped, so a press inside the
 	// panel is swallowed rather than landing in code the user cannot
 	// see (the dwell tooltip's contract, for the same reason).
@@ -229,6 +245,10 @@ func (a *App) openGitReceipt(title, hash, head string, lines []string) {
 	// Reset here so a push receipt replacing a commit receipt does not
 	// inherit its button; handleGitCommitReceipt sets it after the call.
 	a.commitReceipt.pushBranch = ""
+	// A replacement starts with a live timer, so it is not held — even
+	// if the pointer happens to sit where the old box was. The next
+	// motion inside the new box holds it again.
+	a.commitReceipt.held = false
 	a.armCommitReceiptExpiry()
 }
 
@@ -340,7 +360,43 @@ func (a *App) closeCommitReceipt() {
 	a.commitReceipt.lines = nil
 	a.commitReceipt.pushBranch = ""
 	a.commitReceipt.box = struct{ x, y, w, h int }{}
+	a.commitReceipt.held = false
 	a.commitReceipt.seq++
+}
+
+// noteCommitReceiptPointer holds the receipt's expiry while the pointer
+// is inside the drawn panel and re-arms it, for a full window, when the
+// pointer leaves. Called for every mouse event before routing; never
+// claims one.
+//
+//	enter (motion inside, not held)  → held, seq++ (pending tick goes stale)
+//	move inside / move outside       → nothing
+//	leave (motion outside, held)     → not held, armCommitReceiptExpiry
+//
+// Presses are left to handleMouse's own receipt branch, which closes
+// the panel anyway. The wheel counts as a pointer report: its position
+// is where the pointer is, and scrolling with the pointer over the
+// panel is still "resting on it".
+//
+// The re-arm needs the terminal to report the leave. Motion tracking
+// reports every cell crossed, and the panel is centered with window
+// around it, so a pointer leaving the box crosses outside cells first;
+// a terminal without motion reports never holds in the first place.
+func (a *App) noteCommitReceiptPointer(x, y int, btn tcell.ButtonMask) {
+	if !a.commitReceiptOpen() || btn&(tcell.Button1|tcell.Button2|tcell.Button3) != 0 {
+		return
+	}
+	inside := a.commitReceiptContains(x, y)
+	switch {
+	case inside && !a.commitReceipt.held:
+		a.commitReceipt.held = true
+		// The seq bump is the cancel: the tick already scheduled will
+		// carry the old seq and handleCommitReceiptExpire drops it.
+		a.commitReceipt.seq++
+	case !inside && a.commitReceipt.held:
+		a.commitReceipt.held = false
+		a.armCommitReceiptExpiry()
+	}
 }
 
 // commitReceiptOpen reports whether the panel is up.

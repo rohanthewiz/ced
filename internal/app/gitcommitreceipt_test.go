@@ -371,3 +371,84 @@ func TestCommitReceipt_PushButtonOpensPushDialog(t *testing.T) {
 		t.Errorf("push dialog for %q, want main", m.local)
 	}
 }
+
+// TestCommitReceipt_PointerInsideHoldsExpiry pins N-061: the window is
+// held while the pointer rests on the panel (so a slow reach for the
+// push button cannot lose the race) and starts over when it leaves.
+// Motion is never claimed — the receipt only watches it.
+func TestCommitReceipt_PointerInsideHoldsExpiry(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	a.drawCommitReceipt()
+	armed := a.commitReceipt.seq
+	b := a.commitReceipt.box
+
+	// Motion outside before ever entering: no hold, no re-arm — the
+	// timer that is running stays the live one.
+	a.handleMouse(tcell.NewEventMouse(b.x-1, b.y-1, tcell.ButtonNone, tcell.ModNone))
+	if a.commitReceipt.held || a.commitReceipt.seq != armed {
+		t.Fatalf("motion outside changed the window: held=%v seq=%d, want false %d",
+			a.commitReceipt.held, a.commitReceipt.seq, armed)
+	}
+
+	// Enter: the tick armed at open goes stale.
+	a.handleMouse(tcell.NewEventMouse(b.x+1, b.y+1, tcell.ButtonNone, tcell.ModNone))
+	if !a.commitReceipt.held {
+		t.Fatal("pointer inside the panel should hold its expiry")
+	}
+	a.handleCommitReceiptExpire(&commitReceiptExpireEvent{seq: armed})
+	if !a.commitReceiptOpen() {
+		t.Fatal("the expiry fired while the pointer rested on the panel")
+	}
+
+	// Moving about inside (and the wheel) keeps the hold without
+	// re-arming anything.
+	held := a.commitReceipt.seq
+	a.handleMouse(tcell.NewEventMouse(b.x+2, b.y+2, tcell.ButtonNone, tcell.ModNone))
+	a.handleMouse(tcell.NewEventMouse(b.x+2, b.y+2, tcell.WheelDown, tcell.ModNone))
+	if !a.commitReceiptOpen() || !a.commitReceipt.held || a.commitReceipt.seq != held {
+		t.Fatalf("motion inside disturbed the hold: open=%v held=%v seq=%d want %d",
+			a.commitReceiptOpen(), a.commitReceipt.held, a.commitReceipt.seq, held)
+	}
+
+	// Leave: a fresh window is armed, and its tick (only its tick)
+	// closes the panel.
+	a.handleMouse(tcell.NewEventMouse(b.x-1, b.y-1, tcell.ButtonNone, tcell.ModNone))
+	if a.commitReceipt.held {
+		t.Fatal("leaving the panel should release the hold")
+	}
+	if a.commitReceipt.seq == held {
+		t.Fatal("leaving the panel should arm a new expiry")
+	}
+	a.handleCommitReceiptExpire(&commitReceiptExpireEvent{seq: held})
+	if !a.commitReceiptOpen() {
+		t.Fatal("a tick from before the hold must not close the re-armed receipt")
+	}
+	a.handleCommitReceiptExpire(&commitReceiptExpireEvent{seq: a.commitReceipt.seq})
+	if a.commitReceiptOpen() {
+		t.Error("the re-armed expiry should close the receipt")
+	}
+}
+
+// TestCommitReceipt_ReplacementIsNotHeld pins that a receipt replacing
+// a held one starts with its own live window: the hold belonged to the
+// old box, and the pointer has not entered the new one yet.
+func TestCommitReceipt_ReplacementIsNotHeld(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "first"))
+	a.drawCommitReceipt()
+	b := a.commitReceipt.box
+	a.handleMouse(tcell.NewEventMouse(b.x+1, b.y+1, tcell.ButtonNone, tcell.ModNone))
+	if !a.commitReceipt.held {
+		t.Fatal("setup: pointer inside should hold")
+	}
+
+	a.showPushReceipt("main → origin/main", []byte("Everything up-to-date\n"))
+	if a.commitReceipt.held {
+		t.Fatal("a replacement receipt inherited the old one's hold")
+	}
+	a.handleCommitReceiptExpire(&commitReceiptExpireEvent{seq: a.commitReceipt.seq})
+	if a.commitReceiptOpen() {
+		t.Error("the replacement's own expiry should close it")
+	}
+}

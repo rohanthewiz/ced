@@ -3367,6 +3367,12 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		return
 	}
 
+	// The commit receipt's expiry is held while the pointer rests on
+	// it. Bookkeeping only — it claims nothing, so it runs ahead of every
+	// layer that might return early and still sees each pointer report.
+	// See gitcommitreceipt.go.
+	a.noteCommitReceiptPointer(x, y, btn)
+
 	// The find bar's history dropdown is drawn over the editor and any
 	// panel beside it, so it hears the pointer before any of them. It
 	// claims only what lands on it; a press outside closes it and falls
@@ -3418,9 +3424,10 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// button, and a press that landed INSIDE the panel is swallowed
 	// rather than moving the caret in code the user could not see. Pure
 	// motion and the wheel pass through, so reading a receipt is not
-	// interrupted by a nudge of the mouse. A left press on its push
-	// button opens the push dialog — the panel is closed first, since
-	// the dialog takes the modal slot and the receipt paints below it.
+	// interrupted by a nudge of the mouse (they only hold its expiry,
+	// above). A left press on its push button opens the push dialog —
+	// the panel is closed first, since the dialog takes the modal slot
+	// and the receipt paints below it.
 	if btn&(tcell.Button1|tcell.Button2|tcell.Button3) != 0 && a.commitReceiptOpen() {
 		hit := a.commitReceiptContains(x, y)
 		push := btn&tcell.Button1 != 0 && a.commitReceiptPushHit(x, y)

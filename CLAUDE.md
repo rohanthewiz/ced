@@ -738,6 +738,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   the other. A COMMIT receipt carries `[ Push <branch>… ]` (click only,
   keys still pass through) under the Actions row's condition
   (`hasGitPushTarget` + branch), captured at open; it runs `openGitPush`.
+  The expiry is HELD while the pointer is inside the box and re-armed
+  (full window) on leave (`noteCommitReceiptPointer`, never claims).
 - Blame (gitblame.go, Esc-A): blames the BUFFER (`--contents -`). Two
   styles, `"blamestyle"` + ≡ Git row, both measured on every
   `fileBlame` (`newFileBlame`) so a switch never forks git: `bands`

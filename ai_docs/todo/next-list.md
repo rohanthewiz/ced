@@ -168,30 +168,6 @@ and `raised`.
   machine); a custom command (`open -a Ghostty {{DIR}}`) opens there.
   The cats branch and ced's panel branch DID run in the real binary.
 
-- **N-060** · raised `2026-1011-2044-commit-receipt-push-button` · value low
-  The commit receipt's `[ Push <branch>… ]` button has run only in tests
-  (`TestCommitReceipt_PushButtonOpensPushDialog` against a real repo and
-  bare remote). Hand check in the real binary: commit from the git panel
-  in a repo with a remote, the receipt shows the button under the
-  message, a click opens the push dialog for the current branch, and a
-  key still dismisses the receipt without being eaten.
-
-- **N-061** · raised `2026-1011-2044-commit-receipt-push-button` · value low
-  The commit receipt's 7s expiry keeps running while the pointer rests
-  on the panel, so a slow reach for its new `[ Push <branch>… ]` button
-  can lose the race. Holding the expiry while the pointer is inside the
-  box (re-arm on leave) would fix it — the receipt already sees motion
-  in handleMouse but passes it through untouched. FIXED in
-  `2026-1011-2107-commit-receipt-hover-hold`: `noteCommitReceiptPointer`
-  (gitcommitreceipt.go), called ahead of handleMouse's routing, holds
-  the expiry on entering the drawn box (seq bump strands the armed tick)
-  and re-arms a full 7s on leaving — only the inside→outside transition
-  re-arms. Never claims an event.
-  Pinned by `TestCommitReceipt_PointerInsideHoldsExpiry` and
-  `TestCommitReceipt_ReplacementIsNotHeld`. Hand check left: in the real
-  binary, commit, rest the pointer on the receipt past 7s (it stays),
-  move off (it goes ~7s later).
-
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.
@@ -249,6 +225,19 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-11, `SESSIONSTEM4` —
+  **N-061** checked in the real binary (`run-ced`, SGR motion reports):
+  with no pointer the receipt is gone by 8.5s; with the pointer resting
+  inside it is still up at 9.5s; after leaving at 3s it is still up 5s
+  later and gone 8.5s later (a full 7s re-arm on leave).
+
+- closed 2026-10-11, `SESSIONSTEM4` —
+  **N-060** checked in the real binary (`run-ced`, a repo with a bare
+  remote and upstream): a commit from the git panel's Actions ▾ shows
+  the receipt with `[ Push main… ]` under the message; a click on it
+  opens the Push dialog for `main → origin/main`; with the receipt up,
+  `Esc p` dismisses it AND opens the finder (the key is not eaten).
 
 - closed 2026-10-11, `SESSIONSTEM4` —
   **N-063** (raised and fixed in the same session, found by N-056's

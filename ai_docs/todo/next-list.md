@@ -126,7 +126,16 @@ and `raised`.
   'rust-analyzer' in official toolchain". `rustup component add
   rust-analyzer` would make it the cheapest server to check next. Until
   then ced's look-up finds it and the server dies on start, which should
-  degrade silently; worth confirming on the way.) The TypeScript inlay-hint `preferences` in
+  degrade silently; worth confirming on the way.) 2026-10-11
+  (`2026-1011-2210-validate-n059-n056-n060-n061-n013-real-binary`): the proxy is GONE from the dev machine (no
+  `~/.cargo/bin/rust-analyzer`; `rust-analyzer` not on PATH), so the
+  dying-server case was run with a stand-in on PATH that prints rustup's
+  "Unknown binary" error and exits 1: opening a .rs file in the real
+  binary shows no modal, no flash, nothing in the status bar; ≡ Code
+  offers "Restart language server (rust-analyzer)" as the retry; `Esc d`
+  does nothing at all (menuGoToDefinition returns early on
+  `!hasLSPActions()` — the same as with no server, by the
+  silent-degradation rule). The TypeScript inlay-hint `preferences` in
   `initOptions` are the least certain part — typescript-language-server
   may want them via `workspace/didChangeConfiguration` instead.
 
@@ -226,20 +235,20 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-10-11, `SESSIONSTEM4` —
+- closed 2026-10-11, `2026-1011-2210-validate-n059-n056-n060-n061-n013-real-binary` —
   **N-061** checked in the real binary (`run-ced`, SGR motion reports):
   with no pointer the receipt is gone by 8.5s; with the pointer resting
   inside it is still up at 9.5s; after leaving at 3s it is still up 5s
   later and gone 8.5s later (a full 7s re-arm on leave).
 
-- closed 2026-10-11, `SESSIONSTEM4` —
+- closed 2026-10-11, `2026-1011-2210-validate-n059-n056-n060-n061-n013-real-binary` —
   **N-060** checked in the real binary (`run-ced`, a repo with a bare
   remote and upstream): a commit from the git panel's Actions ▾ shows
   the receipt with `[ Push main… ]` under the message; a click on it
   opens the Push dialog for `main → origin/main`; with the receipt up,
   `Esc p` dismisses it AND opens the finder (the key is not eaten).
 
-- closed 2026-10-11, `SESSIONSTEM4` —
+- closed 2026-10-11, `2026-1011-2210-validate-n059-n056-n060-n061-n013-real-binary` —
   **N-063** (raised and fixed in the same session, found by N-056's
   check) the search-history dropdown clipped Copy to… destinations at
   the END, so two folders under one long parent drew as identical rows.
@@ -248,7 +257,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   Pinned by `TestHistDropLabel_DestinationsKeepTheirTail`; re-checked in
   the real binary (`…/v56dest/two`, `…/v56dest/one`).
 
-- closed 2026-10-11, `SESSIONSTEM4` —
+- closed 2026-10-11, `2026-1011-2210-validate-n059-n056-n060-n061-n013-real-binary` —
   **N-056** checked in the real binary in a git repo (`run-ced`, four
   restarts): a copy records its destination in `.ced/history.bytdb`
   (the database ignored by the `.ced/.gitignore` it writes; only that
@@ -258,7 +267,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   a restart (field then seeded with the survivor). The check found
   N-063, fixed alongside.
 
-- closed 2026-10-11, `SESSIONSTEM4` —
+- closed 2026-10-11, `2026-1011-2210-validate-n059-n056-n060-n061-n013-real-binary` —
   **N-062** (raised and fixed in the same session, found by N-059's
   check) a COMBINED diff — the git panel's view of an unmerged file
   (`diff --cc`), and `git show` of a merge commit in the git log —
@@ -268,7 +277,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   them for rows holding a tab. Pinned by
   `TestDiffDisplayLineCols_CombinedDiff`; re-checked in the real binary.
 
-- closed 2026-10-11, `SESSIONSTEM4` —
+- closed 2026-10-11, `2026-1011-2210-validate-n059-n056-n060-n061-n013-real-binary` —
   **N-059** hand check run in the real binary (`run-ced`, a scratch repo
   with tab-indented Go and a parked cherry-pick): the git panel diff of
   a modified Go file, a git log commit detail, and a Go conflict's

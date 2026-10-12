@@ -262,7 +262,8 @@ Newest first. Closures before 2026-09-21 live in the session docs.
 - closed 2026-10-11, `SESSIONSTEM4` —
   **N-056** checked in the real binary in a git repo (`run-ced`, four
   restarts): a copy records its destination in `.ced/history.bytdb`
-  (`.ced/` kept out of `git status`); the next process seeds the field
+  (the database ignored by the `.ced/.gitignore` it writes; only that
+  file shows as untracked, by design); the next process seeds the field
   with it; Up opens the dropdown listing both destinations, newest
   first; Delete forgets the highlighted one and the forgetting survives
   a restart (field then seeded with the survivor). The check found

@@ -358,3 +358,49 @@ func TestDrawTabBar_ActiveCloseIsBrighterThanInactive(t *testing.T) {
 		t.Errorf("active and inactive × share a color (%v); the active one must stand out", active)
 	}
 }
+
+// TestDrawTabBar_ConflictedTabLabelIsError pins N-052: a tab whose file
+// is in git's unmerged set draws its label in theme.Error (the tree's
+// rule for the same file), whether or not it is the active tab, while a
+// clean neighbour keeps its usual colour.
+func TestDrawTabBar_ConflictedTabLabelIsError(t *testing.T) {
+	a := tabBarApp(t, 2)
+	a.activeTab = 1
+	a.gitConflicted = map[string]bool{a.tabs[0].Path: true}
+	a.drawTabBar()
+
+	_, ty, _, _ := a.tabBarRect()
+	// labelFG finds the first cell of the tab's label in its rect and
+	// returns that cell's foreground.
+	labelFG := func(i int) tcell.Color {
+		label := []rune(a.tabLabel(i))
+		for _, r := range a.lastTabRects {
+			if r.Index != i {
+				continue
+			}
+			for cx := r.X; cx < r.X+r.Width; cx++ {
+				ru, _, st, _ := a.screen.GetContent(cx, ty)
+				if ru == label[0] {
+					fg, _, _ := st.Decompose()
+					return fg
+				}
+			}
+		}
+		t.Fatalf("label of tab %d not drawn", i)
+		return 0
+	}
+	if got := labelFG(0); got != a.theme.Error {
+		t.Errorf("conflicted tab label fg = %v, want theme.Error %v", got, a.theme.Error)
+	}
+	if got := labelFG(1); got != a.theme.Text {
+		t.Errorf("clean active tab label fg = %v, want theme.Text %v", got, a.theme.Text)
+	}
+
+	// The active tab gets the colour too: switching to the conflicted
+	// file must not hide that it is unmerged.
+	a.activeTab = 0
+	a.drawTabBar()
+	if got := labelFG(0); got != a.theme.Error {
+		t.Errorf("active conflicted tab label fg = %v, want theme.Error %v", got, a.theme.Error)
+	}
+}

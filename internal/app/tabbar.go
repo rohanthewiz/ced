@@ -45,6 +45,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/icons"
 )
 
@@ -313,11 +314,22 @@ func (a *App) drawTabBar() {
 		// it — see tablabel.go. The icon above still keys off the real
 		// file name: a glyph is chosen by extension, not by how much
 		// path the strip had to show.
+		//
+		// An UNMERGED file's label takes the error colour, the same rule
+		// the tree applies to its row (filetree.drawNodeRow): the file
+		// blocks every commit until it is settled. The colour goes on the
+		// label rather than the marker slot because that slot already
+		// carries the tab's disk state (⊘ / ⚠ / ●), and a merge conflict
+		// is orthogonal to it — an unmerged file is usually saved.
+		labelSt := st
+		if a.tabGitConflicted(tab) {
+			labelSt = st.Foreground(a.theme.Error)
+		}
 		for _, ru := range a.tabLabel(r.Index) {
 			if col >= tx+tw {
 				break
 			}
-			a.screen.SetContent(col, ty, ru, nil, st)
+			a.screen.SetContent(col, ty, ru, nil, labelSt)
 			col++
 		}
 		col++ // separator space before ×
@@ -340,6 +352,13 @@ func (a *App) drawTabBar() {
 	}
 
 	a.drawTabOverflow()
+}
+
+// tabGitConflicted reports whether a tab's file is in git's unmerged set
+// (the snapshot refreshGitStatus keeps in a.gitConflicted, keyed by the
+// same absolute paths tabs carry). Untitled tabs never are.
+func (a *App) tabGitConflicted(tab *editor.Tab) bool {
+	return tab != nil && tab.Path != "" && a.gitConflicted[tab.Path]
 }
 
 // drawTabGroupChip paints a group's chip: its name on the group colour,

@@ -102,12 +102,6 @@ plus the LSP work done in the seeding session itself
   merges are hidden and the summary says so), and a per-commit diff
   preview (today: the files it touches, and which overlap HEAD's side).
 
-- **N-052** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
-  Conflicted files are red in the tree and counted in the status bar's ⚠,
-  but the TAB BAR doesn't mark a conflicted tab. Left over from the 4.3
-  follow-ups (`2026-0812-2058-cats-native-phase4-3`), of which the
-  `--skip` row and the tree marking are now done.
-
 - **N-053** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
   The Conflicts panel rescans every unmerged file WITHOUT an open tab
   from disk on each refresh (open, the 10s tick while it's up, every
@@ -284,8 +278,15 @@ Wanted, but not next. Parked, not declined.
 Newest first. Closures before 2026-09-21 live in the session docs.
 
 - closed 2026-10-11, `2026-1011-next-list-run` —
+  **N-052** a conflicted (unmerged) file's TAB label is drawn in
+  `theme.Error`, the tree's rule for the same file, active or not
+  (`tabGitConflicted`, tabbar.go, reading `a.gitConflicted`). The colour
+  sits on the label, not the marker slot, which keeps the disk state
+  (⊘ / ⚠ / ●). Pinned by `TestDrawTabBar_ConflictedTabLabelIsError`.
+
+- closed 2026-10-11, `2026-1011-next-list-run` —
   **N-036** the README hotkey table now lists all 20 missing top-level
-  leaders (`Esc z/Z T , . b o O \` ~ v h H A g L S`, plus rows for the
+  leaders (`Esc z/Z T , . b o O ~ v h H A g L S`, backtick, plus rows for the
   `Esc a` / `Esc x` / `Esc C` prefixes). `TestREADME_LeaderTableListsEveryBinding`
   (leader_test.go) fails when a binding in `leaderBindings()` or the
   static AI table has no row — it reported exactly those 20 before the

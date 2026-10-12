@@ -102,6 +102,15 @@ type conflictPanelState struct {
 	// tab — see conflictFileCount, which reads an open buffer live.
 	counts map[string]int
 
+	// diskScans remembers each disk scan behind counts by the file's stat
+	// (N-053): a refresh — panel open, the 10s tick while it is up, every
+	// finished git command — re-reads only files whose size or mtime moved,
+	// so a rebase that leaves hundreds unmerged pays one stat per file per
+	// tick instead of a full read and parse. Rebuilt on every refresh from
+	// the current unmerged set, so it never outlives the files it
+	// describes. See conflictCountCached.
+	diskScans map[string]conflictDiskScan
+
 	// resolved / stopKey are the cosmetic memory described in the file
 	// comment: toplevel-relative paths settled since this stop.
 	resolved []string
@@ -120,6 +129,16 @@ type conflictPanelState struct {
 	// the panel is not one, so the mark is explicit, and the next key or
 	// click clears it (handleEvent) — the user is now looking at it.
 	unseen string
+}
+
+// conflictDiskScan is one cached disk scan: the stat it was made against
+// (size, mtime to the nanosecond), the marker length it scanned for, and
+// the block count it found.
+type conflictDiskScan struct {
+	size   int64
+	mtime  int64
+	marker int
+	count  int
 }
 
 // conflictRow is one list row: an unmerged file, or one already settled.
@@ -220,12 +239,47 @@ func (a *App) refreshConflictPanelCounts() {
 		return
 	}
 	st.counts = make(map[string]int, len(st.files))
+	prev := st.diskScans
+	st.diskScans = make(map[string]conflictDiskScan, len(st.files))
 	for _, f := range st.files {
 		if isPresenceConflict(f.xy) || a.tabForPath(f.abs) != nil {
 			continue
 		}
-		st.counts[f.abs] = a.conflictCountFor(f.abs)
+		st.counts[f.abs] = a.conflictCountCached(f.abs, prev)
 	}
+}
+
+// conflictCountCached is conflictCountFor's disk branch behind a stat
+// check: when the file's size, nanosecond mtime and marker length all
+// match the scan in prev, that scan's count is reused; otherwise the file
+// is read and parsed, and the new scan recorded in the panel's diskScans.
+//
+// Only the panel's REFRESH reads through this. The verbs that gate `git
+// add` (Mark resolved, Stage all & continue) call conflictCountFor and
+// read the file fresh: a write that lands within one mtime tick with the
+// same size would fool the cache, and there "no markers" must never be a
+// guess. A stale row for one refresh is the most this cache can cost.
+//
+// A file that cannot be stat'ed or scanned is "unknown" (-1) and not
+// cached, so the next refresh tries again.
+func (a *App) conflictCountCached(abs string, prev map[string]conflictDiskScan) int {
+	fi, err := os.Stat(abs)
+	if err != nil {
+		return -1
+	}
+	marker := a.conflictMarkerSizeFor(abs)
+	key := conflictDiskScan{size: fi.Size(), mtime: fi.ModTime().UnixNano(), marker: marker}
+	if old, ok := prev[abs]; ok && old.size == key.size && old.mtime == key.mtime && old.marker == key.marker {
+		a.conflictPanel.diskScans[abs] = old
+		return old.count
+	}
+	lines, ok := readConflictScanLines(abs)
+	if !ok {
+		return -1
+	}
+	key.count = len(editor.ParseConflictsSized(lines, marker))
+	a.conflictPanel.diskScans[abs] = key
+	return key.count
 }
 
 // conflictFileCount is a row's block count as of THIS frame: read live

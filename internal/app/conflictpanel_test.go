@@ -8,9 +8,11 @@
 package app
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -433,5 +435,53 @@ func TestSaveForStaging_WritesTheBufferVerbatim(t *testing.T) {
 	}
 	if got := readFileT(t, paths[0]); got != tab.Buffer.String() {
 		t.Errorf("disk = %q, buffer = %q", got, tab.Buffer.String())
+	}
+}
+
+// TestConflictPanel_DiskScanCachedByStat pins N-053: a refresh reuses the
+// last disk scan of an unopened unmerged file while its size and mtime
+// are unchanged, rescans once either moves, and the verbs that gate `git
+// add` (conflictCountFor) never read through the cache.
+func TestConflictPanel_DiskScanCachedByStat(t *testing.T) {
+	a, repo := conflictPanelApp(t)
+	f := filepath.Join(repo, "f.txt")
+	if got := a.conflictFileCount(f); got != 1 {
+		t.Fatalf("initial count = %d, want 1", got)
+	}
+	if _, ok := a.conflictPanel.diskScans[f]; !ok {
+		t.Fatal("refresh recorded no disk scan for f.txt")
+	}
+
+	// Rewrite the file to a SAME-LENGTH marker-free text and put the
+	// mtime back: to the cache it is the file it already scanned.
+	fi, err := os.Stat(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(f)
+	clean := []byte(strings.Repeat("x", len(data)-1) + "\n")
+	if err := os.WriteFile(f, clean, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(f, fi.ModTime(), fi.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshConflictPanelCounts()
+	if got := a.conflictFileCount(f); got != 1 {
+		t.Errorf("unchanged stat: count = %d, want the cached 1", got)
+	}
+	// The staging gate reads the disk fresh regardless.
+	if got := a.conflictCountFor(f); got != 0 {
+		t.Errorf("conflictCountFor read through the cache: %d, want 0", got)
+	}
+
+	// A moved mtime is a new file to the cache.
+	later := fi.ModTime().Add(2 * time.Second)
+	if err := os.Chtimes(f, later, later); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshConflictPanelCounts()
+	if got := a.conflictFileCount(f); got != 0 {
+		t.Errorf("after an mtime change: count = %d, want a rescan's 0", got)
 	}
 }

@@ -100,12 +100,6 @@ plus the LSP work done in the seeding session itself
   merges are hidden and the summary says so), and a per-commit diff
   preview (today: the files it touches, and which overlap HEAD's side).
 
-- **N-053** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
-  The Conflicts panel rescans every unmerged file WITHOUT an open tab
-  from disk on each refresh (open, the 10s tick while it's up, every
-  finished git command). Fine for dozens of files; a rebase leaving
-  hundreds unmerged would pay for it. A per-file mtime cache would fix it.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -274,6 +268,16 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-11, `SESSIONSTEM2` —
+  **N-053** the Conflicts panel's refresh reuses a file's last disk scan
+  while its size, nanosecond mtime and marker length are unchanged
+  (`conflictCountCached`, `conflictPanelState.diskScans`, rebuilt from
+  the unmerged set each refresh). The verbs that gate `git add` (Mark
+  resolved, Stage all & continue) still read fresh via
+  `conflictCountFor`. Pinned by `TestConflictPanel_DiskScanCachedByStat`
+  (same-stat rewrite stays cached, the gate reads fresh, an mtime move
+  rescans).
 
 - closed 2026-10-11, `SESSIONSTEM2` —
   **N-050** the conflict grammar takes a marker length

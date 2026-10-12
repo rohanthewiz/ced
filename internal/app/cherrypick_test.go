@@ -327,3 +327,86 @@ func TestOpenCherryPickSourcePicker(t *testing.T) {
 		t.Errorf("picking a branch opened %T", a.modal)
 	}
 }
+
+// TestCherryPickModal_TypeToFilter pins N-051's filter: letters narrow the
+// list (case-insensitive over subject, hash and author) while Space still
+// ticks, the highlight moves onto a visible commit, Select all touches only
+// visible rows, the summary names the filter and the ticks it hides,
+// Backspace edits, and Esc clears the filter before it closes the dialog.
+func TestCherryPickModal_TypeToFilter(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := &cherryPickModal{target: "main", ticked: map[string]bool{}, lastClickRow: -1,
+		commits: []cherryPickCommit{
+			{hash: "h1", short: "aaa1111", author: "ann", subject: "Fix the parser"},
+			{hash: "h2", short: "bbb2222", author: "bob", subject: "Docs"},
+			{hash: "h3", short: "ccc3333", author: "ann", subject: "Parser speedup"},
+		}}
+	a.openModal(m)
+	m.cursor = 1
+	m.toggle(a, 1) // h2 ticked before narrowing
+
+	for _, r := range "PARSER" {
+		m.handleKey(a, keyEvent(tcell.KeyRune, r))
+	}
+	if m.filter != "PARSER" || !reflect.DeepEqual(m.vis(), []int{0, 2}) {
+		t.Fatalf("filter %q view %v, want rows 0 and 2", m.filter, m.vis())
+	}
+	if m.cursor != 0 {
+		t.Errorf("cursor = %d, want it moved onto the first visible commit", m.cursor)
+	}
+	if s := m.summaryText(); !strings.Contains(s, "2 of 3") || !strings.Contains(s, "1 ticked hidden") {
+		t.Errorf("summary = %q", s)
+	}
+	m.handleKey(a, keyEvent(tcell.KeyDown, 0))
+	if m.cursor != 2 {
+		t.Errorf("Down moved to %d, want the next VISIBLE commit (2)", m.cursor)
+	}
+	m.handleKey(a, keyEvent(tcell.KeyRune, ' '))
+	if !m.ticked["h3"] || m.filter != "PARSER" {
+		t.Errorf("Space under a filter: ticked=%v filter=%q", m.ticked, m.filter)
+	}
+	m.toggleAll() // ticks h1 too; h2 (hidden) untouched
+	m.toggleAll() // all visible ticked → clears visible only
+	if m.ticked["h1"] || m.ticked["h3"] || !m.ticked["h2"] {
+		t.Errorf("select none under a filter = %v, want only the hidden h2 kept", m.ticked)
+	}
+
+	// Author matches, and Backspace edits.
+	m.setFilter(a, "bob")
+	if !reflect.DeepEqual(m.vis(), []int{1}) {
+		t.Errorf("author filter view = %v", m.vis())
+	}
+	m.handleKey(a, keyEvent(tcell.KeyBackspace2, 0))
+	if m.filter != "bo" {
+		t.Errorf("Backspace left %q", m.filter)
+	}
+
+	m.handleKey(a, keyEvent(tcell.KeyEsc, 0))
+	if a.modal == nil || m.filter != "" || len(m.vis()) != 3 {
+		t.Fatalf("first Esc: modal=%T filter=%q view=%v, want the filter cleared, dialog open", a.modal, m.filter, m.vis())
+	}
+	m.handleKey(a, keyEvent(tcell.KeyEsc, 0))
+	if a.modal != nil {
+		t.Error("second Esc left the dialog open")
+	}
+}
+
+// TestCherryPickModal_FilterMouseMapsThroughTheView pins that a press on a
+// filtered list's row lands on the commit DRAWN there, not on the
+// unfiltered list's row at that position.
+func TestCherryPickModal_FilterMouseMapsThroughTheView(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := &cherryPickModal{target: "main", ticked: map[string]bool{}, lastClickRow: -1,
+		commits: []cherryPickCommit{
+			{hash: "h1", short: "aaa", subject: "one"},
+			{hash: "h2", short: "bbb", subject: "two"},
+		}}
+	a.openModal(m)
+	m.setFilter(a, "two")
+	mx, _, _, _ := m.rect(a)
+	_, _, listTop, _, _, _, _ := m.rowY(a)
+	m.handleMouse(a, mx+3, listTop, tcell.Button1)
+	if !m.ticked["h2"] || m.ticked["h1"] {
+		t.Errorf("press on the first drawn row ticked %v, want h2", m.ticked)
+	}
+}

@@ -1004,6 +1004,11 @@ what that branch has that yours doesn't:
 - `alt+x` adds git's "(cherry picked from …)" line, `alt+s` stages the
   changes without committing (for squashing several into one), `alt+a`
   ticks everything, `alt+b` switches branch.
+- **Type to filter** a long list: letters narrow it by subject, hash or
+  author (`Space` still ticks), `Backspace` edits, `Esc` clears the
+  filter before it closes the dialog. Ticks survive the filter — the
+  summary says how many it is hiding — and `alt+a` ticks only what's
+  showing.
 
 The git log can pick a set too, from any branch it shows: click a
 commit's leftmost cell (or **Actions ▾ → Tick …**) to tick it — a `✓`

@@ -89,10 +89,12 @@ plus the LSP work done in the seeding session itself
   practical. Decide which, then add it as a second door.
 
 - **N-051** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
-  Cherry-pick dialog extras left out: a filter field for long lists
-  (capped at 300, announced), picking a MERGE commit (needs `-m <parent>`;
-  merges are hidden and the summary says so), and a per-commit diff
-  preview (today: the files it touches, and which overlap HEAD's side).
+  Cherry-pick dialog extras left out: picking a MERGE commit (needs
+  `-m <parent>`; merges are hidden and the summary says so — which parent
+  to offer, and whether `-m` may ride along with non-merge picks in one
+  command, is the open question), and a per-commit diff preview (today:
+  the files it touches, and which overlap HEAD's side). The filter for
+  long lists was done in `SESSIONSTEM3` (type-to-filter).
 
 ## Validate
 
@@ -268,8 +270,9 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   or Actions ▾ "Tick …") and cherry-picks them together: "Cherry-pick N
   ticked commits onto <branch>…" leads the Actions picker, confirms with
   the list, runs one `git cherry-pick` oldest first (order from a
-  streamed `rev-list` walk, so same-second commits keep parent-before-
-  child). New gitlogticks.go; pinned by `TestGitLogTicks_CherryPickEndToEnd`
+  streamed `rev-list --topo-order` — fixed in `ea34914` after the
+  end-to-end test caught a plain walk applying a same-second parent
+  late). New gitlogticks.go; pinned by `TestGitLogTicks_CherryPickEndToEnd`
   (real repo, ticked newest first, lands oldest first), the parked-op
   refusal, the draw (✓ + "N ticked" title) and the row order tests.
 

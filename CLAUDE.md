@@ -721,7 +721,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   keyboard door.
 - **Cherry-pick dialog (cherrypick.go)**: `HEAD...src --right-only
   --cherry-mark --no-merges`, capped (announced); `=` rows shown dimmed and
-  unpickable; ⚠ = touches a file HEAD changed since the merge base. Loaded
+  unpickable; type-to-filter is a VIEW (`m.vis()`, cursor indexes
+  commits, scroll the view), Esc clears it first, Select all = visible
+  rows, hidden ticks still picked and counted in the summary; ⚠ = touches a file HEAD changed since the merge base. Loaded
   off-loop, seq-checked. Applied OLDEST FIRST in one `git cherry-pick`;
   `-x` dropped with `--no-commit`. Refused (panel shown) while an op is
   parked. Alt chords a/x/s/b are the button twins.
@@ -758,8 +760,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `refreshGitStatus`. Ticks (gitlogticks.go): the leading blank cell,
   keyed by hash holding the row, NEVER pruned against the (possibly
   filtered) list; set rows lead the Actions picker only while ticked;
-  order = a streamed `rev-list` walk (parents never before children),
-  not dates; one `cherry-pick`, refused while an op is parked; cleared
+  order = streamed `rev-list --topo-order` (a plain walk lets a ticked
+  parent win a same-second tie), never dates; one `cherry-pick`, refused while an op is parked; cleared
   on success only.
 - Git status report (≡ Git + panel Actions): long format with
   `color.status=false`, `advice.statusHints=false`; capped to the window

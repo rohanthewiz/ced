@@ -45,6 +45,15 @@
 //     not a promise of a conflict, but the cheapest honest hint there is,
 //     and it costs one merge-base and one name-only diff for the whole
 //     list.
+//   - TYPE TO FILTER (N-051). A long list (the cap is 300) narrows as you
+//     type, the file tree's type-to-find model: printable letters build
+//     the filter (Space stays the tick), Backspace edits it, and Esc
+//     clears it before a second Esc closes the dialog. Matching is
+//     case-insensitive over subject, short hash and author. The filter
+//     is a VIEW (m.view) over m.commits: ticks survive narrowing, the
+//     submit still picks every tick, hidden ones included, and the
+//     summary says how many ticks the filter is hiding. Select all acts
+//     on the visible rows, the tree marks' bulk rule.
 //   - LOADED OFF THE MAIN LOOP. --cherry-mark computes a patch id for
 //     every commit on BOTH sides of the range, which on a long-diverged
 //     branch takes seconds. The dialog opens at once saying "Loading…" and
@@ -58,6 +67,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -112,8 +122,18 @@ type cherryPickModal struct {
 	capped  bool
 	ticked  map[string]bool // by full hash
 
+	// cursor indexes COMMITS (the highlighted commit; -1 when a filter
+	// leaves nothing to highlight); scroll is a position in VIEW.
 	cursor int
 	scroll int
+
+	// filter is the typed narrowing text; view lists the indices of
+	// m.commits it keeps, newest first. Rebuilt by refilter.
+	filter string
+	view   []int
+	// viewBuilt marks view as derived from the current commits; a fresh
+	// load clears it, and vis() rebuilds on demand.
+	viewBuilt bool
 
 	recordOrigin bool // -x
 	noCommit     bool // --no-commit
@@ -228,6 +248,7 @@ func (a *App) loadCherryPickCommits(m *cherryPickModal) {
 	m.commits, m.capped = nil, false
 	m.cursor, m.scroll = 0, 0
 	m.ticked = map[string]bool{}
+	m.filter, m.view, m.viewBuilt = "", nil, false
 	if a.screen == nil {
 		return
 	}
@@ -253,6 +274,7 @@ func (a *App) handleCherryPickLoad(e *cherryPickLoadEvent) {
 	m.loading = false
 	m.err = e.err
 	m.commits, m.capped = e.commits, e.capped
+	m.refilter()
 	// The first pickable commit starts highlighted, so Enter on a fresh
 	// dialog picks the newest commit not already applied — the commonest
 	// single-pick, one key away.
@@ -392,26 +414,128 @@ func (m *cherryPickModal) toggle(a *App, i int) {
 	}
 }
 
-// toggleAll ticks every pickable commit, or clears them all when they
-// already are — one button, labelled by what it will do.
+// toggleAll ticks every VISIBLE pickable commit, or clears them when
+// they already are — one button, labelled by what it will do. With no
+// filter the view is the whole list, so this is the old select-all;
+// under a filter it touches only what the user can see (the tree marks'
+// bulk rule — a hidden row is never ticked or unticked behind their back).
 func (m *cherryPickModal) toggleAll() {
-	if len(m.ticked) == m.pickable() && len(m.ticked) > 0 {
-		m.ticked = map[string]bool{}
-		return
-	}
-	for _, c := range m.commits {
-		if !c.applied {
+	all := m.allVisibleTicked()
+	for _, i := range m.vis() {
+		c := m.commits[i]
+		if c.applied {
+			continue
+		}
+		if all {
+			delete(m.ticked, c.hash)
+		} else {
 			m.ticked[c.hash] = true
 		}
 	}
 }
 
+// allVisibleTicked reports whether every visible pickable commit is
+// ticked (and there is at least one) — the state in which Select all
+// becomes Select none.
+func (m *cherryPickModal) allVisibleTicked() bool {
+	n := 0
+	for _, i := range m.vis() {
+		c := m.commits[i]
+		if c.applied {
+			continue
+		}
+		if !m.ticked[c.hash] {
+			return false
+		}
+		n++
+	}
+	return n > 0
+}
+
 // allLabel is the select-all button's label.
 func (m *cherryPickModal) allLabel() string {
-	if len(m.ticked) == m.pickable() && len(m.ticked) > 0 {
+	if m.allVisibleTicked() {
 		return "[ Select none ]"
 	}
 	return "[ Select all ]"
+}
+
+// refilter rebuilds the view from the filter and keeps the highlight on
+// a visible commit: the current one if it survived, else the first
+// visible pickable one, else the first visible one, else none (-1).
+func (m *cherryPickModal) refilter() {
+	m.viewBuilt = true
+	m.view = m.view[:0]
+	q := strings.ToLower(m.filter)
+	for i, c := range m.commits {
+		if q == "" || cherryPickMatches(c, q) {
+			m.view = append(m.view, i)
+		}
+	}
+	if m.viewPos(m.cursor) >= 0 {
+		return
+	}
+	m.cursor = -1
+	for _, i := range m.view {
+		if !m.commits[i].applied {
+			m.cursor = i
+			return
+		}
+	}
+	if len(m.view) > 0 {
+		m.cursor = m.view[0]
+	}
+}
+
+// cherryPickMatches reports whether c matches the lower-cased query:
+// a substring of its subject, short hash or author, case-insensitively.
+func cherryPickMatches(c cherryPickCommit, q string) bool {
+	return strings.Contains(strings.ToLower(c.subject), q) ||
+		strings.Contains(strings.ToLower(c.short), q) ||
+		strings.Contains(strings.ToLower(c.author), q)
+}
+
+// vis is the view, built on first use after a load (or after a test sets
+// commits directly) so no path can read a view that lags the commits.
+func (m *cherryPickModal) vis() []int {
+	if !m.viewBuilt {
+		m.refilter()
+	}
+	return m.view
+}
+
+// viewPos is commit idx's position in the view, -1 when hidden.
+func (m *cherryPickModal) viewPos(idx int) int {
+	for p, i := range m.vis() {
+		if i == idx {
+			return p
+		}
+	}
+	return -1
+}
+
+// hiddenTicks counts ticked commits the filter is hiding — said in the
+// summary, because the submit will pick them too.
+func (m *cherryPickModal) hiddenTicks() int {
+	if m.filter == "" {
+		return 0
+	}
+	shown := 0
+	for _, i := range m.vis() {
+		if m.ticked[m.commits[i].hash] {
+			shown++
+		}
+	}
+	return len(m.ticked) - shown
+}
+
+// setFilter replaces the filter, rebuilds the view and brings the
+// highlight back on screen.
+func (m *cherryPickModal) setFilter(a *App, f string) {
+	m.filter = f
+	m.refilter()
+	m.scroll = 0
+	m.ensureCursorVisible(a)
 }
 
 // submitLabel names the button by what it will do — and how many.
@@ -504,29 +628,34 @@ func (m *cherryPickModal) sourceRect(a *App) btnRect {
 	return btnRect{x: mx + 8, y: sy, w: min(runeLen(m.source)+4, mw-10)}
 }
 
-// ensureCursorVisible scrolls just enough to show the cursor row.
+// ensureCursorVisible scrolls just enough to show the cursor row. Both
+// sides are VIEW positions — the cursor is mapped through viewPos.
 func (m *cherryPickModal) ensureCursorVisible(a *App) {
 	vis := m.listRows(a)
-	if m.cursor < m.scroll {
-		m.scroll = m.cursor
-	}
-	if m.cursor >= m.scroll+vis {
-		m.scroll = m.cursor - vis + 1
+	if p := m.viewPos(m.cursor); p >= 0 {
+		if p < m.scroll {
+			m.scroll = p
+		}
+		if p >= m.scroll+vis {
+			m.scroll = p - vis + 1
+		}
 	}
 	m.clampScroll(a)
 }
 
 // clampScroll keeps the scroll offset in range.
 func (m *cherryPickModal) clampScroll(a *App) {
-	m.scroll = min(max(m.scroll, 0), max(len(m.commits)-m.listRows(a), 0))
+	m.scroll = min(max(m.scroll, 0), max(len(m.vis())-m.listRows(a), 0))
 }
 
-// moveCursor steps the highlight, clamped.
+// moveCursor steps the highlight through the VIEW, clamped.
 func (m *cherryPickModal) moveCursor(a *App, delta int) {
-	if len(m.commits) == 0 {
+	if len(m.vis()) == 0 {
 		return
 	}
-	m.cursor = min(max(m.cursor+delta, 0), len(m.commits)-1)
+	p := max(m.viewPos(m.cursor), 0)
+	p = min(max(p+delta, 0), len(m.vis())-1)
+	m.cursor = m.vis()[p]
 	m.ensureCursorVisible(a)
 }
 
@@ -559,11 +688,11 @@ func (m *cherryPickModal) draw(a *App) {
 	// The list.
 	vis := m.listRows(a)
 	for i := 0; i < vis; i++ {
-		idx := m.scroll + i
-		if idx >= len(m.commits) {
+		p := m.scroll + i
+		if p >= len(m.vis()) {
 			break
 		}
-		m.drawRow(a, idx, listTop+i)
+		m.drawRow(a, m.vis()[p], listTop+i)
 	}
 
 	// Detail of the highlighted commit.
@@ -605,6 +734,13 @@ func (m *cherryPickModal) summaryText() string {
 	case len(m.commits) == 0:
 		return "Nothing on " + m.source + " that " + m.target + " doesn't already have"
 	}
+	if m.filter != "" {
+		s := "filter “" + m.filter + "”: " + itoa(len(m.vis())) + " of " + itoa(len(m.commits))
+		if n := m.hiddenTicks(); n > 0 {
+			s += " · " + itoa(n) + " ticked hidden"
+		}
+		return s + " · Esc clears"
+	}
 	s := plural(len(m.commits), "commit", "commits") + " not on " + m.target
 	if m.capped {
 		s = "newest " + itoa(cherryPickMax) + " commits not on " + m.target + " (list capped)"
@@ -612,7 +748,13 @@ func (m *cherryPickModal) summaryText() string {
 	if n := len(m.commits) - m.pickable(); n > 0 {
 		s += " · " + itoa(n) + " already applied"
 	}
-	return s + " · merges hidden · applied oldest first"
+	s += " · merges hidden · applied oldest first"
+	// The filter is invisible until typed into, so a list longer than the
+	// tallest dialog can show says it can be narrowed.
+	if len(m.commits) > cherryPickMaxH-cherryPickFixedRows {
+		s += " · type to filter"
+	}
+	return s
 }
 
 // detailText describes the highlighted commit's footprint: which files it
@@ -710,7 +852,17 @@ func (m *cherryPickModal) handleKey(a *App, ev *tcell.EventKey) {
 	}
 	switch ev.Key() {
 	case tcell.KeyEsc:
+		// Esc clears a filter first: dropping a narrowed view is the
+		// smaller step back, and closing would lose the ticks too.
+		if m.filter != "" {
+			m.setFilter(a, "")
+			return
+		}
 		a.closeModal()
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
+		if r := []rune(m.filter); len(r) > 0 {
+			m.setFilter(a, string(r[:len(r)-1]))
+		}
 	case tcell.KeyUp:
 		m.moveCursor(a, -1)
 	case tcell.KeyDown:
@@ -720,14 +872,20 @@ func (m *cherryPickModal) handleKey(a *App, ev *tcell.EventKey) {
 	case tcell.KeyPgDn:
 		m.moveCursor(a, m.listRows(a))
 	case tcell.KeyHome:
-		m.moveCursor(a, -len(m.commits))
+		m.moveCursor(a, -len(m.vis()))
 	case tcell.KeyEnd:
-		m.moveCursor(a, len(m.commits))
+		m.moveCursor(a, len(m.vis()))
 	case tcell.KeyEnter:
 		m.submit(a)
 	case tcell.KeyRune:
-		if ev.Rune() == ' ' {
+		// Space ticks; every other printable rune narrows the list.
+		// Ctrl-modified runes are not text (the filter never sees a
+		// stray control chord).
+		switch r := ev.Rune(); {
+		case r == ' ':
 			m.toggle(a, m.cursor)
+		case ev.Modifiers()&tcell.ModCtrl == 0 && unicode.IsPrint(r):
+			m.setFilter(a, m.filter+string(r))
 		}
 	}
 }
@@ -794,10 +952,10 @@ func (m *cherryPickModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	if row < 0 || row >= m.listRows(a) {
 		return
 	}
-	idx := m.scroll + row
-	if idx >= len(m.commits) {
+	if m.scroll+row >= len(m.vis()) {
 		return
 	}
+	idx := m.vis()[m.scroll+row]
 	now := time.Now()
 	again := m.lastClickRow == idx && now.Sub(m.lastClickAt) < doubleClickMs
 	m.cursor, m.lastClickRow, m.lastClickAt = idx, idx, now

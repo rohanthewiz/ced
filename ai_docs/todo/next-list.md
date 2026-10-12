@@ -78,7 +78,7 @@ plus the LSP work done in the seeding session itself
   - a COLOURED member underline, if a capability check can tell which
     terminals take the colon-form SGR 58
   (Creating a folder group from the tree's folder context menu was done
-  in `SESSIONSTEM3`: "New tab group…" on any non-root folder, ≡ twin at
+  in `2026-1011-2159-n051-n042-cherry-pick-filter-folder-tab-groups`: "New tab group…" on any non-root folder, ≡ twin at
   the end of File → "Tab groups…".)
 
 - **N-043** · raised `2026-0930-2056-bookmarks` · value medium
@@ -95,7 +95,7 @@ plus the LSP work done in the seeding session itself
   to offer, and whether `-m` may ride along with non-merge picks in one
   command, is the open question), and a per-commit diff preview (today:
   the files it touches, and which overlap HEAD's side). The filter for
-  long lists was done in `SESSIONSTEM3` (type-to-filter).
+  long lists was done in `2026-1011-2159-n051-n042-cherry-pick-filter-folder-tab-groups` (type-to-filter).
 
 ## Validate
 

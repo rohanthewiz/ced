@@ -1167,8 +1167,13 @@ func (a *App) drawGitPanelDiffRow(row, x, ry, w int) {
 	}
 	line := a.gitPanel.diffLines[idx]
 	st := gitPanelDiffStyle(line, a.theme)
-	// Tabs expanded before the clip, which counts cells.
-	line = diffDisplayLine(line)
+	// Tabs expanded before the clip, which counts cells — at the hunk's
+	// own prefix width, since an unmerged file's diff is a combined one.
+	if strings.ContainsRune(line, '\t') {
+		line = diffDisplayLineCols(line, diffPrefixColsAt(a.gitPanel.diffLines, idx))
+	} else {
+		line = diffDisplayLine(line)
+	}
 	if runeLen(line) > w {
 		line = string([]rune(line)[:w-1]) + "…"
 	}
@@ -1230,14 +1235,30 @@ func gitPanelStatusColor(code string, th theme.Theme) tcell.Color {
 //	"+\t\tx"  →  "+" + "    " + "    " + "x"
 //	"@@ …\t…" →  no prefix column; stops counted from cell 0
 func diffDisplayLine(line string) string {
+	return diffDisplayLineCols(line, 1)
+}
+
+// diffDisplayLineCols is diffDisplayLine for a diff with cols prefix
+// columns. A COMBINED diff (`diff --cc` — an unmerged file in the git
+// panel, a merge commit in the git log) carries one column per parent,
+// so its code starts a cell later than a unified diff's; counting stops
+// from after only the first column drew a tab-indented line one cell
+// short (N-062). cols comes from diffPrefixColsAt. Each prefix cell must
+// be one of `+`, `-`, space — a header line keeps none.
+func diffDisplayLineCols(line string, cols int) string {
 	line = strings.TrimRight(line, "\r")
 	if !strings.ContainsRune(line, '\t') {
 		return line // the common case: nothing to rewrite, no allocation
 	}
-	prefix := ""
-	if c := line[0]; c == '+' || c == '-' || c == ' ' {
-		prefix, line = line[:1], line[1:]
+	n := 0
+	for n < cols && n < len(line) {
+		if c := line[n]; c != '+' && c != '-' && c != ' ' {
+			break
+		}
+		n++
 	}
+	prefix := line[:n]
+	line = line[n:]
 	var b strings.Builder
 	b.Grow(len(prefix) + len(line) + 4*hunkTipTabWidth)
 	b.WriteString(prefix)
@@ -1254,6 +1275,29 @@ func diffDisplayLine(line string) string {
 		col++
 	}
 	return b.String()
+}
+
+// diffPrefixColsAt is how many prefix columns lines[idx] carries: read
+// off the nearest hunk header above it, whose `@` run is one longer than
+// the column count (`@@` → 1, a combined diff's `@@@` → 2, an octopus
+// merge's more). The walk stops at a `diff ` file header or the top, and
+// answers 1 there — the unified case. Callers only ask for rows holding a
+// tab, so the scan stays off the common path.
+func diffPrefixColsAt(lines []string, idx int) int {
+	for i := min(idx, len(lines)-1); i >= 0; i-- {
+		l := lines[i]
+		if strings.HasPrefix(l, "@@") {
+			n := 0
+			for n < len(l) && l[n] == '@' {
+				n++
+			}
+			return max(n-1, 1)
+		}
+		if strings.HasPrefix(l, "diff ") {
+			return 1
+		}
+	}
+	return 1
 }
 
 // gitPanelDiffStyle colors one unified-diff line: additions green,

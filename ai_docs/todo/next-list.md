@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-062**
+**Next ID: N-063**
 
 ## Open
 
@@ -174,16 +174,6 @@ and `raised`.
   machine); a custom command (`open -a Ghostty {{DIR}}`) opens there.
   The cats branch and ced's panel branch DID run in the real binary.
 
-- **N-059** · raised `2026-1008-1837-conflict-compare-sides` · value medium
-  The compare panel, git panel diff and git log detail drew a TAB as one
-  cell, so tab-indented code lost its depth. FIXED in
-  `2026-1011-2016-compare-tab-expansion`: `diffDisplayLine` (gitpanel.go)
-  expands tabs to 4-cell stops after the `+`/`-`/space column, before the
-  clip, in all three painters; pinned by
-  `TestComparePanel_KeepsTabIndentation`. Hand check left: in the real
-  binary, a Go conflict's Compare sides, the git panel diff of a Go file,
-  and a git log commit detail all show tab indentation at full depth.
-
 - **N-060** · raised `2026-1011-2044-commit-receipt-push-button` · value low
   The commit receipt's `[ Push <branch>… ]` button has run only in tests
   (`TestCommitReceipt_PushButtonOpensPushDialog` against a real repo and
@@ -265,6 +255,23 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-11, `SESSIONSTEM4` —
+  **N-062** (raised and fixed in the same session, found by N-059's
+  check) a COMBINED diff — the git panel's view of an unmerged file
+  (`diff --cc`), and `git show` of a merge commit in the git log —
+  expanded tabs one cell short: its two prefix columns were counted as
+  one and code. `diffDisplayLineCols` + `diffPrefixColsAt` (gitpanel.go)
+  read the column count off the hunk header's `@` run; both painters use
+  them for rows holding a tab. Pinned by
+  `TestDiffDisplayLineCols_CombinedDiff`; re-checked in the real binary.
+
+- closed 2026-10-11, `SESSIONSTEM4` —
+  **N-059** hand check run in the real binary (`run-ced`, a scratch repo
+  with tab-indented Go and a parked cherry-pick): the git panel diff of
+  a modified Go file, a git log commit detail, and a Go conflict's
+  Compare sides all draw one tab as 4 cells and two as 8. The check found
+  N-062 (combined diffs one cell short), fixed alongside.
 
 - closed 2026-10-11, `2026-1011-2152-n050-n053-n048-marker-size-scan-cache-log-ticks` —
   **N-048** the git log panel ticks several commits (leading-cell click,

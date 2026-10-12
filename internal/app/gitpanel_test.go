@@ -1009,3 +1009,39 @@ func TestDiffDisplayLine_ExpandsTabsAfterThePrefixColumn(t *testing.T) {
 		}
 	}
 }
+
+// TestDiffDisplayLineCols_CombinedDiff pins N-062: a combined diff
+// (`diff --cc`, an unmerged file or a merge commit) has one prefix column
+// per parent, and the tab stops count from after ALL of them — found in
+// the real binary, where an unmerged Go file's `  \tif` drew three cells
+// of indent instead of four.
+func TestDiffDisplayLineCols_CombinedDiff(t *testing.T) {
+	lines := []string{
+		"diff --cc c.go",
+		"@@@ -2,6 -2,6 +2,10 @@@ package",
+		"  \tif true {",
+		"++\t\tx()",
+		"diff --git a/o.go b/o.go",
+		"@@ -2,6 +2,6 @@ package x",
+		" \tfor {",
+	}
+	if got := diffPrefixColsAt(lines, 2); got != 2 {
+		t.Errorf("cols under @@@ = %d, want 2", got)
+	}
+	if got := diffPrefixColsAt(lines, 6); got != 1 {
+		t.Errorf("cols under @@ = %d, want 1", got)
+	}
+	if got := diffPrefixColsAt(lines, 0); got != 1 {
+		t.Errorf("cols on a file header = %d, want 1", got)
+	}
+	if got := diffDisplayLineCols(lines[2], 2); got != "      if true {" {
+		t.Errorf("combined context = %q, want 2 prefix cells + 4", got)
+	}
+	if got := diffDisplayLineCols(lines[3], 2); got != "++        x()" {
+		t.Errorf("combined addition = %q, want ++ + 8", got)
+	}
+	// A header line keeps no prefix even when cols says 2.
+	if got := diffDisplayLineCols("x\ty", 2); got != "x   y" {
+		t.Errorf("non-prefixed line = %q", got)
+	}
+}

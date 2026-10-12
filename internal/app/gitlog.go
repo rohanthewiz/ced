@@ -979,8 +979,13 @@ func (a *App) drawGitLogDetailRow(row, x, ry, w int) {
 	}
 	line := a.gitLog.detailLines[idx]
 	st := gitLogDetailStyle(line, a.theme)
-	// Tabs expanded before the clip, which counts cells.
-	line = diffDisplayLine(line)
+	// Tabs expanded before the clip, which counts cells — at the hunk's
+	// own prefix width: `git show` of a merge commit is a combined diff.
+	if strings.ContainsRune(line, '\t') {
+		line = diffDisplayLineCols(line, diffPrefixColsAt(a.gitLog.detailLines, idx))
+	} else {
+		line = diffDisplayLine(line)
+	}
 	if runeLen(line) > w {
 		line = string([]rune(line)[:w-1]) + "…"
 	}

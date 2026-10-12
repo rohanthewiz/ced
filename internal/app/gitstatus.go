@@ -74,6 +74,12 @@ type gitStatus struct {
 	// a snapshot up to ten seconds old is fine for enabling a row and far
 	// too stale to run `git add` against.
 	ConflictedFiles map[string]bool
+	// ConflictMarkerSizes is the `conflict-marker-size` gitattribute of
+	// each UNMERGED file whose markers are not git's default 7, keyed by
+	// absolute path (gitopstate.go's loadConflictMarkerSizes). Asked only
+	// while something is unmerged, so the 10-second tick in a repo that is
+	// not parked pays no extra fork.
+	ConflictMarkerSizes map[string]int
 	// GitDir is the repository's absolute git directory (.git, or the
 	// worktree's private dir), and InProgress the operation parked in it
 	// — "cherry-pick", "merge", "revert", "rebase", or "" for none. Both
@@ -124,6 +130,15 @@ func loadGitStatus(rootDir string) gitStatus {
 
 	upstream, ahead, behind := loadGitTracking(rootDir)
 	dirty := parsePorcelain(out, toplevel)
+	conflicted := conflictPorcelainSet(out, toplevel)
+	var markerSizes map[string]int
+	if len(conflicted) > 0 {
+		paths := make([]string, 0, len(conflicted))
+		for p := range conflicted {
+			paths = append(paths, p)
+		}
+		markerSizes = loadConflictMarkerSizes(toplevel, paths)
+	}
 	return gitStatus{
 		IsRepo:      true,
 		DirtyFiles:  dirty,
@@ -139,10 +154,11 @@ func loadGitStatus(rootDir string) gitStatus {
 		// tracked branch) therefore pays nothing for this answer, which
 		// is what keeps the extra fork off the 10-second tick for every
 		// repo anyone actually works in.
-		HasRemote:       upstream != "" || len(loadGitRemotes(rootDir)) > 0,
-		ConflictedFiles: conflictPorcelainSet(out, toplevel),
-		GitDir:          gitDir,
-		InProgress:      gitOpFromGitDir(gitDir),
+		HasRemote:           upstream != "" || len(loadGitRemotes(rootDir)) > 0,
+		ConflictedFiles:     conflicted,
+		ConflictMarkerSizes: markerSizes,
+		GitDir:              gitDir,
+		InProgress:          gitOpFromGitDir(gitDir),
 	}
 }
 

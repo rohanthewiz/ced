@@ -115,13 +115,13 @@ func TestFileHasConflictMarkers(t *testing.T) {
 
 	clean := filepath.Join(dir, "clean.txt")
 	writeFileT(t, clean, "one\ntwo\nthree\n")
-	if fileHasConflictMarkers(clean) {
+	if fileHasConflictMarkers(clean, 0) {
 		t.Error("a resolved file reported as still conflicted")
 	}
 
 	marked := filepath.Join(dir, "marked.txt")
 	writeFileT(t, marked, "one\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> abc\n")
-	if !fileHasConflictMarkers(marked) {
+	if !fileHasConflictMarkers(marked, 0) {
 		t.Error("a file full of markers reported as resolved")
 	}
 
@@ -129,12 +129,24 @@ func TestFileHasConflictMarkers(t *testing.T) {
 	// prose or a string literal is not a conflict.
 	inline := filepath.Join(dir, "inline.txt")
 	writeFileT(t, inline, "the marker is \"<<<<<<<\" and it starts a line\n")
-	if fileHasConflictMarkers(inline) {
+	if fileHasConflictMarkers(inline, 0) {
 		t.Error("a mid-line marker was read as a conflict")
 	}
 
-	if !fileHasConflictMarkers(filepath.Join(dir, "gone.txt")) {
+	if !fileHasConflictMarkers(filepath.Join(dir, "gone.txt"), 0) {
 		t.Error("an unreadable file must answer conservatively (true)")
+	}
+
+	// N-050: a repo with conflict-marker-size 5 writes five-character
+	// openers. The default probe would call that file clean and let it be
+	// staged; probed at its own size it is still conflicted.
+	short := filepath.Join(dir, "short.txt")
+	writeFileT(t, short, "one\n<<<<< HEAD\nmine\n=====\ntheirs\n>>>>> abc\n")
+	if fileHasConflictMarkers(short, 0) {
+		t.Error("five-character markers matched the default 7-character probe")
+	}
+	if !fileHasConflictMarkers(short, 5) {
+		t.Error("five-character markers missed by a size-5 probe")
 	}
 }
 
@@ -705,7 +717,7 @@ func TestSaveConflictTabs(t *testing.T) {
 	if tab.Dirty {
 		t.Error("the tab is still dirty")
 	}
-	if fileHasConflictMarkers(paths[0]) {
+	if fileHasConflictMarkers(paths[0], 0) {
 		t.Error("the resolution never reached the disk git add will read")
 	}
 }

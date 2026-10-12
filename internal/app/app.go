@@ -1595,6 +1595,11 @@ type App struct {
 	// above: it gates the "Resolve conflicts…" menu row, whose enabled()
 	// runs on every menu draw. See gitconflict.go.
 	gitConflicted map[string]bool
+	// gitConflictMarkerSizes is the same snapshot's non-default
+	// `conflict-marker-size` per unmerged file (absolute path → length).
+	// Pushed onto open tabs by applyConflictMarkerSizes and read by the
+	// disk scans (conflictMarkerSizeFor); see N-050 in conflictview.go.
+	gitConflictMarkerSizes map[string]int
 
 	// gitOp / gitDir mirror the snapshot's in-progress operation
 	// ("cherry-pick", "merge", …, "" for none) and absolute git dir. Read
@@ -2031,6 +2036,8 @@ func (a *App) refreshGitStatus() {
 	a.gitHasStash = st.HasStash
 	a.gitStagedFiles = st.StagedFiles
 	a.gitConflicted = st.ConflictedFiles
+	a.gitConflictMarkerSizes = st.ConflictMarkerSizes
+	a.applyConflictMarkerSizes()
 	a.gitOp, a.gitDir = st.InProgress, st.GitDir
 	// The tracking facts follow the same snapshot, including the reset
 	// on a non-repo: a stale "↑3" outliving the folder it described
@@ -4393,6 +4400,10 @@ func (a *App) wireTab(t *editor.Tab) {
 		// nobody else, and its marker-row span should sit over the
 		// diagnostics a compiler raises about the marker itself.
 		conflictSource{app: a})
+	// The conflict scan's marker length rides along too: a file whose
+	// gitattributes set conflict-marker-size, opened mid-conflict, must
+	// scan at that length from its first frame (conflictview.go).
+	t.SetConflictMarkerSize(a.conflictMarkerSizeFor(t.Path))
 	// The matching-word highlight is a built-in source gated by a per-tab
 	// flag, so the preference has to ride along at open time (wordhl.go).
 	t.WordHighlight = a.wordHLEnabled

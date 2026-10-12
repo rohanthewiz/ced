@@ -94,12 +94,6 @@ plus the LSP work done in the seeding session itself
   log-side twin of the cherry-pick dialog, which only lists one branch
   against HEAD.
 
-- **N-050** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
-  The marker grammar (editor/conflict.go) matches only git's default
-  conflict-marker-size of 7. A repo setting the `conflict-marker-size`
-  gitattribute gets no washes or lens, and its files never read as
-  "no markers left" (the stage rows' disk scan has the same rule).
-
 - **N-051** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
   Cherry-pick dialog extras left out: a filter field for long lists
   (capped at 300, announced), picking a MERGE commit (needs `-m <parent>`;
@@ -280,6 +274,17 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-11, `SESSIONSTEM2` —
+  **N-050** the conflict grammar takes a marker length
+  (`editor.ParseConflictsSized`, `Tab.SetConflictMarkerSize`; memo keyed
+  on revision AND size). The git snapshot asks `git check-attr --stdin -z
+  conflict-marker-size` for UNMERGED files only (no fork when nothing is
+  conflicted), pushes the sizes onto open tabs and wireTab; the disk
+  count and the picker's stage-row probe use the same size (the probe
+  asks git live). Pinned by `TestConflictMarkerSize_RealRepo` (a real
+  repo with `conflict-marker-size=10`), `TestParseConflictMarkerSizes`,
+  and editor tests for sized parsing and the memo.
 
 - closed 2026-10-11, `2026-1011-2142-n054-n036-n052-theme-counts-readme-leaders-conflicted-tabs` —
   **N-052** a conflicted (unmerged) file's TAB label is drawn in

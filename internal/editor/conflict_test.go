@@ -293,3 +293,59 @@ func TestConflictChoice_Label(t *testing.T) {
 		t.Error("the three lens verbs changed name")
 	}
 }
+
+// sizedBlock is twoWay rewritten with markers n characters long — what git
+// writes for a path whose `conflict-marker-size` gitattribute is n.
+func sizedBlock(n int) string {
+	return strings.NewReplacer(
+		"<<<<<<<", strings.Repeat("<", n),
+		"=======", strings.Repeat("=", n),
+		">>>>>>>", strings.Repeat(">", n),
+	).Replace(twoWay)
+}
+
+// TestParseConflictsSized_MatchesOnlyItsLength pins N-050: a block written
+// with a non-default marker size is found at that size and ONLY that size
+// — the default scan still treats 10-character markers as text, and a
+// size-10 scan treats 7-character ones as text.
+func TestParseConflictsSized_MatchesOnlyItsLength(t *testing.T) {
+	for _, n := range []int{5, 10} {
+		lines := strings.Split(sizedBlock(n), "\n")
+		got := ParseConflictsSized(lines, n)
+		if len(got) != 1 || got[0].Start != 1 || got[0].Mid != 3 || got[0].End != 5 {
+			t.Errorf("size %d: blocks = %+v, want one block at lines 1/3/5", n, got)
+		}
+		if got := ParseConflicts(lines); len(got) != 0 {
+			t.Errorf("size %d markers matched by the default scan: %+v", n, got)
+		}
+	}
+	if got := ParseConflictsSized(strings.Split(twoWay, "\n"), 10); len(got) != 0 {
+		t.Errorf("default-size markers matched by a size-10 scan: %+v", got)
+	}
+	// A non-positive size is git's default, not "match anything".
+	if got := ParseConflictsSized(strings.Split(twoWay, "\n"), 0); len(got) != 1 {
+		t.Errorf("size 0 should fall back to 7, got %d blocks", len(got))
+	}
+}
+
+// TestTab_SetConflictMarkerSizeRescans pins that the per-revision memo is
+// also keyed on the size: learning the gitattribute after a first scan
+// (the git snapshot lands after the tab opened) must re-scan without an
+// edit, and resetting to 0 goes back to the default.
+func TestTab_SetConflictMarkerSizeRescans(t *testing.T) {
+	tab := tabWith(sizedBlock(10))
+	if n := len(tab.Conflicts()); n != 0 {
+		t.Fatalf("default scan found %d blocks in size-10 markers", n)
+	}
+	tab.SetConflictMarkerSize(10)
+	if n := len(tab.Conflicts()); n != 1 {
+		t.Errorf("after SetConflictMarkerSize(10): %d blocks, want 1", n)
+	}
+	tab.SetConflictMarkerSize(0)
+	if got := tab.ConflictMarkerSize(); got != DefaultConflictMarkerSize {
+		t.Errorf("ConflictMarkerSize after reset = %d, want %d", got, DefaultConflictMarkerSize)
+	}
+	if n := len(tab.Conflicts()); n != 0 {
+		t.Errorf("after reset to default: %d blocks, want 0", n)
+	}
+}

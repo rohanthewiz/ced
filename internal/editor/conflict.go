@@ -27,7 +27,11 @@
 //   - THE GRAMMAR IS STRICT. A marker is exactly seven marker characters
 //     at the start of a line, followed by end-of-line or a space (and the
 //     separator is exactly seven `=` and nothing else). That is what git
-//     writes with the default conflict-marker-size, and strictness is what
+//     writes with the default conflict-marker-size; a repository that sets
+//     the `conflict-marker-size` gitattribute gets markers of THAT length
+//     instead, so the length is a parameter (ParseConflictsSized,
+//     Tab.SetConflictMarkerSize) the app fills in from `git check-attr`
+//     for the files git reports unmerged — never a looser match. Strictness is what
 //     keeps a Markdown setext underline (`=======` under a heading) or a
 //     `<<<<<<<<` in a test fixture from being mistaken for a conflict. A
 //     block must also CLOSE, in order: an opener with no `=======` and
@@ -54,12 +58,17 @@ package editor
 
 import "strings"
 
-// conflictMarkerLen is git's default conflict-marker-size. A repository
-// can change it per path with a gitattribute, which is rare enough that
-// matching only the default is the right trade: a looser match would
-// start finding "conflicts" in ordinary files, and that failure is
-// louder than the one it avoids.
-const conflictMarkerLen = 7
+// DefaultConflictMarkerSize is git's default conflict-marker-size. A
+// repository can change it per path with a gitattribute; the app asks git
+// for the size of each UNMERGED file and passes it in. Matching a range of
+// lengths instead (">= 7") would be simpler and wrong: a looser match
+// starts finding "conflicts" in ordinary files, and that failure is louder
+// than the one it avoids.
+const DefaultConflictMarkerSize = 7
+
+// conflictMarkerLen is the default size under its original name, kept for
+// the comments and callers that predate per-path sizes.
+const conflictMarkerLen = DefaultConflictMarkerSize
 
 // ConflictBlock is one conflict region, by buffer LINE index. Base is -1
 // for the plain two-way style; every other field is always set for a
@@ -235,19 +244,19 @@ func (b ConflictBlock) Resolution(lines []string, c ConflictChoice) ([]string, b
 	return nil, false
 }
 
-// markerTail reports whether line opens with exactly conflictMarkerLen
-// copies of ch followed by end-of-line or a space, and returns the
-// trimmed text after the marker (the label).
-func markerTail(line string, ch byte) (label string, ok bool) {
-	if len(line) < conflictMarkerLen {
+// markerTail reports whether line opens with exactly n copies of ch
+// followed by end-of-line or a space, and returns the trimmed text after
+// the marker (the label).
+func markerTail(line string, ch byte, n int) (label string, ok bool) {
+	if len(line) < n {
 		return "", false
 	}
-	for i := 0; i < conflictMarkerLen; i++ {
+	for i := 0; i < n; i++ {
 		if line[i] != ch {
 			return "", false
 		}
 	}
-	rest := line[conflictMarkerLen:]
+	rest := line[n:]
 	if rest == "" {
 		return "", true
 	}
@@ -259,12 +268,21 @@ func markerTail(line string, ch byte) (label string, ok bool) {
 	return strings.TrimSpace(rest), true
 }
 
-// isMidMarker reports whether line is the `=======` separator. Stricter
-// than the other markers — exactly seven `=` and NOTHING after, not even
-// a label — because a run of `=` is ordinary Markdown (a setext heading
-// underline) and the separator is the marker most likely to collide.
-func isMidMarker(line string) bool {
-	return line == "======="
+// isMidMarker reports whether line is the `=======` separator (n `=`).
+// Stricter than the other markers — exactly n `=` and NOTHING after, not
+// even a label — because a run of `=` is ordinary Markdown (a setext
+// heading underline) and the separator is the marker most likely to
+// collide.
+func isMidMarker(line string, n int) bool {
+	if len(line) != n {
+		return false
+	}
+	for i := 0; i < n; i++ {
+		if line[i] != '=' {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseConflicts scans lines for well-formed conflict blocks, in order.
@@ -272,13 +290,23 @@ func isMidMarker(line string) bool {
 // blocks: the scan moves on from the line after them, so one stray
 // `<<<<<<<` in a fixture cannot swallow a real block further down.
 func ParseConflicts(lines []string) []ConflictBlock {
+	return ParseConflictsSized(lines, DefaultConflictMarkerSize)
+}
+
+// ParseConflictsSized is ParseConflicts for markers n characters long —
+// the `conflict-marker-size` gitattribute's value. n < 1 means the
+// default (git ignores a non-positive size the same way).
+func ParseConflictsSized(lines []string, n int) []ConflictBlock {
+	if n < 1 {
+		n = DefaultConflictMarkerSize
+	}
 	var out []ConflictBlock
 	for i := 0; i < len(lines); i++ {
-		label, ok := markerTail(lines[i], '<')
+		label, ok := markerTail(lines[i], '<', n)
 		if !ok {
 			continue
 		}
-		if b, ok := parseConflictAt(lines, i, label); ok {
+		if b, ok := parseConflictAt(lines, i, label, n); ok {
 			out = append(out, b)
 			i = b.End // resume after the block; the loop's i++ steps past it
 		}
@@ -294,46 +322,69 @@ func ParseConflicts(lines []string) []ConflictBlock {
 // merge, or a broken file) ends the attempt: the outer opener is then
 // reported as text and the scan picks the inner one up as a block of
 // its own, which is the most useful reading of a malformed file.
-func parseConflictAt(lines []string, start int, currentLabel string) (ConflictBlock, bool) {
+func parseConflictAt(lines []string, start int, currentLabel string, n int) (ConflictBlock, bool) {
 	b := ConflictBlock{Start: start, Base: -1, Mid: -1, End: -1, CurrentLabel: currentLabel}
 	for j := start + 1; j < len(lines); j++ {
 		line := lines[j]
-		if _, ok := markerTail(line, '<'); ok {
+		if _, ok := markerTail(line, '<', n); ok {
 			return ConflictBlock{}, false
 		}
 		if b.Mid < 0 {
-			if label, ok := markerTail(line, '|'); ok {
+			if label, ok := markerTail(line, '|', n); ok {
 				if b.Base >= 0 {
 					return ConflictBlock{}, false // two base sections
 				}
 				b.Base, b.BaseLabel = j, label
 				continue
 			}
-			if isMidMarker(line) {
+			if isMidMarker(line, n) {
 				b.Mid = j
 				continue
 			}
-			if _, ok := markerTail(line, '>'); ok {
+			if _, ok := markerTail(line, '>', n); ok {
 				return ConflictBlock{}, false // closed before the separator
 			}
 			continue
 		}
-		if label, ok := markerTail(line, '>'); ok {
+		if label, ok := markerTail(line, '>', n); ok {
 			b.End, b.IncomingLabel = j, label
 			return b, true
 		}
-		if isMidMarker(line) {
+		if isMidMarker(line, n) {
 			return ConflictBlock{}, false // a second separator
 		}
 	}
 	return ConflictBlock{}, false
 }
 
-// conflictCache memoizes ParseConflicts against the revision it scanned.
+// conflictCache memoizes ParseConflicts against the revision AND the
+// marker size it scanned with — a size learned from git after the first
+// scan must not be answered from a scan made with the default.
 type conflictCache struct {
 	rev    int
+	size   int
 	valid  bool
 	blocks []ConflictBlock
+}
+
+// SetConflictMarkerSize sets the marker length this tab's scan uses — the
+// file's `conflict-marker-size` gitattribute, as the app learned it from
+// git. n < 1 (or the default) restores git's default. Not an edit: the
+// buffer is untouched, so EditRev stays put and the memo is keyed on the
+// size instead.
+func (t *Tab) SetConflictMarkerSize(n int) {
+	if n < 1 {
+		n = DefaultConflictMarkerSize
+	}
+	t.conflictMarkerSize = n
+}
+
+// ConflictMarkerSize is the marker length this tab scans for.
+func (t *Tab) ConflictMarkerSize() int {
+	if t.conflictMarkerSize < 1 {
+		return DefaultConflictMarkerSize
+	}
+	return t.conflictMarkerSize
 }
 
 // Conflicts returns the tab's conflict blocks as of its current revision,
@@ -343,10 +394,11 @@ func (t *Tab) Conflicts() []ConflictBlock {
 	if t == nil || t.Buffer == nil || t.IsImage() {
 		return nil
 	}
-	if t.conflictScan.valid && t.conflictScan.rev == t.EditRev {
+	size := t.ConflictMarkerSize()
+	if t.conflictScan.valid && t.conflictScan.rev == t.EditRev && t.conflictScan.size == size {
 		return t.conflictScan.blocks
 	}
-	t.conflictScan = conflictCache{rev: t.EditRev, valid: true, blocks: ParseConflicts(t.Buffer.Lines)}
+	t.conflictScan = conflictCache{rev: t.EditRev, size: size, valid: true, blocks: ParseConflictsSized(t.Buffer.Lines, size)}
 	return t.conflictScan.blocks
 }
 

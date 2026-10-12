@@ -553,7 +553,32 @@ func (a *App) conflictCountFor(path string) int {
 	if !ok {
 		return -1
 	}
-	return len(editor.ParseConflicts(lines))
+	return len(editor.ParseConflictsSized(lines, a.conflictMarkerSizeFor(path)))
+}
+
+// conflictMarkerSizeFor is the marker length path's conflicts are written
+// with: its `conflict-marker-size` gitattribute as the last git snapshot
+// read it (only unmerged files are asked), else git's default 7. N-050:
+// before this the grammar matched 7 only, so a repo that sets the
+// attribute got no washes, no lens, and files that never read "ready".
+func (a *App) conflictMarkerSizeFor(path string) int {
+	if n, ok := a.gitConflictMarkerSizes[path]; ok {
+		return n
+	}
+	return editor.DefaultConflictMarkerSize
+}
+
+// applyConflictMarkerSizes pushes the snapshot's marker lengths onto every
+// open tab — run after each git snapshot, because the size of a file
+// already open is learned only when git first reports it unmerged. A
+// size that did not change costs nothing: the tab's scan memo is keyed on
+// (revision, size) and survives a re-set to the same value.
+func (a *App) applyConflictMarkerSizes() {
+	for _, t := range a.tabs {
+		if t != nil && t.Path != "" {
+			t.SetConflictMarkerSize(a.conflictMarkerSizeFor(t.Path))
+		}
+	}
 }
 
 // jumpToConflict parks the caret on block idx's opener with the jump

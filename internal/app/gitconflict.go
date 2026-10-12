@@ -51,6 +51,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 const (
@@ -165,7 +167,16 @@ func gitConflictedPaths(rootDir string) (root string, rels []string) {
 // together, the opener is the one that cannot appear as ordinary content
 // at the start of a line in any language ced is likely to hold, and
 // scanning for one is a third of the work.
-func fileHasConflictMarkers(path string) bool {
+//
+// size is the opener's length — the path's `conflict-marker-size`
+// gitattribute, 7 by default. A prefix match on that many `<` is
+// deliberately looser than the editor's grammar: this answer gates
+// `git add`, so a false "still has markers" is the safe mistake.
+func fileHasConflictMarkers(path string, size int) bool {
+	if size < 1 {
+		size = editor.DefaultConflictMarkerSize
+	}
+	opener := bytes.Repeat([]byte{'<'}, size)
 	st, err := os.Stat(path)
 	if err != nil || st.Size() > gitConflictScanMax {
 		return true
@@ -175,7 +186,7 @@ func fileHasConflictMarkers(path string) bool {
 		return true
 	}
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
-		if bytes.HasPrefix(line, []byte("<<<<<<<")) {
+		if bytes.HasPrefix(line, opener) {
 			return true
 		}
 	}
@@ -184,9 +195,19 @@ func fileHasConflictMarkers(path string) bool {
 
 // gitConflictReady splits conflicted paths into the ones whose markers
 // are gone (safe to stage) and the ones still carrying them.
+//
+// The marker sizes are asked of git here, at picker open, rather than read
+// from the status snapshot: the picker's own path list is re-read live
+// (gitConflictedPaths), and a snapshot up to ten seconds old must not
+// decide what is safe to stage.
 func gitConflictReady(root string, rels []string) (ready, pending []string) {
-	for _, rel := range rels {
-		if fileHasConflictMarkers(filepath.Join(root, rel)) {
+	abs := make([]string, len(rels))
+	for i, rel := range rels {
+		abs[i] = filepath.Join(root, rel)
+	}
+	sizes := loadConflictMarkerSizes(root, abs)
+	for i, rel := range rels {
+		if fileHasConflictMarkers(abs[i], sizes[abs[i]]) {
 			pending = append(pending, rel)
 		} else {
 			ready = append(ready, rel)

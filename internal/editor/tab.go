@@ -252,6 +252,10 @@ type Tab struct {
 	// conflictScan memoizes the conflict-marker scan against EditRev.
 	// See conflict.go.
 	conflictScan conflictCache
+	// conflictMarkerSize is the `conflict-marker-size` gitattribute for
+	// this file (0 = git's default of 7), set by the app from `git
+	// check-attr` — see SetConflictMarkerSize.
+	conflictMarkerSize int
 
 	// lensHits are the clickable end-of-line lens buttons as of the LAST
 	// RENDER, in render-relative cells — stamped by the paint pass so the

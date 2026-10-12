@@ -684,8 +684,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `ReloadUndoable` (one Undo back); reconcile is held off the path with
   `formatRunBegin/End`, released on both outcomes.
 - **Conflicts (editor/conflict.go, app/conflictview.go, conflictpanel.go,
-  gitopstate.go)**: strict markers (exactly 7 chars + space/EOL; `=======`
-  alone), unclosed openers are text; scan memoized per EditRev. Sides are
+  gitopstate.go)**: strict markers (exactly N chars + space/EOL; N `=`
+  alone), unclosed openers are text; scan memoized per (EditRev, size).
+  N = the `conflict-marker-size` gitattribute (default 7), asked of git
+  only for UNMERGED files (`loadConflictMarkerSizes`, one `check-attr
+  --stdin` fork in the snapshot) and pushed onto tabs
+  (`applyConflictMarkerSizes`, wireTab); never a looser match. Sides are
   CURRENT/INCOMING (positional — git's ours/theirs flips in a rebase).
   Resolve = one structural undo step, bottom-up for all-blocks; never
   stages. The view (washes + lens, `conflictSource` in wireTab) is GATED on

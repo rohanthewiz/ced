@@ -42,6 +42,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // gitOpInfo describes the operation a repo is parked in. The zero value
@@ -292,4 +294,67 @@ func readConflictScanLines(path string) ([]string, bool) {
 		lines[i] = strings.TrimSuffix(l, "\r")
 	}
 	return lines, true
+}
+
+// loadConflictMarkerSizes asks git for the `conflict-marker-size`
+// gitattribute of each absolute path under toplevel, and returns the ones
+// that differ from git's default (7), keyed by the same absolute path. A
+// repository that sets the attribute gets markers of that length written
+// into its conflicted files, and the editor's grammar matches exactly one
+// length (editor.ParseConflictsSized) — so without this, such a file shows
+// no washes or lens and never reads as "no markers left".
+//
+// One fork for the whole set, paths over stdin (`--stdin -z`) so hundreds
+// of unmerged files never meet the argument-length limit. Callers only
+// ask for UNMERGED files, so the steady state (nothing conflicted) pays
+// nothing. Any failure returns nil: every file then scans at the default,
+// which is right for nearly every repository.
+//
+// Output with -z is NUL-separated triples — path, attribute, value — one
+// triple per input path, IN INPUT ORDER; the order is what maps answers
+// back to absolute paths, so no path-spelling question (relative to
+// what?) can mis-key one. A count mismatch reads as failure.
+func loadConflictMarkerSizes(toplevel string, abs []string) map[string]int {
+	if toplevel == "" || len(abs) == 0 {
+		return nil
+	}
+	var in bytes.Buffer
+	for _, p := range abs {
+		rel, err := filepath.Rel(toplevel, p)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return nil // outside the work tree: the caller's paths are wrong
+		}
+		in.WriteString(filepath.ToSlash(rel))
+		in.WriteByte(0)
+	}
+	cmd := exec.Command("git", "-C", toplevel, "check-attr", "--stdin", "-z", "conflict-marker-size")
+	cmd.Stdin = &in
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	return parseConflictMarkerSizes(out, abs)
+}
+
+// parseConflictMarkerSizes maps `check-attr -z` triples onto abs, in
+// order. Values git itself would ignore — "unspecified", "set", "unset",
+// non-numbers, sizes below 1 — and the default size are left out, so the
+// map holds only paths that genuinely scan differently.
+func parseConflictMarkerSizes(out []byte, abs []string) map[string]int {
+	fields := bytes.Split(bytes.TrimSuffix(out, []byte{0}), []byte{0})
+	if len(fields) != 3*len(abs) {
+		return nil
+	}
+	var sizes map[string]int
+	for i, p := range abs {
+		n, err := strconv.Atoi(string(fields[3*i+2]))
+		if err != nil || n < 1 || n == editor.DefaultConflictMarkerSize {
+			continue
+		}
+		if sizes == nil {
+			sizes = make(map[string]int)
+		}
+		sizes[p] = n
+	}
+	return sizes
 }

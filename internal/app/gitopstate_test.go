@@ -210,3 +210,69 @@ func TestGitIndexHasChanges(t *testing.T) {
 		t.Error("staged edit not reported")
 	}
 }
+
+// TestConflictMarkerSize_RealRepo pins N-050 end to end against real git:
+// a repo whose .gitattributes sets conflict-marker-size=10 parks a
+// cherry-pick with ten-character markers, and the snapshot learns the
+// size, the open tab scans at it (one block, where the default grammar
+// found none), and the disk count used by the panel and the stage rows
+// agrees.
+func TestConflictMarkerSize_RealRepo(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	writeCommit(t, repo, ".gitattributes", "*.txt conflict-marker-size=10\n", "attrs")
+	writeCommit(t, repo, "f.txt", "one\ntwo\nthree\n", "base")
+	gitRun(t, repo, "checkout", "-q", "-b", "side")
+	writeCommit(t, repo, "f.txt", "one\nSIDE\nthree\n", "side edits the middle")
+	gitRun(t, repo, "checkout", "-q", "main")
+	writeCommit(t, repo, "f.txt", "one\nMAIN\nthree\n", "main edits the middle")
+	gitRunAllowFail(t, repo, "cherry-pick", "side")
+
+	f := filepath.Join(repo, "f.txt")
+	data, _ := os.ReadFile(f)
+	if !strings.Contains(string(data), strings.Repeat("<", 10)+" ") {
+		t.Fatalf("fixture: git did not write 10-character markers:\n%s", data)
+	}
+
+	a := newTestApp(t, repo)
+	a.openFile(f)
+	tab := a.activeTabPtr()
+	if n := len(tab.Conflicts()); n != 0 {
+		t.Fatalf("before the snapshot the default grammar found %d blocks", n)
+	}
+	a.refreshGitStatus()
+	if got := a.gitConflictMarkerSizes[f]; got != 10 {
+		t.Fatalf("snapshot marker size for f.txt = %d, want 10 (map %v)", got, a.gitConflictMarkerSizes)
+	}
+	if n := len(tab.Conflicts()); n != 1 {
+		t.Errorf("open tab after the snapshot: %d blocks, want 1", n)
+	}
+	a.closeTab(a.activeTab)
+	if n := a.conflictCountFor(f); n != 1 {
+		t.Errorf("disk count for f.txt = %d, want 1", n)
+	}
+	// The stage rows ask git themselves and must agree: still pending.
+	ready, pending := gitConflictReady(repo, []string{"f.txt"})
+	if len(ready) != 0 || len(pending) != 1 {
+		t.Errorf("gitConflictReady = ready %v pending %v, want f.txt pending", ready, pending)
+	}
+}
+
+// TestParseConflictMarkerSizes pins the -z triple parse: only real,
+// non-default sizes kept; "unspecified", "set", junk and a count
+// mismatch all degrade to "default".
+func TestParseConflictMarkerSizes(t *testing.T) {
+	abs := []string{"/r/a", "/r/b", "/r/c", "/r/d", "/r/e"}
+	out := []byte("a\x00conflict-marker-size\x0010\x00" +
+		"b\x00conflict-marker-size\x00unspecified\x00" +
+		"c\x00conflict-marker-size\x007\x00" +
+		"d\x00conflict-marker-size\x00set\x00" +
+		"e\x00conflict-marker-size\x000\x00")
+	got := parseConflictMarkerSizes(out, abs)
+	if !reflect.DeepEqual(got, map[string]int{"/r/a": 10}) {
+		t.Errorf("got %v, want only /r/a → 10", got)
+	}
+	if got := parseConflictMarkerSizes(out, abs[:2]); got != nil {
+		t.Errorf("count mismatch should return nil, got %v", got)
+	}
+}

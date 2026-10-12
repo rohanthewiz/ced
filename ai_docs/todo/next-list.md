@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-060**
+**Next ID: N-062**
 
 ## Open
 
@@ -133,6 +133,13 @@ plus the LSP work done in the seeding session itself
   2026-10-08 by counting `derivations()`. An instance of N-003's doc
   drift.
 
+- **N-061** · raised `2026-1011-2044-commit-receipt-push-button` · value low
+  The commit receipt's 7s expiry keeps running while the pointer rests
+  on the panel, so a slow reach for its new `[ Push <branch>… ]` button
+  can lose the race. Holding the expiry while the pointer is inside the
+  box (re-arm on leave) would fix it — the receipt already sees motion
+  in handleMouse but passes it through untouched.
+
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -219,6 +226,14 @@ and `raised`.
   `TestComparePanel_KeepsTabIndentation`. Hand check left: in the real
   binary, a Go conflict's Compare sides, the git panel diff of a Go file,
   and a git log commit detail all show tab indentation at full depth.
+
+- **N-060** · raised `2026-1011-2044-commit-receipt-push-button` · value low
+  The commit receipt's `[ Push <branch>… ]` button has run only in tests
+  (`TestCommitReceipt_PushButtonOpensPushDialog` against a real repo and
+  bare remote). Hand check in the real binary: commit from the git panel
+  in a repo with a remote, the receipt shows the button under the
+  message, a click opens the push dialog for the current branch, and a
+  key still dismisses the receipt without being eaten.
 
 ## Roadmap
 

@@ -3418,10 +3418,16 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// button, and a press that landed INSIDE the panel is swallowed
 	// rather than moving the caret in code the user could not see. Pure
 	// motion and the wheel pass through, so reading a receipt is not
-	// interrupted by a nudge of the mouse.
+	// interrupted by a nudge of the mouse. A left press on its push
+	// button opens the push dialog — the panel is closed first, since
+	// the dialog takes the modal slot and the receipt paints below it.
 	if btn&(tcell.Button1|tcell.Button2|tcell.Button3) != 0 && a.commitReceiptOpen() {
 		hit := a.commitReceiptContains(x, y)
+		push := btn&tcell.Button1 != 0 && a.commitReceiptPushHit(x, y)
 		a.closeCommitReceipt()
+		if push {
+			a.openGitPush()
+		}
 		if hit {
 			return
 		}

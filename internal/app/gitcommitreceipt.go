@@ -51,6 +51,26 @@
 // Both go through openGitReceipt so there is one panel, one timer and
 // one set of dismissal paths; a second receipt replaces the first rather
 // than stacking over it.
+//
+// A commit receipt also carries a "[ Push <branch>… ]" button, because
+// pushing is the step that most often follows a commit and the receipt
+// is on screen at exactly that moment. It is a door, not a new verb: the
+// click runs openGitPush, the same action behind the git panel's Actions
+// "Push <branch>…" row and ≡ Git, so the dialog, its refusals and the
+// push receipt that follows are all the existing ones. The panel stays
+// passive — the button answers a CLICK only. Keys keep dismissing
+// without being consumed (no key could be bound here without breaking
+// that), and the keyboard door to the same dialog is the ≡ Git row.
+//
+//	┌──────────────────────────────────────┐
+//	│ Committed                    any key │
+//	├──────────────────────────────────────┤
+//	│ 0123456789abcdef…                    │
+//	│                                      │
+//	│ feat: add a thing                    │
+//	│                                      │
+//	│                     [ Push main… ]   │  ← only with a push target
+//	└──────────────────────────────────────┘
 
 package app
 
@@ -134,6 +154,13 @@ type commitReceiptState struct {
 	head string
 	// lines is the wrapped, capped message body, ready to draw.
 	lines []string
+	// pushBranch is the branch the "[ Push <branch>… ]" button names.
+	// Empty means no button — a push receipt, a repo without a remote,
+	// or a detached HEAD. Captured when the receipt OPENS rather than
+	// read per frame: the post-commit status refresh lands while the
+	// panel is up, and a button appearing or vanishing mid-window would
+	// resize the box under a pointer already on its way to it.
+	pushBranch string
 	// seq counts receipts. A scheduled expiry carries the seq current
 	// when it was armed and is ignored unless it still matches — the
 	// hoverdwell generation trick, and what makes "commit twice quickly"
@@ -182,6 +209,12 @@ func (a *App) handleGitCommitReceipt(e *gitCommitReceiptEvent) {
 		return
 	}
 	a.openGitReceipt("Committed", hash, "", commitReceiptBody(msg, commitReceiptWidth-4))
+	// Offered under the same condition the git panel's Actions picker
+	// lists its "Push <branch>…" row, so the two doors never disagree
+	// about whether there is somewhere to push.
+	if a.hasGitPushTarget() && a.gitBranch != "" {
+		a.commitReceipt.pushBranch = a.gitBranch
+	}
 }
 
 // openGitReceipt fills the shared panel and starts its window. Every
@@ -193,6 +226,9 @@ func (a *App) openGitReceipt(title, hash, head string, lines []string) {
 	a.commitReceipt.hash = hash
 	a.commitReceipt.head = head
 	a.commitReceipt.lines = lines
+	// Reset here so a push receipt replacing a commit receipt does not
+	// inherit its button; handleGitCommitReceipt sets it after the call.
+	a.commitReceipt.pushBranch = ""
 	a.armCommitReceiptExpiry()
 }
 
@@ -302,6 +338,7 @@ func (a *App) closeCommitReceipt() {
 	a.commitReceipt.title = ""
 	a.commitReceipt.head = ""
 	a.commitReceipt.lines = nil
+	a.commitReceipt.pushBranch = ""
 	a.commitReceipt.box = struct{ x, y, w, h int }{}
 	a.commitReceipt.seq++
 }
@@ -325,13 +362,52 @@ func (a *App) commitReceiptContains(x, y int) bool {
 //	4        blank
 //	5..5+n-1 the message (or git push's output)
 //	5+n      blank
-//	6+n      bottom border
+//	6+n      "[ Push main… ]", right-aligned — only when pushBranch is set
+//	6+n/7+n  bottom border
 func (a *App) commitReceiptRect() (x, y, w, h int) {
 	w = commitReceiptWidth
 	if w > a.width {
 		w = a.width
 	}
-	return a.centeredRect(w, len(a.commitReceipt.lines)+7)
+	h = len(a.commitReceipt.lines) + 7
+	if a.commitReceipt.pushBranch != "" {
+		h++
+	}
+	return a.centeredRect(w, h)
+}
+
+// commitReceiptPushLabel is the button's text. The branch is named for
+// the same reason the Actions row names it: a bare "Push" next to a
+// commit hash would leave the reader guessing which ref moves.
+func (a *App) commitReceiptPushLabel() string {
+	return "[ Push " + a.commitReceipt.pushBranch + "… ]"
+}
+
+// commitReceiptPushBtn is the ONE geometry for the push button, read by
+// both draw and the press handler (the btnRect house rule). ok is false
+// when the receipt offers no push, or the window is too narrow for the
+// label to fit inside the border — a clipped button would be a target
+// whose text lies about where it ends.
+func (a *App) commitReceiptPushBtn() (b btnRect, ok bool) {
+	if !a.commitReceiptOpen() || a.commitReceipt.pushBranch == "" {
+		return btnRect{}, false
+	}
+	mx, my, mw, mh := a.commitReceiptRect()
+	label := a.commitReceiptPushLabel()
+	w := runeLen(label)
+	if w > mw-4 {
+		return btnRect{}, false
+	}
+	// Right-aligned, two cells in from the border to match the body's
+	// left inset; the row is the one directly above the bottom border.
+	return btnRect{x: mx + mw - 2 - w, y: my + mh - 2, w: w}, true
+}
+
+// commitReceiptPushHit reports whether a screen cell is on the push
+// button. False whenever the button is not offered or not drawn.
+func (a *App) commitReceiptPushHit(x, y int) bool {
+	b, ok := a.commitReceiptPushBtn()
+	return ok && b.contains(x, y)
 }
 
 // drawCommitReceipt paints the panel. Called unconditionally from draw,
@@ -368,5 +444,10 @@ func (a *App) drawCommitReceipt() {
 	drawAt(a.screen, mx+2, my+3, elide(a.commitReceipt.headline(), mw-4), c.title)
 	for i, ln := range a.commitReceipt.lines {
 		drawAt(a.screen, mx+2, my+5+i, elide(ln, mw-4), c.body)
+	}
+	// Accent, unfocused: it is a link the pointer can take, not a
+	// default the keyboard would fire — nothing here owns the keyboard.
+	if b, ok := a.commitReceiptPushBtn(); ok {
+		drawButton(a.screen, b.x, b.y, a.commitReceiptPushLabel(), c.bg, a.theme.Accent, false)
 	}
 }

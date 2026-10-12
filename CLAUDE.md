@@ -735,7 +735,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `gitCmdDoneEvent.onOK`. A successful push shows git's own output in
   the SAME panel ("Pushed", gitpushreceipt.go) via `onOKOutput` /
   `runGitCmdOKOutput`; both open through `openGitReceipt`, one replaces
-  the other.
+  the other. A COMMIT receipt carries `[ Push <branch>… ]` (click only,
+  keys still pass through) under the Actions row's condition
+  (`hasGitPushTarget` + branch), captured at open; it runs `openGitPush`.
 - Blame (gitblame.go, Esc-A): blames the BUFFER (`--contents -`). Two
   styles, `"blamestyle"` + ≡ Git row, both measured on every
   `fileBlame` (`newFileBlame`) so a switch never forks git: `bands`

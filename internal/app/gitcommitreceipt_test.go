@@ -275,3 +275,99 @@ func TestCommitReceipt_EndToEnd(t *testing.T) {
 		t.Errorf("receipt body = %q, want the whole message", body)
 	}
 }
+
+// TestCommitReceipt_PushButtonOnlyWithATarget pins when the receipt
+// offers a push: exactly when the git panel's Actions picker would list
+// its "Push <branch>…" row (a remote and a branch). Without one the
+// panel keeps its old height and draws no button, and a push receipt
+// replacing a commit receipt must not inherit the commit's button.
+func TestCommitReceipt_PushButtonOnlyWithATarget(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+
+	// No remote: no button, and the rect is the button-less height.
+	a.gitIsRepo, a.gitBranch = true, "main"
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	if _, ok := a.commitReceiptPushBtn(); ok {
+		t.Error("no remote, yet the receipt offers a push")
+	}
+	_, _, _, plainH := a.commitReceiptRect()
+
+	// Remote + branch: the button is offered, drawn, and costs one row.
+	a.gitHasRemote = true
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	b, ok := a.commitReceiptPushBtn()
+	if !ok {
+		t.Fatal("a repo with a remote should offer the push button")
+	}
+	if _, _, _, h := a.commitReceiptRect(); h != plainH+1 {
+		t.Errorf("height with button = %d, want %d", h, plainH+1)
+	}
+	a.draw()
+	a.screen.Show()
+	if !strings.Contains(screenText(a), "[ Push main… ]") {
+		t.Errorf("push button not drawn\n%s", screenText(a))
+	}
+	if !a.commitReceiptPushHit(b.x, b.y) || a.commitReceiptPushHit(b.x-1, b.y) {
+		t.Error("hit-test disagrees with the button's geometry")
+	}
+
+	// Detached HEAD (no branch): nothing to name, so no button.
+	a.gitBranch = ""
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	if _, ok := a.commitReceiptPushBtn(); ok {
+		t.Error("detached HEAD, yet the receipt offers a push")
+	}
+
+	// A push receipt replaces a commit receipt whole — button included.
+	a.gitBranch = "main"
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	a.showPushReceipt("main → origin/main", []byte("Everything up-to-date\n"))
+	if _, ok := a.commitReceiptPushBtn(); ok {
+		t.Error("the push receipt inherited the commit receipt's push button")
+	}
+}
+
+// TestCommitReceipt_PushButtonOpensPushDialog pins the button's action
+// end to end: a left click on it closes the receipt and raises the same
+// push dialog the git panel's "Push <branch>…" row opens, while a
+// right-click on it only dismisses (the receipt's ordinary contract).
+func TestCommitReceipt_PushButtonOpensPushDialog(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	dir := initRepoWithRemote(t)
+	a := newTestApp(t, dir)
+	a.refreshGitStatus()
+
+	// Right-click on the button: dismisses, opens nothing. Drawn first,
+	// as the real loop always is, so the press-swallowing box is stamped.
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	a.drawCommitReceipt()
+	b, ok := a.commitReceiptPushBtn()
+	if !ok {
+		t.Fatal("receipt in a repo with a remote should offer a push")
+	}
+	a.handleMouse(tcell.NewEventMouse(b.x, b.y, tcell.ButtonSecondary, tcell.ModNone))
+	// The release a terminal sends, so the left press below reads as a
+	// fresh press rather than a change of held buttons.
+	a.handleMouse(tcell.NewEventMouse(b.x, b.y, tcell.ButtonNone, tcell.ModNone))
+	if a.commitReceiptOpen() || a.modal != nil {
+		t.Fatalf("right-click: receipt open=%v, modal=%T; want closed, none", a.commitReceiptOpen(), a.modal)
+	}
+
+	// Left click on the button: the push dialog, for the current branch.
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	a.drawCommitReceipt()
+	b, _ = a.commitReceiptPushBtn()
+	a.handleMouse(tcell.NewEventMouse(b.x+1, b.y, tcell.Button1, tcell.ModNone))
+	if a.commitReceiptOpen() {
+		t.Error("the receipt should close when its push button is clicked")
+	}
+	m, ok := a.modal.(*gitPushModal)
+	if !ok {
+		t.Fatalf("modal = %T, want *gitPushModal", a.modal)
+	}
+	if m.local != "main" {
+		t.Errorf("push dialog for %q, want main", m.local)
+	}
+}

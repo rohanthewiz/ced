@@ -25,8 +25,8 @@
 //     name it. That is why the set is never pruned against the visible
 //     list: under a filter, the visible list is a search result.
 //   - **Oldest first, one command** — the cherry-pick dialog's rule. The
-//     order is asked of git (a `rev-list` walk, which never lists a
-//     parent before its child), not taken from tick order or list
+//     order is asked of git (`rev-list --topo-order`, which never lists
+//     a parent before its child), not taken from tick order or list
 //     position: a set ticked newest first, or partly hidden by a search,
 //     must still apply in history order.
 //   - **Confirm, listing the set** (treemarks.go's blast-radius rule):
@@ -159,14 +159,16 @@ func (a *App) confirmGitLogCherryPickTicked() {
 // gitLogTickedOldestFirst returns the ticked commits in the order git
 // should apply them: every commit after its ancestors, oldest first.
 //
-// The order comes from a plain `git rev-list` walk from the ticked hashes.
-// Its default order is a date-ordered queue that only learns of a parent
-// by popping its child, so a parent can never be listed before a child —
-// ancestry is honoured even between commits made in the same second,
-// which a pure date sort (`log --no-walk=sorted`) would leave to chance.
+// The order comes from `git rev-list --topo-order` over the ticked hashes,
+// which never lists a parent before its child. A plain walk does NOT
+// promise that here — every ticked hash is a start point, so a parent
+// sits in the date-ordered queue from the beginning and wins a tie with
+// a same-second child (TestGitLogTicks_CherryPickEndToEnd caught exactly
+// that) — and neither does a date sort (`log --no-walk=sorted`).
 // The walk is streamed and stopped as soon as every ticked hash has been
-// seen; ticks come from the 400-commit log window, so that is near the
-// top of the walk and a deep history is never read to the end.
+// seen. --topo-order may have to read the history up front where the
+// repository has no commit-graph; on an explicit gesture, once, that is
+// an acceptable price for never applying a child before its parent.
 //
 // A ticked hash git no longer knows — rewritten away by a rebase since it
 // was ticked — makes rev-list fail, which is reported rather than silently
@@ -175,7 +177,7 @@ func (a *App) gitLogTickedOldestFirst() ([]gitLogCommit, error) {
 	if len(a.gitLog.ticked) == 0 {
 		return nil, nil
 	}
-	args := []string{"-C", a.rootDir, "rev-list"}
+	args := []string{"-C", a.rootDir, "rev-list", "--topo-order"}
 	for h := range a.gitLog.ticked {
 		args = append(args, h)
 	}

@@ -177,8 +177,8 @@ The goals, in order:
   in ced's status bar. Detected at startup and silently absent
   everywhere else — in any other terminal ced is the editor it has
   always been.
-- **Single binary, no CGO** — cross-compiled for macOS and Linux on
-  amd64 and arm64. POSIX only: the embedded terminal panel needs
+- **Single binary, no CGO** — builds for macOS and Linux on amd64 and
+  arm64 (`make build-linux` cross-compiles a static Linux binary). POSIX only: the embedded terminal panel needs
   job-control syscalls Windows doesn't provide.
 
 <img width="2504" height="1726" alt="CleanShot 2026-04-29 at 23 32 22@2x" src="https://github.com/user-attachments/assets/d0dca3da-5ba7-474d-852e-832acde90ca4" />
@@ -206,45 +206,8 @@ in — and it shadows any other `ced` further down `$PATH`.
 A ced pane is listed in the cats sidebar's AGENTS section as a tool
 row beside cats-todo, not as a coding agent.
 
-The sections below cover running ced without cats.
-
-### Linux / macOS (one-line install script)
-
-The simplest way to drop ced onto a Linux box or a Mac without cats is
-the install script:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/rohanthewiz/ced/main/install.sh | sh
-```
-
-It detects your OS / arch, downloads the matching archive from the
-latest [GitHub Release](https://github.com/rohanthewiz/ced/releases),
-and drops the `ced` binary into `~/.local/bin` (or `/usr/local/bin`
-when `~/.local/bin` isn't writable). **Re-run the same command to
-upgrade** — it always fetches the latest tagged release.
-
-Override behaviour with environment variables:
-
-```sh
-# Pin to a specific release.
-curl -fsSL https://raw.githubusercontent.com/rohanthewiz/ced/main/install.sh \
-  | VERSION=v0.0.18 sh
-
-# Install to a custom directory.
-curl -fsSL https://raw.githubusercontent.com/rohanthewiz/ced/main/install.sh \
-  | INSTALL_DIR=/opt/bin sh
-```
-
-The script is plain POSIX `sh` — it works on Alpine / BusyBox / any
-SSH target where you don't want to depend on bash. It only needs `tar`
-plus one of `curl` or `wget`.
-
-### Other platforms (manual binary install)
-
-Pre-built binaries for Linux and macOS (amd64 + arm64) are
-attached to every [GitHub Release](https://github.com/rohanthewiz/ced/releases).
-Download the archive for your OS/arch, extract it, and drop the
-`ced` binary somewhere on your `$PATH`.
+ced has no pre-built binaries: there are no GitHub Release downloads and
+no install script. Without cats, build it from source.
 
 ### From source
 
@@ -2156,8 +2119,7 @@ nothing else: you get one warning, and the rest of the registry loads.
 │   ├── finder/               # Project file index + fuzzy matcher
 │   ├── theme/                # Named themes: palette derivation + registry
 │   └── version/              # Single-line version constant
-├── .github/workflows/        # Auto-release pipeline
-├── .goreleaser.yml           # Cross-compile + GitHub Release archives
+├── .github/workflows/        # Test workflow (test.yml)
 └── Makefile
 ```
 
@@ -2180,24 +2142,21 @@ needs a corresponding `_test.go` — see CLAUDE.md for the bar.
 
 ## Releases
 
-Releases are cut deliberately: ordinary pushes to `main` ship nothing.
-Push to the `release` branch (cut it from `main`) and
-[`.github/workflows/release.yml`](.github/workflows/release.yml):
+A release is a version bump and an annotated tag on `main`, made by hand.
+No workflow publishes anything, and there are no binary downloads. The cats
+plugin host builds ced from source at the tag or commit it fetches.
 
-1. Reads `internal/version/version.go`.
-2. If that file was hand-edited in the pushed commit, the version is
-   used as-is (this is how you bump major or minor: edit the constant
-   manually). Otherwise the patch number is auto-bumped and committed
-   back to `release` with `[skip ci]`.
-3. Tags `v<x.y.z>` and pushes the tag.
-4. [GoReleaser](https://goreleaser.com/) cross-compiles for
-   linux/darwin × amd64/arm64 and attaches the archives and
-   `checksums.txt` to a GitHub Release — what the install script and
-   the manual binary install download.
+1. Set the same `x.y.z` in `internal/version/version.go` and in
+   `cats-plugin.toml`'s top-level `version =`.
+   `TestVersion_MatchesCatsManifest` fails while they differ.
+2. Run `make test`, then commit `Release ced x.y.z` on `main`.
+3. Run `git tag -a vx.y.z -m "ced x.y.z"` and
+   `git push origin main vx.y.z`.
 
-There is no Homebrew formula: ced is installed through the cats plugin
-host, which builds from source. Merge `release` back into `main`
-afterwards to bring `version.go` current.
+Pick a number past the latest tag, not just past `version.go`.
+
+The GitHub Releases page stops at v0.2.0, from the retired
+release-branch pipeline. Later versions exist only as tags.
 
 ## License
 

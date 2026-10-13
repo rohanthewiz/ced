@@ -28,9 +28,8 @@ func TestVersion_NotEmpty(t *testing.T) {
 }
 
 // TestVersion_IsSemver verifies that the package's exported Version
-// constant is in major.minor.patch form so the release pipeline's
-// auto-bump logic stays correct — anything else would break the regex
-// in .github/workflows/release.yml.
+// constant is in major.minor.patch form, the form the hand-made release
+// tags (vx.y.z) and the cats plugin manifest's version use.
 func TestVersion_IsSemver(t *testing.T) {
 	parts := strings.Split(Version, ".")
 	if len(parts) != 3 {
@@ -79,10 +78,10 @@ func TestVersion_MatchesCatsManifest(t *testing.T) {
 		t.Fatalf("read manifest: %v", err)
 	}
 	// Line-anchored: the manifest's only TOP-LEVEL `version =` key, the
-	// same line release.yml's sed rewrites.
+	// line a release bumps by hand alongside internal/version.
 	m := regexp.MustCompile(`(?m)^version = "([^"]+)"`).FindSubmatch(raw)
 	if m == nil {
-		t.Fatal("cats-plugin.toml has no top-level version line for release CI to rewrite")
+		t.Fatal("cats-plugin.toml has no top-level version line")
 	}
 	if got := string(m[1]); got != Version {
 		t.Errorf("cats-plugin.toml version = %q, internal/version = %q — bump both", got, Version)

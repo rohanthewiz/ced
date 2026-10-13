@@ -7,11 +7,10 @@
 #
 # Test pipeline for ced. Runs `go test ./...` with the race detector
 # on every push and every pull request, on Linux + macOS so we catch
-# platform-specific flakes before they ship. The release workflow
-# (release.yml) doesn't depend on this — it triggers separately on push
-# to main — but a red test job is meant to block merges via the PR's
-# required-checks setting (configure that on GitHub once the first run
-# is green).
+# platform-specific flakes before they ship. A red test job is meant to
+# block merges via the PR's required-checks setting (configure that on
+# GitHub once the first run is green). There is no release workflow:
+# releases are a hand-made commit and tag (see README's Releases).
 
 name: Test
 

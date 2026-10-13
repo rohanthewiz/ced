@@ -173,23 +173,6 @@ and `raised`.
 
 Wanted, but not next. Parked, not declined.
 
-- **N-001** · raised `2026-0910-2016-tool-windows` · value low
-  **The GitHub Release pipeline is parked.** Moved from Open on
-  2026-09-21: the owner does not need the CI/CD flow for now; releases
-  are a hand bump of `version.go` + `cats-plugin.toml` and a pushed tag,
-  which is all the cats plugin needs. What stays unshipped: `origin/release`
-  is still at `0409317 Release ced 0.2.0`, so `install.sh` and the GitHub
-  Releases page still say 0.2.0, and tags `v0.3.0`–`v0.3.7` have no
-  artifacts. If revived: the fork suppresses push triggers, so fast-forward
-  `release` and `gh workflow run release.yml --repo rohanthewiz/ced --ref
-  release`; bump past the latest tag first. The `cats-plugin.toml` sed in
-  `release.yml` (N-004) is still unrun.
-
-- **N-009** · raised `2026-0914-1114-homebrew-removed` · value low
-  `.claude/commands/summary-of-downloads.md` says download counts include
-  Homebrew installs. True up to v0.3.0, false for anything released after
-  the tap was removed; tweak if N-001 (now Roadmap) ever ships a release.
-
 - **N-017** · raised `2026-0909-1845-tree-multi-select` · value low
   Tree marks: a cross-folder "select all matching" (tick every
   `*_test.go`). The finder answers the question differently today.
@@ -223,9 +206,21 @@ Wanted, but not next. Parked, not declined.
   clickable END-OF-LINE lens (`LensSource`), so an LSP code lens would no
   longer need virtual rows — still declined, but that reason is gone.
 
+- **N-001** · declined `2026-1013-1525-retire-release-pipeline` — reviving the GitHub Release pipeline
+  (`release` branch, auto-bump, goreleaser). The owner retired it on
+  2026-10-13 (cats N-019) instead of reviving it: `release.yml`,
+  `.goreleaser.yml` and `install.sh` are deleted. ced ships as the cats
+  plugin, or builds from source. The Releases page stops at v0.2.0, and
+  later versions exist only as tags.
+
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-13, `2026-1013-1525-retire-release-pipeline` — **N-009** moot. The
+  download-summary note about Homebrew installs is true for every GitHub
+  Release that exists (all are v0.2.0 or older), and no more will ship
+  now that the pipeline is retired (N-001 → Non-goals).
 
 - closed 2026-10-13, `2026-1013-1326-n064-git-log-merge-picks` —
   **N-064** the log rows now carry `Merge` (parent count from `%P` in

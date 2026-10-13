@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-ced ("Cats Editor") is a Go terminal editor module at `github.com/rohanthewiz/ced`; the CLI entry point is `main.go` and the binary is `ced`. Core packages live under `internal/`: `app` owns the event loop and rendering, `editor` owns buffers/tabs/editing behavior, `filetree` manages the sidebar tree, and supporting packages cover clipboard, formatting, icons, config, theme, finder, versioning, and the JSON-RPC clients (`lsp` for gopls/ACP, `mcp` for Model Context Protocol servers), and `skills` (the `SKILL.md` inventory read from `~/.claude/skills`, `<project>/.claude/skills`, and `~/.config/ced/skills`). Tests sit beside source files as `*_test.go`. Release packaging includes `Formula/ced.rb`, `install.sh`, and samples under `samples/`.
+ced ("Cats Editor") is a Go terminal editor module at `github.com/rohanthewiz/ced`; the CLI entry point is `main.go` and the binary is `ced`. Core packages live under `internal/`: `app` owns the event loop and rendering, `editor` owns buffers/tabs/editing behavior, `filetree` manages the sidebar tree, and supporting packages cover clipboard, formatting, icons, config, theme, finder, versioning, and the JSON-RPC clients (`lsp` for gopls/ACP, `mcp` for Model Context Protocol servers), and `skills` (the `SKILL.md` inventory read from `~/.claude/skills`, `<project>/.claude/skills`, and `~/.config/ced/skills`). Tests sit beside source files as `*_test.go`. Sample files live under `samples/`. ced ships no release packages: it is installed as a cats plugin (`cats-plugin.toml`) or built from source.
 
 ## Build, Test, and Development Commands
 
@@ -24,8 +24,8 @@ Every non-trivial source file should have a same-package test file, for example 
 
 ## Commit & Pull Request Guidelines
 
-Recent commits use concise, imperative summaries, often with PR numbers, such as `Mute dotfiles in tree + per-tab Nerd Font icons (#32)`. Release automation uses `[skip ci]`; preserve that marker when editing generated release commits or workflows. PRs should describe behavior changes, mention tests run, link issues, and include screenshots or terminal captures for UI changes.
+Recent commits use concise, imperative summaries, often with PR numbers, such as `Mute dotfiles in tree + per-tab Nerd Font icons (#32)`. A release is a hand-made `Release ced x.y.z` commit plus an annotated `vx.y.z` tag on `main` (see README's Releases); there is no release automation. PRs should describe behavior changes, mention tests run, link issues, and include screenshots or terminal captures for UI changes.
 
 ## Security & Configuration Tips
 
-Format-on-save commands are project config and require trust prompts; do not bypass that flow. `~/.config/ced/mcp.json` holds MCP server commands and their credentials: never echo an entry's `env` values into the UI, logs, or tests — surface the keys only. Keep generated artifacts (`bin/`, `coverage.out`, `coverage.html`) out of normal feature commits unless the release workflow explicitly requires them.
+Format-on-save commands are project config and require trust prompts; do not bypass that flow. `~/.config/ced/mcp.json` holds MCP server commands and their credentials: never echo an entry's `env` values into the UI, logs, or tests — surface the keys only. Keep generated artifacts (`bin/`, `coverage.out`, `coverage.html`) out of commits.

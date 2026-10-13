@@ -34,10 +34,12 @@ syntax-highlighted editor, status bar. One static Go binary, no CGO.
 
 ## Module / repo
 
-- Module `github.com/rohanthewiz/ced`; binary `ced` (Makefile,
-  goreleaser, cats-plugin.toml `bin`, install.sh all assume it).
+- Module `github.com/rohanthewiz/ced`; binary `ced` (the Makefile and
+  cats-plugin.toml `bin` assume it).
 - Official install: the cats plugin (`cats-plugin.toml` → `~/.cats/bin/ced`).
-  **No Homebrew formula/tap**, ever.
+  Otherwise, build from source. There is **no Homebrew formula/tap**, no
+  install script and no GitHub Release binaries; the goreleaser pipeline
+  was retired on 2026-10-13. Don't bring it back.
 
 ## Architecture map
 
@@ -137,7 +139,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - UI code: `tcell.NewSimulationScreen("UTF-8")` + `scr.GetContents()`.
 - `t.Skip` only for unsatisfiable environment needs, never for flakiness.
 - `make test` (race detector) / `make coverage`. CI does NOT actually run
-  on this fork (see Releases) — run tests locally.
+  on this fork: Actions triggers (test.yml) don't fire until enabled in
+  the Actions tab. Run tests locally.
 - **newTestApp stubs every host side effect** (LSP/Copilot/chat dead,
   `lspLookPath`/`chatLookPath` never-found, builtin formatters nil,
   plugin/skill/theme/chat-archive/history/session/favorites paths at temp
@@ -884,7 +887,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 
 ### Terminal (app/terminal.go, termdiag.go, runexec.go)
 - Embedded grsh REPL strip — NOT a PTY, no VT emulator. POSIX-only;
-  don't add `windows` back to goreleaser (build-tag it out instead).
+  don't add `windows` to cats-plugin.toml's `platforms` (build-tag it out
+  instead).
 - Tool window, bottom by default; ≡ "Dock terminal left" is a preset
   that also opens it. Keep terminal rows near the top of ≡ View
   (`TestMenuLayout_TerminalRowsAboveTheFold`).
@@ -1094,18 +1098,10 @@ A release is a hand bump and a tag on `main`:
 2. `make test`, commit `Release ced x.y.z` on `main`.
 3. `git tag -a vx.y.z -m "ced x.y.z"` and `git push origin main vx.y.z`.
 
-Pick a number past the LATEST TAG, not just `version.go`. Don't touch the
-`release` branch or dispatch `release.yml` — that's the parked
-goreleaser pipeline (it publishes a GitHub Release). install.sh and the
-Releases page still serve 0.2.0 (next-list N-001).
-
-Parked pipeline notes, if revived: this repo is a FORK, so Actions
-triggers (release.yml AND test.yml) don't fire until enabled in the
-Actions tab — dispatch by hand with
-`gh workflow run release.yml --repo rohanthewiz/ced --ref release`.
-The workflow auto-bumps unless the TIP commit edits version.go — amend
-the version commit, don't stack on it; delete a stale remote tag before
-re-dispatching. The version auto-commit must keep `[skip ci]`.
+Pick a number past the LATEST TAG, not just `version.go`. Nothing else
+ships: no workflow, no GitHub Release, no binaries. The cats plugin builds
+from source. The `release` branch and the GitHub Releases page (stuck at
+0.2.0) are leftovers of the retired pipeline.
 
 There is no website; README.md is the documentation. Don't restore the
 old SpiceEdit `website/`.

@@ -108,6 +108,51 @@ func TestBuiltins_DarkFlagMatchesBackground(t *testing.T) {
 	}
 }
 
+// TestBuiltin_DarculaSidebarStepsDown pins the Darcula file tree to the
+// shared dark-theme convention: the sidebar sits a shade DARKER than the
+// editor. Darcula used to state JetBrains' lighter #3c3f41 tool pane,
+// which in a terminal made the tree look like it belonged to another
+// theme.
+func TestBuiltin_DarculaSidebarStepsDown(t *testing.T) {
+	s, ok := Find(Builtins(), "darcula")
+	if !ok {
+		t.Fatal("darcula builtin missing")
+	}
+	p, err := Normalize(s.Colors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Luminance(p["sidebar-bg"]) >= Luminance(p["bg"]) {
+		t.Errorf("darcula sidebar-bg %s is not darker than bg %s", p["sidebar-bg"], p["bg"])
+	}
+}
+
+// TestBuiltin_DarculaFoldersAreNeutral pins Darcula's tree folders off
+// the blue accent (the active-folder color) and checks the brightness
+// tiers still tell folders from files from dotfiles.
+func TestBuiltin_DarculaFoldersAreNeutral(t *testing.T) {
+	s, ok := Find(Builtins(), "darcula")
+	if !ok {
+		t.Fatal("darcula builtin missing")
+	}
+	p, err := Normalize(s.Colors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p["folder"] == p["accent"] {
+		t.Errorf("darcula folder %s is the accent; the tree reads as blue", p["folder"])
+	}
+	// 0.05 of luminance is roughly the smallest step that still reads
+	// as a different tier at a glance on a dark panel.
+	folder, file, muted := Luminance(p["folder"]), Luminance(p["file"]), Luminance(p["muted"])
+	if folder-file < 0.05 {
+		t.Errorf("folder %s (%.3f) too close to file %s (%.3f)", p["folder"], folder, p["file"], file)
+	}
+	if file-muted < 0.05 {
+		t.Errorf("file %s (%.3f) too close to dotfile/muted %s (%.3f)", p["file"], file, p["muted"], muted)
+	}
+}
+
 // TestBuiltins_Legible walks every shipped theme through the contrast
 // invariants the original single-theme test applied to Default(): text
 // must not vanish into the background, the sidebar must read as its own

@@ -117,8 +117,22 @@ func Builtins() []Spec {
 				"bg": "#2b2b2b", "fg": "#a9b7c6", "muted": "#808080", "line": "#4b4b4b",
 				"accent": "#6897bb", "ok": "#6a8759", "warn": "#ffc66d", "err": "#ff6b68",
 
-				"sidebar-bg": "#3c3f41", "line-hl": "#323232", "selection": "#214283",
+				// The sidebar steps DOWN from the editor like every other
+				// dark theme (shadePanel's 18%). JetBrains' own #3c3f41 tool
+				// pane is a step UP — fine in an IDE full of grey chrome,
+				// but in a terminal it reads as a foreign grey slab bolted
+				// onto the editor (and it also paints the tab strip and
+				// every tool window header).
+				"sidebar-bg": "#232323", "line-hl": "#323232", "selection": "#214283",
 				"accent-soft": "#9876aa", "find-match": "#32593d",
+				// Folders are JetBrains' neutral label grey, not the derived
+				// accent: Darcula's blue is its NUMBER color, and a tree full
+				// of it clashes with the orange/yellow/green code beside it.
+				// Three tiers of brightness still separate the rows —
+				// folders #bbbbbb > files (derived, ≈#9ba4ad) > dotfiles
+				// (muted #808080) — and the ACTIVE folder keeps the blue
+				// accent, which now reads as the one marked row it is.
+				"folder": "#bbbbbb",
 				// JetBrains leaves types, operators, and punctuation the
 				// plain text color — that restraint is most of what makes
 				// Darcula read as Darcula, so state it rather than let the

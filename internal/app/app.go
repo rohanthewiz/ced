@@ -2281,6 +2281,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleGitPushRefs(e)
 	case *cherryPickLoadEvent:
 		a.handleCherryPickLoad(e)
+	case *cherryPickDiffEvent:
+		a.handleCherryPickDiff(e)
 	case *termOutputEvent:
 		a.handleTermOutput()
 	case *termDoneEvent:

@@ -11,11 +11,12 @@
 //
 //	┌ Cherry-pick onto main ─────────────────────────────────────── esc ┐
 //	│ From  ‹ feature/parser ›                              alt+b change │
-//	│ 5 commits not on main · 1 already applied · merges hidden          │
-//	│ [x] 7c8f3a7   Handle empty input               rohan   2 days ago  │
-//	│ [ ] bff5bbb ⚠ Rework the lexer                 rohan   2 days ago  │
-//	│ [=] 2a0370b   Bump version (already on main)   rohan   3 days ago  │
-//	│ touches lexer.go, parse.go · ⚠ parse.go also changed on main       │
+//	│ 5 commits not on main · 1 already applied · merges as -m 1         │
+//	│ [x] 7c8f3a7    Handle empty input              rohan   2 days ago  │
+//	│ [ ] bff5bbb ⚠  Rework the lexer                rohan   2 days ago  │
+//	│ [ ] 41c09de  ⑂ Merge branch 'fix/eof'          rohan   2 days ago  │
+//	│ [=] 2a0370b    Bump version (already on main)  rohan   3 days ago  │
+//	│ touches lexer.go, parse.go · ⚠ parse.go also …        ▸ diff alt+d │
 //	│ [ ] -x  note the origin in each message   [ ] stage only, no commit │
 //	│ [ Select all ]                       [ Cancel ]  [ Cherry-pick 1 ] │
 //	└────────────────────────────────────────────────────────────────────┘
@@ -31,9 +32,36 @@
 //     unpickable — hiding them would make the list disagree with `git log`
 //     and leave the user wondering where a commit went; picking one would
 //     only produce an empty commit.
-//   - MERGES ARE HIDDEN. Cherry-picking a merge needs `-m <parent>`, a
-//     question nobody can answer from a checkbox. The summary line says
-//     they are hidden, so a missing merge is never a mystery.
+//   - MERGES ARE PICKED AGAINST THEIR FIRST PARENT (N-051). Cherry-picking
+//     a merge needs `-m <parent>`, and the dialog always answers 1. The
+//     first parent is the branch the merge was made ON, so `-m 1` replays
+//     "what this merge brought into the source branch" — the only reading
+//     of "bring that merge over" that fits a branch-to-branch pick. `-m 2`
+//     would replay the source branch's OWN side against the merged-in one,
+//     which nobody means from a checkbox, so no parent picker is offered
+//     (the terminal is the door for that). One parent number covers the
+//     whole command, and since git 2.21 `-m 1` on a non-merge commit just
+//     picks it normally — so merges and ordinary commits still go in ONE
+//     `git cherry-pick`, the order rule below intact. `-m` is passed only
+//     when a merge is among the picks, so a merge-free pick is the exact
+//     argv it always was. The file list and ⚠ hint of a merge are its
+//     diff against the first parent (`--diff-merges=first-parent`) — the
+//     same diff `-m 1` applies.
+//   - A MERGE THAT ONLY BRINGS IN WHAT HEAD HAS IS NOT PICKABLE. The
+//     commonest merge on a feature branch is "merge main into feature":
+//     its first-parent diff is main's own work, already on main, and git
+//     stops the sequence on it as an empty pick. --cherry-mark never marks
+//     a merge (merges have no patch id), so the dialog asks itself: a
+//     merge whose every OTHER parent is already an ancestor of HEAD is
+//     shown `[=]` like an applied commit, with the reason. One `rev-list`
+//     answers it for every merge in the list.
+//   - OLD GIT DEGRADES TO THE OLD LIST. `--diff-merges` needs git 2.31; if
+//     the merge-aware log fails, the listing reruns without merges and the
+//     summary says they are hidden — the dialog as it was before merges
+//     could be picked, rather than an error.
+//   - A DIFF PREVIEW FOLLOWS THE HIGHLIGHT (cherrypickdiff.go): alt+d, or
+//     the "diff" toggle on the detail row, opens a pane with the
+//     highlighted commit's message, stat and patch.
 //   - APPLIED OLDEST FIRST, WHATEVER THE TICK ORDER. The list reads newest
 //     first like every log, but a later commit usually builds on an
 //     earlier one, so the command always lists the ticked commits in
@@ -103,6 +131,15 @@ type cherryPickCommit struct {
 	// HEAD, so picking it would produce an empty commit.
 	applied bool
 
+	// merge: the commit has more than one parent, so it is picked with
+	// `-m 1`. synced: a merge whose every non-first parent is already on
+	// HEAD — it only brings in what HEAD has, so it is not pickable.
+	merge  bool
+	synced bool
+	// parents are the commit's parent hashes, first parent first; only
+	// read to work out synced.
+	parents []string
+
 	// files are the paths the commit touches (toplevel-relative); overlap
 	// are those the current branch ALSO changed since the merge base.
 	files   []string
@@ -120,7 +157,10 @@ type cherryPickModal struct {
 
 	commits []cherryPickCommit // newest first
 	capped  bool
-	ticked  map[string]bool // by full hash
+	// mergesHidden: git was too old for the merge-aware listing, so the
+	// fallback left merges out and the summary says so.
+	mergesHidden bool
+	ticked       map[string]bool // by full hash
 
 	// cursor indexes COMMITS (the highlighted commit; -1 when a filter
 	// leaves nothing to highlight); scroll is a position in VIEW.
@@ -138,6 +178,9 @@ type cherryPickModal struct {
 	recordOrigin bool // -x
 	noCommit     bool // --no-commit
 
+	// diff is the preview pane's state (cherrypickdiff.go).
+	diff cherryPickDiffState
+
 	dirty int // uncommitted files at open, for the warning row
 
 	// lastBtn / lastClickRow / lastClickAt make presses edge-triggered and
@@ -149,11 +192,12 @@ type cherryPickModal struct {
 
 // cherryPickLoadEvent carries a finished commit listing to the main loop.
 type cherryPickLoadEvent struct {
-	when    time.Time
-	seq     int64
-	commits []cherryPickCommit
-	capped  bool
-	err     string
+	when         time.Time
+	seq          int64
+	commits      []cherryPickCommit
+	capped       bool
+	mergesHidden bool
+	err          string
 }
 
 // When satisfies tcell.Event.
@@ -245,7 +289,7 @@ func (a *App) openCherryPick(source string) {
 func (a *App) loadCherryPickCommits(m *cherryPickModal) {
 	m.seq = cherryPickSeqGen.Add(1)
 	m.loading, m.err = true, ""
-	m.commits, m.capped = nil, false
+	m.commits, m.capped, m.mergesHidden = nil, false, false
 	m.cursor, m.scroll = 0, 0
 	m.ticked = map[string]bool{}
 	m.filter, m.view, m.viewBuilt = "", nil, false
@@ -254,8 +298,9 @@ func (a *App) loadCherryPickCommits(m *cherryPickModal) {
 	}
 	scr, root, source, seq := a.screen, a.rootDir, m.source, m.seq
 	go func() {
-		commits, capped, err := listCherryPickCommits(root, source)
-		e := &cherryPickLoadEvent{when: time.Now(), seq: seq, commits: commits, capped: capped}
+		l, err := listCherryPickCommits(root, source)
+		e := &cherryPickLoadEvent{when: time.Now(), seq: seq,
+			commits: l.commits, capped: l.capped, mergesHidden: l.mergesHidden}
 		if err != nil {
 			e.err = err.Error()
 		}
@@ -273,40 +318,72 @@ func (a *App) handleCherryPickLoad(e *cherryPickLoadEvent) {
 	}
 	m.loading = false
 	m.err = e.err
-	m.commits, m.capped = e.commits, e.capped
+	m.commits, m.capped, m.mergesHidden = e.commits, e.capped, e.mergesHidden
 	m.refilter()
 	// The first pickable commit starts highlighted, so Enter on a fresh
 	// dialog picks the newest commit not already applied — the commonest
 	// single-pick, one key away.
 	for i, c := range m.commits {
-		if !c.applied {
+		if c.pickable() {
 			m.cursor = i
 			break
 		}
 	}
 }
 
-// listCherryPickCommits runs the log and the overlap probe. Runs off the
-// main loop.
-func listCherryPickCommits(rootDir, source string) ([]cherryPickCommit, bool, error) {
-	out, err := exec.Command("git", "-C", rootDir, "log", "--cherry-mark", "--right-only", "--no-merges",
-		"--format=%x1e%m%x1f%H%x1f%h%x1f%an%x1f%ar%x1f%s", "--name-only",
-		"-n", itoa(cherryPickMax+1), "HEAD..."+source, "--").Output()
+// cherryPickListing is listCherryPickCommits' answer.
+type cherryPickListing struct {
+	commits      []cherryPickCommit
+	capped       bool
+	mergesHidden bool
+}
+
+// listCherryPickCommits runs the log, the synced-merge probe and the
+// overlap probe. Runs off the main loop. The merge-aware log is tried
+// first; if git rejects it (older than 2.31, no --diff-merges) the
+// merge-free log of earlier releases runs instead and the listing says
+// merges were hidden. The second run's error is the one reported: when
+// both fail the cause is the source, not the flag.
+func listCherryPickCommits(rootDir, source string) (cherryPickListing, error) {
+	var l cherryPickListing
+	out, err := exec.Command("git", cherryPickLogArgs(rootDir, source, false)...).Output()
 	if err != nil {
-		return nil, false, err
+		out, err = exec.Command("git", cherryPickLogArgs(rootDir, source, true)...).Output()
+		if err != nil {
+			return l, err
+		}
+		l.mergesHidden = true
 	}
-	commits := parseCherryPickLog(out)
-	capped := len(commits) > cherryPickMax
-	if capped {
-		commits = commits[:cherryPickMax]
+	l.commits = parseCherryPickLog(out)
+	l.capped = len(l.commits) > cherryPickMax
+	if l.capped {
+		l.commits = l.commits[:cherryPickMax]
 	}
-	markCherryPickOverlap(commits, loadOurSideChanges(rootDir, source))
-	return commits, capped, nil
+	markCherryPickSynced(l.commits, loadMergeParentsNotOnHead(rootDir, l.commits))
+	markCherryPickOverlap(l.commits, loadOurSideChanges(rootDir, source))
+	return l, nil
+}
+
+// cherryPickLogArgs is the listing's argv. legacy is the pre-merge form
+// (git older than 2.31): merges left out, so --diff-merges is not needed.
+// Otherwise merges are listed, and --diff-merges=first-parent makes
+// --name-only list a merge's files against its first parent — the diff
+// `-m 1` will apply (by default git log shows no files for a merge).
+func cherryPickLogArgs(rootDir, source string, legacy bool) []string {
+	args := []string{"-C", rootDir, "log", "--cherry-mark", "--right-only"}
+	if legacy {
+		args = append(args, "--no-merges")
+	} else {
+		args = append(args, "--diff-merges=first-parent")
+	}
+	return append(args, "--format=%x1e%m%x1f%H%x1f%h%x1f%an%x1f%ar%x1f%P%x1f%s", "--name-only",
+		"-n", itoa(cherryPickMax+1), "HEAD..."+source, "--")
 }
 
 // parseCherryPickLog parses the log format above: records split on RS
-// (0x1e), the first line of each holding US-separated fields, the rest
-// the --name-only file list.
+// (0x1e), the first line of each holding US-separated fields (the
+// parents space-separated, so two or more of them make a merge), the
+// rest the --name-only file list.
 func parseCherryPickLog(out []byte) []cherryPickCommit {
 	var commits []cherryPickCommit
 	for _, rec := range strings.Split(string(out), "\x1e") {
@@ -315,14 +392,18 @@ func parseCherryPickLog(out []byte) []cherryPickCommit {
 			continue
 		}
 		head, rest, _ := strings.Cut(rec, "\n")
-		f := strings.Split(head, "\x1f")
-		if len(f) < 6 {
+		// SplitN, not Split: the subject is last and may itself hold a US
+		// byte (nothing stops a commit message carrying one).
+		f := strings.SplitN(head, "\x1f", 7)
+		if len(f) < 7 {
 			continue
 		}
 		c := cherryPickCommit{
 			applied: f[0] == "=",
-			hash:    f[1], short: f[2], author: f[3], age: f[4], subject: f[5],
+			hash:    f[1], short: f[2], author: f[3], age: f[4], subject: f[6],
+			parents: strings.Fields(f[5]),
 		}
+		c.merge = len(c.parents) > 1
 		for _, p := range strings.Split(rest, "\n") {
 			if p = strings.TrimSpace(p); p != "" {
 				c.files = append(c.files, p)
@@ -331,6 +412,58 @@ func parseCherryPickLog(out []byte) []cherryPickCommit {
 		commits = append(commits, c)
 	}
 	return commits
+}
+
+// loadMergeParentsNotOnHead returns, of the listed merges' non-first
+// parents, the ones that are NOT ancestors of HEAD. One `rev-list P… --not
+// HEAD` answers for every merge at once: it walks what those parents
+// reach that HEAD does not, and a parent appears in that walk exactly
+// when it is not already on HEAD. The walk is bounded by the source's own
+// side of the range, which the listing already walked. nil (no merges, or
+// git failing) leaves every merge pickable — git is then the one to say
+// a pick is empty, as it would have before.
+func loadMergeParentsNotOnHead(rootDir string, commits []cherryPickCommit) map[string]bool {
+	args := []string{"-C", rootDir, "rev-list"}
+	n := len(args)
+	for _, c := range commits {
+		if c.merge {
+			args = append(args, c.parents[1:]...)
+		}
+	}
+	if len(args) == n {
+		return nil
+	}
+	out, err := exec.Command("git", append(args, "--not", "HEAD", "--")...).Output()
+	if err != nil {
+		return nil
+	}
+	set := make(map[string]bool)
+	for _, h := range strings.Fields(string(out)) {
+		set[h] = true
+	}
+	return set
+}
+
+// markCherryPickSynced flags each merge whose every non-first parent is
+// already on HEAD (absent from notOnHead). A nil set means the probe did
+// not run or failed, and marks nothing.
+func markCherryPickSynced(commits []cherryPickCommit, notOnHead map[string]bool) {
+	if notOnHead == nil {
+		return
+	}
+	for i := range commits {
+		c := &commits[i]
+		if !c.merge {
+			continue
+		}
+		c.synced = true
+		for _, p := range c.parents[1:] {
+			if notOnHead[p] {
+				c.synced = false
+				break
+			}
+		}
+	}
 }
 
 // loadOurSideChanges returns the set of files the CURRENT branch changed
@@ -373,15 +506,34 @@ func markCherryPickOverlap(commits []cherryPickCommit, ours map[string]bool) {
 // State helpers
 // -----------------------------------------------------------------------------
 
+// pickable reports whether c can be ticked: neither its patch nor (for
+// a merge) everything it brings in is already on HEAD.
+func (c cherryPickCommit) pickable() bool { return !c.applied && !c.synced }
+
 // pickable reports how many commits can be ticked.
 func (m *cherryPickModal) pickable() int {
 	n := 0
 	for _, c := range m.commits {
-		if !c.applied {
+		if c.pickable() {
 			n++
 		}
 	}
 	return n
+}
+
+// picksMerge reports whether any of hashes is a merge — the one case
+// the command needs `-m 1`.
+func (m *cherryPickModal) picksMerge(hashes []string) bool {
+	want := make(map[string]bool, len(hashes))
+	for _, h := range hashes {
+		want[h] = true
+	}
+	for _, c := range m.commits {
+		if c.merge && want[c.hash] {
+			return true
+		}
+	}
+	return false
 }
 
 // tickedInOrder returns the ticked hashes OLDEST FIRST — the list is
@@ -407,6 +559,10 @@ func (m *cherryPickModal) toggle(a *App, i int) {
 		a.flash(c.short + " is already on " + m.target + " — nothing to pick")
 		return
 	}
+	if c.synced {
+		a.flash(c.short + " only merges in what " + m.target + " already has — nothing to pick")
+		return
+	}
 	if m.ticked[c.hash] {
 		delete(m.ticked, c.hash)
 	} else {
@@ -423,7 +579,7 @@ func (m *cherryPickModal) toggleAll() {
 	all := m.allVisibleTicked()
 	for _, i := range m.vis() {
 		c := m.commits[i]
-		if c.applied {
+		if !c.pickable() {
 			continue
 		}
 		if all {
@@ -441,7 +597,7 @@ func (m *cherryPickModal) allVisibleTicked() bool {
 	n := 0
 	for _, i := range m.vis() {
 		c := m.commits[i]
-		if c.applied {
+		if !c.pickable() {
 			continue
 		}
 		if !m.ticked[c.hash] {
@@ -477,7 +633,7 @@ func (m *cherryPickModal) refilter() {
 	}
 	m.cursor = -1
 	for _, i := range m.view {
-		if !m.commits[i].applied {
+		if m.commits[i].pickable() {
 			m.cursor = i
 			return
 		}
@@ -555,22 +711,38 @@ func (m *cherryPickModal) submitLabel() string {
 // to the LIST — three commits get a three-row list, not a screenful of
 // blank rows — between the floor and what the window allows. The floor
 // holds while loading, so the one resize happens when the list lands
-// rather than as rows trickle in.
+// rather than as rows trickle in. With the diff preview open the dialog
+// takes the whole window instead (cherrypickdiff.go): a patch wants
+// every row and column it can get, and a dialog that resized with each
+// commit's diff would move the list under the pointer.
 func (m *cherryPickModal) rect(a *App) (x, y, w, h int) {
+	if m.diff.open {
+		w = min(max(a.width-4, cherryPickMinW), cherryPickDiffMaxW)
+		h = max(a.height-2, cherryPickMinH)
+		return a.centeredRect(min(w, a.width), min(h, a.height))
+	}
 	w = min(max(a.width-4, cherryPickMinW), cherryPickMaxW)
 	h = max(cherryPickFixedRows+len(m.commits), cherryPickMinH)
 	h = min(h, cherryPickMaxH, max(a.height-2, cherryPickMinH))
 	return a.centeredRect(min(w, a.width), min(h, a.height))
 }
 
-// listRows is how many commit rows fit.
+// listRows is how many commit rows fit — all the room there is, or with
+// the diff preview open the list's share of it (cherryPickSplitRows).
 func (m *cherryPickModal) listRows(a *App) int {
 	_, _, _, h := m.rect(a)
-	return max(h-cherryPickFixedRows, 1)
+	avail := max(h-cherryPickFixedRows, 1)
+	if !m.diff.open {
+		return avail
+	}
+	return cherryPickSplitRows(avail, len(m.commits))
 }
 
 // rowY maps the dialog's named rows to screen lines. One map for draw and
-// hit-test (the btnRect rule applied to rows).
+// hit-test (the btnRect rule applied to rows). Without the preview the
+// list fills down to the detail row; with it the detail row follows the
+// list and the diff pane (diffPaneRows) takes what is left above the
+// options row.
 func (m *cherryPickModal) rowY(a *App) (source, summary, listTop, detail, options, warn, buttons int) {
 	_, my, _, mh := m.rect(a)
 	source, summary, listTop = my+3, my+4, my+5
@@ -578,6 +750,9 @@ func (m *cherryPickModal) rowY(a *App) (source, summary, listTop, detail, option
 	warn = buttons - 1
 	options = warn - 1
 	detail = options - 1
+	if m.diff.open {
+		detail = listTop + m.listRows(a)
+	}
 	return
 }
 
@@ -695,9 +870,15 @@ func (m *cherryPickModal) draw(a *App) {
 		m.drawRow(a, m.vis()[p], listTop+i)
 	}
 
-	// Detail of the highlighted commit.
+	// Detail of the highlighted commit, then the diff toggle at the row's
+	// right end — the preview is OF the commit this row describes.
+	tg := m.diffToggleRect(a)
 	if d := m.detailText(); d != "" {
-		drawAt(a.screen, mx+2, dy, gitPushClip(d, inner), c.muted)
+		drawAt(a.screen, mx+2, dy, gitPushClip(d, max(tg.x-1-(mx+2), 0)), c.muted)
+	}
+	drawAt(a.screen, tg.x, tg.y, m.diffToggleLabel(), c.title)
+	if m.diff.open {
+		m.drawDiffPane(a)
 	}
 
 	// Options.
@@ -748,7 +929,16 @@ func (m *cherryPickModal) summaryText() string {
 	if n := len(m.commits) - m.pickable(); n > 0 {
 		s += " · " + itoa(n) + " already applied"
 	}
-	s += " · merges hidden · applied oldest first"
+	// Merges: hidden only when git was too old to list them; otherwise
+	// named only when the list holds one, with the parent it is picked
+	// against.
+	switch {
+	case m.mergesHidden:
+		s += " · merges hidden (git < 2.31)"
+	case m.hasMerge():
+		s += " · merges as -m 1"
+	}
+	s += " · applied oldest first"
 	// The filter is invisible until typed into, so a list longer than the
 	// tallest dialog can show says it can be narrowed.
 	if len(m.commits) > cherryPickMaxH-cherryPickFixedRows {
@@ -767,14 +957,32 @@ func (m *cherryPickModal) detailText() string {
 	if c.applied {
 		return c.short + " is already on " + m.target + " (same patch, different hash)"
 	}
+	if c.synced {
+		return c.short + " only merges in commits " + m.target + " already has"
+	}
 	if len(c.files) == 0 {
 		return c.short + " changes no files"
 	}
 	s := "touches " + listFew(c.files, 3)
+	if c.merge {
+		// The merge's files are its first-parent diff — say so, since
+		// that is also exactly what `-m 1` will apply.
+		s = "merge, picked as -m 1 · " + s
+	}
 	if len(c.overlap) > 0 {
 		s += " · ⚠ " + listFew(c.overlap, 2) + " also changed on " + m.target + " — may conflict"
 	}
 	return s
+}
+
+// hasMerge reports whether the list holds a pickable merge.
+func (m *cherryPickModal) hasMerge() bool {
+	for _, c := range m.commits {
+		if c.merge && c.pickable() {
+			return true
+		}
+	}
+	return false
 }
 
 // listFew joins up to n items and counts the rest — "a.go, b.go +3".
@@ -801,7 +1009,7 @@ func (m *cherryPickModal) drawRow(a *App, idx, y int) {
 
 	box := checkbox(m.ticked[c.hash])
 	subjFG := th.Text
-	if c.applied {
+	if !c.pickable() {
 		box, subjFG = "[=]", th.Muted
 	}
 	x := mx + 2
@@ -809,10 +1017,15 @@ func (m *cherryPickModal) drawRow(a *App, idx, y int) {
 	x += 4
 	drawAt(a.screen, x, y, c.short, st(th.AccentSoft))
 	x += runeLen(c.short) + 1
-	if len(c.overlap) > 0 && !c.applied {
+	// Two marker cells, each with a fixed home so subjects stay aligned:
+	// ⚠ (may conflict) then ⑂ (a merge, picked as -m 1).
+	if len(c.overlap) > 0 && c.pickable() {
 		a.screen.SetContent(x, y, '⚠', nil, st(th.Modified))
 	}
-	x += 2
+	if c.merge {
+		a.screen.SetContent(x+1, y, '⑂', nil, st(th.AccentSoft))
+	}
+	x += 3
 
 	// Author and age right-aligned, when the subject keeps a readable
 	// share of the row (gitlog's rule: the subject wins).
@@ -823,8 +1036,11 @@ func (m *cherryPickModal) drawRow(a *App, idx, y int) {
 		end -= runeLen(tail) + 2
 	}
 	subj := c.subject
-	if c.applied {
+	switch {
+	case c.applied:
 		subj += "  (already on " + m.target + ")"
+	case c.synced:
+		subj += "  (nothing " + m.target + " lacks)"
 	}
 	drawStatusText(a.screen, x, y, end-x, subj, st(subjFG))
 }
@@ -835,7 +1051,8 @@ func (m *cherryPickModal) drawRow(a *App, idx, y int) {
 
 // handleKey: arrows and paging move, Space ticks, Enter picks, Esc
 // cancels, and the Alt chords are the keyboard twins of every button —
-// the modal owns the keyboard, so the ≡ menu cannot be their door.
+// the modal owns the keyboard, so the ≡ menu cannot be their door
+// (alt+d is the diff toggle's).
 func (m *cherryPickModal) handleKey(a *App, ev *tcell.EventKey) {
 	if ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune {
 		switch ev.Rune() {
@@ -847,7 +1064,14 @@ func (m *cherryPickModal) handleKey(a *App, ev *tcell.EventKey) {
 			m.noCommit = !m.noCommit
 		case 'b':
 			m.changeSource(a)
+		case 'd':
+			m.toggleDiff(a)
 		}
+		return
+	}
+	// Alt/Shift + arrows and paging scroll the diff pane while it is open;
+	// the bare keys still walk the list, so both stay one key away.
+	if m.diff.open && ev.Modifiers()&(tcell.ModAlt|tcell.ModShift) != 0 && m.scrollDiffKey(a, ev.Key()) {
 		return
 	}
 	switch ev.Key() {
@@ -908,6 +1132,10 @@ func (m *cherryPickModal) changeSource(a *App) {
 func (m *cherryPickModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	pressed := btn&tcell.Button1 != 0 && m.lastBtn&tcell.Button1 == 0
 	m.lastBtn = btn
+	if btn&(tcell.WheelUp|tcell.WheelDown) != 0 && m.diffPaneContains(a, x, y) {
+		m.scrollDiffWheel(a, btn)
+		return
+	}
 	switch {
 	case btn&tcell.WheelUp != 0:
 		m.scroll -= wheelLines
@@ -946,6 +1174,9 @@ func (m *cherryPickModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	case m.sourceRect(a).contains(x, y):
 		m.changeSource(a)
 		return
+	case m.diffToggleRect(a).contains(x, y):
+		m.toggleDiff(a)
+		return
 	}
 	_, _, listTop, _, _, _, _ := m.rowY(a)
 	row := y - listTop
@@ -978,13 +1209,13 @@ func (m *cherryPickModal) submit(a *App) {
 	}
 	hashes := m.tickedInOrder()
 	if len(hashes) == 0 {
-		if m.cursor < 0 || m.cursor >= len(m.commits) || m.commits[m.cursor].applied {
+		if m.cursor < 0 || m.cursor >= len(m.commits) || !m.commits[m.cursor].pickable() {
 			a.flash("Tick the commits to cherry-pick (Space)")
 			return
 		}
 		hashes = []string{m.commits[m.cursor].hash}
 	}
-	args := cherryPickArgs(hashes, m.recordOrigin, m.noCommit)
+	args := cherryPickArgs(hashes, m.recordOrigin, m.noCommit, m.picksMerge(hashes))
 	n := len(hashes)
 	target, staged := m.target, m.noCommit
 	a.closeModal()
@@ -1002,13 +1233,18 @@ func (m *cherryPickModal) submit(a *App) {
 // thing with consequences, so it is testable without forking git. -x is
 // dropped with --no-commit — git only writes the "(cherry picked from …)"
 // line into a commit it makes, so passing both would promise a note that
-// never appears.
-func cherryPickArgs(hashes []string, recordOrigin, noCommit bool) []string {
+// never appears. mainline adds `-m 1` for a set holding a merge (see the
+// file comment: it covers every commit in the command, and git ≥ 2.21
+// picks a non-merge under it unchanged).
+func cherryPickArgs(hashes []string, recordOrigin, noCommit, mainline bool) []string {
 	args := []string{"cherry-pick"}
 	if noCommit {
 		args = append(args, "--no-commit")
 	} else if recordOrigin {
 		args = append(args, "-x")
+	}
+	if mainline {
+		args = append(args, "-m", "1")
 	}
 	return append(args, hashes...)
 }

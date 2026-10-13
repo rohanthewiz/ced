@@ -50,14 +50,20 @@ func openLoadedCherryPick(t *testing.T, a *App, source string) *cherryPickModal 
 }
 
 // TestParseCherryPickLog pins the record format: the cherry mark, every
-// field, and the --name-only file list per commit.
+// field, the parents (two make a merge), a subject holding a US byte, and
+// the --name-only file list per commit.
 func TestParseCherryPickLog(t *testing.T) {
-	out := "\x1e+\x1fH1\x1fh1\x1fAnn\x1f2 days ago\x1fFix it\n\na.go\nb.go\n" +
-		"\x1e=\x1fH2\x1fh2\x1fBob\x1f3 days ago\x1fBump\n\nv.txt\n"
+	out := "\x1e+\x1fH1\x1fh1\x1fAnn\x1f2 days ago\x1fP0\x1fFix it\n\na.go\nb.go\n" +
+		"\x1e=\x1fH2\x1fh2\x1fBob\x1f3 days ago\x1fP1\x1fBump\n\nv.txt\n" +
+		"\x1e+\x1fH3\x1fh3\x1fCy\x1f4 days ago\x1fP2 P3\x1fMerge a\x1fb\n\nm.go\n"
 	got := parseCherryPickLog([]byte(out))
 	want := []cherryPickCommit{
-		{hash: "H1", short: "h1", author: "Ann", age: "2 days ago", subject: "Fix it", files: []string{"a.go", "b.go"}},
-		{hash: "H2", short: "h2", author: "Bob", age: "3 days ago", subject: "Bump", applied: true, files: []string{"v.txt"}},
+		{hash: "H1", short: "h1", author: "Ann", age: "2 days ago", subject: "Fix it",
+			parents: []string{"P0"}, files: []string{"a.go", "b.go"}},
+		{hash: "H2", short: "h2", author: "Bob", age: "3 days ago", subject: "Bump", applied: true,
+			parents: []string{"P1"}, files: []string{"v.txt"}},
+		{hash: "H3", short: "h3", author: "Cy", age: "4 days ago", subject: "Merge a\x1fb", merge: true,
+			parents: []string{"P2", "P3"}, files: []string{"m.go"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)
@@ -74,20 +80,69 @@ func TestParseCherryPickSources(t *testing.T) {
 }
 
 // TestCherryPickArgs pins the argv: -x only when committing, --no-commit
-// otherwise, hashes in the order given.
+// otherwise, `-m 1` only for a set holding a merge, hashes in the order
+// given.
 func TestCherryPickArgs(t *testing.T) {
 	cases := []struct {
-		x, nc bool
-		want  []string
+		x, nc, m bool
+		want     []string
 	}{
-		{false, false, []string{"cherry-pick", "a", "b"}},
-		{true, false, []string{"cherry-pick", "-x", "a", "b"}},
-		{true, true, []string{"cherry-pick", "--no-commit", "a", "b"}},
+		{false, false, false, []string{"cherry-pick", "a", "b"}},
+		{true, false, false, []string{"cherry-pick", "-x", "a", "b"}},
+		{true, true, false, []string{"cherry-pick", "--no-commit", "a", "b"}},
+		{true, false, true, []string{"cherry-pick", "-x", "-m", "1", "a", "b"}},
+		{false, true, true, []string{"cherry-pick", "--no-commit", "-m", "1", "a", "b"}},
 	}
 	for _, c := range cases {
-		if got := cherryPickArgs([]string{"a", "b"}, c.x, c.nc); !reflect.DeepEqual(got, c.want) {
-			t.Errorf("x=%v nc=%v: %v", c.x, c.nc, got)
+		if got := cherryPickArgs([]string{"a", "b"}, c.x, c.nc, c.m); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("x=%v nc=%v m=%v: %v", c.x, c.nc, c.m, got)
 		}
+	}
+}
+
+// TestCherryPickLogArgs pins the two listings: the merge-aware one lists
+// merges with their first-parent files, the legacy one (git < 2.31)
+// leaves merges out and never names --diff-merges.
+func TestCherryPickLogArgs(t *testing.T) {
+	cur := strings.Join(cherryPickLogArgs("/r", "topic", false), " ")
+	if !strings.Contains(cur, "--diff-merges=first-parent") || strings.Contains(cur, "--no-merges") {
+		t.Errorf("merge-aware args = %s", cur)
+	}
+	old := strings.Join(cherryPickLogArgs("/r", "topic", true), " ")
+	if strings.Contains(old, "--diff-merges") || !strings.Contains(old, "--no-merges") {
+		t.Errorf("legacy args = %s", old)
+	}
+	for _, args := range []string{cur, old} {
+		if !strings.Contains(args, "HEAD...topic --") || !strings.Contains(args, "%P") {
+			t.Errorf("range or parents missing: %s", args)
+		}
+	}
+}
+
+// TestMarkCherryPickSynced pins the synced rule: a merge is synced when
+// every non-first parent is on HEAD (absent from the not-on-HEAD set),
+// one parent off HEAD keeps it pickable, non-merges are never marked, and
+// a failed probe (nil set) marks nothing.
+func TestMarkCherryPickSynced(t *testing.T) {
+	mk := func() []cherryPickCommit {
+		return []cherryPickCommit{
+			{hash: "m1", merge: true, parents: []string{"p", "onHead"}},
+			{hash: "m2", merge: true, parents: []string{"p", "onHead", "offHead"}},
+			{hash: "c", parents: []string{"p"}},
+		}
+	}
+	commits := mk()
+	markCherryPickSynced(commits, map[string]bool{"offHead": true})
+	if !commits[0].synced || commits[1].synced || commits[2].synced {
+		t.Errorf("synced = %v %v %v, want only m1", commits[0].synced, commits[1].synced, commits[2].synced)
+	}
+	if commits[0].pickable() || !commits[1].pickable() {
+		t.Error("a synced merge is pickable, or an octopus with new work is not")
+	}
+	commits = mk()
+	markCherryPickSynced(commits, nil)
+	if commits[0].synced {
+		t.Error("a failed probe marked a merge synced")
 	}
 }
 
@@ -131,9 +186,10 @@ func TestCherryPickModal_ToggleRules(t *testing.T) {
 // touching a file main also changed, and newest-first order.
 func TestListCherryPickCommits_RealRepo(t *testing.T) {
 	repo := cherryPickSourceRepo(t)
-	commits, capped, err := listCherryPickCommits(repo, "topic")
-	if err != nil || capped || len(commits) != 3 {
-		t.Fatalf("commits=%+v capped=%v err=%v", commits, capped, err)
+	l, err := listCherryPickCommits(repo, "topic")
+	commits := l.commits
+	if err != nil || l.capped || l.mergesHidden || len(commits) != 3 {
+		t.Fatalf("listing=%+v err=%v", l, err)
 	}
 	subjects := []string{commits[0].subject, commits[1].subject, commits[2].subject}
 	if !reflect.DeepEqual(subjects, []string{"t3 another file", "t2 edits shared", "t1 new file"}) {
@@ -408,5 +464,126 @@ func TestCherryPickModal_FilterMouseMapsThroughTheView(t *testing.T) {
 	m.handleMouse(a, mx+3, listTop, tcell.Button1)
 	if !m.ticked["h2"] || m.ticked["h1"] {
 		t.Errorf("press on the first drawn row ticked %v, want h2", m.ticked)
+	}
+}
+
+// cherryPickMergeRepo builds main plus a `topic` branch holding two merges:
+// "merge side" brings in a side branch's s.txt (new work, pickable as -m
+// 1), and "merge main" brings in main's own m.txt (nothing main lacks, so
+// synced). c1 and c2 are plain commits around them.
+func cherryPickMergeRepo(t *testing.T) string {
+	t.Helper()
+	requireGit(t)
+	repo := initRepo(t)
+	writeCommit(t, repo, "base.txt", "base\n", "base")
+	gitRun(t, repo, "checkout", "-q", "-b", "topic")
+	writeCommit(t, repo, "c1.txt", "c1\n", "c1 plain")
+	gitRun(t, repo, "checkout", "-q", "-b", "side")
+	writeCommit(t, repo, "s.txt", "s\n", "s1 side work")
+	gitRun(t, repo, "checkout", "-q", "topic")
+	gitRun(t, repo, "merge", "-q", "--no-ff", "side", "-m", "merge side")
+	gitRun(t, repo, "checkout", "-q", "main")
+	writeCommit(t, repo, "m.txt", "m\n", "main work")
+	gitRun(t, repo, "checkout", "-q", "topic")
+	gitRun(t, repo, "merge", "-q", "--no-ff", "main", "-m", "merge main")
+	writeCommit(t, repo, "c2.txt", "c2\n", "c2 plain")
+	gitRun(t, repo, "checkout", "-q", "main")
+	return repo
+}
+
+// cherryPickBySubject finds a listed commit by subject.
+func cherryPickBySubject(t *testing.T, commits []cherryPickCommit, subject string) (int, cherryPickCommit) {
+	t.Helper()
+	for i, c := range commits {
+		if c.subject == subject {
+			return i, c
+		}
+	}
+	t.Fatalf("no commit %q in %+v", subject, commits)
+	return -1, cherryPickCommit{}
+}
+
+// TestListCherryPickCommits_Merges pins the merge listing against real
+// git: both merges listed, their files the first-parent diff, the merge
+// of main marked synced (unpickable), the side merge pickable.
+func TestListCherryPickCommits_Merges(t *testing.T) {
+	repo := cherryPickMergeRepo(t)
+	l, err := listCherryPickCommits(repo, "topic")
+	if err != nil || l.mergesHidden {
+		t.Fatalf("listing=%+v err=%v", l, err)
+	}
+	_, side := cherryPickBySubject(t, l.commits, "merge side")
+	if !side.merge || side.synced || !reflect.DeepEqual(side.files, []string{"s.txt"}) {
+		t.Errorf("merge side = %+v, want a pickable merge touching s.txt", side)
+	}
+	_, mainM := cherryPickBySubject(t, l.commits, "merge main")
+	if !mainM.merge || !mainM.synced || mainM.pickable() {
+		t.Errorf("merge main = %+v, want a synced, unpickable merge", mainM)
+	}
+	if _, c := cherryPickBySubject(t, l.commits, "c1 plain"); c.merge || c.synced {
+		t.Errorf("plain commit flagged: %+v", c)
+	}
+}
+
+// TestCherryPickModal_SyncedMergeRefusesAndSays pins the synced merge's
+// surfaces: the tick refuses with the reason, the row is [=] with its
+// note, the detail row says why, and the summary names the -m 1 rule for
+// the pickable merge.
+func TestCherryPickModal_SyncedMergeRefusesAndSays(t *testing.T) {
+	repo := cherryPickMergeRepo(t)
+	a := newTestApp(t, repo)
+	a.rootDir = repo
+	a.refreshGitStatus()
+	m := openLoadedCherryPick(t, a, "topic")
+	i, _ := cherryPickBySubject(t, m.commits, "merge main")
+	m.toggle(a, i)
+	if len(m.ticked) != 0 || !strings.Contains(a.statusMsg, "only merges in what main already has") {
+		t.Errorf("synced tick: ticked=%v flash=%q", m.ticked, a.statusMsg)
+	}
+	m.cursor = i
+	if d := m.detailText(); !strings.Contains(d, "only merges in commits main already has") {
+		t.Errorf("detail = %q", d)
+	}
+	si, _ := cherryPickBySubject(t, m.commits, "merge side")
+	m.cursor = si
+	if d := m.detailText(); !strings.HasPrefix(d, "merge, picked as -m 1 · touches s.txt") {
+		t.Errorf("merge detail = %q", d)
+	}
+	if s := m.summaryText(); !strings.Contains(s, "merges as -m 1") || strings.Contains(s, "hidden") {
+		t.Errorf("summary = %q", s)
+	}
+
+	a.draw()
+	mx, _, mw, _ := m.rect(a)
+	_, _, listTop, _, _, _, _ := m.rowY(a)
+	row := screenRow(t, a, listTop+m.viewPos(i)-m.scroll, mx, mw)
+	if !strings.Contains(row, "[=]") || !strings.Contains(row, "⑂") || !strings.Contains(row, "nothing main lacks") {
+		t.Errorf("synced row = %q", row)
+	}
+}
+
+// TestCherryPick_MergeEndToEnd ticks a plain commit, the side merge and a
+// later plain commit, and checks git took them in ONE command with -m 1:
+// all three landed, oldest first, the merge's file included.
+func TestCherryPick_MergeEndToEnd(t *testing.T) {
+	repo := cherryPickMergeRepo(t)
+	a := newTestApp(t, repo)
+	a.rootDir = repo
+	a.refreshGitStatus()
+	m := openLoadedCherryPick(t, a, "topic")
+	for _, s := range []string{"c1 plain", "merge side", "c2 plain"} {
+		_, c := cherryPickBySubject(t, m.commits, s)
+		m.ticked[c.hash] = true
+	}
+	if !m.picksMerge(m.tickedInOrder()) {
+		t.Fatal("picksMerge missed the ticked merge")
+	}
+	m.submit(a)
+	pumpAppEvents(t, a, func() bool { return strings.HasPrefix(a.statusMsg, "Cherry-picked") })
+	if got := gitOut(t, repo, "log", "-3", "--format=%s"); got != "c2 plain\nmerge side\nc1 plain" {
+		t.Errorf("log = %q", got)
+	}
+	if got := gitOut(t, repo, "show", "--format=", "--name-only", "HEAD~1"); got != "s.txt" {
+		t.Errorf("the picked merge changed %q, want s.txt", got)
 	}
 }

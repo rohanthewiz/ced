@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-064**
+**Next ID: N-065**
 
 ## Open
 
@@ -89,13 +89,13 @@ plus the LSP work done in the seeding session itself
   first, per the ⌘ allowlist rule) would make stepping through them
   practical. Decide which, then add it as a second door.
 
-- **N-051** · raised `2026-1003-2042-cherry-pick-and-conflicts-ui` · value low
-  Cherry-pick dialog extras left out: picking a MERGE commit (needs
-  `-m <parent>`; merges are hidden and the summary says so — which parent
-  to offer, and whether `-m` may ride along with non-merge picks in one
-  command, is the open question), and a per-commit diff preview (today:
-  the files it touches, and which overlap HEAD's side). The filter for
-  long lists was done in `2026-1011-2159-n051-n042-cherry-pick-filter-folder-tab-groups` (type-to-filter).
+- **N-064** · raised `2026-1013-1242-n051-cherry-pick-merges-diff-preview` · value low
+  The git log panel's cherry-pick and revert of a MERGE commit (Actions
+  ▾ single-commit rows, and a tick set holding a merge) still run without
+  `-m`, so git refuses with "is a merge but no -m option was given" in
+  the error modal. The dialog's rule would carry over: `-m 1`, added only
+  when a merge is in the set (`cherryPickArgs`' `mainline`). Revert of a
+  merge needs the same `-m 1`.
 
 ## Validate
 
@@ -234,6 +234,23 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-13, `2026-1013-1242-n051-cherry-pick-merges-diff-preview` —
+  **N-051** both remaining extras. MERGES are
+  listed (`⑂`) and picked against their first parent: `-m 1` is always
+  the answer (the merge's own contribution to the source branch; `-m 2`
+  replays the branch against what it merged and is left to the terminal),
+  and it rides in the SAME `git cherry-pick` as non-merge picks — git
+  ≥ 2.21 picks a non-merge under `-m 1` unchanged (checked against git
+  2.54 by hand and by `TestCherryPick_MergeEndToEnd`). A merge that only
+  brings in what HEAD has ("merge main into feature") is shown `[=]` and
+  refused — git would stop the sequence on it as an empty pick. Git <
+  2.31 falls back to the merge-free listing with "merges hidden" in the
+  summary. DIFF PREVIEW: `alt+d` / the detail row's `▸ diff` toggle opens
+  a pane inside the dialog (cherrypickdiff.go) that follows the
+  highlight — message, stat, patch (first-parent for a merge), cached by
+  hash, Alt/Shift+arrows and the wheel scroll it. Checked in the real
+  binary (`run-ced`). Raised N-064 (the git log panel's merge picks).
 
 - closed 2026-10-11, `2026-1011-2210-validate-n059-n056-n060-n061-n013-real-binary` —
   **N-061** checked in the real binary (`run-ced`, SGR motion reports):

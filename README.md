@@ -985,11 +985,12 @@ what that branch has that yours doesn't:
 ```
 ┌ Cherry-pick onto main ──────────────────────────────────────────── esc ┐
 │ From  ‹ feature/parser ›                                  alt+b change │
-│ 3 commits not on main · merges hidden · applied oldest first           │
-│ [x] 70ec301 ⚠ Split on whitespace                    Dev  2 hours ago  │
-│ [ ] 7c37b7b   Add lexer stub                         Dev  2 hours ago  │
-│ [x] 683e1dc ⚠ Reject empty input                     Dev  2 hours ago  │
-│ touches parse.go · ⚠ parse.go also changed on main — may conflict      │
+│ 4 commits not on main · merges as -m 1 · applied oldest first          │
+│ [x] 70ec301 ⚠  Split on whitespace                   Dev  2 hours ago  │
+│ [ ] 41c09de  ⑂ Merge branch 'fix/eof' into feature   Dev  2 hours ago  │
+│ [ ] 7c37b7b    Add lexer stub                        Dev  2 hours ago  │
+│ [x] 683e1dc ⚠  Reject empty input                    Dev  2 hours ago  │
+│ touches parse.go · ⚠ parse.go also changed on…            ▸ diff alt+d │
 │ [ ] -x  note the origin in each message   [ ] stage only, don't commit │
 │ [ Select all ]                           [ Cancel ]  [ Cherry-pick 2 ] │
 └────────────────────────────────────────────────────────────────────────┘
@@ -1003,6 +1004,18 @@ what that branch has that yours doesn't:
   another hash (an earlier cherry-pick); it can't be ticked.
 - **`⚠`** marks a commit that touches a file your branch has also
   changed since the two split — not a promise of a conflict, a hint.
+- **`⑂`** marks a merge. A merge is picked against its **first parent**
+  (`git cherry-pick -m 1`): you get what that merge brought into the
+  branch, as one ordinary commit, in the same command as the rest. A
+  merge that only brings in what your branch already has (say "Merge
+  main into feature") shows `[=]` — picking it would change nothing.
+  (With git older than 2.31 merges are left out, and the summary says so.)
+- **`alt+d`** (or click **▸ diff** on the detail row) opens a **diff
+  preview** under the list: the highlighted commit's message, stat and
+  patch — for a merge, its diff against the first parent, which is what
+  the pick applies. It follows the highlight as you walk the list;
+  `alt+↑/↓` (or `shift+↑/↓`, `alt+PgUp/PgDn`) or the wheel over it
+  scrolls it.
 - `alt+x` adds git's "(cherry picked from …)" line, `alt+s` stages the
   changes without committing (for squashing several into one), `alt+a`
   ticks everything, `alt+b` switches branch.

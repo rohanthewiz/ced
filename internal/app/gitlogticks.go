@@ -152,7 +152,7 @@ func (a *App) confirmGitLogCherryPickTicked() {
 		app.runGitCmdFull(label, gitNoEditorEnv(), gitConflictFailHook, func(app *App) {
 			app.gitLogClearTicks()
 			app.flash("Cherry-picked " + plural(n, "commit", "commits") + " onto " + branch)
-		}, nil, cherryPickArgs(hashes, false, false)...)
+		}, nil, cherryPickArgs(hashes, false, false, false)...)
 	})
 }
 

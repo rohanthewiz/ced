@@ -730,8 +730,17 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   existing rev-parse via `--absolute-git-dir`). The picker stays as the
   keyboard door.
 - **Cherry-pick dialog (cherrypick.go)**: `HEAD...src --right-only
-  --cherry-mark --no-merges`, capped (announced); `=` rows shown dimmed and
-  unpickable; type-to-filter is a VIEW (`m.vis()`, cursor indexes
+  --cherry-mark --diff-merges=first-parent`, capped (announced); `=` rows shown dimmed and
+  unpickable. MERGES are listed (`⑂`) and picked with `-m 1` — always
+  parent 1, no picker; `-m` added only when a merge is ticked, and rides
+  in the SAME command as non-merges (git ≥ 2.21). A merge whose non-first
+  parents are all on HEAD is `synced` → `[=]`, unpickable (one `rev-list
+  … --not HEAD`). Log failure → legacy `--no-merges` rerun, summary says
+  "merges hidden". Diff preview (cherrypickdiff.go, alt+d / detail-row
+  toggle): a pane INSIDE the dialog (it grows to the window, list ≤ a
+  third), follows the highlight, load asked from the pane's draw, cached
+  by hash, event addresses its dialog; Alt/Shift+arrows and the wheel
+  over it scroll it. Type-to-filter is a VIEW (`m.vis()`, cursor indexes
   commits, scroll the view), Esc clears it first, Select all = visible
   rows, hidden ticks still picked and counted in the summary; ⚠ = touches a file HEAD changed since the merge base. Loaded
   off-loop, seq-checked. Applied OLDEST FIRST in one `git cherry-pick`;

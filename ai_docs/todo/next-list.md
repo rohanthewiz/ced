@@ -89,14 +89,6 @@ plus the LSP work done in the seeding session itself
   first, per the ⌘ allowlist rule) would make stepping through them
   practical. Decide which, then add it as a second door.
 
-- **N-064** · raised `2026-1013-1242-n051-cherry-pick-merges-diff-preview` · value low
-  The git log panel's cherry-pick and revert of a MERGE commit (Actions
-  ▾ single-commit rows, and a tick set holding a merge) still run without
-  `-m`, so git refuses with "is a merge but no -m option was given" in
-  the error modal. The dialog's rule would carry over: `-m 1`, added only
-  when a merge is in the set (`cherryPickArgs`' `mainline`). Revert of a
-  merge needs the same `-m 1`.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -234,6 +226,16 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-13, `2026-1013-1326-n064-git-log-merge-picks` —
+  **N-064** the log rows now carry `Merge` (parent count from `%P` in
+  `gitLogFormat`), and both single-commit verbs plus the tick set add
+  `-m 1` only when a merge is in the command (cherry-pick through
+  `cherryPickArgs`' `mainline`, revert through `gitLogRevertArgs`). The
+  confirm gains a line naming the choice (`gitLogMergeNote`: "replays" /
+  "undoes what it merged in (-m 1)"). Pinned against real git by
+  `TestGitLogActions_MergeEndToEnd` (pick onto main, revert on topic) and
+  `TestGitLogTicks_SetWithAMergeEndToEnd`; not driven in the real binary.
 
 - closed 2026-10-13, `2026-1013-1242-n051-cherry-pick-merges-diff-preview` —
   **N-051** both remaining extras. MERGES are

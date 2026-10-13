@@ -73,6 +73,11 @@ type gitLogCommit struct {
 	When    string
 	Refs    string
 	Subject string
+	// Merge marks a commit with more than one parent. Cherry-pick and
+	// revert both refuse a merge without `-m <parent>`, so the apply
+	// verbs (gitlogactions.go, gitlogticks.go) read it to add `-m 1` —
+	// the cherry-pick dialog's rule, only when a merge is in the command.
+	Merge bool
 }
 
 // gitLogState is the panel's whole state, mutated only on the main
@@ -239,10 +244,11 @@ func (a *App) gitLogSelectedCommit() (gitLogCommit, bool) {
 }
 
 // gitLogFormat is the tab-separated --format spec the loader requests:
-// full hash, short hash, author, relative date, decorations, subject.
+// full hash, short hash, author, relative date, decorations, parent
+// hashes (space-separated — only their COUNT is kept, as Merge), subject.
 // The subject is deliberately LAST — it's the only field that can
 // itself contain a tab, and SplitN keeps a trailing field intact.
-const gitLogFormat = "%H%x09%h%x09%an%x09%ad%x09%D%x09%s"
+const gitLogFormat = "%H%x09%h%x09%an%x09%ad%x09%D%x09%P%x09%s"
 
 // loadGitLogCommits returns up to gitLogMaxCommits commits across all
 // refs (--all, so a cherry-pick can reach commits on other branches),
@@ -273,8 +279,8 @@ func loadGitLogCommits(rootDir string) ([]gitLogCommit, bool) {
 func parseGitLogCommits(out []byte) []gitLogCommit {
 	var commits []gitLogCommit
 	for _, raw := range bytes.Split(out, []byte{'\n'}) {
-		parts := strings.SplitN(string(raw), "\t", 6)
-		if len(parts) < 6 || parts[0] == "" {
+		parts := strings.SplitN(string(raw), "\t", 7)
+		if len(parts) < 7 || parts[0] == "" {
 			continue
 		}
 		commits = append(commits, gitLogCommit{
@@ -283,7 +289,8 @@ func parseGitLogCommits(out []byte) []gitLogCommit {
 			Author:  parts[2],
 			When:    parts[3],
 			Refs:    parts[4],
-			Subject: parts[5],
+			Merge:   len(strings.Fields(parts[5])) > 1,
+			Subject: parts[6],
 		})
 	}
 	return commits

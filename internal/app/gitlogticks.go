@@ -35,6 +35,11 @@
 //   - **Refused while an operation is parked** (menuCherryPickFromBranch's
 //     rule): a second cherry-pick cannot start until the first is
 //     settled, and the Conflicts panel is put up with the refusal.
+//   - **A merge in the set adds `-m 1` to the whole command** (N-064,
+//     the dialog's rule via cherryPickArgs' mainline): git refuses a
+//     merge without it, and since git 2.21 the ordinary commits beside it
+//     are picked unchanged under it. A merge-free set keeps its old argv;
+//     a set holding one says so in the confirm.
 
 package app
 
@@ -142,17 +147,22 @@ func (a *App) confirmGitLogCherryPickTicked() {
 		}
 		lines = append(lines, c.Short+" "+elide(c.Subject, gitLogSubjectMax))
 	}
-	lines = append(lines, "onto "+branch+", oldest first?")
 	hashes := make([]string, n)
+	merge := false
 	for i, c := range commits {
 		hashes[i] = c.Hash
+		merge = merge || c.Merge
 	}
+	if merge {
+		lines = append(lines, gitLogMergeNote("Cherry-pick"))
+	}
+	lines = append(lines, "onto "+branch+", oldest first?")
 	label := "Cherry-pick " + plural(n, "commit", "commits")
 	a.openConfirmLines(label, lines, func(app *App) {
 		app.runGitCmdFull(label, gitNoEditorEnv(), gitConflictFailHook, func(app *App) {
 			app.gitLogClearTicks()
 			app.flash("Cherry-picked " + plural(n, "commit", "commits") + " onto " + branch)
-		}, nil, cherryPickArgs(hashes, false, false, false)...)
+		}, nil, cherryPickArgs(hashes, false, false, merge)...)
 	})
 }
 

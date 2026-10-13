@@ -156,6 +156,52 @@ func TestGitLogTicks_CherryPickEndToEnd(t *testing.T) {
 	}
 }
 
+// TestGitLogTicks_SetWithAMergeEndToEnd ticks a plain commit and a merge
+// from topic and picks the set onto main: one command with `-m 1` lands
+// both (the merge as its first-parent diff, s.txt), oldest first, and the
+// confirm names the merge rule.
+func TestGitLogTicks_SetWithAMergeEndToEnd(t *testing.T) {
+	repo := cherryPickMergeRepo(t)
+	a := newTestApp(t, repo)
+	a.rootDir = repo
+	a.refreshGitStatus()
+	a.gitBranch = "main"
+	a.gitLog.commits, _ = loadGitLogCommits(repo)
+	a.gitLogToggleTick(logCommit(t, a, "merge side"))
+	a.gitLogToggleTick(logCommit(t, a, "c1 plain"))
+
+	a.confirmGitLogCherryPickTicked()
+	m, ok := a.modal.(*confirmModal)
+	if !ok {
+		t.Fatalf("opened %T, want a confirm", a.modal)
+	}
+	if body := strings.Join(m.lines, "\n"); !strings.Contains(body, "-m 1") {
+		t.Errorf("confirm does not name the merge rule:\n%s", body)
+	}
+	m.callback(a)
+	a.closeModal()
+	pumpAppEvents(t, a, func() bool { return strings.HasPrefix(a.statusMsg, "Cherry-picked") })
+	if got := gitOut(t, repo, "log", "-2", "--format=%s"); got != "merge side\nc1 plain" {
+		t.Errorf("main log = %q, want c1 then the merge", got)
+	}
+	if got := gitOut(t, repo, "show", "--format=", "--name-only", "HEAD"); got != "s.txt" {
+		t.Errorf("the picked merge changed %q, want s.txt", got)
+	}
+}
+
+// TestGitLogTicks_MergeFreeSetHasNoMergeNote pins the other half: a set
+// of ordinary commits keeps its old confirm, with no `-m` line.
+func TestGitLogTicks_MergeFreeSetHasNoMergeNote(t *testing.T) {
+	a, _ := tickRepo(t)
+	a.gitBranch = "main"
+	a.gitLogToggleTick(logCommit(t, a, "s1 first"))
+	a.confirmGitLogCherryPickTicked()
+	m := a.modal.(*confirmModal)
+	if body := strings.Join(m.lines, "\n"); strings.Contains(body, "-m 1") {
+		t.Errorf("merge-free set's confirm names -m:\n%s", body)
+	}
+}
+
 // TestGitLogTicks_RefusedWhileParked pins the parked-operation gate: with
 // a cherry-pick stopped on conflicts, picking the set flashes and raises
 // the Conflicts panel instead of confirming.

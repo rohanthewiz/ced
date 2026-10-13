@@ -23,25 +23,28 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
-// TestParseGitLogCommits pins the tab-separated decode: all six fields
+// TestParseGitLogCommits pins the tab-separated decode: all seven fields
 // land, a tab INSIDE the subject survives (the subject is the trailing
-// SplitN field), decorations pass through, and malformed lines are
-// skipped rather than erroring — the best-effort read contract.
+// SplitN field), decorations pass through, the parent list becomes Merge
+// (two parents is a merge; one, or none for a root commit, is not), and
+// malformed lines are skipped rather than erroring — the best-effort
+// read contract.
 func TestParseGitLogCommits(t *testing.T) {
 	out := []byte(strings.Join([]string{
-		"aaaa\ta1\tAlice\t2 hours ago\tHEAD -> main, tag: v1\tfix: the thing",
-		"bbbb\tb2\tBob\t3 days ago\t\tsubject with\ttab inside",
+		"aaaa\ta1\tAlice\t2 hours ago\tHEAD -> main, tag: v1\tp1 p2\tfix: the thing",
+		"bbbb\tb2\tBob\t3 days ago\t\tp1\tsubject with\ttab inside",
+		"cccc\tc3\tCy\t4 days ago\t\t\troot commit",
 		"not-a-commit-line",
 		"",
 	}, "\n"))
 	commits := parseGitLogCommits(out)
-	if len(commits) != 2 {
-		t.Fatalf("parsed %d commits, want 2", len(commits))
+	if len(commits) != 3 {
+		t.Fatalf("parsed %d commits, want 3", len(commits))
 	}
 	first := commits[0]
 	if first.Hash != "aaaa" || first.Short != "a1" || first.Author != "Alice" ||
 		first.When != "2 hours ago" || first.Refs != "HEAD -> main, tag: v1" ||
-		first.Subject != "fix: the thing" {
+		first.Subject != "fix: the thing" || !first.Merge {
 		t.Errorf("first commit fields wrong: %+v", first)
 	}
 	if commits[1].Subject != "subject with\ttab inside" {
@@ -49,6 +52,28 @@ func TestParseGitLogCommits(t *testing.T) {
 	}
 	if commits[1].Refs != "" {
 		t.Errorf("undecorated commit should have empty Refs, got %q", commits[1].Refs)
+	}
+	if commits[1].Merge || commits[2].Merge {
+		t.Errorf("one-parent / root commits read as merges: %+v, %+v", commits[1], commits[2])
+	}
+	if commits[2].Subject != "root commit" {
+		t.Errorf("root commit's empty parent field shifted the subject: %q", commits[2].Subject)
+	}
+}
+
+// TestLoadGitLogCommits_MarksMerges pins Merge against real git: the
+// loader's %P field flags exactly the two --no-ff merges in the fixture.
+func TestLoadGitLogCommits_MarksMerges(t *testing.T) {
+	repo := cherryPickMergeRepo(t)
+	commits, _ := loadGitLogCommits(repo)
+	var merges []string
+	for _, c := range commits {
+		if c.Merge {
+			merges = append(merges, c.Subject)
+		}
+	}
+	if strings.Join(merges, ",") != "merge main,merge side" {
+		t.Errorf("merges = %v, want [merge main merge side]", merges)
 	}
 }
 

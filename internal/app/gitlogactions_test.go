@@ -201,6 +201,93 @@ func TestConfirmGitLogApply_ElidesLongSubject(t *testing.T) {
 	}
 }
 
+// TestGitLogApplyArgs_MainlineOnlyForMerges pins N-064's argv rule for
+// both single-commit verbs: an ordinary commit's argv is exactly what it
+// always was, and a merge gets `-m 1` ahead of its hash.
+func TestGitLogApplyArgs_MainlineOnlyForMerges(t *testing.T) {
+	plain := gitLogCommit{Hash: "h1"}
+	merge := gitLogCommit{Hash: "h2", Merge: true}
+	cases := []struct {
+		name string
+		got  []string
+		want string
+	}{
+		{"revert plain", gitLogRevertArgs(plain), "revert --no-edit h1"},
+		{"revert merge", gitLogRevertArgs(merge), "revert --no-edit -m 1 h2"},
+		{"pick plain", cherryPickArgs([]string{plain.Hash}, false, false, plain.Merge), "cherry-pick h1"},
+		{"pick merge", cherryPickArgs([]string{merge.Hash}, false, false, merge.Merge), "cherry-pick -m 1 h2"},
+	}
+	for _, c := range cases {
+		if got := strings.Join(c.got, " "); got != c.want {
+			t.Errorf("%s: argv = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestConfirmGitLogApply_NamesTheMergeParent pins the confirm's third
+// line: a merge says it is applied against its first parent, in the
+// verb's own words, and an ordinary commit's confirm stays two lines.
+func TestConfirmGitLogApply_NamesTheMergeParent(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitBranch = "main"
+	merge := gitLogCommit{Hash: strings.Repeat("f", 40), Short: "fab6789", Subject: "Merge branch 'x'", Merge: true}
+	for i, want := range []string{"replays", "undoes"} {
+		a.closeModal()
+		a.gitLogActionItems(merge)[i].run(a)
+		m := a.modal.(*confirmModal)
+		if len(m.lines) != 3 || !strings.Contains(m.lines[2], want) || !strings.Contains(m.lines[2], "-m 1") {
+			t.Errorf("row %d confirm = %q, want a third line that %s with -m 1", i, m.lines, want)
+		}
+		if runeLen(m.lines[2]) > 50 {
+			t.Errorf("merge note %q overflows the 50-cell body", m.lines[2])
+		}
+	}
+	a.closeModal()
+	a.gitLogActionItems(gitLogCommit{Hash: "h", Short: "h"})[0].run(a)
+	if m := a.modal.(*confirmModal); len(m.lines) != 2 {
+		t.Errorf("ordinary commit confirm = %q, want two lines", m.lines)
+	}
+}
+
+// runGitLogApply runs Actions row i for the log commit subj through its
+// confirm, and waits for runGitCmd's "— done" flash.
+func runGitLogApply(t *testing.T, a *App, i int, subj string) {
+	t.Helper()
+	a.statusMsg = "" // a previous run's flash would satisfy the pump at once
+	a.gitLogActionItems(logCommit(t, a, subj))[i].run(a)
+	m, ok := a.modal.(*confirmModal)
+	if !ok {
+		t.Fatalf("opened %T, want a confirm", a.modal)
+	}
+	m.callback(a)
+	a.closeModal()
+	pumpAppEvents(t, a, func() bool { return strings.HasSuffix(a.statusMsg, "— done") })
+}
+
+// TestGitLogActions_MergeEndToEnd is the bug N-064 reported, against real
+// git: cherry-picking a merge from the log panel lands its first-parent
+// diff (s.txt) on main instead of git's "is a merge but no -m option was
+// given" modal, and reverting a merge on its own branch removes that diff.
+func TestGitLogActions_MergeEndToEnd(t *testing.T) {
+	repo := cherryPickMergeRepo(t)
+	a := newTestApp(t, repo)
+	a.rootDir = repo
+	a.refreshGitStatus()
+	a.gitLog.commits, _ = loadGitLogCommits(repo)
+
+	runGitLogApply(t, a, 0, "merge side")
+	if got := gitOut(t, repo, "show", "--format=%s", "--name-only", "HEAD"); got != "merge side\n\ns.txt" {
+		t.Errorf("main HEAD after the pick = %q, want the merge's s.txt", got)
+	}
+
+	gitRun(t, repo, "checkout", "-q", "topic")
+	a.refreshGitStatus()
+	runGitLogApply(t, a, 1, "merge side")
+	if got := gitOut(t, repo, "show", "--format=%s", "--name-only", "HEAD"); !strings.HasPrefix(got, "Revert \"merge side\"") || !strings.HasSuffix(got, "s.txt") {
+		t.Errorf("topic HEAD after the revert = %q, want a revert removing s.txt", got)
+	}
+}
+
 // TestTryGitLogContextClick_SelectsRowUnderPointer is the contract every
 // context menu must honour: right-clicking row three acts on row three,
 // not on whatever was highlighted before.

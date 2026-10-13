@@ -23,7 +23,7 @@
 //     (editorContextModal), built by the same function, so the two doors
 //     cannot come to offer different verbs.
 //   - Async git (gitcmd.go's rule): every write goes through runGitCmd,
-//     so revert refusals on merges and reset errors land in the info
+//     so refusals and reset errors land in the info
 //     modal with git's own words, and the log refreshes off the
 //     done-event's pipeline — never optimistically. The one failure with
 //     a better answer than a modal is a conflict, which cherry-pick and
@@ -35,6 +35,15 @@
 //     a mis-aimed one can park the whole repo in a conflict. So they
 //     confirm too, and their confirms spell out the two facts that
 //     decide the answer: which commit, and onto what.
+//   - A MERGE IS APPLIED AGAINST ITS FIRST PARENT (N-064). Git refuses
+//     to cherry-pick or revert a merge without `-m <parent>`; the
+//     cherry-pick dialog's answer carries over — always `-m 1`, added
+//     only when the commit IS a merge (gitLogCommit.Merge), so an
+//     ordinary commit's argv is unchanged. Parent 1 is the branch the
+//     merge was made on, so a pick replays what the merge brought in
+//     and a revert undoes it — the reading a row in a list means. The
+//     other parent stays a terminal job, and the confirm names the
+//     choice so it is never silent.
 
 package app
 
@@ -94,11 +103,11 @@ func (a *App) gitLogActionItems(c gitLogCommit) []paletteItem {
 	return append(items, []paletteItem{
 		{label: "Cherry-pick " + c.Short + " onto " + branch + "…", run: func(app *App) {
 			app.confirmGitLogApply(c, "Cherry-pick", "onto "+branch,
-				"cherry-pick", c.Hash)
+				cherryPickArgs([]string{c.Hash}, false, false, c.Merge)...)
 		}},
 		{label: "Revert " + c.Short + "…", run: func(app *App) {
 			app.confirmGitLogApply(c, "Revert", "on "+branch+" — a new commit undoing it",
-				"revert", "--no-edit", c.Hash)
+				gitLogRevertArgs(c)...)
 		}},
 		a.gitLogTickItem(c),
 		{label: "Reset " + branch + " to " + c.Short + "…", run: func(app *App) {
@@ -132,13 +141,46 @@ func (a *App) gitLogActionItems(c gitLogCommit) []paletteItem {
 // log panel lists commits from --all, so the row under the pointer is
 // routinely from somewhere else. "Cherry-pick this" is a sentence with a
 // hidden second half, and this dialog is where it gets said out loud.
+//
+// A merge gets a third line naming the `-m 1` choice (gitLogMergeNote):
+// the args already carry it, and a merge applied against a parent the
+// user did not expect is exactly the kind of hidden half this dialog is
+// for.
 func (a *App) confirmGitLogApply(c gitLogCommit, verb, where string, args ...string) {
-	a.openConfirmLines(verb+" "+c.Short, []string{
+	lines := []string{
 		"“" + elide(c.Subject, gitLogSubjectMax) + "”",
 		where + "?",
-	}, func(app *App) {
+	}
+	if c.Merge {
+		lines = append(lines, gitLogMergeNote(verb))
+	}
+	a.openConfirmLines(verb+" "+c.Short, lines, func(app *App) {
 		app.runGitCmdHook(verb+" "+c.Short, gitConflictFailHook, args...)
 	})
+}
+
+// gitLogRevertArgs is revert's argv, split out like cherryPickArgs so the
+// rule with consequences is testable without forking git: `-m 1` only for
+// a merge (see the file comment). Git ≥ 2.21 would accept it on an
+// ordinary commit too, but leaving it off keeps that argv exactly what it
+// always was.
+func gitLogRevertArgs(c gitLogCommit) []string {
+	args := []string{"revert", "--no-edit"}
+	if c.Merge {
+		args = append(args, "-m", "1")
+	}
+	return append(args, c.Hash)
+}
+
+// gitLogMergeNote is the confirm line that says a merge is applied
+// against its first parent — in the verb's own terms, since a pick
+// replays the merge's contribution and a revert undoes it. Kept short
+// enough for the confirm body's 50 cells.
+func gitLogMergeNote(verb string) string {
+	if verb == "Revert" {
+		return "Merge: undoes what it merged in (-m 1)"
+	}
+	return "Merge: replays what it merged in (-m 1)"
 }
 
 // gitLogBranchLabel names the ref that reset / cherry-pick will move —

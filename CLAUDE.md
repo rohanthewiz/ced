@@ -781,7 +781,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   filtered) list; set rows lead the Actions picker only while ticked;
   order = streamed `rev-list --topo-order` (a plain walk lets a ticked
   parent win a same-second tie), never dates; one `cherry-pick`, refused while an op is parked; cleared
-  on success only.
+  on success only. MERGES (`gitLogCommit.Merge`, from `%P`) are
+  cherry-picked AND reverted with `-m 1` — single rows and tick sets,
+  added only when a merge is in the command, named in the confirm
+  (`gitLogMergeNote`).
 - Git status report (≡ Git + panel Actions): long format with
   `color.status=false`, `advice.statusHints=false`; capped to the window
   with the cut named; declines an occupied modal slot.

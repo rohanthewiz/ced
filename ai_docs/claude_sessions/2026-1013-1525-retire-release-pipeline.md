@@ -50,9 +50,9 @@ release.yml".
 
 ## Left alone
 
-- The remote `release` branch (at `0409317 Release ced 0.2.0`) and the
-  v0.2.0 GitHub Release. Deleting them is outward-facing, so the owner
-  decides.
+- The v0.2.0 GitHub Release, kept by the owner's choice. The `release`
+  branch (at `0409317 Release ced 0.2.0`, fully contained in main) was
+  deleted, remote and local, at the owner's say.
 - `.claude/commands/summary-of-downloads.md`. It still reports the old
   releases' downloads correctly.
 - The Makefile's `alt` target, which is cats N-010's remaining question.

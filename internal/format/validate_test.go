@@ -155,6 +155,11 @@ func TestValidates_MatchesValidate(t *testing.T) {
 			t.Errorf("Validates(%q) = %v but Validate produced problems = %v", p, claimed, actual)
 		}
 	}
+	// "{,}" is perfectly good CSV (one row, two fields), so the CSV
+	// side gets input broken in ITS language: an unclosed quote.
+	if !Validates("/proj/data.csv") || Validate("/proj/data.csv", []byte("a,\"b\n")) == nil {
+		t.Error("Validates/Validate disagree on data.csv")
+	}
 }
 
 // TestValidate_GoIsLeftToGopls pins the deliberate absence. gopls

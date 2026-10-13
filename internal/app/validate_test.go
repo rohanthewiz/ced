@@ -44,6 +44,27 @@ func TestValidate_OpeningABrokenFileMarksIt(t *testing.T) {
 	}
 }
 
+// TestValidate_BrokenCSVIsMarked pins the CSV kind end to end: a row
+// with an extra field is parsed on open and painted with the same
+// gutter glyph and underline as a JSON finding — one feature, two
+// languages.
+func TestValidate_BrokenCSVIsMarked(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	tab := openScratch(t, a, "data.csv", "a,b\n1,2\n3,4,5\n")
+
+	probs := a.liveProblems(tab)
+	if len(probs) != 1 || probs[0].Line != 2 {
+		t.Fatalf("liveProblems = %v, want one finding on line 2", probs)
+	}
+	spans, marks := validateSource{app: a}.Decorations(tab, theme.Default(), 0, 3)
+	if len(marks) != 1 || marks[0].Glyph != validateMark {
+		t.Errorf("marks = %v, want one %q", marks, validateMark)
+	}
+	if len(spans) != 1 || !spans[0].Delta.Underline {
+		t.Errorf("spans = %v, want one underline", spans)
+	}
+}
+
 // TestValidate_ValidFileSaysNothing pins the quiet case, which is
 // almost every file almost all the time.
 func TestValidate_ValidFileSaysNothing(t *testing.T) {

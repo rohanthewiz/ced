@@ -500,7 +500,7 @@ Then:
   - *Show git history* — the git log filtered to this file (`p:` query,
     renames followed).
   - *Compare with clipboard*, *Preview* (markdown files), *Format file*.
-  - *Validate file* — ced's own JSON check plus whatever the language
+  - *Validate file* — ced's own JSON / CSV check plus whatever the language
     server last reported; the caret lands on the first error.
   - *Restore (discard changes)…* — puts the file back the way the last
     commit has it (staged changes too), after a confirm that says how

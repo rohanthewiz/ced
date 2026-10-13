@@ -50,6 +50,12 @@ const (
 	kindNone kind = iota
 	kindGo
 	kindJSON
+	// kindCSV is VALIDATED but never formatted. CSV has no canonical
+	// layout to restore: every byte between the commas is data, so a
+	// "formatter" could only change the file's contents. The Format
+	// verb therefore says "no formatter" for it, which is the truth,
+	// rather than contradicting the validator.
+	kindCSV
 )
 
 // jsoncNames are the .json files that are conventionally JSON **with
@@ -94,6 +100,9 @@ func kindFor(filePath string) kind {
 			return kindNone
 		}
 		return kindJSON
+	case "csv":
+		// .tsv deliberately stays kindNone — see csvvalidate.go.
+		return kindCSV
 	default:
 		// .jsonc and .json5 are explicitly NOT kindJSON: they announce
 		// in their own extension that they are a different language,

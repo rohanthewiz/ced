@@ -279,10 +279,18 @@ func resolveTool(rootDir, name string) (string, bool) {
 }
 
 // BuiltinHandles reports whether ced's built-in path (either rung) has
-// any opinion about this file. Used by the install-offer branch to stay
-// quiet about a file ced already formats — offering to install a global
-// default for JSON when the built-in already handles it would be a nag
-// with no upside, which is the call already made for Go.
+// any opinion about how to FORMAT this file. Used by the install-offer
+// branch to stay quiet about a file ced already formats — offering to
+// install a global default for JSON when the built-in already handles it
+// would be a nag with no upside, which is the call already made for Go.
+//
+// Listed kinds rather than "!= kindNone" because kindCSV is validated
+// but never formatted; a CSV file must stay open to the install offer.
 func BuiltinHandles(filePath string) bool {
-	return kindFor(filePath) != kindNone
+	switch kindFor(filePath) {
+	case kindGo, kindJSON:
+		return true
+	default:
+		return false
+	}
 }

@@ -22,6 +22,9 @@ func TestKindFor_ClassifiesByExtension(t *testing.T) {
 	}{
 		{"/proj/main.go", kindGo},
 		{"/proj/data.json", kindJSON},
+		{"/proj/data.csv", kindCSV},
+		{"/proj/DATA.CSV", kindCSV},
+		{"/proj/data.tsv", kindNone},
 		{"/proj/notes.txt", kindNone},
 		{"/proj/Makefile", kindNone},
 		{"/proj/main.py", kindNone},
@@ -145,6 +148,24 @@ func TestKindFor_AgreesWithTheThreeVerbs(t *testing.T) {
 	if BuiltinHandles(tsPath) {
 		t.Error("BuiltinHandles(tsconfig.json) = true, want false")
 	}
+
+	// A CSV file: validated, but there is no layout to restore, so
+	// neither formatting rung claims it — the Format verb answers "no
+	// formatter", which agrees with the table instead of contradicting
+	// the validator.
+	const csvPath = "/proj/data.csv"
+	if !Validates(csvPath) {
+		t.Error("Validates(data.csv) = false, want true")
+	}
+	if _, ok, _ := InProcessFormat(csvPath, []byte("a,b\n")); ok {
+		t.Error("InProcessFormat(data.csv) ok = true, want false")
+	}
+	if BuiltinHandles(csvPath) {
+		t.Error("BuiltinHandles(data.csv) = true, want false")
+	}
+	if FormatsInProcess(csvPath) {
+		t.Error("FormatsInProcess(data.csv) = true, want false")
+	}
 }
 
 // TestFormatsOnSave_OnlyGo pins the on-save policy: Go formats on every
@@ -155,6 +176,7 @@ func TestFormatsOnSave_OnlyGo(t *testing.T) {
 		"/proj/main.go":       true,
 		"/proj/MAIN.GO":       true,
 		"/proj/data.json":     false,
+		"/proj/data.csv":      false,
 		"/proj/tsconfig.json": false,
 		"/proj/notes.md":      false,
 		"/proj/script.py":     false,

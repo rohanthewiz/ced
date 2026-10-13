@@ -576,6 +576,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   mark MOVES to the mistake (trailing comma → the comma; missing comma
   → end of the previous value; EOF → the unclosed opener). Unrecognised
   shapes keep the parser's wording and position.
+- CSV (format/csvvalidate.go) is VALIDATED, never formatted (`kindCSV`;
+  `BuiltinHandles` lists the formatting kinds, not `!= kindNone`).
+  Strict `encoding/csv` decides; field count set by the first row. Mark
+  moves to the mistake: extra field → its start; too few → the row's
+  last char; unclosed / line-eating quote → the OPENER
+  (`quotedFieldAt` re-walks the failed record). `.tsv` excluded (no
+  quoting convention).
 - **Only Go formats on save** (`format.FormatsOnSave`). Everything else
   (JSON, non-Go `format.json` entries) runs only via ≡ File → "Format
   file" (`formatActiveFile`: saves a dirty tab first; a Go save already

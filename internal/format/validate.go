@@ -64,7 +64,7 @@ type Problem struct {
 // that case should cost one extension comparison.
 func Validates(filePath string) bool {
 	switch kindFor(filePath) {
-	case kindJSON:
+	case kindJSON, kindCSV:
 		return true
 	default:
 		// Go is deliberately absent. gopls already reports parse errors
@@ -87,6 +87,8 @@ func Validate(filePath string, src []byte) []Problem {
 	switch kindFor(filePath) {
 	case kindJSON:
 		return validateJSON(src)
+	case kindCSV:
+		return validateCSV(src)
 	default:
 		return nil
 	}

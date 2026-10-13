@@ -6,8 +6,8 @@
 // =============================================================================
 
 // validate.go is ced's own syntax checker for the data formats it
-// parses in-process — JSON today, and whatever joins format.kindFor
-// later. It turns "this file does not parse" into a mark on the line
+// parses in-process — JSON and CSV today, and whatever joins
+// format.kindFor later. It turns "this file does not parse" into a mark on the line
 // that broke, which is the only form of that answer worth having.
 //
 // It is the ONLY diagnostic producer in this editor that needs nothing
@@ -408,7 +408,7 @@ func (a *App) validateFile() {
 	}
 	diags := a.diagsFor(t.Path)
 	if !builtin && server == "" && len(diags) == 0 {
-		a.flash("Can't validate " + name + " — ced checks JSON itself; other files need their language server on PATH")
+		a.flash("Can't validate " + name + " — ced checks JSON and CSV itself; other files need their language server on PATH")
 		return
 	}
 	if len(diags) == 0 {

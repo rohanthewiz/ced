@@ -26,7 +26,7 @@
 //	      ▼ main loop
 //	handleGitCmdDone: flash "… — done", refresh, onOKOutput(a, output)
 //	      ▼
-//	showPushReceipt ──► openGitReceipt("Pushed", "", head, lines)
+//	showPushReceipt ──► openGitReceipt("Pushed", "", head, "", lines)
 //
 // Failures never get here: a nonzero push already opens the info modal
 // with the same output, which is the louder answer it deserves. The
@@ -60,7 +60,7 @@ func (a *App) showPushReceipt(head string, out []byte) {
 	if a.modal != nil || a.menuOpen {
 		return
 	}
-	a.openGitReceipt("Pushed", "", head, pushReceiptBody(out, commitReceiptWidth-4))
+	a.openGitReceipt("Pushed", "", head, "", pushReceiptBody(out, commitReceiptWidth-4))
 }
 
 // pushReceiptBody turns `git push`'s combined output into panel rows:

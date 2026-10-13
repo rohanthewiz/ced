@@ -62,8 +62,13 @@
 // without being consumed (no key could be bound here without breaking
 // that), and the keyboard door to the same dialog is the ≡ Git row.
 //
+// A receipt that offers that button stays up longer (commitReceiptPushFor
+// rather than commitReceiptFor): reading the hash and subject is a
+// glance, but deciding to push and reaching for the button is a second
+// step, and a window sized for the glance made that step a race.
+//
 // The window is HELD while the pointer rests inside the panel, and
-// starts over (a full commitReceiptFor) when it leaves. A fixed window
+// starts over (a full window) when it leaves. A fixed window
 // races the reader: a slow reach for the push button, or a long push
 // output being read line by line, could lose the panel under the
 // pointer at the exact moment it was being used. Holding is pure
@@ -96,6 +101,16 @@ import (
 // sitting over their code — and every gesture they might make on
 // returning closes it anyway.
 const commitReceiptFor = 7 * time.Second
+
+// commitReceiptPushFor is the unattended window for a commit receipt
+// that carries the "[ Push <branch>… ]" button. Pushing is the usual
+// next step after a commit, and the user has to read the receipt,
+// decide, then move the pointer across the screen to the button — or
+// finish a thought in the code first. Roughly three times the plain
+// window covers that without leaving a box parked over the code for
+// long; every key and click still closes it early, so the extra time
+// only ever costs anything to a user who has walked away.
+const commitReceiptPushFor = 20 * time.Second
 
 // commitReceiptWidth is the panel's preferred width, clamped to the
 // window at draw time. Sized for git's own convention: a 40-character
@@ -224,27 +239,32 @@ func (a *App) handleGitCommitReceipt(e *gitCommitReceiptEvent) {
 	if hash == "" {
 		return
 	}
-	a.openGitReceipt("Committed", hash, "", commitReceiptBody(msg, commitReceiptWidth-4))
 	// Offered under the same condition the git panel's Actions picker
 	// lists its "Push <branch>…" row, so the two doors never disagree
 	// about whether there is somewhere to push.
+	push := ""
 	if a.hasGitPushTarget() && a.gitBranch != "" {
-		a.commitReceipt.pushBranch = a.gitBranch
+		push = a.gitBranch
 	}
+	a.openGitReceipt("Committed", hash, "", push, commitReceiptBody(msg, commitReceiptWidth-4))
 }
 
 // openGitReceipt fills the shared panel and starts its window. Every
 // field is written, so whatever receipt was showing is replaced whole —
 // a push landing over a commit receipt must not inherit its hash.
 // Callers have already applied the modal/menu suppression rule.
-func (a *App) openGitReceipt(title, hash, head string, lines []string) {
+//
+// pushBranch is taken here, rather than set by the caller afterwards,
+// because the window length depends on it (commitReceiptWindow) and the
+// timer is armed at the end of this function. Writing it unconditionally
+// is also what keeps a push receipt replacing a commit receipt from
+// inheriting its button.
+func (a *App) openGitReceipt(title, hash, head, pushBranch string, lines []string) {
 	a.commitReceipt.title = title
 	a.commitReceipt.hash = hash
 	a.commitReceipt.head = head
 	a.commitReceipt.lines = lines
-	// Reset here so a push receipt replacing a commit receipt does not
-	// inherit its button; handleGitCommitReceipt sets it after the call.
-	a.commitReceipt.pushBranch = ""
+	a.commitReceipt.pushBranch = pushBranch
 	// A replacement starts with a live timer, so it is not held — even
 	// if the pointer happens to sit where the old box was. The next
 	// motion inside the new box holds it again.
@@ -327,6 +347,18 @@ func commitReceiptBody(msg string, width int) []string {
 	return capLines(out, commitReceiptMaxLines)
 }
 
+// commitReceiptWindow is how long the receipt on screen stays up
+// unattended: the longer commitReceiptPushFor while it offers a push,
+// else commitReceiptFor. Read at every arm — the first one in
+// openGitReceipt and the re-arm when the pointer leaves the box — so a
+// held-then-released push receipt gets its full longer window back.
+func (a *App) commitReceiptWindow() time.Duration {
+	if a.commitReceipt.pushBranch != "" {
+		return commitReceiptPushFor
+	}
+	return commitReceiptFor
+}
+
 // armCommitReceiptExpiry schedules the automatic dismissal. One-shot
 // timer, no goroutine of its own until it fires, and it POSTS rather
 // than mutating — the iron rule for anything running off the main loop.
@@ -337,7 +369,7 @@ func (a *App) armCommitReceiptExpiry() {
 	a.commitReceipt.seq++
 	seq := a.commitReceipt.seq
 	scr := a.screen
-	time.AfterFunc(commitReceiptFor, func() {
+	time.AfterFunc(a.commitReceiptWindow(), func() {
 		_ = scr.PostEvent(&commitReceiptExpireEvent{when: time.Now(), seq: seq})
 	})
 }

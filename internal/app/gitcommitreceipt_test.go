@@ -327,6 +327,36 @@ func TestCommitReceipt_PushButtonOnlyWithATarget(t *testing.T) {
 	}
 }
 
+// TestCommitReceipt_PushOfferGetsTheLongerWindow pins the window length:
+// a commit receipt offering "[ Push <branch>… ]" stays up for
+// commitReceiptPushFor so the push isn't a race, while a receipt without
+// the button (no remote, or a push receipt replacing it) keeps the plain
+// commitReceiptFor.
+func TestCommitReceipt_PushOfferGetsTheLongerWindow(t *testing.T) {
+	if commitReceiptPushFor <= commitReceiptFor {
+		t.Fatalf("push window %v should be longer than the plain %v",
+			commitReceiptPushFor, commitReceiptFor)
+	}
+	a := newTestApp(t, t.TempDir())
+
+	a.gitIsRepo, a.gitBranch = true, "main"
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	if got := a.commitReceiptWindow(); got != commitReceiptFor {
+		t.Errorf("no push offered: window = %v, want %v", got, commitReceiptFor)
+	}
+
+	a.gitHasRemote = true
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	if got := a.commitReceiptWindow(); got != commitReceiptPushFor {
+		t.Errorf("push offered: window = %v, want %v", got, commitReceiptPushFor)
+	}
+
+	a.showPushReceipt("main → origin/main", []byte("Everything up-to-date\n"))
+	if got := a.commitReceiptWindow(); got != commitReceiptFor {
+		t.Errorf("push receipt: window = %v, want %v", got, commitReceiptFor)
+	}
+}
+
 // TestCommitReceipt_PushButtonOpensPushDialog pins the button's action
 // end to end: a left click on it closes the receipt and raises the same
 // push dialog the git panel's "Push <branch>…" row opens, while a

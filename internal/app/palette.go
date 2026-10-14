@@ -63,7 +63,16 @@ type paletteItem struct {
 	// filtering, the list is ranked by score and "sections" no longer
 	// describe it.
 	spacer bool
+	// swatch, when set, is drawn as a two-cell block of that colour in
+	// front of the label: a row that offers a COLOUR (the tab-group
+	// colour picker) shows it instead of only naming it. It's not part
+	// of the label, so fuzzy matching and hit indexes are unchanged.
+	// tcell.ColorDefault (the zero value) means no swatch.
+	swatch tcell.Color
 }
+
+// paletteSwatchW is the cells a swatch takes: the block plus a gap.
+const paletteSwatchW = 3
 
 // paletteSpacer is the one spelling of a divider row.
 func paletteSpacer() paletteItem { return paletteItem{spacer: true} }
@@ -517,6 +526,15 @@ func (m *paletteModal) drawRow(a *App, mx, ry, mw int, match paletteMatch, selec
 	}
 	startCol := mx + 2
 	maxCols := mw - 4
+	if sw := match.item.swatch; sw != tcell.ColorDefault {
+		// Painted as BACKGROUND on spaces rather than as a glyph such
+		// as █: it shows in any font and fills the cell exactly.
+		swSt := tcell.StyleDefault.Background(sw)
+		a.screen.SetContent(startCol, ry, ' ', nil, swSt)
+		a.screen.SetContent(startCol+1, ry, ' ', nil, swSt)
+		startCol += paletteSwatchW
+		maxCols -= paletteSwatchW
+	}
 	for i, ch := range []rune(match.item.label) {
 		if i >= maxCols {
 			break

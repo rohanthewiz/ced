@@ -404,3 +404,26 @@ func TestDrawTabBar_ConflictedTabLabelIsError(t *testing.T) {
 		t.Errorf("active conflicted tab label fg = %v, want theme.Error %v", got, a.theme.Error)
 	}
 }
+
+// TestDrawTabBar_UnderlineRunsUnderTheIcon pins the glyph's style being
+// derived from the tab's: with icons on, a group member's underline does
+// not break under the file icon.
+func TestDrawTabBar_UnderlineRunsUnderTheIcon(t *testing.T) {
+	a, root := groupTestApp(t)
+	a.tree.IconsEnabled = true
+	a.newTabGroup("api", filepath.Join(root, "api"))
+	a.draw()
+	_, ty, _, _ := a.tabBarRect()
+	for _, r := range a.lastTabRects {
+		if filepath.Base(a.tabs[r.Index].Path) != "b.go" {
+			continue
+		}
+		icon := r.MarkerX + 2
+		_, _, st, _ := a.screen.GetContent(icon, ty)
+		if st.GetUnderlineStyle() == tcell.UnderlineStyleNone {
+			t.Errorf("icon cell %d not underlined", icon)
+		}
+		return
+	}
+	t.Fatal("b.go not drawn")
+}

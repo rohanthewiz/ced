@@ -264,12 +264,17 @@ func (a *App) drawTabBar() {
 		// A group member is underlined end to end — the strip has one
 		// row, so the line under the tabs is the only place membership
 		// can be drawn without costing a column. The chip in front says
-		// WHICH group; the underline says how far it runs. Plain, not
-		// coloured: a coloured underline is the colon-form SGR 58, which
-		// ced emits nowhere else and which a terminal that splits colons
-		// like semicolons would read as stray colour codes.
+		// WHICH group; the underline says how far it runs. It takes the
+		// group's colour only where undercolor.go vouches for the
+		// terminal: a coloured underline is the colon-form SGR 58, which a
+		// terminal that splits colons like semicolons would read as
+		// blink plus a stray colour code. Everywhere else it is plain.
 		if r.Group != nil {
-			st = st.Underline(true)
+			if a.underlineColor {
+				st = st.Underline(tcell.UnderlineStyleSolid, a.tabGroupColor(r.Group))
+			} else {
+				st = st.Underline(true)
+			}
 		}
 		// Background.
 		for cx := r.X; cx < r.X+r.Width; cx++ {
@@ -297,10 +302,10 @@ func (a *App) drawTabBar() {
 			name := tab.DisplayName()
 			glyph := icons.For(name, false, false)
 			gfg := icons.ColorFor(name, false, fg)
-			gst := tcell.StyleDefault.Background(bg).Foreground(gfg)
-			if active {
-				gst = gst.Bold(true)
-			}
+			// Derived from st (not built fresh) so a group member's
+			// underline runs under the glyph too instead of breaking
+			// there; st already carries the background and the bold.
+			gst := st.Foreground(gfg)
 			for _, gr := range glyph {
 				if col >= tx+tw {
 					break

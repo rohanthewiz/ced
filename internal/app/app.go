@@ -1193,6 +1193,12 @@ type App struct {
 	// its single write path. See diagnote.go.
 	diagNoteOff bool
 
+	// underlineColor is whether tab-group members get their underline in
+	// the group's colour (SGR 58), resolved once from "underlinecolor"
+	// and the terminal sniff in loadUserConfig. False — a plain
+	// underline — in a directly built App. See undercolor.go.
+	underlineColor bool
+
 	// toolLayoutState is the TOOL WINDOW layout: which edge each panel
 	// is docked to and how big it is there. It is the thing remembered
 	// per project (state.json — see toollayout.go), and it is what
@@ -2006,6 +2012,7 @@ func (a *App) loadUserConfig() {
 	a.sessionEnabled = cfg.Session
 	a.remote.enabled = cfg.Remote
 	a.terminalPref = cfg.Terminal
+	a.underlineColor = resolveUnderlineColor(cfg.UnderlineColor, hostEnv)
 	// Themes last: loadThemes and applyThemeName both flash on failure,
 	// and a color problem is the least urgent thing in this function —
 	// letting it land last keeps a more important message visible.

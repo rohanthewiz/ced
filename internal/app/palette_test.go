@@ -618,3 +618,31 @@ func TestOpenPickerRows_AsksForTheHeight(t *testing.T) {
 		t.Fatalf("ordinary picker height = %d, want %d", h, paletteResultsVisible+6)
 	}
 }
+
+// TestPaletteRow_Swatch pins the swatch: a row with one paints two cells
+// of that colour where the label would start and shifts the label past
+// them; a row without one is unchanged.
+func TestPaletteRow_Swatch(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openPicker("Colours", []paletteItem{
+		{label: "red", swatch: tcell.ColorRed, run: func(*App) {}},
+		{label: "none", run: func(*App) {}},
+	})
+	m := paletteOf(a)
+	m.draw(a)
+	mx, my, _, _ := m.rect(a)
+	row := my + 4
+	for _, x := range []int{mx + 2, mx + 3} {
+		if _, _, st, _ := a.screen.GetContent(x, row); true {
+			if _, bg, _ := st.Decompose(); bg != tcell.ColorRed {
+				t.Errorf("swatch cell %d bg = %v, want red", x, bg)
+			}
+		}
+	}
+	if ru, _, _, _ := a.screen.GetContent(mx+2+paletteSwatchW, row); ru != 'r' {
+		t.Errorf("label starts with %q, want it after the swatch", ru)
+	}
+	if ru, _, _, _ := a.screen.GetContent(mx+2, row+1); ru != 'n' {
+		t.Errorf("unswatched row starts with %q, want its label at the usual column", ru)
+	}
+}

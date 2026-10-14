@@ -388,7 +388,7 @@ func TestChipRightClick_OpensTheGroupMenu(t *testing.T) {
 			t.Errorf("Make ad-hoc dimmed on a folder group")
 		}
 	}
-	want := "Collapse group|Switch to a tab in group…|Rename group…|Make ad-hoc group|Close group's tabs|Ungroup"
+	want := "Collapse group|Switch to a tab in group…|Rename group…|Change colour…|Make ad-hoc group|Close group's tabs|Ungroup"
 	if got := strings.Join(labels, "|"); got != want {
 		t.Errorf("rows = %s, want %s", got, want)
 	}
@@ -652,5 +652,134 @@ func TestFolderTabGroup_TreeRowAndMenuTwin(t *testing.T) {
 	submitPrompt(t, a, promptOf(a), "web")
 	if a.tabGroupForFolder(other) == nil {
 		t.Error("the ≡ twin did not create the web/ folder group")
+	}
+}
+
+// TestDrawTabBar_MemberUnderlineColour pins the two underline forms: with
+// the terminal vouched for, a member's underline carries the group's
+// colour; without, it is a plain underline with no colour set (so tcell
+// never writes SGR 58).
+func TestDrawTabBar_MemberUnderlineColour(t *testing.T) {
+	a, root := groupTestApp(t)
+	g := a.newTabGroup("api", filepath.Join(root, "api"))
+	member := func() tcell.Style {
+		a.draw()
+		_, ty, _, _ := a.tabBarRect()
+		for _, r := range a.lastTabRects {
+			if a.tabs[r.Index] == tabByName(t, a, "b.go") {
+				_, _, st, _ := a.screen.GetContent(r.X+2, ty)
+				return st
+			}
+		}
+		t.Fatal("b.go not drawn")
+		return tcell.StyleDefault
+	}
+
+	st := member()
+	if st.GetUnderlineStyle() == tcell.UnderlineStyleNone || st.GetUnderlineColor() != tcell.ColorDefault {
+		t.Errorf("default: underline style %v colour %v, want a plain underline",
+			st.GetUnderlineStyle(), st.GetUnderlineColor())
+	}
+
+	a.underlineColor = true
+	st = member()
+	if st.GetUnderlineStyle() != tcell.UnderlineStyleSolid {
+		t.Errorf("vouched: underline style = %v, want solid", st.GetUnderlineStyle())
+	}
+	if st.GetUnderlineColor() != a.tabGroupColor(g) {
+		t.Errorf("vouched: underline colour = %v, want the group's %v", st.GetUnderlineColor(), a.tabGroupColor(g))
+	}
+}
+
+// TestPickTabGroupColor pins the colour picker reached through the
+// group's menu rows: one row per hue, each with its swatch, the group's
+// own hue marked current and another group's hue named; picking stores
+// the index, which the chip then draws and the session keeps.
+func TestPickTabGroupColor(t *testing.T) {
+	a, root := groupTestApp(t)
+	api := a.newTabGroup("api", filepath.Join(root, "api"))
+	grp := a.newTabGroup("grp", "")
+	a.addTabToGroup(tabByName(t, a, "c.go"), grp)
+
+	a.tabGroupActionsPicker(api)
+	pickByLabel(t, a, "Change colour")
+	pm := paletteOf(a)
+	if pm == nil || len(pm.items) != len(tabGroupColorKeys) {
+		t.Fatalf("colour picker = %v, want %d rows", a.modal, len(tabGroupColorKeys))
+	}
+	for i, it := range pm.items {
+		if want := tabGroupColorKeys[i](a.theme); it.swatch != want {
+			t.Errorf("row %d swatch = %v, want %v", i, it.swatch, want)
+		}
+	}
+	if l := pm.items[api.color].label; !strings.Contains(l, "current") {
+		t.Errorf("own hue row = %q, want it marked current", l)
+	}
+	if l := pm.items[grp.color].label; !strings.Contains(l, "used by grp") {
+		t.Errorf("grp's hue row = %q, want it to name grp", l)
+	}
+
+	// Pick grp's hue: sharing is allowed, only announced.
+	want := grp.color
+	pickByLabel(t, a, tabGroupColorNames[want]+" colour")
+	if api.color != want {
+		t.Fatalf("api.color = %d, want %d", api.color, want)
+	}
+	a.draw()
+	for _, r := range a.lastTabRects {
+		if r.ChipW > 0 && r.Group == api {
+			_, ty, _, _ := a.tabBarRect()
+			_, _, st, _ := a.screen.GetContent(r.ChipX, ty)
+			if _, bg, _ := st.Decompose(); bg != a.tabGroupColor(grp) {
+				t.Errorf("api chip bg = %v, want the picked hue %v", bg, a.tabGroupColor(grp))
+			}
+		}
+	}
+	for _, sg := range a.encodeTabGroups() {
+		if sg.Name == "api" && sg.Color != want {
+			t.Errorf("session colour = %d, want %d", sg.Color, want)
+		}
+	}
+}
+
+// TestPickTabGroupColor_GoneGroupIsANoOp pins the stale-capture rule: a
+// pick for a group ungrouped while the picker was open changes nothing
+// and opens nothing.
+func TestPickTabGroupColor_GoneGroupIsANoOp(t *testing.T) {
+	a, root := groupTestApp(t)
+	g := a.newTabGroup("api", filepath.Join(root, "api"))
+	a.pickTabGroupColor(g)
+	pm := paletteOf(a)
+	a.closeModal()
+	a.ungroupTabGroup(g)
+	before := g.color
+	pm.items[(before+1)%len(pm.items)].run(a)
+	if g.color != before {
+		t.Errorf("colour changed on an ungrouped group")
+	}
+	a.pickTabGroupColor(g)
+	if a.modal != nil {
+		t.Errorf("picker opened for an ungrouped group: %T", a.modal)
+	}
+}
+
+// TestTabGroupColorIndex_FoldsOutOfRange pins the fold every reader uses:
+// a hand-edited or foreign session colour (negative, or past the six)
+// lands in range, and nextTabGroupColor treats it as the hue it draws.
+func TestTabGroupColorIndex_FoldsOutOfRange(t *testing.T) {
+	n := len(tabGroupColorKeys)
+	if len(tabGroupColorNames) != n {
+		t.Fatalf("%d colour names for %d hues", len(tabGroupColorNames), n)
+	}
+	for in, want := range map[int]int{0: 0, n: 0, n + 2: 2, -1: n - 1} {
+		if got := tabGroupColorIndex(in); got != want {
+			t.Errorf("tabGroupColorIndex(%d) = %d, want %d", in, got, want)
+		}
+	}
+	a, _ := groupTestApp(t)
+	g := a.newTabGroup("x", "")
+	g.color = n // draws as hue 0
+	if got := a.nextTabGroupColor(); got != 1 {
+		t.Errorf("nextTabGroupColor = %d, want 1 (hue 0 is taken via the fold)", got)
 	}
 }

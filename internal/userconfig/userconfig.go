@@ -100,6 +100,16 @@
 //	                        // validated here: the registry is app-layer
 //	                        // knowledge and an unknown name falls back
 //	                        // to the default at resolve time.
+//	{"underlinecolor": "auto"}
+//	                        // default; a tab group's members are
+//	                        // underlined in the group's colour when the
+//	                        // terminal is known to parse SGR 58, plainly
+//	                        // otherwise (app/undercolor.go)
+//	{"underlinecolor": "on"}// always colour it — for a capable terminal
+//	                        // the sniff can't see (e.g. over ssh)
+//	{"underlinecolor": "off"}
+//	                        // always a plain underline. No ≡ row —
+//	                        // hand-edited only.
 //
 // The loader is best-effort the same way customactions is: missing
 // file → defaults, malformed file → error returned for the app to
@@ -115,6 +125,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+)
+
+// UnderlineColorMode is whether ced may colour an underline (SGR 58).
+// "auto" asks the terminal sniff; the other two bypass it, because the
+// sniff can only accept what it has positive evidence for and ssh drops
+// most of that evidence (TERM_PROGRAM is not forwarded).
+type UnderlineColorMode string
+
+const (
+	UnderlineColorAuto UnderlineColorMode = "auto"
+	UnderlineColorOn   UnderlineColorMode = "on"
+	UnderlineColorOff  UnderlineColorMode = "off"
 )
 
 // IconsMode is the user's preference for Nerd Font icons in the file
@@ -400,6 +422,11 @@ type Config struct {
 	// picker, but the command-line half — the reason the key exists —
 	// cannot, and a picker that edits half a setting hides the other half.
 	Terminal string
+
+	// UnderlineColor gates the coloured tab-group underline. Defaults to
+	// auto. Hand-edited only: it is an override for a sniff that guessed
+	// wrong, not a preference anyone flips twice.
+	UnderlineColor UnderlineColorMode
 }
 
 // The keyword values of "terminal". Anything else is a command line.
@@ -414,7 +441,7 @@ const (
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, DiagNote: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true, Terminal: TerminalAuto}
+	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, DiagNote: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true, Terminal: TerminalAuto, UnderlineColor: UnderlineColorAuto}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -450,6 +477,8 @@ type fileFormat struct {
 	Session       string `json:"session,omitempty"`
 	Theme         string `json:"theme,omitempty"`
 	Terminal      string `json:"terminal,omitempty"`
+	// UnderlineColor is "underlinecolor": auto / on / off.
+	UnderlineColor string `json:"underlinecolor,omitempty"`
 
 	// The tag is lowercase like every other key here. encoding/json
 	// matches field tags case-INSENSITIVELY, so the camelCase spelling
@@ -902,6 +931,24 @@ func Load(path string) (Config, error) {
 	cfg.ChatAgent = strings.ToLower(strings.TrimSpace(ff.ChatAgent))
 	cfg.Theme = strings.ToLower(strings.TrimSpace(ff.Theme))
 	cfg.Terminal = parseTerminal(ff.Terminal)
+
+	// Same tri-state shape and error rule as "icons": a typo is reported,
+	// not silently read as auto.
+	switch UnderlineColorMode(strings.ToLower(strings.TrimSpace(ff.UnderlineColor))) {
+	case "":
+		// field omitted — keep default
+	case UnderlineColorAuto:
+		cfg.UnderlineColor = UnderlineColorAuto
+	case UnderlineColorOn:
+		cfg.UnderlineColor = UnderlineColorOn
+	case UnderlineColorOff:
+		cfg.UnderlineColor = UnderlineColorOff
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: underlinecolor must be %q, %q, or %q (got %q)",
+			path, UnderlineColorAuto, UnderlineColorOn, UnderlineColorOff, ff.UnderlineColor,
+		)
+	}
 	return cfg, nil
 }
 

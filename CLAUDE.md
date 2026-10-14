@@ -89,6 +89,7 @@ internal/app/
   modal.go leader.go whichkey.go  Modal slot; leader table + namespaces; which-key band
   metakeys.go nav.go          ⌘ layer; back/forward history
   tabbar.go tablabel.go tabcontext.go tabgroups.go statusbar.go
+  undercolor.go               May an underline be coloured (SGR 58): env allowlist
   toolwindow.go tooladapt.go toolheader.go toollayout.go toolmenu.go  Tool windows
   splitter.go treeautofit.go treefilter.go treemarks.go overflow.go
   find.go findall.go projectsearch.go goto.go bracket.go
@@ -295,9 +296,14 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   The chip lives inside its tab's slot (`tabSlotWidth(i, first)`), so
   `tabScroll` stays a tab index; the first DRAWN member carries it.
   Collapse never hides the active tab; folded tabs get zero-width rects
-  so `+N` counts only scrolled-off tabs. Members get a PLAIN underline
-  (no colour: the colon-form SGR 58 is emitted nowhere in ced). Chip
-  colours come from the syntax palette (read at paint time). Chip left
+  so `+N` counts only scrolled-off tabs. Members' underline takes the
+  group colour (colon-form SGR 58) ONLY when `a.underlineColor`
+  (undercolor.go: env ALLOWLIST, innermost multiplexer decides, tmux
+  only with TERM_PROGRAM=tmux; `"underlinecolor"` auto/on/off
+  overrides) — else PLAIN. Never send SGR 58 elsewhere without that
+  gate. Chip colours come from the syntax palette (read at paint time),
+  stored as an INDEX (`tabGroupColorIndex` folds it); "Change colour…"
+  (`pickTabGroupColor`, rows carry `paletteItem.swatch`) may share a hue. Chip left
   click folds, right click = group menu (`tabGroupContextItems`, shared
   with the ≡ File "Tab groups…" picker); ≡ File "Add tab to group…" is
   the tab row's twin. A folder group can start with NO tab: the tree's

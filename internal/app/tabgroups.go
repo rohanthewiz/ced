@@ -56,6 +56,15 @@
 //     "Tab groups…" reaches the same verbs through pickers, and "Add tab
 //     to group…" is the tab menu's row for the active tab. No leader:
 //     the flat table is out of letters.
+//   - **Colours are automatic, and can be changed.** A new group takes
+//     the first hue no live group wears (nextTabGroupColor); "Change
+//     colour…" in the group menu picks another from the same six syntax
+//     hues (pickTabGroupColor). Choosing is by index, not RGB, so a pick
+//     stays a fitting colour through a theme switch.
+//   - **The member underline is coloured only where it is safe.** In a
+//     terminal undercolor.go vouches for, the underline takes the group's
+//     hue; elsewhere it is plain, because an unrecognised SGR 58 can turn
+//     into blink.
 //   - **Names are at most four letters or digits.** The chip competes
 //     with file names for the one row every open file shares, and four
 //     is enough for a mnemonic ("api", "docs", "wip2"). Names are unique
@@ -115,10 +124,24 @@ var tabGroupColorKeys = []func(theme.Theme) tcell.Color{
 	func(t theme.Theme) tcell.Color { return t.SynConstant },
 }
 
+// tabGroupColorNames names tabGroupColorKeys' hues, index for index, in
+// the colour picker. They are named by the syntax role they borrow
+// because the actual hue changes with the theme: "keyword" is the one
+// stable thing to call it, and the row's swatch shows what it looks like
+// now.
+var tabGroupColorNames = []string{"function", "string", "keyword", "type", "number", "constant"}
+
 // tabGroupColor is g's colour under the current theme.
 func (a *App) tabGroupColor(g *tabGroup) tcell.Color {
+	return tabGroupColorKeys[tabGroupColorIndex(g.color)](a.theme)
+}
+
+// tabGroupColorIndex folds a stored colour index into tabGroupColorKeys'
+// range. A session file can hold any int (hand edits, or a build with a
+// different number of hues), so every reader goes through here.
+func tabGroupColorIndex(c int) int {
 	n := len(tabGroupColorKeys)
-	return tabGroupColorKeys[((g.color%n)+n)%n](a.theme)
+	return ((c % n) + n) % n
 }
 
 // tabGroupChipFG picks the chip's text colour: whichever of the editor
@@ -137,7 +160,7 @@ func (a *App) tabGroupChipFG(bg tcell.Color) tcell.Color {
 func (a *App) nextTabGroupColor() int {
 	used := make(map[int]bool, len(a.tabGroups))
 	for _, g := range a.tabGroups {
-		used[g.color] = true
+		used[tabGroupColorIndex(g.color)] = true
 	}
 	for c := range tabGroupColorKeys {
 		if !used[c] {
@@ -542,6 +565,7 @@ func (a *App) tabGroupContextItems(g *tabGroup) []editorContextItem {
 		{label: foldLabel, action: func(app *App) { app.toggleTabGroupCollapsed(g) }, enabled: alwaysTrue},
 		{label: "Switch to a tab in group…", action: func(app *App) { app.switchInTabGroup(g) }, enabled: hasMembers},
 		{label: "Rename group…", action: func(app *App) { app.promptRenameTabGroup(g) }, enabled: alwaysTrue},
+		{label: "Change colour…", action: func(app *App) { app.pickTabGroupColor(g) }, enabled: alwaysTrue},
 		{label: "Make ad-hoc group", action: func(app *App) { app.makeTabGroupAdhoc(g) }, enabled: func(*App) bool { return g.isFolder() }},
 		{label: "Close group's tabs", action: func(app *App) { app.closeTabGroupTabs(g) }, enabled: hasMembers},
 		{label: "Ungroup", action: func(app *App) { app.ungroupTabGroup(g) }, enabled: alwaysTrue},
@@ -693,6 +717,47 @@ func (a *App) promptRenameTabGroupWith(g *tabGroup, seed string) {
 		}
 		g.name = name
 	})
+}
+
+// pickTabGroupColor is the group menu's "Change colour…": a picker of
+// the hues, each row with a swatch, marked "current" and naming any other
+// group already wearing it. Groups get distinct colours automatically
+// (nextTabGroupColor); this is for choosing a different one, so sharing a
+// hue is allowed and only announced. The pick is stored as the index, so
+// it follows theme switches and rides the session like the automatic one.
+func (a *App) pickTabGroupColor(g *tabGroup) {
+	if !a.tabGroupLive(g) {
+		return
+	}
+	cur := tabGroupColorIndex(g.color)
+	items := make([]paletteItem, 0, len(tabGroupColorKeys))
+	for c, pick := range tabGroupColorKeys {
+		var notes []string
+		if c == cur {
+			notes = append(notes, "current")
+		}
+		for _, other := range a.tabGroups {
+			if other != g && tabGroupColorIndex(other.color) == c {
+				notes = append(notes, "used by "+other.name)
+			}
+		}
+		label := tabGroupColorNames[c] + " colour"
+		if len(notes) > 0 {
+			label += "  (" + strings.Join(notes, ", ") + ")"
+		}
+		items = append(items, paletteItem{
+			label:  label,
+			swatch: pick(a.theme),
+			run: func(app *App) {
+				if !app.tabGroupLive(g) {
+					return
+				}
+				g.color = c
+				app.flash(fmt.Sprintf("Group %s: %s colour", g.name, tabGroupColorNames[c]))
+			},
+		})
+	}
+	a.openPicker("Colour for group "+g.name+" (from the theme's syntax hues)", items)
 }
 
 // switchInTabGroup is a picker of g's tabs — the way into a folded group

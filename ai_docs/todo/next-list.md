@@ -72,15 +72,6 @@ plus the LSP work done in the seeding session itself
   those servers never switch hints on. Contingent on N-013 showing it
   matters.
 
-- **N-042** · raised `2026-0930-2025-tab-groups` · value low
-  Tab group extras left out of the first cut:
-  - choosing a group's colour (groups get distinct ones automatically)
-  - a COLOURED member underline, if a capability check can tell which
-    terminals take the colon-form SGR 58
-  (Creating a folder group from the tree's folder context menu was done
-  in `2026-1011-2159-n051-n042-cherry-pick-filter-folder-tab-groups`: "New tab group…" on any non-root folder, ≡ twin at
-  the end of File → "Tab groups…".)
-
 - **N-043** · raised `2026-0930-2056-bookmarks` · value medium
   Bookmarks have no keyboard door: the leader table is out of letters,
   so Toggle / Next / Previous are ≡ Nav rows reached by the palette
@@ -216,6 +207,24 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-14, `2026-1014-1447-n042-tab-group-colours` —
+  **N-042** both extras. Group menu (and the ≡
+  *Tab groups…* picker, which shows the same rows) gains *Change colour…*
+  (`pickTabGroupColor`): the six syntax hues, each row with a swatch
+  (new `paletteItem.swatch`), "current" and "used by <group>" marked,
+  stored as the index so it follows theme switches and the session.
+  Members' underline takes the group colour (SGR 58) only when
+  `undercolor.go` vouches for the terminal: an env ALLOWLIST where the
+  innermost multiplexer decides (screen → no; tmux only with
+  TERM_PROGRAM=tmux; Zellij; cats by CATS_ENV), then TERM_PROGRAM /
+  TERM / terminal-specific vars, VTE ≥ 0.52. List from a Sept 2026
+  review of terminals' SGR parsers (vim PR #21412). `"underlinecolor"`
+  auto/on/off overrides (ssh hides most evidence). Also fixed: the
+  member underline broke under the file icon. Real binary checked via
+  a raw byte dump of the capture tool: on/auto-in-cats emit
+  `58:2::r:g:b` matching the chip, off/auto-without-evidence emit none;
+  not checked by eye in other terminals.
 
 - closed 2026-10-13, `2026-1013-1525-retire-release-pipeline` — **N-009** moot. The
   download-summary note about Homebrew installs is true for every GitHub

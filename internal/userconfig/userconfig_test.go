@@ -1717,3 +1717,35 @@ func TestDefaults_TerminalIsAuto(t *testing.T) {
 		t.Fatalf("Defaults().Terminal = %q, want %q", got, TerminalAuto)
 	}
 }
+
+// TestLoadUnderlineColorValues pins the tri-state: each keyword folds
+// case and whitespace like icons, an omitted key keeps auto, and a typo
+// is an error rather than a silent auto.
+func TestLoadUnderlineColorValues(t *testing.T) {
+	cases := map[string]UnderlineColorMode{
+		`{"underlinecolor":"on"}`:    UnderlineColorOn,
+		`{"underlinecolor":" OFF "}`: UnderlineColorOff,
+		`{"underlinecolor":"auto"}`:  UnderlineColorAuto,
+		`{}`:                         UnderlineColorAuto,
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.json")
+	for body, want := range cases {
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil {
+			t.Fatalf("Load(%s): %v", body, err)
+		}
+		if cfg.UnderlineColor != want {
+			t.Errorf("Load(%s).UnderlineColor = %q, want %q", body, cfg.UnderlineColor, want)
+		}
+	}
+	if err := os.WriteFile(p, []byte(`{"underlinecolor":"yes"}`), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Error("invalid underlinecolor value should error")
+	}
+}

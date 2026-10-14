@@ -494,11 +494,27 @@ Then:
   A group's tabs sit together behind a coloured chip (` api `) and are
   underlined. Click the chip to collapse the group to `api +3`; the
   active tab always stays visible. Right-click the chip to Collapse /
-  Expand, Switch to a tab in the group, Rename, Make ad-hoc (freeze a
-  folder group's members), Close the group's tabs (unsaved ones are
-  kept) or Ungroup. ≡ File → *Add tab to group…* and *Tab groups…* are
-  the keyboard doors. Groups are remembered per project with the
-  session.
+  Expand, Switch to a tab in the group, Rename, Change colour (each
+  group gets a different one automatically; the picker shows the
+  theme's six syntax hues), Make ad-hoc (freeze a folder group's
+  members), Close the group's tabs (unsaved ones are kept) or Ungroup.
+  ≡ File → *Add tab to group…* and *Tab groups…* are the keyboard
+  doors. Groups are remembered per project with the session.
+
+  The underline takes the group's colour in terminals known to handle
+  coloured underlines: inside cats or a current tmux (one that sets
+  `TERM_PROGRAM`), and in kitty, Ghostty, WezTerm, iTerm2, foot,
+  Alacritty, Konsole, VTE-based terminals, VS Code, Windows Terminal
+  and Zellij. Elsewhere it's a plain underline,
+  because a terminal that doesn't know the sequence can read it as
+  *blink*. If ssh hides a capable terminal from ced, override the
+  check in `~/.config/ced/config.json`:
+
+  ```jsonc
+  { "underlinecolor": "auto" }   // default: decide from the environment
+  { "underlinecolor": "on" }     // always colour it
+  { "underlinecolor": "off" }    // always plain
+  ```
 - Click `≡` (top-left), right-click anywhere, or double-tap `Esc`
   for the action menu — including New file, Rename, Delete.
 - If your terminal forwards Button3, right-click on a file or folder

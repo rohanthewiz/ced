@@ -31,8 +31,10 @@
 //	────────────────────     ─────────────────────────────────────
 //	bg fg muted line     ┐
 //	accent ok warn err   ┴──► the same eight core keys, verbatim
-//	panel                ───► sidebar-bg   (the second surface)
+//	panel                ───► sidebar-bg   (the second surface, only
+//	                                        when it steps DOWN from bg)
 //	panel2               ───► line-hl      (the raised surface)
+//	fg                   ───► folder       (neutral tree folders)
 //	  (everything else)  ───► derived by ced (palette.go)
 //
 // THREE RULES THIS FILE KEEPS
@@ -107,6 +109,9 @@ const (
 //   - panel2 is the host's raised surface, which is the same STEP ced's
 //     active-line highlight takes away from the editor background.
 //
+// panel survives only when it is darker than bg, and folders are set from
+// fg. Both happen after this table, in catsHostTreeColors.
+//
 // Notably NOT taken: chrome → status-bg. ced paints its status bar as
 // background-colored text ON status-bg, which only reads if status-bg is a
 // loud color; cats' chrome is a quiet dark surface, so importing it would
@@ -154,6 +159,7 @@ func catsHostSpec(hostName string, colors map[string]string) (theme.Spec, bool) 
 			return theme.Spec{}, false
 		}
 	}
+	catsHostTreeColors(p)
 	label := "Cats (host)"
 	if n := strings.TrimSpace(hostName); n != "" {
 		label = "Cats (host: " + n + ")"
@@ -172,6 +178,38 @@ func catsHostSpec(hostName string, colors map[string]string) (theme.Spec, bool) 
 		return theme.Spec{}, false
 	}
 	return spec, true
+}
+
+// catsHostTreeColors adjusts the mapped palette p, in place, so the file
+// tree follows ced's own conventions rather than the host's chrome. It
+// makes the same two corrections the Darcula built-in states by hand
+// (theme/builtin.go), because every cats dark palette but Tokyo Night has
+// the problems Darcula had:
+//
+//   - **The sidebar steps down.** cats' panel is a step LIGHTER than its
+//     bg in most of its themes (cats-green: #242a25 over #1f2420). That
+//     suits a pane list in a browser, but next to ced's editor it reads as
+//     a grey slab that belongs to another theme, and sidebar-bg also
+//     paints the tab strip and every tool-window header. A panel that is
+//     not darker than bg is dropped, so the derivation (shadePanel)
+//     supplies the step down every ced theme takes. A host panel that
+//     already steps down (Tokyo Night, both light themes) is kept: it is
+//     still the host's own surface.
+//   - **Folders are neutral.** The derivation paints folders in the accent.
+//     A host accent is a chrome colour that also becomes syn-function and
+//     diag-info, so a tree full of it competes with the code beside it.
+//     Folders take fg instead. The tree still has three tiers, folders (fg)
+//     > files (derived 35% toward muted) > dotfiles (muted), and the ACTIVE
+//     folder keeps the accent, so it is the one coloured row.
+//
+// Both keys are stated in the sparse palette, not hidden in the
+// derivation, so "Customize theme…" and a shadowing user file see the
+// choice as the host theme's own.
+func catsHostTreeColors(p theme.Palette) {
+	if panel, ok := p["sidebar-bg"]; ok && theme.Luminance(panel) >= theme.Luminance(p["bg"]) {
+		delete(p, "sidebar-bg")
+	}
+	p["folder"] = p["fg"]
 }
 
 // catsHexColor reports whether v is a color ced's palette can carry:

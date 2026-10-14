@@ -1044,6 +1044,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Eight core keys; the rest derived via the ordered table in palette.go
   (new keys get a derivation). Palettes are `map[string]string`; specs
   keep the sparse palette.
+- Host theme (app/catstheme.go): cats' `panel` becomes `sidebar-bg`
+  only when it is DARKER than bg (else derived); folders = `fg`, never
+  the accent (`catsHostTreeColors`, same fix as Darcula's palette).
 - `theme.Default()` is a hardcoded literal
   (`TestBuiltin_TokyoNightMatchesDefault`).
 - Switch = live restyle; `Tab.Styles` (and markdown rows) are the only

@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-065**
+**Next ID: N-066**
 
 ## Open
 
@@ -159,6 +159,14 @@ and `raised`.
   auto) inside real tmux splits a pane in the folder (no tmux on the dev
   machine); a custom command (`open -a Ghostty {{DIR}}`) opens there.
   The cats branch and ced's panel branch DID run in the real binary.
+
+- **N-065** · raised `2026-1014-1518-host-theme-tree-colors` · value low
+  The host theme's tree corrections (`catsHostTreeColors`: a panel lighter
+  than bg is dropped for the derived darker sidebar, folders = fg) have
+  only run in tests. run-ced has no cats host, so the synthesized theme
+  never appears there. Hand check inside cats on cats-green and one theme
+  that keeps its panel (Tokyo Night): does the darker tree/tab strip sit
+  well against cats' own sidebar, and do the folder/file tiers read.
 
 ## Roadmap
 

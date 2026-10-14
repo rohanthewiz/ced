@@ -52,12 +52,13 @@ func TestCatsHostSpecSynthesizesFromTheCoreEight(t *testing.T) {
 	if !spec.Dark {
 		t.Fatal("a #1f2420 background is dark")
 	}
-	// The sparse form carries exactly the mapped keys, nothing invented.
+	// The sparse form carries the mapped keys plus the stated folder,
+	// minus cats-green's lighter panel (see catsHostTreeColors).
 	if got, want := len(spec.Colors), len(catsHostPalette); got != want {
 		t.Fatalf("mapped %d keys, want %d: %v", got, want, spec.Colors)
 	}
-	if spec.Colors["sidebar-bg"] != "#242a25" || spec.Colors["line-hl"] != "#2b322c" {
-		t.Fatalf("the two surfaces did not cross over: %v", spec.Colors)
+	if spec.Colors["line-hl"] != "#2b322c" {
+		t.Fatalf("the raised surface did not cross over: %v", spec.Colors)
 	}
 	// And it resolves to a full editor palette, syntax colors included.
 	th, err := spec.Resolve()
@@ -69,6 +70,79 @@ func TestCatsHostSpecSynthesizesFromTheCoreEight(t *testing.T) {
 	}
 	if th.Accent == th.BG {
 		t.Fatal("accent and background resolved to the same color")
+	}
+}
+
+// TestCatsHostSpec_TreeStepsDownWithNeutralFolders pins the Darcula
+// corrections on the synthesized theme. A host panel lighter than bg
+// (cats-green, cats' Darcula) is dropped, so the resolved sidebar is
+// darker than the editor. A panel that already steps down (Tokyo Night,
+// Solarized Light) is kept verbatim. Folders resolve to fg, not the accent,
+// and stay a readable tier from files, which stay one from dotfiles.
+// Palettes are hand-copied from cats' builtins (internal/theme/builtin.go
+// there); ced never imports the cats module.
+func TestCatsHostSpec_TreeStepsDownWithNeutralFolders(t *testing.T) {
+	cases := []struct {
+		name      string
+		colors    map[string]string
+		keepPanel bool
+	}{
+		{"cats-green", hostPalette(), false},
+		{"darcula", map[string]string{
+			"bg": "#2b2b2b", "fg": "#a9b7c6", "muted": "#8c8c8c", "line": "#45494b",
+			"accent": "#cc7832", "ok": "#629755", "warn": "#ffc66b", "err": "#ff6b68",
+			"panel": "#313335", "panel2": "#3c3f41",
+		}, false},
+		{"tokyo-night", map[string]string{
+			"bg": "#1a1b26", "fg": "#c0caf5", "muted": "#565f89", "line": "#292e42",
+			"accent": "#7aa2f7", "ok": "#9ece6a", "warn": "#e0af68", "err": "#f7768e",
+			"panel": "#16161e", "panel2": "#1f2335",
+		}, true},
+		{"solarized-light", map[string]string{
+			"bg": "#fdf6e3", "fg": "#657b83", "muted": "#93a1a1", "line": "#d3cbb7",
+			"accent": "#268bd2", "ok": "#859900", "warn": "#b58900", "err": "#dc322f",
+			"panel": "#eee8d5", "panel2": "#e4ddc8",
+		}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			spec, ok := catsHostSpec(c.name, c.colors)
+			if !ok {
+				t.Fatal("palette did not synthesize")
+			}
+			_, stated := spec.Colors["sidebar-bg"]
+			if stated != c.keepPanel {
+				t.Fatalf("sidebar-bg stated = %v, want %v (panel %s over bg %s)",
+					stated, c.keepPanel, c.colors["panel"], c.colors["bg"])
+			}
+			p, err := theme.Normalize(spec.Colors)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if theme.Luminance(p["sidebar-bg"]) >= theme.Luminance(p["bg"]) {
+				t.Errorf("sidebar %s is not darker than bg %s", p["sidebar-bg"], p["bg"])
+			}
+			if p["folder"] == p["accent"] || p["folder"] != p["fg"] {
+				t.Errorf("folder = %s, want fg %s (accent %s)", p["folder"], p["fg"], p["accent"])
+			}
+			// Tiers are compared by distance from the panel, not by raw
+			// brightness, so a light theme (darker text = louder) passes
+			// the same check. 0.05 is the Darcula test's floor.
+			bg := theme.Luminance(p["sidebar-bg"])
+			dist := func(k string) float64 {
+				d := theme.Luminance(p[k]) - bg
+				if d < 0 {
+					d = -d
+				}
+				return d
+			}
+			if dist("folder")-dist("file") < 0.05 {
+				t.Errorf("folder %s too close to file %s", p["folder"], p["file"])
+			}
+			if dist("file")-dist("muted") < 0.05 {
+				t.Errorf("file %s too close to dotfile/muted %s", p["file"], p["muted"])
+			}
+		})
 	}
 }
 

@@ -31,7 +31,7 @@ name = "ced"
 # Informational only — the host does not compare it. internal/version is the
 # release source of truth, and a release bumps both by hand in one commit:
 # TestVersion_MatchesCatsManifest fails when the two disagree.
-version = "0.4.3"
+version = "0.4.4"
 description = "A mouse-first terminal code editor: file tree, tabs, syntax highlighting, LSP, git panels and an agent chat panel — cats-native, so paths clicked anywhere in cats open in it."
 # grsh (the embedded terminal panel) is POSIX-only, so there is no Windows
 # build.

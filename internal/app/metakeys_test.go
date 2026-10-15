@@ -135,6 +135,43 @@ func TestMetaAccelOpensRecentFiles(t *testing.T) {
 	}
 }
 
+// TestMetaAccelFindsAllInFile pins ⌘F to Find all in file, not the find
+// bar: a single-line selection opens the list straight away on that
+// text, and with nothing selected the chord asks through the Find-all
+// prompt — the two halves of openFindAll, so a regression back to
+// openFind (which opens neither) fails on both.
+func TestMetaAccelFindsAllInFile(t *testing.T) {
+	armMetaHost(t)
+	a, tab := seedFindAllApp(t)
+
+	// Selected text: the list opens silently on it.
+	tab.Anchor = editor.Position{Line: 0, Col: 0}
+	tab.Cursor = editor.Position{Line: 0, Col: 7} // "package"
+	a.handleKey(metaKeyEv('f', false))
+	m, ok := a.modal.(*findAllModal)
+	if !ok {
+		t.Fatalf("Cmd+F with a selection opened %T, want the Find-all list", a.modal)
+	}
+	if m.query != "package" {
+		t.Fatalf("Find-all query = %q, want %q", m.query, "package")
+	}
+	if a.findOpen {
+		t.Fatal("Cmd+F opened the find bar; it should list every match instead")
+	}
+	a.closeAllModals()
+
+	// No selection: the Find-all prompt asks what to look for.
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
+	a.handleKey(metaKeyEv('f', false))
+	p, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("Cmd+F without a selection opened %T, want the Find-all prompt", a.modal)
+	}
+	if p.title != "Find all in file" {
+		t.Fatalf("prompt title = %q, want %q", p.title, "Find all in file")
+	}
+}
+
 // The shift half of the table, in BOTH spellings a host may send it in:
 // kitty reports the unshifted codepoint with the shift bit (⌘⇧P =
 // 'p'+Shift+Meta), while an emitter reporting the produced character

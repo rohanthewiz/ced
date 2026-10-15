@@ -640,7 +640,7 @@ is ≡ **Edit ▸ Select all** (also under ≡ **File**, and `⌘A`, where `Cmd`
 **Command-key accelerators.** If your terminal forwards the `Cmd` key —
 kitty, Ghostty, WezTerm, or a cats pane — ced also answers the chords
 your hands already know from every other editor: `⌘S` save, `⌘P` find
-file, `⌘⇧P` command palette, `⌘F` find, `⌘⇧F` find in project, `⌘D`
+file, `⌘⇧P` command palette, `⌘F` find all in file, `⌘⇧F` find in project, `⌘D`
 duplicate line, `⌘/` toggle comment, `⌘G` go to line, `⌘E` recent files,
 `⌘A` select all,
 plus `⌘←` / `⌘→` for the start and end of the line (hold `Shift` to
@@ -748,7 +748,7 @@ as `"wordhl": "off"` in `~/.config/ced/config.json`.
 
 ### Find in file
 
-`Esc f` (or **Find in file** from the `≡` menu, or `⌘F`) opens a search
+`Esc f` (or **Find in file** from the `≡` menu) opens a search
 bar directly under the editor, above the status bar:
 
 ```
@@ -792,7 +792,7 @@ query) opens a second row under the first:
 **Replace**) swaps the highlighted match and moves to the next one;
 `Alt+a` (or **All**) swaps every match. Either way it is one undo step.
 
-**Every match at once.** `Esc F` (or `≡` → **Find all in file**, or `↓`
+**Every match at once.** `Esc F` (or `⌘F`, or `≡` → **Find all in file**, or `↓`
 in the bar) lists each hit as a row — line number, then the line with the
 match lit — in a strip that pushes the editor down rather than covering
 it. Moving the highlight previews that line in the editor; `Enter` keeps

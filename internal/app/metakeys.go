@@ -139,8 +139,16 @@ func metaAccels() []metaAccel {
 		// every other editor's user will press first.
 		{key: 'p', action: (*App).openFinder, label: "Find file"},
 		{key: 'p', shift: true, action: (*App).openPalette, label: "Command palette"},
-		// Find and its wider scope, matching the f/F leader pair.
-		{key: 'f', action: (*App).openFind, label: "Find"},
+		// ⌘F is Find all in file (Esc-F's verb, the ≡ Find row), not the
+		// one-at-a-time find bar: the list shows every hit at once and
+		// previews as the highlight moves, which is what the chord is
+		// usually reached for. A single-line selection runs silently;
+		// otherwise it prompts, seeded from the bar or the word under the
+		// caret (openFindAll). The find bar keeps Esc-f and its ≡ row —
+		// and the list is one ↓ away from the bar anyway, so the two stay
+		// a gesture apart in both directions. ⌘⇧F widens the same search
+		// to the project.
+		{key: 'f', action: (*App).menuFindAll, label: "Find all in file"},
 		{key: 'f', shift: true, action: (*App).menuFindInProject, label: "Find in project"},
 		// ⌘W is bound for completeness and is expected to be DEAD in
 		// most hosts: kitty, Ghostty and every browser claim it for

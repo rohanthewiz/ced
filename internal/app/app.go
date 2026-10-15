@@ -4056,6 +4056,15 @@ func (a *App) sidebarPress(x, y int, shift bool) {
 // root" state.
 func (a *App) sidebarClick(x, y int) {
 	sx, sy, _, _ := a.sidebarRect()
+	// The ★ after the project name is the tree's door to the recent
+	// folders picker (same verb as ≡ → File → Recent folders…, which
+	// stays the keyboard path). Checked before HitTest, which answers
+	// "root" for the whole project row and would reset the active folder
+	// instead. No focus change: the picker takes the keyboard anyway.
+	if a.tree.RecentStarAt(x-sx, y-sy) {
+		a.menuRecentFolders()
+		return
+	}
 	n, ok := a.tree.HitTest(x-sx, y-sy)
 	if !ok {
 		return

@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-066**
+**Next ID: N-067**
 
 ## Open
 
@@ -167,6 +167,16 @@ and `raised`.
   never appears there. Hand check inside cats on cats-green and one theme
   that keeps its panel (Tokyo Night): does the darker tree/tab strip sit
   well against cats' own sidebar, and do the folder/file tiers read.
+
+- **N-066** · raised `2026-1015-1640-tree-recent-folders-star` · value low
+  The tree's recent-folders star (`★`, U+2605) is an East Asian
+  AMBIGUOUS-width rune. Measure, paint and hit-test all assume it takes
+  one cell, and it was only seen through run-ced's emulator, which
+  doesn't measure glyph width. Hand check in macOS Terminal.app, tmux and
+  cats: the star takes one cell, the sidebar's right border stays
+  straight on the project row, and a real click on it opens Recent
+  folders. If any of them draws it two cells wide, swap it for a
+  narrow-safe glyph.
 
 ## Roadmap
 

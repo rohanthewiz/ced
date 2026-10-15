@@ -1291,7 +1291,9 @@ func TestContentWidth_CountsIconsAndExecMarks(t *testing.T) {
 
 // TestContentWidth_MeasuresHeaderBlock keeps the two header rows in the
 // answer: a project whose own name is longer than any child would
-// otherwise be the one row auto-fit truncated.
+// otherwise be the one row auto-fit truncated. The project row includes
+// the recent-folders star (a space and the glyph), so a panel sized to
+// the answer shows the whole name AND the star.
 func TestContentWidth_MeasuresHeaderBlock(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "a-project-with-a-very-long-directory-name")
 	mustMkdir(t, root)
@@ -1301,7 +1303,7 @@ func TestContentWidth_MeasuresHeaderBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if got, want := tr.ContentWidth(), runeLen(" "+tr.Root.Name); got != want {
+	if got, want := tr.ContentWidth(), runeLen(" "+tr.Root.Name+" "+RecentFoldersGlyph); got != want {
 		t.Fatalf("ContentWidth = %d, want the project row's %d", got, want)
 	}
 }
@@ -1848,8 +1850,13 @@ func TestHideLabel_ShiftsTheWholeRowMap(t *testing.T) {
 			row0.WriteRune(c.Runes[0])
 		}
 	}
-	if got := strings.TrimSpace(row0.String()); got != filepath.Base(dir) {
-		t.Errorf("row 0 = %q, want the project name %q", got, filepath.Base(dir))
+	// The project row carries the recent-folders star after the name.
+	if got, want := strings.TrimSpace(row0.String()), filepath.Base(dir)+" "+RecentFoldersGlyph; got != want {
+		t.Errorf("row 0 = %q, want the project name row %q", got, want)
+	}
+	// The star moves up with the row: the click map shifts too.
+	if !tr.RecentStarAt(runeLen(" "+filepath.Base(dir))+1, 0) {
+		t.Error("with the label hidden the star should be hit on row 0")
 	}
 
 	// And hit-testing agrees: row 0 is the root, row 1 the first child.
@@ -1909,6 +1916,111 @@ func TestRender_ConflictedFileUsesErrorColor(t *testing.T) {
 		}
 		if !rowHasColor(cells, w, rowY, theme.Default().Error) {
 			t.Errorf("%s row not drawn in the error colour", name)
+		}
+	}
+}
+
+// TestRootStarCol_Layout pins where the recent-folders star goes on the
+// project row: one space past the name when it fits, pinned to the last
+// column (name cut in front of it) when it doesn't, and absent on a panel
+// too narrow for gutter + letter + gap + star.
+func TestRootStarCol_Layout(t *testing.T) {
+	cases := []struct {
+		name string
+		w    int
+		want int
+	}{
+		{"proj", 40, 6}, // " proj" is 5 columns, the gap is col 5
+		{"proj", 7, 6},  // exactly fits
+		{"proj", 6, 5},  // one short: pinned to the last column
+		{"proj", 4, 3},  // smallest panel that still gets a star
+		{"proj", 3, 0},  // too narrow: no star at all
+		{"", 40, 2},     // nameless root still gets its button
+		{"日本語", 40, 5},  // measured in runes, like drawString paints
+	}
+	for _, c := range cases {
+		if got := rootStarCol(c.name, c.w); got != c.want {
+			t.Errorf("rootStarCol(%q, %d) = %d, want %d", c.name, c.w, got, c.want)
+		}
+	}
+}
+
+// TestRender_DrawsRecentStarAfterProjectName checks the paint and the
+// click map agree: the star is drawn exactly where RecentStarAt answers
+// true, and the neighbouring cells (the name, the gap) are not the star.
+func TestRender_DrawsRecentStarAfterProjectName(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "proj")
+	mustMkdir(t, root)
+	tr, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	cells, w := renderAndCollect(t, tr, 30, 6)
+	// Row 1 is the project row (row 0 is EXPLORER).
+	if got := strings.TrimRight(rowText(cells, w, 1), " "); got != " proj "+RecentFoldersGlyph {
+		t.Fatalf("project row = %q, want %q", got, " proj "+RecentFoldersGlyph)
+	}
+	if !tr.RecentStarAt(6, 1) {
+		t.Error("RecentStarAt should hit the star's cell")
+	}
+	for _, miss := range [][2]int{{5, 1}, {7, 1}, {6, 0}, {6, 2}, {1, 1}} {
+		if tr.RecentStarAt(miss[0], miss[1]) {
+			t.Errorf("RecentStarAt(%d, %d) should miss", miss[0], miss[1])
+		}
+	}
+}
+
+// TestRender_RecentStarSurvivesANarrowPanel pins the narrow-panel rule:
+// a long project name is truncated rather than pushing the star off the
+// panel, and the star sits on the last column where the hit test expects.
+func TestRender_RecentStarSurvivesANarrowPanel(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "a-very-long-project-name")
+	mustMkdir(t, root)
+	tr, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	cells, w := renderAndCollect(t, tr, 12, 6)
+	if got := rowText(cells, w, 1); got != " a-very-lo "+RecentFoldersGlyph {
+		t.Fatalf("project row = %q, want the name cut before the star", got)
+	}
+	if !tr.RecentStarAt(11, 1) {
+		t.Error("star on the last column should be hit")
+	}
+}
+
+// TestRecentStarAt_NothingBeforeRender keeps an un-rendered (or nil)
+// tree from reporting a star it never drew — the zero column is the
+// "absent" value, and column 0 of the root row must stay the root.
+func TestRecentStarAt_NothingBeforeRender(t *testing.T) {
+	var nilTree *Tree
+	if nilTree.RecentStarAt(0, 1) {
+		t.Error("nil tree reported a star")
+	}
+	tr := &Tree{Root: &Node{Name: "proj", IsDir: true}}
+	for x := 0; x < 10; x++ {
+		if tr.RecentStarAt(x, 1) {
+			t.Errorf("un-rendered tree reported a star at column %d", x)
+		}
+	}
+}
+
+// TestRender_NoRecentStarOnATinyPanel — below four columns there is no
+// room for the star, and the hit test must not claim a cell for it.
+func TestRender_NoRecentStarOnATinyPanel(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "proj")
+	mustMkdir(t, root)
+	tr, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	cells, w := renderAndCollect(t, tr, 3, 4)
+	if strings.Contains(rowText(cells, w, 1), RecentFoldersGlyph) {
+		t.Fatal("a 3-column panel should not draw the star")
+	}
+	for x := 0; x < 3; x++ {
+		if tr.RecentStarAt(x, 1) {
+			t.Errorf("RecentStarAt(%d, 1) hit with no star drawn", x)
 		}
 	}
 }

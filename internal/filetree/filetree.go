@@ -32,6 +32,18 @@ import (
 // to borrow.
 const markGlyph = "\u2713"
 
+// RecentFoldersGlyph is the star drawn one space after the project name.
+// It is a button, not decoration: clicking it opens the recent-folders
+// picker (the app wires that up via RecentStarAt). A plain BMP star rather
+// than a Nerd Font glyph so it shows on every font, single-width for the
+// same reason markGlyph is — measure (ContentWidth), paint (Render) and
+// hit-test (RecentStarAt) all assume it takes exactly one cell.
+const RecentFoldersGlyph = "\u2605"
+
+// recentStarGap is what the star adds to the project row: one space of
+// separation plus the glyph itself.
+const recentStarGap = 2
+
 // Node is a single entry in the file tree. Directories also carry their
 // children (loaded lazily on first expansion); files carry only their path.
 type Node struct {
@@ -69,6 +81,16 @@ func IsExecFile(info os.FileInfo) bool {
 type Tree struct {
 	Root    *Node
 	visible []*Node // index = screen row in the list area; nil for blank rows.
+
+	// recentStarCol is the column (relative to the render rect's x) where
+	// the last Render drew the recent-folders star on the project row,
+	// or 0 when it drew none. Stamped by Render and read by RecentStarAt,
+	// the same draw-then-hit-test handshake t.visible uses, so the click
+	// target can never sit a cell away from the picture. 0 is safe as
+	// "absent" because column 0 is the row's leading gutter — the star
+	// never lands there.
+	recentStarCol int
+
 	ScrollY int
 
 	// ActiveFolder is the absolute path of the folder the user is
@@ -393,7 +415,22 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	if rootActive {
 		rootStyle = tcell.StyleDefault.Background(bg).Foreground(th.Accent).Bold(true)
 	}
-	drawString(scr, x, y+t.headerRows()-1, w, " "+t.Root.Name, rootStyle)
+	rootY := y + t.headerRows() - 1
+	t.recentStarCol = rootStarCol(t.Root.Name, w)
+	if t.recentStarCol == 0 {
+		drawString(scr, x, rootY, w, " "+t.Root.Name, rootStyle)
+	} else {
+		// The name gets every column up to the gap before the star, so a
+		// long name is cut short rather than pushing the star off the
+		// panel — the button stays reachable at any sidebar width.
+		// Muted (the EXPLORER label's colour) rather than Accent: the root
+		// name is already Accent most of the time, and a star in the same
+		// colour would read as part of the name instead of a separate
+		// button. Muted is known to clear SidebarBG — the label uses it.
+		drawString(scr, x, rootY, t.recentStarCol-1, " "+t.Root.Name, rootStyle)
+		drawString(scr, x+t.recentStarCol, rootY, 1, RecentFoldersGlyph,
+			tcell.StyleDefault.Background(bg).Foreground(th.Muted).Bold(true))
+	}
 
 	// Build the flat list of visible rows from the root's children.
 	flat := make([]flatNode, 0, 128)
@@ -652,7 +689,10 @@ func (t *Tree) ContentWidth() int {
 	if !t.HideLabel {
 		w = runeLen(" EXPLORER")
 	}
-	if n := runeLen(" " + t.Root.Name); n > w {
+	// The project row carries the recent-folders star after the name, so
+	// it is measured with it — otherwise auto-fit would size a panel
+	// that pushes the star onto the name's last letters.
+	if n := runeLen(" "+t.Root.Name) + recentStarGap; n > w {
 		w = n
 	}
 	flat := make([]flatNode, 0, 128)
@@ -778,6 +818,40 @@ func (t *Tree) HitTest(localX, localY int) (*Node, bool) {
 		return nil, false
 	}
 	return n, true
+}
+
+// rootStarCol is where the recent-folders star goes on a project row w
+// columns wide, or 0 when it doesn't go at all.
+//
+// Normally that is one space past the end of " <name>". When the panel
+// is too narrow for the whole row, the star pins to the LAST column and
+// the name is truncated in front of it — the star is a button, and a
+// button that disappears whenever the sidebar is narrow is not one you
+// can rely on. Below four columns there is no room for the gutter, a
+// letter of the name, the gap and the star, so nothing is drawn.
+//
+//	" proj ★"        fits: star after the name
+//	" a-very-lo ★"   narrow: name cut, star on the last column
+func rootStarCol(name string, w int) int {
+	if w < 4 {
+		return 0
+	}
+	col := runeLen(" "+name) + 1
+	if col > w-1 {
+		col = w - 1
+	}
+	return col
+}
+
+// RecentStarAt reports whether a click at (localX, localY) — relative to
+// the tree's render rect, like HitTest — lands on the recent-folders star
+// the last Render drew. Callers check it BEFORE HitTest, which would
+// otherwise answer t.Root for the whole project row.
+func (t *Tree) RecentStarAt(localX, localY int) bool {
+	if t == nil || t.recentStarCol == 0 {
+		return false
+	}
+	return localY == t.headerRows()-1 && localX == t.recentStarCol
 }
 
 // Toggle expands or collapses a directory node, lazily loading its children

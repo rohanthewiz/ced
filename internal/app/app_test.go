@@ -1368,6 +1368,80 @@ func TestSidebarClick_RootRowResetsActiveFolder(t *testing.T) {
 	}
 }
 
+// findTreeRecentStar locates the recent-folders star the last draw put
+// on the tree's project row, in screen coordinates, by reading the
+// screen — so the test clicks where the user would, not where the code
+// says it painted.
+func findTreeRecentStar(t *testing.T, a *App) (int, int) {
+	t.Helper()
+	a.draw()
+	a.screen.Show()
+	cells, w, _ := a.screen.(tcell.SimulationScreen).GetContents()
+	sx, sy, sw, sh := a.sidebarRect()
+	star := []rune(filetree.RecentFoldersGlyph)[0]
+	for y := sy; y < sy+sh; y++ {
+		for x := sx; x < sx+sw; x++ {
+			if c := cells[y*w+x]; len(c.Runes) > 0 && c.Runes[0] == star {
+				return x, y
+			}
+		}
+	}
+	t.Fatal("no recent-folders star drawn in the tree")
+	return 0, 0
+}
+
+// TestSidebarClick_RecentStarOpensRecentFolders pins the tree's door to
+// the recent-folders picker: a click on the ★ after the project name
+// opens the same picker ≡ → File → Recent folders… does, and does NOT
+// fall through to the project row's own click (resetting the active
+// folder).
+func TestSidebarClick_RecentStarOpensRecentFolders(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	sub := filepath.Join(root, "internal")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, root)
+	store := seedSessionStore(a)
+	store.Touch(other)
+	store.Touch(root)
+	a.setActiveFolder(sub)
+
+	x, y := findTreeRecentStar(t, a)
+	a.sidebarPress(x, y, false)
+
+	m, ok := a.modal.(*paletteModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the recent folders picker", a.modal)
+	}
+	if m.title != "Recent folders" {
+		t.Fatalf("picker title = %q, want Recent folders", m.title)
+	}
+	if a.activeFolder != sub {
+		t.Errorf("star click reset the active folder to %q; the root row's click leaked through", a.activeFolder)
+	}
+}
+
+// TestSidebarClick_RecentStarExplainsAnEmptyList — with nothing to list
+// the star still answers, by flashing why (the "unavailable explains
+// itself" rule) rather than opening an empty picker or doing nothing.
+func TestSidebarClick_RecentStarExplainsAnEmptyList(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	seedSessionStore(a).Touch(root)
+
+	x, y := findTreeRecentStar(t, a)
+	a.sidebarPress(x, y, false)
+
+	if a.modal != nil {
+		t.Fatalf("modal = %T, want none", a.modal)
+	}
+	if !strings.Contains(a.statusMsg, "recent folders") {
+		t.Fatalf("status = %q, want the empty-list reason", a.statusMsg)
+	}
+}
+
 // TestSelectWordAt selects the word under a buffer position.
 func TestSelectWordAt(t *testing.T) {
 	dir := t.TempDir()

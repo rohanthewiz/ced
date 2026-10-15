@@ -68,11 +68,11 @@ func TestHostIdentTitle(t *testing.T) {
 	}
 }
 
-// TestHostIdentTabName pins the "file:" prefix: a tab backed by a file
-// is labelled as one by its base name, while an untitled buffer — which
-// has no filename — stays a bare "untitled".
+// TestHostIdentTabName pins the bare name: a tab backed by a file is
+// labelled by its base name with no "file:" prefix (it showed up as
+// noise in cats' PLUGINS rows), and an untitled buffer stays "untitled".
 func TestHostIdentTabName(t *testing.T) {
-	if got := hostIdentTabName(filepath.Join("a", "b", "main.go")); got != "file:main.go" {
+	if got := hostIdentTabName(filepath.Join("a", "b", "main.go")); got != "main.go" {
 		t.Errorf("file tab name = %q", got)
 	}
 	if got := hostIdentTabName(""); got != "untitled" {
@@ -108,14 +108,14 @@ func TestHostIdentAfterEventLifecycle(t *testing.T) {
 	// Open a file: title switches to the file name.
 	a.openFile(target)
 	a.hostIdentAfterEvent()
-	if len(*got) != 2 || (*got)[1] != "\x1b]2;file:hello.go · ced\x07" {
+	if len(*got) != 2 || (*got)[1] != "\x1b]2;hello.go · ced\x07" {
 		t.Fatalf("open title: got %q", *got)
 	}
 
 	// Dirty the buffer: dot appears.
 	a.activeTabPtr().Dirty = true
 	a.hostIdentAfterEvent()
-	if len(*got) != 3 || (*got)[2] != "\x1b]2;● file:hello.go · ced\x07" {
+	if len(*got) != 3 || (*got)[2] != "\x1b]2;● hello.go · ced\x07" {
 		t.Fatalf("dirty title: got %q", *got)
 	}
 

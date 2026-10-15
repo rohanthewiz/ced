@@ -118,23 +118,21 @@ func (a *App) hostIdentAfterEvent() {
 	_ = a.hostIdentWrite(osc2TitleSeq(title))
 }
 
-// hostIdentFilePrefix marks a title that names a FILE. The same OSC 2
-// slot also carries the workspace folder's name when no tab is open, and
-// a host labelling panes from it (cats' tab bar, tmux's pane title)
-// cannot otherwise tell "main.go" the file from a directory that happens
-// to share the spelling — or tell ced's file titles apart from the bare
-// names other programs write there.
-const hostIdentFilePrefix = "file:"
-
-// hostIdentTabName is the name part of a tab's title. A tab backed by a
-// file gets hostIdentFilePrefix on its base name; an untitled buffer has
-// no filename to vouch for, so it keeps the plain "untitled" rather than
-// claiming to be a file called that.
+// hostIdentTabName is the name part of a tab's title: the file's base
+// name, or "untitled" for a buffer with no file behind it.
+//
+// The name goes out bare. An earlier "file:" prefix was meant to let a
+// host tell a file title from the no-tab workspace-folder title, but no
+// host ever parsed it — cats' PLUGINS rows and tab bar just showed it as
+// noise ("file:main.go · ced"). The " · ced" suffix already says which
+// program is talking, and a reader can tell a file from a folder by its
+// name. A host that ever needs the distinction should get a structured
+// signal, not a string prefix scraped out of a free-text title.
 func hostIdentTabName(path string) string {
 	if path == "" {
 		return "untitled"
 	}
-	return hostIdentFilePrefix + filepath.Base(path)
+	return filepath.Base(path)
 }
 
 // hostIdentTitle builds the window title: the ced dirty dot, the name,

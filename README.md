@@ -125,9 +125,9 @@ The goals, in order:
 - **Clipboard over SSH** — OSC 52, including a `tmux` passthrough so
   copy works from inside a tmux session on a remote host.
 - **Formatting** — Go files are formatted on every save (goimports /
-  gofmt); JSON and anything a project lists in `.ced/format.json` are
-  formatted on request with **≡ File → Format file**, keeping the file's
-  own indentation (tabs stay tabs). A first-run trust prompt means
+  gofmt); JSON, PostgreSQL and anything a project lists in
+  `.ced/format.json` are formatted on request with **≡ File → Format
+  file**, keeping the file's own indentation (tabs stay tabs). A first-run trust prompt means
   cloning a repo never silently executes its commands. See
   [Formatting](#formatting).
 - **Auto-save** — dirty buffers are written after you pause for five
@@ -1433,6 +1433,23 @@ file** (a dirty buffer is saved first). That covers:
   gutter), on the character to fix and in plain words — a trailing
   comma is marked on the comma ("trailing comma: JSON allows no ','
   before ']'"), not on the bracket the parser tripped over.
+- **PostgreSQL** (`.sql`, `.pgsql`, `.psql`), built in — a repo-local
+  `sql-formatter` (in `node_modules/.bin`), else `pg_format`, else a
+  global `sql-formatter`, otherwise ced's own formatter. ced's own puts
+  each clause keyword (`SELECT`, `FROM`, `WHERE`, …) on its own line with
+  its body indented one item per line, breaks `AND`/`OR` in `WHERE` and
+  join conditions, indents subqueries and `CREATE TABLE` columns, and
+  leaves other DDL with your own line breaks. Function bodies (`$$ … $$`),
+  strings, comments and `COPY … FROM stdin` data are never touched. The
+  file's **indentation and keyword case are kept** (a lower-case file
+  stays lower-case; no keywords at all → upper case), and the external
+  tools are told the same unless the repo configures them
+  (`.pg_format`, `.sql-formatter.json`, or your own `~/.pg_format`).
+  SQL that doesn't lex — an unterminated string, an unbalanced
+  parenthesis, a MySQL backtick, a `{{ template }}` — is left alone and
+  the flash says where (`sql formatter failed: line 12, col 8:
+  unterminated string`). A project on another database can point `"sql"`
+  at its own tool in `.ced/format.json`.
 - **Any extension your project lists** in `.ced/format.json` —
   `php-cs-fixer`, `ruff`, `prettier`, anything you like. This is **off by
   default** and only kicks in for projects that opt in by checking in a

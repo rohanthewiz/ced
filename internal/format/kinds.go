@@ -56,6 +56,12 @@ const (
 	// verb therefore says "no formatter" for it, which is the truth,
 	// rather than contradicting the validator.
 	kindCSV
+	// kindSQL is PostgreSQL, FORMATTED but not validated. The formatter
+	// refuses what it cannot lex (and says where), but a live underline
+	// on every .sql file would misfire on the other dialects that share
+	// the extension — MySQL's backslash escapes and `#` comments lex as
+	// unterminated PostgreSQL strings — so ced stays quiet until asked.
+	kindSQL
 )
 
 // jsoncNames are the .json files that are conventionally JSON **with
@@ -103,6 +109,12 @@ func kindFor(filePath string) kind {
 	case "csv":
 		// .tsv deliberately stays kindNone — see csvvalidate.go.
 		return kindCSV
+	case "sql", "pgsql", "psql":
+		// .sql is claimed for PostgreSQL. Files in other dialects are
+		// protected by the formatter's refusals (sqllex.go), and a project
+		// on another database overrides the whole ladder with a
+		// format.json "sql" entry.
+		return kindSQL
 	default:
 		// .jsonc and .json5 are explicitly NOT kindJSON: they announce
 		// in their own extension that they are a different language,

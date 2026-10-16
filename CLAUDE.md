@@ -585,6 +585,21 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   mark MOVES to the mistake (trailing comma → the comma; missing comma
   → end of the previous value; EOF → the unclosed opener). Unrecognised
   shapes keep the parser's wording and position.
+- PostgreSQL (`kindSQL`: .sql/.pgsql/.psql) is FORMATTED, never
+  validated live (other dialects share .sql; the formatter's refusals,
+  positioned, are the answer). Builtin: repo-local sql-formatter →
+  pg_format → global sql-formatter; root `.pg_format` /
+  `.sql-formatter.json` handed over with `-c` (tools search their CWD),
+  else the file's style as flags (`sampleSQLStyle`). In-process
+  (format/sqllex.go, sqlfmt.go) is TOKEN-PRESERVING: only whitespace and
+  keyword case change, ENFORCED by re-lexing the output
+  (`sameSQLTokens`) — never weaken that check. Clause layout only for
+  DML/`AS SELECT`/EXPLAIN; other statements keep their line breaks.
+  Verbatim: $$ bodies, strings, comments, COPY data, psql `\` lines.
+  Adjacent string literals keep a newline (grammar). Keyword case and
+  indent by vote (no keywords → upper; no indent → 4 spaces). Only
+  re-case `sqlKeywords` (reserved + rare-as-column); column-ish words go
+  in `sqlContextKeywords`. Backticks / braces refuse.
 - CSV (format/csvvalidate.go) is VALIDATED, never formatted (`kindCSV`;
   `BuiltinHandles` lists the formatting kinds, not `!= kindNone`).
   Strict `encoding/csv` decides; field count set by the first row. Mark

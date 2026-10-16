@@ -916,6 +916,61 @@ func TestRunFormatter_InProcessRefusesBrokenJSON(t *testing.T) {
 	}
 }
 
+// TestRunFormatter_InProcessFormatsSQL pins the SQL floor end to end: no
+// format.json, no pg_format or sql-formatter on PATH, and a .sql file
+// still comes back laid out — no trust prompt, since the code is ours.
+func TestRunFormatter_InProcessFormatsSQL(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "query.sql")
+	if err := os.WriteFile(target, []byte("select a, b from t where x = 1;"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+
+	if !a.runFormatter(0, false) {
+		t.Fatal("runFormatter = false for a .sql file, want the in-process rung to take it")
+	}
+	if confirmOf(a) != nil {
+		t.Fatal("in-process formatting must not open a trust prompt — the code is ours")
+	}
+	if ev := waitForFormatEvent(t, a); ev.err != nil || ev.label != "sql formatter" {
+		t.Fatalf("in-process run: label %q err %v", ev.label, ev.err)
+	}
+	got, _ := os.ReadFile(target)
+	want := "select\n    a,\n    b\nfrom\n    t\nwhere\n    x = 1;\n"
+	if string(got) != want {
+		t.Fatalf("file contents:\ngot  %q\nwant %q", string(got), want)
+	}
+}
+
+// TestRunFormatter_InProcessRefusesBrokenSQL pins the SQL refusal: SQL
+// the formatter cannot lex is left byte for byte, and the error names the
+// position so the flash can send the user to it.
+func TestRunFormatter_InProcessRefusesBrokenSQL(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "query.sql")
+	const broken = "select 1;\nselect 'oops from t;\n"
+	if err := os.WriteFile(target, []byte(broken), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	openTabAtPath(t, a, target)
+
+	a.runFormatter(0, false)
+
+	ev := waitForFormatEvent(t, a)
+	if ev.err == nil || !strings.Contains(ev.err.Error(), "line 2, col 8") {
+		t.Fatalf("err = %v, want the unterminated string's position", ev.err)
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != broken {
+		t.Fatalf("broken file was rewritten:\ngot  %q\nwant %q", string(got), broken)
+	}
+}
+
 // TestRunFormatter_InProcessSkipsAnUnchangedWrite pins that a save
 // of an already-formatted file touches nothing. A rewrite bumps the
 // mtime, which every other layer reads as "somebody changed this file"

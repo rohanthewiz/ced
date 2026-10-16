@@ -25,6 +25,9 @@ func TestKindFor_ClassifiesByExtension(t *testing.T) {
 		{"/proj/data.csv", kindCSV},
 		{"/proj/DATA.CSV", kindCSV},
 		{"/proj/data.tsv", kindNone},
+		{"/proj/schema.sql", kindSQL},
+		{"/proj/fn.pgsql", kindSQL},
+		{"/proj/setup.psql", kindSQL},
 		{"/proj/notes.txt", kindNone},
 		{"/proj/Makefile", kindNone},
 		{"/proj/main.py", kindNone},
@@ -166,6 +169,22 @@ func TestKindFor_AgreesWithTheThreeVerbs(t *testing.T) {
 	if FormatsInProcess(csvPath) {
 		t.Error("FormatsInProcess(data.csv) = true, want false")
 	}
+
+	// A SQL file: formatted by both rungs, but not validated live — the
+	// formatter's own refusals say what is wrong (see kinds.go).
+	const sqlPath = "/proj/schema.sql"
+	if Validates(sqlPath) {
+		t.Error("Validates(schema.sql) = true, want false")
+	}
+	if _, ok, _ := InProcessFormat(sqlPath, []byte("select 1;")); !ok {
+		t.Error("InProcessFormat(schema.sql) ok = false, want true")
+	}
+	if !FormatsInProcess(sqlPath) {
+		t.Error("FormatsInProcess(schema.sql) = false, want true")
+	}
+	if !BuiltinHandles(sqlPath) {
+		t.Error("BuiltinHandles(schema.sql) = false, want true")
+	}
 }
 
 // TestFormatsOnSave_OnlyGo pins the on-save policy: Go formats on every
@@ -177,6 +196,7 @@ func TestFormatsOnSave_OnlyGo(t *testing.T) {
 		"/proj/MAIN.GO":       true,
 		"/proj/data.json":     false,
 		"/proj/data.csv":      false,
+		"/proj/schema.sql":    false,
 		"/proj/tsconfig.json": false,
 		"/proj/notes.md":      false,
 		"/proj/script.py":     false,

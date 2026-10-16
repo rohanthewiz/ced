@@ -76,6 +76,9 @@ func InProcessFormat(filePath string, src []byte) (out []byte, ok bool, err erro
 	case kindJSON:
 		out, err = formatJSON(src)
 		return out, true, err
+	case kindSQL:
+		out, err = formatSQL(src)
+		return out, true, err
 	default:
 		return nil, false, nil
 	}
@@ -128,7 +131,8 @@ func formatJSON(src []byte) ([]byte, error) {
 // It must agree with InProcessFormat's ok result exactly; both switch
 // on the same kindFor, and a test pins them together.
 func FormatsInProcess(filePath string) bool {
-	return kindFor(filePath) == kindJSON
+	k := kindFor(filePath)
+	return k == kindJSON || k == kindSQL
 }
 
 // InProcessName names the formatter for status messages — what ced
@@ -138,6 +142,8 @@ func InProcessName(filePath string) string {
 	switch kindFor(filePath) {
 	case kindJSON:
 		return "json"
+	case kindSQL:
+		return "sql"
 	default:
 		return ""
 	}

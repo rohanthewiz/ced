@@ -201,3 +201,22 @@ func TestInProcessFormat_KeepsTheFilesIndent(t *testing.T) {
 		})
 	}
 }
+
+// TestInProcessFormat_FormatsSQL pins the SQL dispatch: a .sql file is
+// laid out by ced's own pass and named "sql" in status messages, and SQL
+// it cannot lex is refused with the file left to the caller untouched.
+func TestInProcessFormat_FormatsSQL(t *testing.T) {
+	got, ok, err := InProcessFormat("/proj/q.sql", []byte("select a from t;"))
+	if err != nil || !ok {
+		t.Fatalf("InProcessFormat = %v, %v", ok, err)
+	}
+	if want := "select\n    a\nfrom\n    t;\n"; string(got) != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if InProcessName("/proj/q.sql") != "sql" {
+		t.Errorf("InProcessName = %q, want sql", InProcessName("/proj/q.sql"))
+	}
+	if _, ok, err := InProcessFormat("/proj/q.sql", []byte("select 'x")); !ok || err == nil {
+		t.Errorf("broken SQL: ok=%v err=%v, want ok with an error", ok, err)
+	}
+}

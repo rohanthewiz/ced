@@ -391,3 +391,118 @@ func TestBuiltinCommandsFor_JSONRepoConfigOwnsTheStyle(t *testing.T) {
 		})
 	}
 }
+
+// -----------------------------------------------------------------------------
+// PostgreSQL.
+// -----------------------------------------------------------------------------
+
+// writeSQLFixture writes body to query.sql in a fresh temp root and
+// isolates the per-user pg_format config lookup (HOME, XDG) in temp dirs
+// so the machine's own ~/.pg_format cannot change the argv. Returns
+// (root, path).
+func writeSQLFixture(t *testing.T, body string) (string, string) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	root := t.TempDir()
+	p := filepath.Join(root, "query.sql")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	return root, p
+}
+
+// TestBuiltinCommandsFor_SQLOrder pins the SQL preference order: a
+// repo-pinned sql-formatter, then pg_format, then a global sql-formatter
+// — and nil (the in-process rung) with neither installed.
+func TestBuiltinCommandsFor_SQLOrder(t *testing.T) {
+	root, p := writeSQLFixture(t, "select 1;\n")
+
+	stubLookPath(t, map[string]string{"pg_format": "/fake/bin/pg_format", "sql-formatter": "/fake/bin/sql-formatter"})
+	if cmds := BuiltinCommandsFor(root, p); len(cmds) != 1 || cmds[0][0] != "/fake/bin/pg_format" {
+		t.Errorf("both global: cmds = %v, want pg_format", cmds)
+	}
+
+	local := writeFakeTool(t, root, "sql-formatter", 0o755)
+	if cmds := BuiltinCommandsFor(root, p); len(cmds) != 1 || cmds[0][0] != local {
+		t.Errorf("repo-local present: cmds = %v, want %s", cmds, local)
+	}
+
+	other := t.TempDir()
+	stubLookPath(t, map[string]string{"sql-formatter": "/fake/bin/sql-formatter"})
+	if cmds := BuiltinCommandsFor(other, p); len(cmds) != 1 || cmds[0][0] != "/fake/bin/sql-formatter" {
+		t.Errorf("global sql-formatter only: cmds = %v", cmds)
+	}
+
+	stubLookPath(t, nil)
+	if cmds := BuiltinCommandsFor(other, p); cmds != nil {
+		t.Errorf("no tools: cmds = %v, want nil", cmds)
+	}
+}
+
+// TestBuiltinCommandsFor_PgFormatGetsTheFilesStyle pins that pg_format is
+// told the file's indent and keyword case, rewriting in place.
+func TestBuiltinCommandsFor_PgFormatGetsTheFilesStyle(t *testing.T) {
+	root, p := writeSQLFixture(t, "select\n\ta\nfrom t;\n")
+	stubLookPath(t, map[string]string{"pg_format": "/fake/bin/pg_format"})
+	cmds := BuiltinCommandsFor(root, p)
+	want := []string{"/fake/bin/pg_format", "-i", "--tabs", "--keyword-case", "1", p}
+	if len(cmds) != 1 || !equalArgv(cmds[0], want) {
+		t.Errorf("cmds = %v, want %v", cmds, want)
+	}
+}
+
+// TestBuiltinCommandsFor_PgFormatConfigOwnsTheStyle pins the config
+// rules: a repo .pg_format is handed over with -c (pg_format would only
+// find it from its cwd), and a per-user config means no flags at all.
+func TestBuiltinCommandsFor_PgFormatConfigOwnsTheStyle(t *testing.T) {
+	root, p := writeSQLFixture(t, "select\n\ta\nfrom t;\n")
+	stubLookPath(t, map[string]string{"pg_format": "/fake/bin/pg_format"})
+
+	if err := os.WriteFile(filepath.Join(os.Getenv("HOME"), ".pg_format"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"/fake/bin/pg_format", "-i", p}
+	if cmds := BuiltinCommandsFor(root, p); len(cmds) != 1 || !equalArgv(cmds[0], want) {
+		t.Errorf("user config: cmds = %v, want %v", cmds, want)
+	}
+
+	rc := filepath.Join(root, ".pg_format")
+	if err := os.WriteFile(rc, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"/fake/bin/pg_format", "-i", "-c", rc, p}
+	if cmds := BuiltinCommandsFor(root, p); len(cmds) != 1 || !equalArgv(cmds[0], want) {
+		t.Errorf("repo config: cmds = %v, want %v", cmds, want)
+	}
+}
+
+// TestBuiltinCommandsFor_SQLFormatterConfig pins sql-formatter's argv:
+// an inline config naming the dialect and the file's style, or the
+// repo's own config file handed over by path.
+func TestBuiltinCommandsFor_SQLFormatterConfig(t *testing.T) {
+	root, p := writeSQLFixture(t, "SELECT\n    a\nFROM t;\n")
+	stubLookPath(t, map[string]string{"sql-formatter": "/fake/bin/sql-formatter"})
+	want := []string{"/fake/bin/sql-formatter", "--fix", "-c",
+		`{"keywordCase":"upper","language":"postgresql","tabWidth":4}`, p}
+	if cmds := BuiltinCommandsFor(root, p); len(cmds) != 1 || !equalArgv(cmds[0], want) {
+		t.Errorf("inline config: cmds = %v, want %v", cmds, want)
+	}
+
+	cfg := filepath.Join(root, ".sql-formatter.json")
+	if err := os.WriteFile(cfg, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"/fake/bin/sql-formatter", "--fix", "-c", cfg, p}
+	if cmds := BuiltinCommandsFor(root, p); len(cmds) != 1 || !equalArgv(cmds[0], want) {
+		t.Errorf("repo config: cmds = %v, want %v", cmds, want)
+	}
+}
+
+// TestBuiltinHandles_SQL pins that ced's built-in path claims SQL, so the
+// install offer stays quiet about a file ced already formats.
+func TestBuiltinHandles_SQL(t *testing.T) {
+	if !BuiltinHandles("/proj/query.sql") {
+		t.Error("BuiltinHandles(query.sql) = false, want true")
+	}
+}

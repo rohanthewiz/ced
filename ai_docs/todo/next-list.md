@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-067**
+**Next ID: N-070**
 
 ## Open
 
@@ -79,6 +79,22 @@ plus the LSP work done in the seeding session itself
   binds F-keys yet) or a ⌘ chord (must be pressed in a real browser
   first, per the ⌘ allowlist rule) would make stepping through them
   practical. Decide which, then add it as a second door.
+
+- **N-068** · raised `2026-1016-1651-postgres-sql-formatting` · value low
+  SQL files get no live syntax underline (`kindSQL` is formatted, not
+  validated) because .sql is shared with other dialects — MySQL's
+  backslash escapes and `#` comments lex as unterminated PostgreSQL
+  strings. The formatter's positioned refusal is the only answer today.
+  Option: validate only the dialect-unambiguous `.pgsql` / `.psql`
+  extensions with the existing lexer + paren matcher (sqllex.go,
+  `matchSQLParens`), keeping the three-verb table in agreement.
+
+- **N-069** · raised `2026-1016-1651-postgres-sql-formatting` · value low
+  ced's in-process SQL formatter (sqlfmt.go) deliberately does not wrap
+  long lines and does not look inside `$$` PL/pgSQL bodies (a second
+  language, a string to the SQL grammar). A long DDL line or a messy
+  function body stays as written. Revisit only if someone hits it; any
+  change must keep the re-lex token check (`sameSQLTokens`).
 
 ## Validate
 
@@ -177,6 +193,18 @@ and `raised`.
   a gold emoji two cells wide, the sidebar's right border stays straight
   on the project row, and a real click on either half opens Recent
   folders.
+
+- **N-067** · raised `2026-1016-1651-postgres-sql-formatting` · value low
+  PostgreSQL formatting's external rung has only run with stubbed
+  binaries: neither `pg_format` nor `sql-formatter` was installed, so the
+  argvs (`pg_format -i --tabs|--spaces N --keyword-case 1|2`, `-c
+  <root>/.pg_format`; `sql-formatter --fix -c '<inline JSON>'` / `-c
+  <root>/.sql-formatter.json`) were checked against each project's
+  README only. Install both and run ≡ File → Format file on a tab- and
+  a four-space-indented, lower-case .sql file: each tool rewrites in
+  place, keeps the indent and case, and a root config wins. Also confirm
+  the in-process rung in the real binary (run-ced): format, then one
+  Esc u undoes it.
 
 ## Roadmap
 

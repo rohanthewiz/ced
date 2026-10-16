@@ -71,10 +71,37 @@
 //
 // A file with no indentation to read (minified, one line) gets no flags
 // at all: the tool's own default applies, exactly as before.
+//
+// # PostgreSQL
+//
+// Two tools pass the in-place test: pg_format (pgFormatter, `-i`) and
+// sql-formatter (`--fix`). The order follows the repo-local rule above:
+//
+//	<root>/node_modules/.bin/sql-formatter   the repo pinned it
+//	pg_format on $PATH                       Postgres's own formatter
+//	sql-formatter on $PATH                   the generic fallback
+//
+// pg_format outranks a GLOBAL sql-formatter because it is written for
+// PostgreSQL alone; sql-formatter needs telling (`postgresql`), and a
+// machine with both is likelier to be a Postgres developer's.
+//
+// Both get the file's own conventions — indent unit AND keyword case
+// (sqlfmt.go's vote) — unless the tool is configured. Neither tool finds
+// its config relative to the FILE: both search the process's working
+// directory, which in ced is wherever the terminal panel last cd'd. So a
+// config in the project root is handed over explicitly with -c, which
+// makes it win regardless of cwd:
+//
+//	pg_format       <root>/.pg_format → `-c` it; ~/.pg_format or
+//	                $XDG_CONFIG_HOME/pg_format/pg_format.conf → no flags
+//	                (pg_format reads those itself); none → style flags
+//	sql-formatter   <root>/.sql-formatter.json → `-c` it; none → `-c`
+//	                with an inline JSON config naming the dialect + style
 
 package format
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -175,6 +202,8 @@ func BuiltinCommandsFor(rootDir, filePath string) [][]string {
 		return goCommands(abs)
 	case kindJSON:
 		return jsonCommands(rootDir, abs)
+	case kindSQL:
+		return sqlCommands(rootDir, abs)
 	default:
 		return nil
 	}
@@ -223,6 +252,110 @@ func jsonCommands(rootDir, abs string) [][]string {
 	return nil
 }
 
+// sqlCommands resolves the PostgreSQL formatter (see the file comment
+// for the order and the config rules). Like JSON it never chains.
+func sqlCommands(rootDir, abs string) [][]string {
+	if rootDir != "" {
+		local := filepath.Join(rootDir, filepath.FromSlash(nodeBinDir), "sql-formatter")
+		if isExecutable(local) {
+			return [][]string{sqlFormatterArgv(local, rootDir, abs)}
+		}
+	}
+	if bin, err := lookPath("pg_format"); err == nil {
+		return [][]string{pgFormatArgv(bin, rootDir, abs)}
+	}
+	if bin, err := lookPath("sql-formatter"); err == nil {
+		return [][]string{sqlFormatterArgv(bin, rootDir, abs)}
+	}
+	return nil
+}
+
+// pgFormatArgv builds pg_format's in-place command line.
+func pgFormatArgv(bin, rootDir, abs string) []string {
+	argv := []string{bin, "-i"}
+	if rootDir != "" && hasAnyFile(rootDir, []string{".pg_format"}) {
+		return append(argv, "-c", filepath.Join(rootDir, ".pg_format"), abs)
+	}
+	if pgFormatUserConfig() {
+		return append(argv, abs)
+	}
+	st := sampleSQLStyle(abs)
+	switch {
+	case st.indent.Tabs:
+		argv = append(argv, "--tabs")
+	case st.indent.Width > 0:
+		argv = append(argv, "--spaces", strconv.Itoa(st.indent.Width))
+	}
+	if st.caseKnown {
+		// 1 = lower, 2 = upper (pg_format's own numbering).
+		argv = append(argv, "--keyword-case", map[bool]string{false: "1", true: "2"}[st.upper])
+	}
+	return append(argv, abs)
+}
+
+// pgFormatUserConfig reports whether pg_format will find a per-user
+// config on its own, in which case ced passes no style flags: the user
+// has said how they want SQL formatted.
+func pgFormatUserConfig() bool {
+	if home, err := os.UserHomeDir(); err == nil && hasAnyFile(home, []string{".pg_format"}) {
+		return true
+	}
+	xdg := os.Getenv("XDG_CONFIG_HOME")
+	if xdg == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			xdg = filepath.Join(home, ".config")
+		}
+	}
+	return xdg != "" && hasAnyFile(filepath.Join(xdg, "pg_format"), []string{"pg_format.conf"})
+}
+
+// sqlFormatterArgv builds sql-formatter's in-place command line. Its
+// -c takes a file path or an inline JSON object; the inline form is how
+// the dialect and the file's style reach it without writing a config.
+func sqlFormatterArgv(bin, rootDir, abs string) []string {
+	argv := []string{bin, "--fix"}
+	if rootDir != "" && hasAnyFile(rootDir, []string{".sql-formatter.json"}) {
+		return append(argv, "-c", filepath.Join(rootDir, ".sql-formatter.json"), abs)
+	}
+	cfg := map[string]any{"language": "postgresql"}
+	st := sampleSQLStyle(abs)
+	switch {
+	case st.indent.Tabs:
+		cfg["useTabs"] = true
+	case st.indent.Width > 0:
+		cfg["tabWidth"] = st.indent.Width
+	}
+	if st.caseKnown {
+		cfg["keywordCase"] = map[bool]string{false: "lower", true: "upper"}[st.upper]
+	}
+	// Marshalling a map of strings, bools and ints cannot fail.
+	js, _ := json.Marshal(cfg)
+	return append(argv, "-c", string(js), abs)
+}
+
+// sampleSQLStyle reads the conventions of the SQL file at path from its
+// first indentSampleBytes. An unreadable file reports no conventions,
+// which means "pass no style" — the tool's defaults.
+func sampleSQLStyle(path string) sqlStyle {
+	f, err := os.Open(path)
+	if err != nil {
+		return sqlStyle{}
+	}
+	defer f.Close()
+	head, err := io.ReadAll(io.LimitReader(f, indentSampleBytes))
+	if err != nil {
+		return sqlStyle{}
+	}
+	return detectSQLStyle(head)
+}
+
+// isExecutable reports whether path is a regular file with an execute
+// bit, following symlinks (a node_modules/.bin entry is normally one).
+func isExecutable(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+}
+
 // sampleIndent detects the indentation of the file at path from its
 // first indentSampleBytes. An unreadable file reports the zero Indent,
 // which means "pass no flags" — the tool's default, the behaviour
@@ -268,7 +401,7 @@ func resolveTool(rootDir, name string) (string, bool) {
 		local := filepath.Join(rootDir, filepath.FromSlash(nodeBinDir), name)
 		// Stat, not Lstat: a .bin entry is normally a symlink into the
 		// package that provides it, and following it is the point.
-		if info, err := os.Stat(local); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+		if isExecutable(local) {
 			return local, true
 		}
 	}
@@ -288,7 +421,7 @@ func resolveTool(rootDir, name string) (string, bool) {
 // but never formatted; a CSV file must stay open to the install offer.
 func BuiltinHandles(filePath string) bool {
 	switch kindFor(filePath) {
-	case kindGo, kindJSON:
+	case kindGo, kindJSON, kindSQL:
 		return true
 	default:
 		return false

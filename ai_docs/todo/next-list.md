@@ -169,14 +169,14 @@ and `raised`.
   well against cats' own sidebar, and do the folder/file tiers read.
 
 - **N-066** · raised `2026-1015-1640-tree-recent-folders-star` · value low
-  The tree's recent-folders star (`★`, U+2605) is an East Asian
-  AMBIGUOUS-width rune. Measure, paint and hit-test all assume it takes
-  one cell, and it was only seen through run-ced's emulator, which
-  doesn't measure glyph width. Hand check in macOS Terminal.app, tmux and
-  cats: the star takes one cell, the sidebar's right border stays
-  straight on the project row, and a real click on it opens Recent
-  folders. If any of them draws it two cells wide, swap it for a
-  narrow-safe glyph.
+  The tree's recent-folders star has only been seen through run-ced's
+  emulator, which doesn't measure glyph width. Since 0.5.0 it changed
+  from `★` (U+2605, ambiguous width, drawn too small) to the emoji `⭐`
+  (U+2B50, East Asian WIDE, measured, painted and hit-tested as two
+  cells). Hand check in macOS Terminal.app, tmux and cats: it draws as
+  a gold emoji two cells wide, the sidebar's right border stays straight
+  on the project row, and a real click on either half opens Recent
+  folders.
 
 ## Roadmap
 

@@ -839,10 +839,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `lockTreeAutoFit`.
 
 ### File tree
-- **Recent-folders star (filetree.go)**: `★` one space after the project
-  name on the root row; click = `menuRecentFolders` (≡ File "Recent
-  folders…" is the twin). A narrow panel cuts the NAME, never the star
-  (pinned to the last column; none under 4 cols). Render stamps the
+- **Recent-folders star (filetree.go)**: `⭐` (U+2B50, WIDE = two cells,
+  `recentStarWidth`; not `★`, which is small and ambiguous-width) one
+  space after the project name on the root row; click on either cell =
+  `menuRecentFolders` (≡ File "Recent folders…" is the twin). A narrow
+  panel cuts the NAME, never the star (pinned to the last two columns;
+  none under 5 cols). Render stamps the
   column, `RecentStarAt` reads it and is checked BEFORE `HitTest` (which
   answers root for the whole row); `ContentWidth` measures it.
 - **Auto-fit (treeautofit.go)**: `autoFitSidebar` runs at the top of

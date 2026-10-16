@@ -34,15 +34,24 @@ const markGlyph = "\u2713"
 
 // RecentFoldersGlyph is the star drawn one space after the project name.
 // It is a button, not decoration: clicking it opens the recent-folders
-// picker (the app wires that up via RecentStarAt). A plain BMP star rather
-// than a Nerd Font glyph so it shows on every font, single-width for the
-// same reason markGlyph is — measure (ContentWidth), paint (Render) and
-// hit-test (RecentStarAt) all assume it takes exactly one cell.
-const RecentFoldersGlyph = "\u2605"
+// picker (the app wires that up via RecentStarAt).
+//
+// Why ⭐ (U+2B50) and not the text star ★ (U+2605): ★ renders as a thin,
+// font-dependent glyph a little smaller than the letters beside it — hard
+// to spot as a button. ⭐ has Emoji_Presentation, so terminals draw it as
+// a full-size gold colour emoji. It is also East Asian WIDE, which every
+// terminal and tmux agree is two cells, where ★ is AMBIGUOUS and some
+// setups draw it two wide over one measured cell. The cost is the second
+// cell, which measure, paint and hit-test all account for via
+// recentStarWidth.
+const RecentFoldersGlyph = "\u2b50"
+
+// recentStarWidth is how many cells the star occupies on screen.
+const recentStarWidth = 2
 
 // recentStarGap is what the star adds to the project row: one space of
-// separation plus the glyph itself.
-const recentStarGap = 2
+// separation plus the glyph's cells.
+const recentStarGap = 1 + recentStarWidth
 
 // Node is a single entry in the file tree. Directories also carry their
 // children (loaded lazily on first expansion); files carry only their path.
@@ -82,8 +91,9 @@ type Tree struct {
 	Root    *Node
 	visible []*Node // index = screen row in the list area; nil for blank rows.
 
-	// recentStarCol is the column (relative to the render rect's x) where
-	// the last Render drew the recent-folders star on the project row,
+	// recentStarCol is the column (relative to the render rect's x) of
+	// the FIRST cell of the recent-folders star the last Render drew on
+	// the project row,
 	// or 0 when it drew none. Stamped by Render and read by RecentStarAt,
 	// the same draw-then-hit-test handshake t.visible uses, so the click
 	// target can never sit a cell away from the picture. 0 is safe as
@@ -423,13 +433,16 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		// The name gets every column up to the gap before the star, so a
 		// long name is cut short rather than pushing the star off the
 		// panel — the button stays reachable at any sidebar width.
-		// Muted (the EXPLORER label's colour) rather than Accent: the root
-		// name is already Accent most of the time, and a star in the same
-		// colour would read as part of the name instead of a separate
-		// button. Muted is known to clear SidebarBG — the label uses it.
+		//
+		// The emoji brings its own gold; the foreground only matters to a
+		// terminal that falls back to a monochrome glyph, where the warning
+		// yellow keeps it reading as a gold star rather than as text.
+		// SetContent (not drawString) because tcell knows the rune is wide
+		// and claims the second cell itself.
 		drawString(scr, x, rootY, t.recentStarCol-1, " "+t.Root.Name, rootStyle)
-		drawString(scr, x+t.recentStarCol, rootY, 1, RecentFoldersGlyph,
-			tcell.StyleDefault.Background(bg).Foreground(th.Muted).Bold(true))
+		star, _ := utf8.DecodeRuneInString(RecentFoldersGlyph)
+		scr.SetContent(x+t.recentStarCol, rootY, star, nil,
+			tcell.StyleDefault.Background(bg).Foreground(th.DiagWarning))
 	}
 
 	// Build the flat list of visible rows from the root's children.
@@ -823,35 +836,39 @@ func (t *Tree) HitTest(localX, localY int) (*Node, bool) {
 // rootStarCol is where the recent-folders star goes on a project row w
 // columns wide, or 0 when it doesn't go at all.
 //
+// The answer is the star's FIRST cell; it occupies recentStarWidth.
 // Normally that is one space past the end of " <name>". When the panel
-// is too narrow for the whole row, the star pins to the LAST column and
-// the name is truncated in front of it — the star is a button, and a
+// is too narrow for the whole row, the star pins to the LAST two columns
+// and the name is truncated in front of it — the star is a button, and a
 // button that disappears whenever the sidebar is narrow is not one you
-// can rely on. Below four columns there is no room for the gutter, a
-// letter of the name, the gap and the star, so nothing is drawn.
+// can rely on. Below five columns there is no room for the gutter, a
+// letter of the name, the gap and the two-cell star, so nothing is drawn.
 //
-//	" proj ★"        fits: star after the name
-//	" a-very-lo ★"   narrow: name cut, star on the last column
+//	" proj ⭐"       fits: star after the name
+//	" a-very-l ⭐"   narrow: name cut, star on the last two columns
 func rootStarCol(name string, w int) int {
-	if w < 4 {
+	if w < 2+recentStarGap {
 		return 0
 	}
 	col := runeLen(" "+name) + 1
-	if col > w-1 {
-		col = w - 1
+	if last := w - recentStarWidth; col > last {
+		col = last
 	}
 	return col
 }
 
 // RecentStarAt reports whether a click at (localX, localY) — relative to
 // the tree's render rect, like HitTest — lands on the recent-folders star
-// the last Render drew. Callers check it BEFORE HitTest, which would
-// otherwise answer t.Root for the whole project row.
+// the last Render drew — either of its two cells, since a click on the
+// right half of a wide glyph reports that half's column. Callers check it
+// BEFORE HitTest, which would otherwise answer t.Root for the whole
+// project row.
 func (t *Tree) RecentStarAt(localX, localY int) bool {
 	if t == nil || t.recentStarCol == 0 {
 		return false
 	}
-	return localY == t.headerRows()-1 && localX == t.recentStarCol
+	return localY == t.headerRows()-1 &&
+		localX >= t.recentStarCol && localX < t.recentStarCol+recentStarWidth
 }
 
 // Toggle expands or collapses a directory node, lazily loading its children

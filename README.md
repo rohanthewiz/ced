@@ -448,7 +448,7 @@ Bare `ced` always opens the current directory — `cd myproj && ced` means
 what it says. What comes back with you is the **tabs**: each folder
 remembers which files were open and where the cursors were, and reopening
 it restores them. `≡` → File → **Open folder…** / **Recent folders…**
-switches projects without leaving the editor — or click the **★** after
+switches projects without leaving the editor — or click the **⭐** after
 the project name at the top of the file tree for the same recent list;
 **Disable session restore**
 in the same group turns the tab restore off (folders are still

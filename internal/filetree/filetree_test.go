@@ -21,8 +21,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/uniseg"
 
 	"github.com/rohanthewiz/ced/internal/icons"
 	"github.com/rohanthewiz/ced/internal/theme"
@@ -1303,7 +1305,9 @@ func TestContentWidth_MeasuresHeaderBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if got, want := tr.ContentWidth(), runeLen(" "+tr.Root.Name+" "+RecentFoldersGlyph); got != want {
+	// The star is one rune but two cells, hence the gap constant rather
+	// than runeLen of the glyph.
+	if got, want := tr.ContentWidth(), runeLen(" "+tr.Root.Name)+recentStarGap; got != want {
 		t.Fatalf("ContentWidth = %d, want the project row's %d", got, want)
 	}
 }
@@ -1921,9 +1925,10 @@ func TestRender_ConflictedFileUsesErrorColor(t *testing.T) {
 }
 
 // TestRootStarCol_Layout pins where the recent-folders star goes on the
-// project row: one space past the name when it fits, pinned to the last
-// column (name cut in front of it) when it doesn't, and absent on a panel
-// too narrow for gutter + letter + gap + star.
+// project row (its first cell): one space past the name when it fits,
+// pinned to the last two columns (name cut in front of it) when it
+// doesn't, and absent on a panel too narrow for gutter + letter + gap +
+// the two-cell star.
 func TestRootStarCol_Layout(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1931,10 +1936,10 @@ func TestRootStarCol_Layout(t *testing.T) {
 		want int
 	}{
 		{"proj", 40, 6}, // " proj" is 5 columns, the gap is col 5
-		{"proj", 7, 6},  // exactly fits
-		{"proj", 6, 5},  // one short: pinned to the last column
-		{"proj", 4, 3},  // smallest panel that still gets a star
-		{"proj", 3, 0},  // too narrow: no star at all
+		{"proj", 8, 6},  // exactly fits: cells 6 and 7
+		{"proj", 7, 5},  // one short: pinned to the last two columns
+		{"proj", 5, 3},  // smallest panel that still gets a star
+		{"proj", 4, 0},  // too narrow: no star at all
 		{"", 40, 2},     // nameless root still gets its button
 		{"日本語", 40, 5},  // measured in runes, like drawString paints
 	}
@@ -1960,10 +1965,14 @@ func TestRender_DrawsRecentStarAfterProjectName(t *testing.T) {
 	if got := strings.TrimRight(rowText(cells, w, 1), " "); got != " proj "+RecentFoldersGlyph {
 		t.Fatalf("project row = %q, want %q", got, " proj "+RecentFoldersGlyph)
 	}
-	if !tr.RecentStarAt(6, 1) {
-		t.Error("RecentStarAt should hit the star's cell")
+	// Both cells of the wide glyph answer: a click on its right half
+	// reports that half's column.
+	for _, hit := range []int{6, 7} {
+		if !tr.RecentStarAt(hit, 1) {
+			t.Errorf("RecentStarAt(%d, 1) should hit the star", hit)
+		}
 	}
-	for _, miss := range [][2]int{{5, 1}, {7, 1}, {6, 0}, {6, 2}, {1, 1}} {
+	for _, miss := range [][2]int{{5, 1}, {8, 1}, {6, 0}, {6, 2}, {1, 1}} {
 		if tr.RecentStarAt(miss[0], miss[1]) {
 			t.Errorf("RecentStarAt(%d, %d) should miss", miss[0], miss[1])
 		}
@@ -1981,11 +1990,12 @@ func TestRender_RecentStarSurvivesANarrowPanel(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	cells, w := renderAndCollect(t, tr, 12, 6)
-	if got := rowText(cells, w, 1); got != " a-very-lo "+RecentFoldersGlyph {
+	// rowText reads the wide glyph's second cell as a blank.
+	if got := rowText(cells, w, 1); got != " a-very-l "+RecentFoldersGlyph+" " {
 		t.Fatalf("project row = %q, want the name cut before the star", got)
 	}
-	if !tr.RecentStarAt(11, 1) {
-		t.Error("star on the last column should be hit")
+	if !tr.RecentStarAt(10, 1) || !tr.RecentStarAt(11, 1) {
+		t.Error("star on the last two columns should be hit")
 	}
 }
 
@@ -2005,7 +2015,7 @@ func TestRecentStarAt_NothingBeforeRender(t *testing.T) {
 	}
 }
 
-// TestRender_NoRecentStarOnATinyPanel — below four columns there is no
+// TestRender_NoRecentStarOnATinyPanel — below five columns there is no
 // room for the star, and the hit test must not claim a cell for it.
 func TestRender_NoRecentStarOnATinyPanel(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "proj")
@@ -2014,13 +2024,26 @@ func TestRender_NoRecentStarOnATinyPanel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	cells, w := renderAndCollect(t, tr, 3, 4)
+	cells, w := renderAndCollect(t, tr, 4, 4)
 	if strings.Contains(rowText(cells, w, 1), RecentFoldersGlyph) {
-		t.Fatal("a 3-column panel should not draw the star")
+		t.Fatal("a 4-column panel should not draw the star")
 	}
-	for x := 0; x < 3; x++ {
+	for x := 0; x < 4; x++ {
 		if tr.RecentStarAt(x, 1) {
 			t.Errorf("RecentStarAt(%d, 1) hit with no star drawn", x)
 		}
+	}
+}
+
+// TestRecentFoldersGlyph_IsTwoCellsWide pins the assumption measure,
+// paint and hit-test share: the star is a wide rune that tcell lays over
+// recentStarWidth cells. If the glyph is ever swapped for a narrow or
+// ambiguous one, this fails before the click target drifts off the paint.
+func TestRecentFoldersGlyph_IsTwoCellsWide(t *testing.T) {
+	if got := uniseg.StringWidth(RecentFoldersGlyph); got != recentStarWidth {
+		t.Fatalf("glyph width = %d, want recentStarWidth %d", got, recentStarWidth)
+	}
+	if utf8.RuneCountInString(RecentFoldersGlyph) != 1 {
+		t.Fatal("the star must be a single rune — Render paints it with one SetContent")
 	}
 }

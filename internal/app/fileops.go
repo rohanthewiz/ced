@@ -782,6 +782,25 @@ func (a *App) menuCopyAbsolutePath() {
 	a.copyPathToSystemClipboard(absolutePathFor(tab.Path), "absolute path")
 }
 
+// menuCopyFileName copies the active tab's bare file name (no directory)
+// onto the host system clipboard. The ≡ File twin of the tree's "Copy
+// name" row, for the terminal that swallows right-click.
+func (a *App) menuCopyFileName() {
+	a.closeMenu()
+	tab := a.activeTabPtr()
+	if tab == nil || tab.Path == "" {
+		return
+	}
+	a.copyPathToSystemClipboard(filepath.Base(tab.Path), "name")
+}
+
+// ctxCopyName copies n's bare name onto the host system clipboard. Read
+// from the path rather than Node.Name so the root row — whose Name is
+// derived the same way today — can never hand over a display label.
+func ctxCopyName(a *App, n *filetree.Node) {
+	a.copyPathToSystemClipboard(filepath.Base(n.Path), "name")
+}
+
 // ctxCopyRelativePath copies n's path (relative to the project root) onto
 // the host system clipboard. Tree-context counterpart to menuCopyRelativePath.
 func ctxCopyRelativePath(a *App, n *filetree.Node) {

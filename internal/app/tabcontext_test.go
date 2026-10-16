@@ -99,7 +99,7 @@ func TestTabContext_RightClickOpensTheTabMenu(t *testing.T) {
 		labels = append(labels, it.label)
 	}
 	want := "Reveal in file tree|Show uncommitted changes|Show git history|Compare with clipboard|" +
-		"Format file|Validate file|Restore (discard changes)…|Add to group…|Zip file|Copy to…|Copy relative path|Copy absolute path|Close tab|Close other tabs"
+		"Format file|Validate file|Restore (discard changes)…|Add to group…|Zip file|Copy to…|Copy file name|Copy relative path|Copy absolute path|Close tab|Close other tabs"
 	if got := strings.Join(labels, "|"); got != want {
 		t.Errorf("rows = %s, want %s", got, want)
 	}
@@ -330,6 +330,21 @@ func TestTabContext_ZipActsInPlace(t *testing.T) {
 	if _, err := os.Stat(paths[1] + ".zip"); err != nil {
 		t.Errorf("no b.go.zip beside b.go: %v", err)
 	}
+}
+
+// TestTabContext_CopyFileNameActsInPlace pins the name row: it copies
+// the CLICKED background tab's base name and leaves the active tab in
+// front, like the copy-path rows beside it.
+func TestTabContext_CopyFileNameActsInPlace(t *testing.T) {
+	a, paths := tabMenuTestApp(t)
+	_, sy, _ := a.tabStripRect()
+	rightClick(a, tabRectFor(t, a, paths[1]).X+2, sy)
+	runTabMenuRow(t, a, "Copy file name")
+
+	if a.activeTabPtr().Path != paths[0] {
+		t.Errorf("active = %s, want a.go still", a.activeTabPtr().Path)
+	}
+	assertCopiedName(t, a, filepath.Base(paths[1]))
 }
 
 // TestTabContext_CopyToCopiesTheClickedTabInPlace pins N-055's row: Copy

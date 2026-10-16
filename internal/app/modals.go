@@ -1034,6 +1034,10 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	// Zip works on files, folders, and the root alike — the archive
 	// is read-only on the source, so no root guard is needed.
 	items = append(items, contextItem{label: "Zip", action: ctxZip})
+	// Name / rel path / abs path: the three clipboard rows, shortest
+	// string first. The name row is on every node, root included — a
+	// folder's or project's name is as pasteable as a file's.
+	items = append(items, contextItem{label: "Copy name", action: ctxCopyName})
 	items = append(items, contextItem{label: "Copy rel path", action: ctxCopyRelativePath})
 	items = append(items, contextItem{label: "Copy abs path", action: ctxCopyAbsolutePath})
 	// Preview / Stop Preview (markdown.go) — a conditional row like Paste

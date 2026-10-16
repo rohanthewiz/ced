@@ -323,6 +323,7 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuPasteItem, enabled: (*App).hasFileClip, labelFor: (*App).pasteItemLabel},
 			{label: "Zip file", action: (*App).menuZipFile, enabled: (*App).hasFileTab},
 			{action: (*App).menuZipFolder, enabled: alwaysTrue, labelFor: (*App).zipFolderLabel},
+			{label: "Copy file name", action: (*App).menuCopyFileName, enabled: (*App).hasFileTab},
 			{label: "Copy relative path", action: (*App).menuCopyRelativePath, enabled: (*App).hasFileTab},
 			{label: "Copy absolute path", action: (*App).menuCopyAbsolutePath, enabled: (*App).hasFileTab},
 			// A twin of the ≡ Edit row, for the user who reads "select the

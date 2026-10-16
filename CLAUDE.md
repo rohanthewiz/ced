@@ -276,7 +276,7 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (`gitLogShowFile`, `p:` filter, field NOT focused), compare, Preview
   (markdown only), Format, Validate (`validateFile`), Restore (`restoreFile`),
   Move/Copy to split → (only when `InCats`, like the ≡ Cats group), Add to group…,
-  Remove from group <name> (grouped tabs only), Zip, Copy to…, copy paths,
+  Remove from group <name> (grouped tabs only), Zip, Copy to…, copy name + paths,
   Close tab, Close other tabs (KEEPS dirty tabs). Rows call the same
   verbs as their ≡ twins: Nav "Reveal file in tree", File "Validate
   file" / "Close other tabs" / "Copy file to…", Git "Show file's uncommitted changes" /
@@ -1083,8 +1083,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 175 group
-  actions + 15 headers (192), height 198, dividers `[2, 5, 195]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 176 group
+  actions + 15 headers (193), height 199, dividers `[2, 5, 196]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

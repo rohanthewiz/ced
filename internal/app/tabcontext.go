@@ -26,6 +26,7 @@
 //	             │ ▸ Remove from group api   │   (grouped tabs only)
 //	             │ ▸ Zip file                │   copy it out
 //	             │ ▸ Copy to…                │   (copyto.go)
+//	             │ ▸ Copy file name          │
 //	             │ ▸ Copy relative path      │
 //	             │ ▸ Copy absolute path      │
 //	             │ ▸ Close tab               │   make it go away
@@ -71,6 +72,8 @@
 package app
 
 import (
+	"path/filepath"
+
 	"github.com/rohanthewiz/ced/internal/cats"
 	"github.com/rohanthewiz/ced/internal/editor"
 )
@@ -178,6 +181,11 @@ func (a *App) tabContextItems(t *editor.Tab) []editorContextItem {
 		// prompt and then a file somewhere else on disk. An unsaved
 		// buffer is copied as shown (copypaste.go's overlay), never saved.
 		editorContextItem{label: "Copy to…", action: func(app *App) { app.promptCopyTo([]string{t.Path}) }, enabled: hasPath},
+		// Name, then the two paths — the tree's order (shortest string
+		// first); ≡ File "Copy file name" is the active-tab twin.
+		editorContextItem{label: "Copy file name", action: func(app *App) {
+			app.copyPathToSystemClipboard(filepath.Base(t.Path), "name")
+		}, enabled: hasPath},
 		editorContextItem{label: "Copy relative path", action: func(app *App) {
 			app.copyPathToSystemClipboard(app.relativePathFor(t.Path), "relative path")
 		}, enabled: hasPath},

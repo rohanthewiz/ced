@@ -602,6 +602,65 @@ func TestCopyPathToSystemClipboard_FlashMessage(t *testing.T) {
 	}
 }
 
+// assertCopiedName checks the flash a name copy leaves: the bare name
+// and nothing of its directory. A test environment without a usable
+// /dev/tty answers "Copy failed" instead, which still proves feedback.
+func assertCopiedName(t *testing.T, a *App, want string) {
+	t.Helper()
+	if strings.HasPrefix(a.statusMsg, "Copy failed") {
+		return
+	}
+	if a.statusMsg != "Copied name: "+want {
+		t.Fatalf("flash = %q, want %q", a.statusMsg, "Copied name: "+want)
+	}
+}
+
+// TestCtxCopyName_FileAndRoot copies the tree row's bare name — the
+// file's base name, and for the project root the folder's own name
+// rather than an empty or relative "." string.
+func TestCtxCopyName_FileAndRoot(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "sub", "thing.go")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(target, "x"); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, dir)
+
+	ctxCopyName(a, &filetree.Node{Path: target, Name: "thing.go"})
+	assertCopiedName(t, a, "thing.go")
+
+	ctxCopyName(a, a.tree.Root)
+	assertCopiedName(t, a, filepath.Base(a.tree.Root.Path))
+}
+
+// TestMenuCopyFileName copies the active tab's base name, and is a
+// silent no-op with no tab open (keyboard activation can race the
+// row's dimming, like the copy-path rows).
+func TestMenuCopyFileName(t *testing.T) {
+	dir := t.TempDir()
+	a := newTestApp(t, dir)
+	a.menuOpen = true
+	a.menuCopyFileName()
+	if a.statusMsg != "" {
+		t.Fatalf("no tab: flash = %q, want none", a.statusMsg)
+	}
+
+	target := filepath.Join(dir, "notes.md")
+	if err := writeFile(target, "x"); err != nil {
+		t.Fatal(err)
+	}
+	a.openFile(target)
+	a.menuOpen = true
+	a.menuCopyFileName()
+	if a.menuOpen {
+		t.Fatal("the row should close the menu")
+	}
+	assertCopiedName(t, a, "notes.md")
+}
+
 // TestCreateFolder_New creates a directory and confirms it landed as a
 // directory rather than a file.
 func TestCreateFolder_New(t *testing.T) {

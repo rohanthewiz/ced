@@ -1003,6 +1003,12 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 		// directory), same prompt shape, and the pair reads as one
 		// vocabulary rather than two half-features.
 		items = append(items, contextItem{label: "New Folder", action: ctxNewFolder})
+		// Find all in folder (projectsearch.go): Find in project scoped
+		// to this directory. Directories only, with the other rows that
+		// treat the folder as a PLACE; on the root it is the whole
+		// project and is labelled as such. ≡ twin: Find → "Find all in
+		// folder (sub/)" on the active folder.
+		items = append(items, contextItem{label: a.findInFolderContextLabel(n), action: ctxFindInFolder})
 	}
 	if n != a.tree.Root {
 		items = append(items, contextItem{label: "Rename", action: ctxRename})

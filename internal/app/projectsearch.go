@@ -32,6 +32,20 @@
 // so the project's own ignore rules apply, run off the main loop and
 // delivered as an event like every other background result in this
 // codebase.
+//
+// "Find all in folder" is the same search with a SCOPE: the index is
+// narrowed to the paths under one directory before the walk starts, and
+// everything after that — the event, the list, ⟳, the tints — is this
+// file's pipeline unchanged. The scope rides the event and the modal
+// (scopeDir) so the title can name it and ⟳ re-asks the same question:
+//
+//	tree folder ▸ "Find all in folder…" ─┐
+//	≡ Find "Find all in folder (sub/)" ──┼─▶ promptFindInFolder(dir)
+//	                                     │        │
+//	≡ Find "Find in project" / Esc-P ────┼────────┼─▶ startFolderSearch(q, opts, dir)
+//	⟳ on a finished list ────────────────┘        │      dir "" = whole project
+//	                                              ▼
+//	                       scopeSearchPaths(index, dir) ─▶ search.Project ─▶ event
 package app
 
 import (
@@ -43,6 +57,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/history"
 	"github.com/rohanthewiz/ced/internal/search"
 )
@@ -54,6 +69,7 @@ import (
 type projectSearchEvent struct {
 	when      time.Time
 	seq       int
+	dir       string // absolute folder the search was scoped to; "" = project
 	query     string
 	opts      editor.FindOptions
 	hits      []search.Hit
@@ -119,19 +135,41 @@ func (a *App) hasProjectSearch() bool {
 // finished list must re-ask ITS question (the snapshot on the modal),
 // while fresh searches pass a.findOptions().
 func (a *App) startProjectSearch(query string, opts editor.FindOptions) {
+	a.startFolderSearch(query, opts, "")
+}
+
+// startFolderSearch is startProjectSearch narrowed to the files under
+// dir (absolute). dir "" — or the project root itself, which is what a
+// right-click on the tree's root row hands over — is the whole project,
+// so the two verbs are one pipeline and the root case reads exactly like
+// Find in project rather than as a folder that happens to be everything.
+func (a *App) startFolderSearch(query string, opts editor.FindOptions, dir string) {
 	if query == "" || a.screen == nil {
 		return
 	}
+	dir = a.searchScopeDir(dir)
+	verb := a.projectSearchVerb(dir)
 	if a.finder == nil {
-		a.flash("Find in project: no file index yet")
+		a.flash(verb + ": no file index yet")
 		return
 	}
 	paths := a.finder.Paths()
 	if len(paths) == 0 {
 		// The index builds asynchronously at startup and after workspace
 		// mutations. Saying so beats "no results", which would be a lie.
-		a.flash("Find in project: still indexing — try again in a moment")
+		a.flash(verb + ": still indexing — try again in a moment")
 		return
+	}
+	if dir != "" {
+		paths = a.scopeSearchPaths(paths, dir)
+		if len(paths) == 0 {
+			// Distinct from "no occurrences": nothing was searched at
+			// all. The usual cause is a folder the project ignores
+			// (build output, vendor) — the index skips it, so the search
+			// does too, and the user deserves to know which it was.
+			a.flash(verb + ": no indexed files there (ignored by the project?)")
+			return
+		}
 	}
 
 	// Remembered once the walk is really going to run — not for a query
@@ -148,7 +186,7 @@ func (a *App) startProjectSearch(query string, opts editor.FindOptions) {
 	go func() {
 		hits, truncated := search.Project(root, paths, search.Options{Query: query, FindOptions: opts})
 		_ = scr.PostEvent(&projectSearchEvent{
-			when: time.Now(), seq: seq, query: query, opts: opts,
+			when: time.Now(), seq: seq, dir: dir, query: query, opts: opts,
 			hits: hits, truncated: truncated,
 		})
 	}()
@@ -170,18 +208,20 @@ func (a *App) handleProjectSearch(e *projectSearchEvent) {
 	if e.seq != a.projectSearchSeq {
 		return
 	}
+	verb := a.projectSearchVerb(e.dir)
 	if len(e.hits) == 0 {
-		a.flash(fmt.Sprintf("Find in project: no occurrences of %q%s", e.query, findOptionsNote(e.opts)))
+		a.flash(fmt.Sprintf("%s: no occurrences of %q%s", verb, e.query, findOptionsNote(e.opts)))
 		return
 	}
 	if a.modal != nil || a.menuOpen {
-		a.flash(fmt.Sprintf("Find in project: %d hits for %q — run it again", len(e.hits), e.query))
+		a.flash(fmt.Sprintf("%s: %d hits for %q — run it again", verb, len(e.hits), e.query))
 		return
 	}
 	m := &findAllModal{
 		query:     e.query,
 		tabIdx:    -1, // no single tab behind this list
 		project:   true,
+		scopeDir:  e.dir,
 		truncated: e.truncated,
 		opts:      e.opts,
 		rows:      a.projectSearchRows(e.hits),
@@ -192,12 +232,147 @@ func (a *App) handleProjectSearch(e *projectSearchEvent) {
 		filter: newTextField(e.query),
 		seed:   e.query,
 	}
+	if e.dir != "" {
+		m.scopeName = a.relativeFolderLabel(e.dir)
+	}
 	m.rebuildView()
 	// Same replacement rule as showFindAll: a fresh list supersedes a
 	// pinned survivor from an earlier search.
 	a.dropFindAllPin()
 	a.openModal(m)
 	m.ensureRowVisible(a)
+}
+
+// searchScopeDir normalizes a folder scope: "" and the project root
+// both mean "the whole project" and come back as "", so a scoped search
+// of the root is indistinguishable from Find in project — same title,
+// same flashes, same ⟳. The tree's root may be spelled differently from
+// rootDir (symlinked checkout), so both are compared.
+func (a *App) searchScopeDir(dir string) string {
+	if dir == "" || dir == a.rootDir {
+		return ""
+	}
+	if a.tree != nil && a.tree.Root != nil && dir == a.tree.Root.Path {
+		return ""
+	}
+	return dir
+}
+
+// projectSearchVerb is how flashes and the list title name a search:
+// "Find in project" for the whole tree, "Find in internal/app/" for a
+// folder — the folder spelled project-relative, the way the ≡ folder
+// rows spell it (relativeFolderLabel), so the reader sees exactly which
+// subtree the answer covers.
+func (a *App) projectSearchVerb(dir string) string {
+	if dir == "" {
+		return "Find in project"
+	}
+	return "Find in " + a.relativeFolderLabel(dir)
+}
+
+// scopeSearchPaths keeps the index entries under dir. The index holds
+// ROOT-RELATIVE paths, so the folder is made root-relative too and
+// compared as a path-segment prefix (with the trailing separator) —
+// "internal/app" must not admit "internal/application/x.go". Slashes are
+// normalized on both sides because `git ls-files` always answers with
+// "/" while the fallback walk uses the OS separator.
+//
+// A folder outside the root (a stale node after an external move)
+// answers nil, which the caller reports as "nothing indexed there".
+func (a *App) scopeSearchPaths(paths []string, dir string) []string {
+	rel, err := filepath.Rel(a.rootDir, dir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	if rel == "." {
+		return paths
+	}
+	prefix := filepath.ToSlash(rel) + "/"
+	var out []string
+	for _, p := range paths {
+		if strings.HasPrefix(filepath.ToSlash(p), prefix) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// promptFindInFolder asks what to look for under dir, then runs the
+// scoped search. The prompt is Find in project's (menuFindInProject):
+// same seed ranking, same search-history kind — a query typed here is
+// one the next Find in project should offer, and vice versa — and the
+// toggles are read when the search runs, not when the prompt opened.
+//
+// The root goes through here too (the tree root's row): searchScopeDir
+// folds it into a project search, and the prompt says "every file" so
+// it doesn't promise a narrower walk than it will do.
+func (a *App) promptFindInFolder(dir string) {
+	seed := a.projectSearchSeed()
+	dir = a.searchScopeDir(dir)
+	title, hint := "Find all in folder", "searches "+a.relativeFolderLabel(dir)
+	if dir == "" {
+		title, hint = "Find in project", "searches every file"
+	}
+	a.openSearchPrompt(title, hint, seed, history.SearchFind, func(app *App, v string) {
+		app.startFolderSearch(v, app.findOptions(), dir)
+	})
+}
+
+// ctxFindInFolder is the tree's folder row "Find all in folder…" (and
+// the root's "Find in project…"): a text search scoped to the clicked
+// directory. Folders only — openTreeContext never offers it on a file.
+func ctxFindInFolder(a *App, n *filetree.Node) {
+	if !n.IsDir {
+		return
+	}
+	a.promptFindInFolder(n.Path)
+}
+
+// findInFolderContextLabel names the tree row for n: the root's row is
+// the whole project and says so, every other folder gets the folder verb.
+func (a *App) findInFolderContextLabel(n *filetree.Node) string {
+	if a.tree != nil && n == a.tree.Root {
+		return "Find in project…"
+	}
+	return "Find all in folder…"
+}
+
+// menuFindInFolder is the ≡ Find twin of the tree's folder row (every
+// file action also lives in ≡ — a terminal that eats right-clicks must
+// not lose the verb). It acts on the ACTIVE folder, the one the ≡ folder
+// rows (New file, Copy folder…) already target.
+//
+// With no subfolder active the row stays clickable and explains itself
+// rather than quietly becoming a second Find in project: the user asked
+// for a narrower search and should learn how to name the folder.
+func (a *App) menuFindInFolder() {
+	a.closeMenu()
+	if !a.hasActiveSubfolder() {
+		a.flash("Find all in folder: click a folder in the tree first — Find in project searches everything")
+		return
+	}
+	a.promptFindInFolder(a.activeFolder)
+}
+
+// findInFolderLabel is the ≡ row's dynamic label, naming the folder it
+// will search the way copyFolderLabel does — the suffix front-truncated
+// to maxLabelSuffix so the deep end of the path (the part that tells two
+// folders apart) survives.
+func (a *App) findInFolderLabel() string {
+	const base = "Find all in folder"
+	if !a.hasActiveSubfolder() {
+		return base
+	}
+	rel := a.relativeFolderLabel(a.activeFolder)
+	suffix := " (" + rel + ")"
+	if runeLen(suffix) > maxLabelSuffix {
+		keep := max(maxLabelSuffix-runeLen(" (…)"), 4)
+		if r := []rune(rel); keep < len(r) {
+			rel = "…" + string(r[len(r)-keep:])
+		}
+		suffix = " (" + rel + ")"
+	}
+	return base + suffix
 }
 
 // projectSearchRows compacts each hit into a display row, reusing the
@@ -387,6 +562,11 @@ func (m *findAllModal) titleText() string {
 		return fmt.Sprintf("Find all %q%s", m.query, note)
 	}
 	verb := "Find in project"
+	if m.scopeName != "" {
+		// A folder-scoped search names its folder, so a list that
+		// covers one subtree never reads as the whole project's answer.
+		verb = "Find in " + m.scopeName
+	}
 	if m.heading != "" {
 		verb = m.heading
 	}

@@ -17,6 +17,8 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/filetree"
+	"github.com/rohanthewiz/ced/internal/finder"
 	"github.com/rohanthewiz/ced/internal/search"
 )
 
@@ -485,5 +487,223 @@ func TestProjectSearch_ReferencesTitleHasNoOptionsNote(t *testing.T) {
 	}
 	if got := m.titleText(); got != `References to "needle"` {
 		t.Errorf("title = %q, want no options note", got)
+	}
+}
+
+// folderSearchApp is projectSearchApp with a READY finder index, plus a
+// decoy folder whose name extends "sub" — the prefix trap
+// scopeSearchPaths must not fall into.
+func folderSearchApp(t *testing.T) (*App, string) {
+	t.Helper()
+	a, root := projectSearchApp(t)
+	decoy := filepath.Join(root, "subway", "delta.go")
+	if err := os.MkdirAll(filepath.Dir(decoy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(decoy, []byte("needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.finder = finder.New(a.rootDir)
+	a.finder.Rebuild(nil)
+	waitForFinderReady(t, a)
+	return a, root
+}
+
+// awaitProjectSearch drains the screen's queue until the search posts
+// its result, then hands it to the real handler — the main loop's job.
+func awaitProjectSearch(t *testing.T, a *App) *projectSearchEvent {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ev := a.screen.PollEvent()
+		if ev == nil {
+			break
+		}
+		if e, ok := ev.(*projectSearchEvent); ok {
+			a.handleProjectSearch(e)
+			return e
+		}
+	}
+	t.Fatal("the folder search never posted its result")
+	return nil
+}
+
+// TestScopeSearchPaths_KeepsOnlyTheFolder pins the scope filter: entries
+// under the folder survive, a sibling whose name merely STARTS with the
+// folder's ("subway" vs "sub") does not, the root is everything, and a
+// folder outside the project is nothing.
+func TestScopeSearchPaths_KeepsOnlyTheFolder(t *testing.T) {
+	a, root := projectSearchApp(t)
+	paths := []string{"alpha.go", "sub/bravo.go", "sub/deep/x.go", "subway/delta.go"}
+
+	got := a.scopeSearchPaths(paths, filepath.Join(root, "sub"))
+	if strings.Join(got, ",") != "sub/bravo.go,sub/deep/x.go" {
+		t.Errorf("scoped to sub/ = %v, want only sub/'s files", got)
+	}
+	if got := a.scopeSearchPaths(paths, root); len(got) != len(paths) {
+		t.Errorf("scoped to the root = %v, want every path", got)
+	}
+	if got := a.scopeSearchPaths(paths, filepath.Dir(root)); got != nil {
+		t.Errorf("a folder outside the project = %v, want nil", got)
+	}
+}
+
+// TestFindInFolder_SearchesOnlyThatFolder is the feature end to end: the
+// scoped search walks only the folder's indexed files, the list's title
+// names the folder, and ⟳ re-asks the SAME scoped question.
+func TestFindInFolder_SearchesOnlyThatFolder(t *testing.T) {
+	a, root := folderSearchApp(t)
+	sub := filepath.Join(root, "sub")
+
+	a.startFolderSearch("needle", editor.FindOptions{}, sub)
+	e := awaitProjectSearch(t, a)
+	if e.dir != sub {
+		t.Fatalf("event scope = %q, want %q", e.dir, sub)
+	}
+	m, ok := a.modal.(*findAllModal)
+	if !ok {
+		t.Fatalf("expected the find-all panel, got %T (flash %q)", a.modal, a.statusMsg)
+	}
+	if len(m.rows) != 2 {
+		t.Fatalf("rows = %d, want the two hits in sub/bravo.go", len(m.rows))
+	}
+	for _, r := range m.rows {
+		if filepath.Dir(r.path) != sub {
+			t.Errorf("row %q is outside the folder", r.path)
+		}
+	}
+	if got := m.titleText(); !strings.HasPrefix(got, "Find in sub"+string(filepath.Separator)+" ") {
+		t.Errorf("title %q should name the folder", got)
+	}
+
+	// ⟳ re-runs under the list's scope, not the whole project.
+	m.rerun(a)
+	if e := awaitProjectSearch(t, a); e.dir != sub {
+		t.Errorf("⟳ scope = %q, want the list's folder %q", e.dir, sub)
+	}
+}
+
+// TestFindInFolder_RootIsAProjectSearch: the tree root's row hands over
+// the root, which must read as Find in project — no scope on the event,
+// so the title and ⟳ behave exactly like the ≡ row's search.
+func TestFindInFolder_RootIsAProjectSearch(t *testing.T) {
+	a, root := folderSearchApp(t)
+	a.startFolderSearch("needle", editor.FindOptions{}, root)
+	if e := awaitProjectSearch(t, a); e.dir != "" {
+		t.Fatalf("root search scope = %q, want \"\" (the project)", e.dir)
+	}
+	m, ok := a.modal.(*findAllModal)
+	if !ok {
+		t.Fatalf("expected the find-all panel, got %T", a.modal)
+	}
+	if got := m.titleText(); !strings.HasPrefix(got, "Find in project ") {
+		t.Errorf("title = %q, want the project title", got)
+	}
+}
+
+// TestFindInFolder_IgnoredFolderSaysSo: a folder with nothing indexed
+// (the project ignores it) is refused with a reason, not reported as
+// "no occurrences" — nothing was searched.
+func TestFindInFolder_IgnoredFolderSaysSo(t *testing.T) {
+	a, root := folderSearchApp(t)
+	empty := filepath.Join(root, "empty")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a.startFolderSearch("needle", editor.FindOptions{}, empty)
+	if a.modal != nil {
+		t.Fatalf("expected no list, got %T", a.modal)
+	}
+	if !strings.Contains(a.statusMsg, "no indexed files") {
+		t.Errorf("flash = %q, want the nothing-indexed reason", a.statusMsg)
+	}
+}
+
+// TestTreeContext_FindAllInFolderOnFoldersOnly pins the tree row: offered
+// on a folder ("Find all in folder…") and on the root, where it is
+// labelled as the project search; never on a file. Activating it opens
+// the query prompt scoped to the clicked folder.
+func TestTreeContext_FindAllInFolderOnFoldersOnly(t *testing.T) {
+	a, root := projectSearchApp(t)
+	find := func(items []contextItem, label string) *contextItem {
+		for i := range items {
+			if items[i].label == label {
+				return &items[i]
+			}
+		}
+		return nil
+	}
+	subNode, ok := a.tree.Reveal(filepath.Join(root, "sub"))
+	if !ok {
+		t.Fatal("setup: sub/ not in the tree")
+	}
+	fileNode, ok := a.tree.Reveal(filepath.Join(root, "alpha.go"))
+	if !ok {
+		t.Fatal("setup: alpha.go not in the tree")
+	}
+
+	a.openTreeContext(fileNode, 5, 5)
+	if find(contextOf(a).items, "Find all in folder…") != nil {
+		t.Error("a file must not offer Find all in folder")
+	}
+	a.closeModal()
+
+	a.openTreeContext(a.tree.Root, 5, 5)
+	if find(contextOf(a).items, "Find in project…") == nil {
+		t.Error("the root row should offer the project search")
+	}
+	a.closeModal()
+
+	a.openTreeContext(subNode, 5, 5)
+	row := find(contextOf(a).items, "Find all in folder…")
+	if row == nil {
+		t.Fatal("a folder should offer Find all in folder")
+	}
+	a.closeModal()
+	row.action(a, subNode)
+	p, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the query prompt", a.modal)
+	}
+	if p.title != "Find all in folder" || !strings.Contains(p.hint, "sub") {
+		t.Errorf("prompt = %q / %q, want the folder prompt naming sub/", p.title, p.hint)
+	}
+}
+
+// TestMenuFindInFolder_NamesTheActiveFolderOrExplains pins the ≡ twin:
+// with a subfolder active the label names it and the row prompts; with
+// none it stays clickable and flashes how to pick one.
+func TestMenuFindInFolder_NamesTheActiveFolderOrExplains(t *testing.T) {
+	a, root := projectSearchApp(t)
+
+	a.activeFolder = ""
+	if got := a.findInFolderLabel(); got != "Find all in folder" {
+		t.Errorf("label with no folder = %q", got)
+	}
+	a.menuFindInFolder()
+	if a.modal != nil {
+		t.Fatalf("with no folder, modal = %T, want a flash", a.modal)
+	}
+	if !strings.Contains(a.statusMsg, "folder in the tree") {
+		t.Errorf("flash = %q, want the how-to", a.statusMsg)
+	}
+
+	a.activeFolder = filepath.Join(root, "sub")
+	if got := a.findInFolderLabel(); got != "Find all in folder (sub"+string(filepath.Separator)+")" {
+		t.Errorf("label = %q, want it to name sub/", got)
+	}
+	a.menuFindInFolder()
+	if _, ok := a.modal.(*promptModal); !ok {
+		t.Fatalf("modal = %T, want the query prompt", a.modal)
+	}
+}
+
+// TestCtxFindInFolder_IgnoresFiles: the action is only ever offered on a
+// directory, and a file node reaching it anyway does nothing.
+func TestCtxFindInFolder_IgnoresFiles(t *testing.T) {
+	a, root := projectSearchApp(t)
+	ctxFindInFolder(a, &filetree.Node{Path: filepath.Join(root, "alpha.go")})
+	if a.modal != nil {
+		t.Errorf("a file node opened %T", a.modal)
 	}
 }

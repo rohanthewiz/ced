@@ -522,6 +522,11 @@ func builtinMenuGroups() []menuGroup {
 			// filename twin because they answer the same question at two
 			// scopes, and the shifted leader says so.
 			{label: "Find in project", shortcut: "esc P", action: (*App).menuFindInProject, enabled: (*App).hasProjectSearch},
+			// The same search narrowed to the active folder — the ≡ twin
+			// of the tree folder row "Find all in folder…". Labelled with
+			// the folder it will search; with none active it explains
+			// how to pick one rather than dimming (projectsearch.go).
+			{action: (*App).menuFindInFolder, enabled: (*App).hasProjectSearch, labelFor: (*App).findInFolderLabel},
 		}},
 		// Nav — getting somewhere else: back/forward through the file
 		// history (tree, tabs, finder and definition jumps all feed it),

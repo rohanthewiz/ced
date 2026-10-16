@@ -215,6 +215,14 @@ type findAllModal struct {
 	// since the bar that shows them lit is usually not on screen.
 	opts editor.FindOptions
 
+	// scopeDir is the folder a project-mode TEXT search was narrowed to
+	// ("Find all in folder", projectsearch.go); "" = the whole project.
+	// Snapshotted like opts so ⟳ re-asks the same question. scopeName is
+	// its display form, captured at open so the title doesn't have to
+	// reach back into the App to spell it.
+	scopeDir  string
+	scopeName string
+
 	// previewed records whether we ever moved the cursor. Nothing to
 	// put back if we didn't, and restoring anyway would fight a
 	// background reload that clamped the cursor for a good reason.
@@ -1888,7 +1896,9 @@ func (m *findAllModal) rerun(a *App) {
 			a.flash("This list came from the language server — re-run it from the menu")
 			return
 		}
-		a.startProjectSearch(m.query, m.opts)
+		// Under the list's own scope as well as its own options: a
+		// folder search re-runs over that folder (scopeDir "" = project).
+		a.startFolderSearch(m.query, m.opts, m.scopeDir)
 		return
 	}
 	tab := m.tab(a)

@@ -815,6 +815,13 @@ file at the match and keeps the list up so you can click the next one;
 `Enter` opens it and closes the list. Results stop at 10,000, and the
 title then reads "first 10000".
 
+**In one folder.** Right-click a folder in the tree → **Find all in
+folder…** runs the same search over just that folder's files; the list's
+title names the folder (`Find in internal/app/ "needle"`) and `⟳` re-runs
+it over the same folder. `≡` → **Find all in folder (sub/)** is the same
+search on the folder you last clicked in the tree. On the project root
+the row reads **Find in project…**.
+
 The list and project search match the way the bar's `Aa` and `|W|` are
 set when they run — the title says "(match case)" / "(whole word)" when
 either is on, and `⟳` re-runs under the same options. There's no regex. `Esc j` (or

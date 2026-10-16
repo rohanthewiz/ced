@@ -1083,8 +1083,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 176 group
-  actions + 15 headers (193), height 199, dividers `[2, 5, 196]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 177 group
+  actions + 15 headers (194), height 200, dividers `[2, 5, 197]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

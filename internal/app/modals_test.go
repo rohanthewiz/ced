@@ -372,7 +372,7 @@ func TestOpenTreeContext_Folder(t *testing.T) {
 	if contextOf(a) == nil {
 		t.Fatal("context should open")
 	}
-	wantLabels := []string{"New File", "New Folder", "Rename", "Delete", "Copy", "Copy to…", "Zip",
+	wantLabels := []string{"New File", "New Folder", "Find all in folder…", "Rename", "Delete", "Copy", "Copy to…", "Zip",
 		"Copy name", "Copy rel path", "Copy abs path", "Select", "Add to favorites…", "New tab group…", "Open in $EDITOR",
 		fileManagerLabel(), "Open in terminal", "Shell command…"}
 	if len(contextOf(a).items) != len(wantLabels) {
@@ -423,7 +423,7 @@ func TestOpenTreeContext_File(t *testing.T) {
 func TestOpenTreeContext_Root(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.openTreeContext(a.tree.Root, 5, 5)
-	wantLabels := []string{"New File", "New Folder", "Copy to…", "Zip", "Copy name", "Copy rel path", "Copy abs path",
+	wantLabels := []string{"New File", "New Folder", "Find in project…", "Copy to…", "Zip", "Copy name", "Copy rel path", "Copy abs path",
 		"Add to favorites…", "Open in $EDITOR", fileManagerLabel(), "Open in terminal", "Shell command…"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("root context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))

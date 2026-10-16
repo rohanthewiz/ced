@@ -53,13 +53,13 @@ import (
 // the overflow button, so a full strip doesn't read as one run-on word.
 const tabOverflowGap = 1
 
-// tabStripRect returns where tabs may be drawn: the tab bar minus the ≡
-// button on the left, and minus the overflow button on the right when one
+// tabStripRect returns where tabs may be drawn: the tab bar minus the ✕
+// and ≡ buttons on the left (tabBarLeadW), and minus the overflow button on the right when one
 // is showing. Everything else in this file measures against it.
 func (a *App) tabStripRect() (x, y, w int) {
 	tx, ty, tw, _ := a.tabBarRect()
-	x = tx + menuButtonWidth
-	w = tw - menuButtonWidth - a.tabOverflowReserve()
+	x = tx + tabBarLeadW
+	w = tw - tabBarLeadW - a.tabOverflowReserve()
 	return x, ty, max(w, 0)
 }
 
@@ -74,7 +74,7 @@ func (a *App) tabOverflowReserve() int {
 	}
 	tx, _, tw, _ := a.tabBarRect()
 	_ = tx
-	if a.widthOfTabs(0, len(a.tabs)-1) <= tw-menuButtonWidth {
+	if a.widthOfTabs(0, len(a.tabs)-1) <= tw-tabBarLeadW {
 		return 0
 	}
 	return tabOverflowGap + len(fmt.Sprintf(" +%d ", len(a.tabs)))
@@ -239,6 +239,7 @@ func (a *App) drawTabBar() {
 		a.screen.SetContent(cx, ty, ' ', nil, barStyle)
 	}
 
+	a.drawQuitButton()
 	a.drawMenuButton()
 
 	rects := a.layoutTabs()
@@ -397,12 +398,16 @@ func (a *App) drawTabOverflow() {
 	drawAt(a.screen, x, y, a.tabOverflowLabel(hidden), st)
 }
 
-// tabBarClick dispatches clicks in the tab bar: the leftmost menuButtonWidth
-// cells open the action menu, the overflow button opens the switcher, and
+// tabBarClick dispatches clicks in the tab bar: the ✕ in the leftmost
+// cells asks to quit (quitbutton.go), the ≡ beside it opens the action menu, the overflow button opens the switcher, and
 // remaining cells switch, close, or (on the ⚠ slot) re-ask a tab's deferred
 // disk-conflict question, based on where the click landed within their
 // rendered geometry.
 func (a *App) tabBarClick(x, _ int) {
+	if qx, _, qw, _ := a.quitButtonRect(); x >= qx && x < qx+qw {
+		a.requestQuitFromButton()
+		return
+	}
 	mx, _, mw, _ := a.menuButtonRect()
 	if x >= mx && x < mx+mw {
 		a.openMenu()

@@ -88,6 +88,7 @@ internal/app/
   inputburst.go               One frame per wheel/motion burst
   modal.go leader.go whichkey.go  Modal slot; leader table + namespaces; which-key band
   metakeys.go nav.go          ⌘ layer; back/forward history
+  quitbutton.go               ✕ quit button left of ≡ (confirm, then menuQuit)
   tabbar.go tablabel.go tabcontext.go tabgroups.go statusbar.go
   undercolor.go               May an underline be coloured (SGR 58): env allowlist
   toolwindow.go tooladapt.go toolheader.go toollayout.go toolmenu.go  Tool windows
@@ -262,6 +263,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   count).
 
 ### Tabs, labels, status bar
+- **Tab bar lead (quitbutton.go)**: `✕` (DiagError, `quitButtonRect`)
+  then `≡` (`menuButtonRect`); the strip starts after `tabBarLeadW` —
+  never measure tabs from `menuButtonWidth` alone. ✕ ALWAYS asks: dirty
+  tabs → menuQuit's Save/Discard/Cancel directly (one question, not two),
+  clean → Yes/No (No default) whose Yes re-enters `menuQuit`.
 - `tabScroll` is DERIVED each frame (`ensureActiveTabVisible`, including
   pull-back). A tab that doesn't fit gets no rect (only the active tab on
   a too-narrow strip). `switchToTab` is the single place a switch records
@@ -854,12 +860,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `lockTreeAutoFit`.
 
 ### File tree
-- **Recent-folders star (filetree.go)**: `⭐` (U+2B50, WIDE = two cells,
-  `recentStarWidth`; not `★`, which is small and ambiguous-width) one
-  space after the project name on the root row; click on either cell =
-  `menuRecentFolders` (≡ File "Recent folders…" is the twin). A narrow
-  panel cuts the NAME, never the star (pinned to the last two columns;
-  none under 5 cols). Render stamps the
+- **Recent-folders star (filetree.go)**: `⭑` (U+2B51, NEUTRAL width) BOLD
+  in `DiagWarning` gold, ONE cell (`recentStarWidth`) — the two-cell emoji
+  `⭐` was too big, `★` (U+2605, ambiguous width) a little too small; size
+  within one cell = pick the glyph the fallback font draws bigger. One space after the project name on the root row;
+  click = `menuRecentFolders` (≡ File "Recent folders…" is the twin). A
+  narrow panel cuts the NAME, never the star (pinned to the last column;
+  none under 4 cols). Render stamps the
   column, `RecentStarAt` reads it and is checked BEFORE `HitTest` (which
   answers root for the whole row); `ContentWidth` measures it.
 - **Auto-fit (treeautofit.go)**: `autoFitSidebar` runs at the top of
@@ -867,6 +874,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `defaultSidebarWidth`, cap `autoFitMinEditor` (80) and a share of the
   band. Measurement shares `nodeRowSegments` with the renderer; measures
   all expanded rows. `"treeautofit"` default on (off in newTestApp).
+- **Find files in folder (app/finder.go)**: the file finder with a
+  SCOPE on the modal (`finderModal.scope`, root-relative), never on the
+  shared index; `Finder.SearchUnder` matches and returns paths RELATIVE
+  to the folder. Tree folder row under "Find all in folder…"; root =
+  "Find file in project…" (plain finder via `searchScopeDir`); ≡ Find
+  twin on the active folder flashes the how-to when none is active.
 - **Type-to-find (filter.go, treefilter.go)**: substring match per rune
   fold; no timeout; clears on Backspace-to-empty, Esc (side effect),
   focus loss. **No bare letter is a command in the focused tree** —
@@ -1098,8 +1111,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 177 group
-  actions + 15 headers (194), height 200, dividers `[2, 5, 197]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 178 group
+  actions + 15 headers (195), height 201, dividers `[2, 5, 198]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

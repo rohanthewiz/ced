@@ -359,7 +359,14 @@ func (a *App) menuFindInFolder() {
 // to maxLabelSuffix so the deep end of the path (the part that tells two
 // folders apart) survives.
 func (a *App) findInFolderLabel() string {
-	const base = "Find all in folder"
+	return a.activeFolderRowLabel("Find all in folder")
+}
+
+// activeFolderRowLabel is base plus " (<active folder>)" — the shape of
+// every ≡ row that acts on the folder last clicked in the tree ("Find
+// all in folder", "Find files in folder"). Bare base when no subfolder
+// is active, which is when the row flashes how to pick one.
+func (a *App) activeFolderRowLabel(base string) string {
 	if !a.hasActiveSubfolder() {
 		return base
 	}

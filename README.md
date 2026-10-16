@@ -448,7 +448,7 @@ Bare `ced` always opens the current directory — `cd myproj && ced` means
 what it says. What comes back with you is the **tabs**: each folder
 remembers which files were open and where the cursors were, and reopening
 it restores them. `≡` → File → **Open folder…** / **Recent folders…**
-switches projects without leaving the editor — or click the **⭐** after
+switches projects without leaving the editor — or click the gold **⭑** after
 the project name at the top of the file tree for the same recent list;
 **Disable session restore**
 in the same group turns the tab restore off (folders are still
@@ -519,6 +519,9 @@ Then:
   ```
 - Click `≡` (top-left), right-click anywhere, or double-tap `Esc`
   for the action menu — including New file, Rename, Delete.
+- The red `✕` just left of `≡` closes the editor. It always asks first:
+  "Close the editor?" (No is the default), or Save / Discard / Cancel
+  when files have unsaved changes. `Esc q` and `≡` → Quit do the same.
 - If your terminal forwards Button3, right-click on a file or folder
   in the tree opens a per-item context menu (New File on folders,
   Rename, Delete, Copy / Paste, Copy to…). macOS Terminal + tmux often
@@ -858,6 +861,15 @@ fuzzy file finder over every non-ignored file in the project:
   as the file tree, plus immediately after any create/rename/delete
   inside the editor.
 - Only files are listed — no directories, no symlinked duplicates.
+
+**In one folder.** Right-click a folder in the tree → **Find files in
+folder…** opens the same finder over just that folder's files. Paths are
+shown and matched *relative to the folder*, so you can type a bare file
+name (`tab`) or a path inside it (`app/tab`). The title names the folder
+(`Find file in internal/`) and the count is the folder's. `≡` → Find →
+**Find files in folder (sub/)** does the same for the folder you last
+clicked in the tree. On the project root the row reads **Find file in
+project…**.
 
 ### Bookmarks
 

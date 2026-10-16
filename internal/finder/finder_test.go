@@ -201,3 +201,68 @@ func TestFinder_PathsMirrorsSearchContract(t *testing.T) {
 		t.Fatalf("Paths = %v, want a.go + sub/b.go", paths)
 	}
 }
+
+// TestFinder_SearchUnderScopesAndRelativizes pins the folder-scoped
+// search: only paths under the folder come back, each relative to it, a
+// sibling sharing the folder's name as a prefix is NOT admitted, and
+// total counts the folder's files rather than the project's.
+func TestFinder_SearchUnderScopesAndRelativizes(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, dir, "internal/app/tab.go", "x")
+	mustWrite(t, dir, "internal/app/sub/tabbar.go", "x")
+	mustWrite(t, dir, "internal/application/tab.go", "x")
+	mustWrite(t, dir, "tab.go", "x")
+
+	f := New(dir)
+	done := make(chan struct{})
+	f.Rebuild(func() { close(done) })
+	<-done
+
+	got, total := f.SearchUnder("internal/app", "tab", 10)
+	if total != 2 {
+		t.Fatalf("total = %d, want 2 (internal/application must not count)", total)
+	}
+	// Order is the scorer's business; the scope is what's pinned here.
+	paths := map[string]bool{}
+	for _, r := range got {
+		paths[r.Path] = true
+	}
+	if len(got) != 2 || !paths["tab.go"] || !paths["sub/tabbar.go"] {
+		t.Fatalf("results = %+v, want tab.go and sub/tabbar.go relative to the folder", got)
+	}
+	// A folder-relative path query matches the trimmed path.
+	if got, _ := f.SearchUnder("internal/app", "sub/tab", 10); len(got) != 1 || got[0].Path != "sub/tabbar.go" {
+		t.Fatalf("path query results = %+v, want [sub/tabbar.go]", got)
+	}
+	// A trailing slash on the folder is tolerated.
+	if _, total := f.SearchUnder("internal/app/", "", 10); total != 2 {
+		t.Fatalf("trailing-slash total = %d, want 2", total)
+	}
+}
+
+// TestFinder_SearchUnderEmptyDirIsWholeIndex keeps dir "" equivalent to
+// Search, so callers need no special case for the project root.
+func TestFinder_SearchUnderEmptyDirIsWholeIndex(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, dir, "a.go", "x")
+	mustWrite(t, dir, "sub/b.go", "x")
+
+	f := New(dir)
+	done := make(chan struct{})
+	f.Rebuild(func() { close(done) })
+	<-done
+
+	got, total := f.SearchUnder("", "", 10)
+	if total != 2 || len(got) != 2 || got[1].Path != "sub/b.go" {
+		t.Fatalf("SearchUnder(\"\") = %+v (total %d), want both root-relative paths", got, total)
+	}
+}
+
+// TestFinder_SearchUnderNotReady mirrors Search's not-ready contract:
+// nil and a zero total before the first build.
+func TestFinder_SearchUnderNotReady(t *testing.T) {
+	f := New(t.TempDir())
+	if got, total := f.SearchUnder("sub", "x", 10); got != nil || total != 0 {
+		t.Fatalf("SearchUnder before Rebuild = %v, %d; want nil, 0", got, total)
+	}
+}

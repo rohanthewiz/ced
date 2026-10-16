@@ -372,18 +372,19 @@ func TestStatusRect(t *testing.T) {
 	}
 }
 
-// TestMenuButtonRect places the ≡ button at the start of the tab bar and
-// shifts left when the sidebar is hidden.
+// TestMenuButtonRect places the ≡ button just past the ✕ quit button at
+// the start of the tab bar, and shifts left when the sidebar is hidden.
 func TestMenuButtonRect(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	x, _, w, _ := a.menuButtonRect()
-	if x != defaultSidebarWidth || w != menuButtonWidth {
+	// The ✕ quit button takes the first cells; ≡ follows it.
+	if x != defaultSidebarWidth+quitButtonWidth || w != menuButtonWidth {
 		t.Fatalf("shown menuButtonRect: x=%d w=%d", x, w)
 	}
 	a.sidebarShown = false
 	x, _, _, _ = a.menuButtonRect()
-	if x != 0 {
-		t.Fatalf("hidden menuButtonRect should sit at column 0: got %d", x)
+	if x != quitButtonWidth {
+		t.Fatalf("hidden menuButtonRect should sit just past the ✕ at column %d: got %d", quitButtonWidth, x)
 	}
 }
 
@@ -394,7 +395,7 @@ func TestMenuModalRect_Centered(t *testing.T) {
 	// The menu (141 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 200
+	a.height = 201
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -2117,16 +2118,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 200 {
-		t.Errorf("modalHeight = %d, want 200", h)
+	if h != 201 {
+		t.Errorf("modalHeight = %d, want 201", h)
 	}
-	if got := len(items); got != 194 {
-		t.Errorf("row count = %d, want 194 (2 top-zone + 177 group actions + 15 headers)", got)
+	if got := len(items); got != 195 {
+		t.Errorf("row count = %d, want 195 (2 top-zone + 178 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (197) — headers separate the
+	// one setting off the headerless Quit group (198) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 197}
+	wantDiv := []int{2, 5, 198}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2710,8 +2711,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 203 { // 200 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 203", h)
+	if h != 204 { // 201 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 204", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -3165,7 +3166,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 200
+	a.height = 201
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

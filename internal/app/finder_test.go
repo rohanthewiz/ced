@@ -10,10 +10,12 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/finder"
 )
 
@@ -256,4 +258,188 @@ func endsWith(s, suffix string) bool {
 		return false
 	}
 	return s[len(s)-len(suffix):] == suffix
+}
+
+// TestOpenFinderIn_ScopesToTheFolder pins the folder-scoped finder: only
+// files under the folder are listed, each relative to it, and the count
+// tail's total is the folder's.
+func TestOpenFinderIn_ScopesToTheFolder(t *testing.T) {
+	a, dir := withFinder(t)
+	a.openFinderIn(filepath.Join(dir, "internal"))
+
+	m := finderOf(a)
+	if m == nil {
+		t.Fatal("openFinderIn should open the finder")
+	}
+	if m.scope != "internal" {
+		t.Fatalf("scope = %q, want internal", m.scope)
+	}
+	if m.scopeTotal != 3 || len(m.results) != 3 {
+		t.Fatalf("total %d / results %d, want the 3 files under internal/", m.scopeTotal, len(m.results))
+	}
+	for _, r := range m.results {
+		if strings.HasPrefix(r.Path, "internal/") {
+			t.Errorf("result %q should be relative to the folder", r.Path)
+		}
+		if r.Path == "main.go" || r.Path == "README.md" {
+			t.Errorf("result %q is outside the folder", r.Path)
+		}
+	}
+}
+
+// TestFinderIn_PathQueryOpensTheRightFile walks the typed-path case: a
+// folder-relative path narrows to one file, and Enter opens it at its
+// real location under the project root.
+func TestFinderIn_PathQueryOpensTheRightFile(t *testing.T) {
+	a, dir := withFinder(t)
+	a.openFinderIn(filepath.Join(dir, "internal"))
+	for _, r := range "app/tab" {
+		finderOf(a).handleKey(a, tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone))
+	}
+	if got := finderOf(a).results; len(got) == 0 || got[0].Path != "app/tab.go" {
+		t.Fatalf("results = %+v, want app/tab.go first", got)
+	}
+	finderOf(a).handleKey(a, tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if finderOf(a) != nil {
+		t.Fatal("Enter should close the finder")
+	}
+	want := filepath.Join(dir, "internal", "app", "tab.go")
+	if tab := a.activeTabPtr(); tab == nil || tab.Path != want {
+		t.Fatalf("active tab = %v, want %s", tab, want)
+	}
+}
+
+// TestOpenFinderIn_RootIsThePlainFinder: the tree root's row hands over
+// the project root, which must open the ordinary, unscoped finder.
+func TestOpenFinderIn_RootIsThePlainFinder(t *testing.T) {
+	a, dir := withFinder(t)
+	a.openFinderIn(dir)
+	m := finderOf(a)
+	if m == nil || m.scope != "" {
+		t.Fatalf("root should open the unscoped finder, got %+v", m)
+	}
+}
+
+// TestOpenFinderIn_OutsideTheProjectFlashes: a folder outside the root
+// (a stale node) is refused with a reason rather than an empty modal.
+func TestOpenFinderIn_OutsideTheProjectFlashes(t *testing.T) {
+	a, _ := withFinder(t)
+	a.openFinderIn(t.TempDir())
+	if a.modal != nil {
+		t.Fatalf("modal = %T, want a flash", a.modal)
+	}
+	if !strings.Contains(a.statusMsg, "outside the project") {
+		t.Errorf("flash = %q, want the outside-the-project reason", a.statusMsg)
+	}
+}
+
+// TestFinderIn_DrawNamesTheFolderAndExplainsAnEmptyOne checks the paint:
+// the title names the folder, and a folder with no indexed files says so
+// on the first row instead of showing a blank list.
+func TestFinderIn_DrawNamesTheFolderAndExplainsAnEmptyOne(t *testing.T) {
+	a, dir := withFinder(t)
+	empty := filepath.Join(dir, "empty")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a.openFinderIn(empty)
+	m := finderOf(a)
+	if m == nil {
+		t.Fatal("finder should open on an empty folder")
+	}
+	m.draw(a)
+	a.screen.Show()
+	text := screenText(a)
+	if !strings.Contains(text, "Find file in empty"+string(filepath.Separator)) {
+		t.Errorf("title should name the folder:\n%s", text)
+	}
+	if !strings.Contains(text, "No indexed files here") {
+		t.Errorf("an empty folder should explain itself:\n%s", text)
+	}
+}
+
+// TestTreeContext_FindFilesInFolderOnFoldersOnly pins the tree row:
+// offered on a folder and on the root (labelled as the project finder),
+// never on a file; activating it opens the finder scoped to the folder.
+func TestTreeContext_FindFilesInFolderOnFoldersOnly(t *testing.T) {
+	a, dir := withFinder(t)
+	find := func(items []contextItem, label string) *contextItem {
+		for i := range items {
+			if items[i].label == label {
+				return &items[i]
+			}
+		}
+		return nil
+	}
+	folder, ok := a.tree.Reveal(filepath.Join(dir, "internal"))
+	if !ok {
+		t.Fatal("setup: internal/ not in the tree")
+	}
+	file, ok := a.tree.Reveal(filepath.Join(dir, "main.go"))
+	if !ok {
+		t.Fatal("setup: main.go not in the tree")
+	}
+
+	a.openTreeContext(file, 5, 5)
+	if find(contextOf(a).items, "Find files in folder…") != nil {
+		t.Error("a file must not offer Find files in folder")
+	}
+	a.closeModal()
+
+	a.openTreeContext(a.tree.Root, 5, 5)
+	if find(contextOf(a).items, "Find file in project…") == nil {
+		t.Error("the root row should offer the project finder")
+	}
+	a.closeModal()
+
+	a.openTreeContext(folder, 5, 5)
+	row := find(contextOf(a).items, "Find files in folder…")
+	if row == nil {
+		t.Fatal("a folder should offer Find files in folder")
+	}
+	a.closeModal()
+	row.action(a, folder)
+	if m := finderOf(a); m == nil || m.scope != "internal" {
+		t.Fatalf("modal = %T, want the finder scoped to internal/", a.modal)
+	}
+}
+
+// TestCtxFindFilesInFolder_IgnoresFiles: a file node reaching the action
+// anyway opens nothing.
+func TestCtxFindFilesInFolder_IgnoresFiles(t *testing.T) {
+	a, dir := withFinder(t)
+	ctxFindFilesInFolder(a, &filetree.Node{Path: filepath.Join(dir, "main.go")})
+	if a.modal != nil {
+		t.Errorf("a file node opened %T", a.modal)
+	}
+}
+
+// TestMenuFindFilesInFolder_NamesTheActiveFolderOrExplains pins the ≡
+// twin: with a subfolder active the label names it and the row opens the
+// scoped finder; with none it stays clickable and flashes how to pick
+// one.
+func TestMenuFindFilesInFolder_NamesTheActiveFolderOrExplains(t *testing.T) {
+	a, dir := withFinder(t)
+
+	a.activeFolder = ""
+	if got := a.findFilesInFolderLabel(); got != "Find files in folder" {
+		t.Errorf("label with no folder = %q", got)
+	}
+	a.menuFindFilesInFolder()
+	if a.modal != nil {
+		t.Fatalf("with no folder, modal = %T, want a flash", a.modal)
+	}
+	if !strings.Contains(a.statusMsg, "folder in the tree") {
+		t.Errorf("flash = %q, want the how-to", a.statusMsg)
+	}
+
+	a.activeFolder = filepath.Join(dir, "internal", "app")
+	want := "Find files in folder (internal" + string(filepath.Separator) + "app" + string(filepath.Separator) + ")"
+	if got := a.findFilesInFolderLabel(); got != want {
+		t.Errorf("label = %q, want %q", got, want)
+	}
+	a.menuFindFilesInFolder()
+	if m := finderOf(a); m == nil || m.scope != "internal/app" {
+		t.Fatalf("modal = %T, want the finder scoped to internal/app", a.modal)
+	}
 }

@@ -1009,6 +1009,12 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 		// project and is labelled as such. ≡ twin: Find → "Find all in
 		// folder (sub/)" on the active folder.
 		items = append(items, contextItem{label: a.findInFolderContextLabel(n), action: ctxFindInFolder})
+		// Find files in folder (finder.go): the file finder scoped to
+		// this directory, matching names or folder-relative paths. Under
+		// its text-search sibling — the pair answers "which file" and
+		// "which line" for the same place. ≡ twin: Find → "Find files in
+		// folder (sub/)".
+		items = append(items, contextItem{label: a.findFilesInFolderContextLabel(n), action: ctxFindFilesInFolder})
 	}
 	if n != a.tree.Root {
 		items = append(items, contextItem{label: "Rename", action: ctxRename})

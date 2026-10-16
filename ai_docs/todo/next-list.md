@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-070**
+**Next ID: N-071**
 
 ## Open
 
@@ -186,13 +186,14 @@ and `raised`.
 
 - **N-066** · raised `2026-1015-1640-tree-recent-folders-star` · value low
   The tree's recent-folders star has only been seen through run-ced's
-  emulator, which doesn't measure glyph width. Since 0.5.0 it changed
-  from `★` (U+2605, ambiguous width, drawn too small) to the emoji `⭐`
-  (U+2B50, East Asian WIDE, measured, painted and hit-tested as two
-  cells). Hand check in macOS Terminal.app, tmux and cats: it draws as
-  a gold emoji two cells wide, the sidebar's right border stays straight
-  on the project row, and a real click on either half opens Recent
-  folders.
+  emulator, which doesn't measure glyph width. It went `★` (muted, too
+  faint) → emoji `⭐` (two cells, too big) → `★` bold gold (a little
+  small) → `⭑` (U+2B51, NEUTRAL width) bold gold, one cell. Size seen
+  and approved in cats on 2026-10-16. In SF Mono's fallback ⭑ is a few
+  pixels wider than its cell. Still to hand check in macOS Terminal.app,
+  tmux and cats: the overhang doesn't clip or smear into the splitter
+  when a narrow panel pins it to the last column, and a real click on it
+  opens Recent folders.
 
 - **N-067** · raised `2026-1016-1651-postgres-sql-formatting` · value low
   PostgreSQL formatting's external rung has only run with stubbed
@@ -205,6 +206,13 @@ and `raised`.
   place, keeps the indent and case, and a root config wins. Also confirm
   the in-process rung in the real binary (run-ced): format, then one
   Esc u undoes it.
+
+- **N-070** · raised `2026-1016-1849-tree-star-find-files-quit-button` · value low
+  The ✕ quit button left of ≡ (quitbutton.go) has only run in tests and
+  run-ced's emulator. Hand check in cats and tmux: a real click on any
+  of its three cells opens "Close the editor?" (dirty tabs → Save /
+  Discard / Cancel), the red ✕ reads as distinct from the tree header's
+  muted ✕ a few cells left, and the ≡ beside it still opens the menu.
 
 ## Roadmap
 

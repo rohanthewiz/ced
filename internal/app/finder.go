@@ -17,12 +17,28 @@ package app
 // file is just the wiring between user input and the buffer/tree
 // that already exist. The cached index (App.finder) outlives the
 // modal — finderModal is only the transient UI state of one open.
+//
+// "Find files in folder…" is the same modal with a SCOPE: the index is
+// narrowed to one directory and every path is matched and shown
+// relative to it, so a query can be a bare filename or a path inside the
+// folder ("app/tab" typed in internal/). The scope lives on the modal,
+// never on the shared index, so the plain finder is untouched:
+//
+//	tree folder ▸ "Find files in folder…" ─┐
+//	≡ Find "Find files in folder (sub/)" ──┴─▶ openFinderIn(dir)
+//	                                              │ root → "" (whole project)
+//	≡ Find "Find file in project" / Esc-p ──▶ openFinder()
+//	                                              ▼
+//	        refresh: scope "" → Finder.Search, else Finder.SearchUnder
+//	        openSelected: rootDir + scope + folder-relative result path
 
 import (
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/finder"
 )
 
@@ -58,6 +74,16 @@ type finderModal struct {
 	field    textField
 	selected int
 	results  []finder.Result
+
+	// scope is the folder this finder is narrowed to, ROOT-RELATIVE and
+	// "/"-separated ("internal/app"), or "" for the whole project. When
+	// set, results[].Path is relative to the folder, not the root.
+	// scopeName is its display form for the title, and scopeTotal how
+	// many indexed files the folder holds (the count tail's total, and
+	// the "nothing indexed here" note when it is 0).
+	scope      string
+	scopeName  string
+	scopeTotal int
 }
 
 // openFinder shows the project-wide file finder. Triggers a
@@ -79,6 +105,86 @@ func (a *App) openFinder() {
 		}
 	}
 	m.refresh(a)
+}
+
+// openFinderIn opens the finder narrowed to the files under dir
+// (absolute). The project root — what the tree's root row hands over —
+// folds into the plain finder (searchScopeDir), so "Find file in
+// project…" on the root is exactly Esc-p.
+//
+// A folder outside the root (a stale node after an external move)
+// flashes instead of opening an empty modal: the index only knows the
+// project, so there is nothing it could ever list.
+func (a *App) openFinderIn(dir string) {
+	dir = a.searchScopeDir(dir)
+	if dir == "" {
+		a.openFinder()
+		return
+	}
+	rel, err := filepath.Rel(a.rootDir, dir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		a.flash("Find files in folder: that folder is outside the project")
+		return
+	}
+	m := &finderModal{scope: filepath.ToSlash(rel), scopeName: a.relativeFolderLabel(dir)}
+	a.openModal(m)
+	a.rebuildFinderIfStale()
+	m.refresh(a)
+}
+
+// rebuildFinderIfStale kicks a background index build when the cache is
+// not ready, posting finderRebuiltEvent so an open modal refreshes. A
+// warm index costs nothing — the finder's coalesce gate also makes a
+// redundant call a no-op.
+func (a *App) rebuildFinderIfStale() {
+	if a.finder == nil || a.finder.State() == finder.StateReady {
+		return
+	}
+	scr := a.screen
+	a.finder.Rebuild(func() {
+		_ = scr.PostEvent(&finderRebuiltEvent{when: time.Now()})
+	})
+}
+
+// ctxFindFilesInFolder is the tree's folder row "Find files in folder…"
+// (the root's "Find file in project…"): the file finder scoped to the
+// clicked directory. Folders only — openTreeContext never offers it on
+// a file.
+func ctxFindFilesInFolder(a *App, n *filetree.Node) {
+	if !n.IsDir {
+		return
+	}
+	a.openFinderIn(n.Path)
+}
+
+// findFilesInFolderContextLabel names the tree row for n: the root's row
+// is the whole project and says so (it opens the plain finder), every
+// other folder gets the folder verb.
+func (a *App) findFilesInFolderContextLabel(n *filetree.Node) string {
+	if a.tree != nil && n == a.tree.Root {
+		return "Find file in project…"
+	}
+	return "Find files in folder…"
+}
+
+// menuFindFilesInFolder is the ≡ Find twin of the tree's folder row
+// (every file action also lives in ≡ — right-click is not reliable
+// under macOS Terminal + tmux). It acts on the ACTIVE folder, like the
+// other ≡ folder rows. With no subfolder active it explains how to pick
+// one rather than quietly becoming the plain finder.
+func (a *App) menuFindFilesInFolder() {
+	a.closeMenu()
+	if !a.hasActiveSubfolder() {
+		a.flash("Find files in folder: click a folder in the tree first — Find file in project searches everything")
+		return
+	}
+	a.openFinderIn(a.activeFolder)
+}
+
+// findFilesInFolderLabel is the ≡ row's dynamic label, naming the folder
+// it will search (activeFolderRowLabel).
+func (a *App) findFilesInFolderLabel() string {
+	return a.activeFolderRowLabel("Find files in folder")
 }
 
 // menuFindFile is the ≡ menu entry that opens the finder. Lives
@@ -105,7 +211,11 @@ func (m *finderModal) refresh(a *App) {
 		m.results = nil
 		return
 	}
-	m.results = a.finder.Search(m.field.String(), finderSearchLimit)
+	if m.scope == "" {
+		m.results = a.finder.Search(m.field.String(), finderSearchLimit)
+	} else {
+		m.results, m.scopeTotal = a.finder.SearchUnder(m.scope, m.field.String(), finderSearchLimit)
+	}
 	if m.selected >= len(m.results) {
 		m.selected = len(m.results) - 1
 	}
@@ -190,7 +300,9 @@ func (m *finderModal) openSelected(a *App) {
 	}
 	rel := m.results[m.selected].Path
 	a.closeModal()
-	abs := filepath.Join(a.rootDir, rel)
+	// A scoped result is folder-relative; Join drops the "" of an
+	// unscoped one.
+	abs := filepath.Join(a.rootDir, filepath.FromSlash(m.scope), rel)
 	a.openFile(abs)
 }
 
@@ -237,7 +349,11 @@ func (m *finderModal) draw(a *App) {
 	mx, my, mw, mh := m.rect(a)
 	c := a.chrome()
 	hitStyle := tcell.StyleDefault.Background(c.bg).Foreground(a.theme.FindCurrent).Bold(true)
-	c.drawFrame(a.screen, mx, my, mw, mh, "Find file")
+	title := "Find file"
+	if m.scope != "" {
+		title = "Find file in " + m.scopeName
+	}
+	c.drawFrame(a.screen, mx, my, mw, mh, title)
 
 	// Input row — the right side leaves room for the count tail.
 	inputStyle := tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Text)
@@ -257,6 +373,11 @@ func (m *finderModal) draw(a *App) {
 	case finder.StateErrored:
 		tail = "index err "
 	case finder.StateReady:
+		if m.scope != "" {
+			// The folder's own file count, not the project's: "3/12"
+			// in a folder of 12 files.
+			total = m.scopeTotal
+		}
 		tail = countLabel(len(m.results), total) + " "
 	}
 	drawAt(a.screen, mx+mw-1-runeLen(tail), my+3, tail, c.muted)
@@ -273,8 +394,19 @@ func (m *finderModal) draw(a *App) {
 	if len(visible) > rowsCap {
 		visible = visible[:rowsCap]
 	}
+	// A scoped finder over a folder the index skips entirely (build
+	// output, vendor, anything gitignored) would otherwise read as "no
+	// file matched"; name the likelier cause on the first row instead.
+	emptyScope := m.scope != "" && state == finder.StateReady && m.scopeTotal == 0
 	for i := 0; i < rowsCap; i++ {
 		ry := rowsStart + i
+		if i == 0 && emptyScope {
+			for cx := mx + 1; cx < mx+mw-1; cx++ {
+				a.screen.SetContent(cx, ry, ' ', nil, c.bgSt)
+			}
+			drawAt(a.screen, mx+2, ry, clipRunes("No indexed files here (ignored by the project?)", mw-4), c.muted)
+			continue
+		}
 		if i >= len(visible) {
 			// Clear unused rows so a previous query's tail doesn't
 			// linger when results shrink.

@@ -36,18 +36,25 @@ const markGlyph = "\u2713"
 // It is a button, not decoration: clicking it opens the recent-folders
 // picker (the app wires that up via RecentStarAt).
 //
-// Why ⭐ (U+2B50) and not the text star ★ (U+2605): ★ renders as a thin,
-// font-dependent glyph a little smaller than the letters beside it — hard
-// to spot as a button. ⭐ has Emoji_Presentation, so terminals draw it as
-// a full-size gold colour emoji. It is also East Asian WIDE, which every
-// terminal and tmux agree is two cells, where ★ is AMBIGUOUS and some
-// setups draw it two wide over one measured cell. The cost is the second
-// cell, which measure, paint and hit-test all account for via
-// recentStarWidth.
-const RecentFoldersGlyph = "\u2b50"
+// Why a one-cell ⭑ (U+2B51) bold in gold: a terminal cannot scale a
+// glyph, so the only sizes on offer are one cell and two, and "bigger"
+// within one cell means a glyph the fallback font draws bigger. The
+// colour emoji ⭐ (U+2B50, two cells) loomed over the project name; the
+// text star ★ (U+2605) was a little too small. Despite its name, "black
+// small star" ⭑ comes out about a quarter larger than ★ in SF Mono's
+// fallback (what cats' WebKit terminal and macOS terminals draw with),
+// sitting between the two. Bold in the warning gold keeps it reading as
+// a button beside the bold name.
+//
+// ⭑ is also East Asian NEUTRAL width, so every terminal and tmux agree
+// it is one cell — ★ was AMBIGUOUS, which a CJK locale may draw two
+// wide. The width is still a named constant (recentStarWidth) that
+// measure, paint and hit-test all read, so trading for a wide glyph is
+// a two-line change.
+const RecentFoldersGlyph = "\u2b51"
 
 // recentStarWidth is how many cells the star occupies on screen.
-const recentStarWidth = 2
+const recentStarWidth = 1
 
 // recentStarGap is what the star adds to the project row: one space of
 // separation plus the glyph's cells.
@@ -434,15 +441,15 @@ func (t *Tree) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		// long name is cut short rather than pushing the star off the
 		// panel — the button stays reachable at any sidebar width.
 		//
-		// The emoji brings its own gold; the foreground only matters to a
-		// terminal that falls back to a monochrome glyph, where the warning
-		// yellow keeps it reading as a gold star rather than as text.
-		// SetContent (not drawString) because tcell knows the rune is wide
-		// and claims the second cell itself.
+		// Warning gold rather than Accent: the root name is Accent most of
+		// the time, and a star in the same colour would read as part of the
+		// name. Bold thickens the strokes so the one-cell glyph holds its
+		// own beside the bold name. SetContent (not drawString) so a
+		// future wide glyph still has tcell claim its second cell.
 		drawString(scr, x, rootY, t.recentStarCol-1, " "+t.Root.Name, rootStyle)
 		star, _ := utf8.DecodeRuneInString(RecentFoldersGlyph)
 		scr.SetContent(x+t.recentStarCol, rootY, star, nil,
-			tcell.StyleDefault.Background(bg).Foreground(th.DiagWarning))
+			tcell.StyleDefault.Background(bg).Foreground(th.DiagWarning).Bold(true))
 	}
 
 	// Build the flat list of visible rows from the root's children.
@@ -838,14 +845,15 @@ func (t *Tree) HitTest(localX, localY int) (*Node, bool) {
 //
 // The answer is the star's FIRST cell; it occupies recentStarWidth.
 // Normally that is one space past the end of " <name>". When the panel
-// is too narrow for the whole row, the star pins to the LAST two columns
+// is too narrow for the whole row, the star pins to the LAST column(s)
 // and the name is truncated in front of it — the star is a button, and a
 // button that disappears whenever the sidebar is narrow is not one you
-// can rely on. Below five columns there is no room for the gutter, a
-// letter of the name, the gap and the two-cell star, so nothing is drawn.
+// can rely on. Below 2+recentStarGap columns there is no room for the
+// gutter, a letter of the name, the gap and the star, so nothing is
+// drawn.
 //
-//	" proj ⭐"       fits: star after the name
-//	" a-very-l ⭐"   narrow: name cut, star on the last two columns
+//	" proj ★"       fits: star after the name
+//	" a-very-l ★"   narrow: name cut, star on the last column
 func rootStarCol(name string, w int) int {
 	if w < 2+recentStarGap {
 		return 0
@@ -859,8 +867,8 @@ func rootStarCol(name string, w int) int {
 
 // RecentStarAt reports whether a click at (localX, localY) — relative to
 // the tree's render rect, like HitTest — lands on the recent-folders star
-// the last Render drew — either of its two cells, since a click on the
-// right half of a wide glyph reports that half's column. Callers check it
+// the last Render drew — any of its recentStarWidth cells, since a click
+// on the right half of a wide glyph would report that half's column. Callers check it
 // BEFORE HitTest, which would otherwise answer t.Root for the whole
 // project row.
 func (t *Tree) RecentStarAt(localX, localY int) bool {

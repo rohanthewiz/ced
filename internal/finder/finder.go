@@ -30,7 +30,9 @@ package finder
 //     stays responsive instead of blocking on a 200ms walk.
 
 import (
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -183,6 +185,56 @@ func (f *Finder) Search(query string, limit int) []Result {
 	if state == StateIdle || state == StateBuilding {
 		return nil
 	}
+	return rank(paths, query, limit)
+}
+
+// SearchUnder is Search narrowed to one folder of the index: only paths
+// under dir (root-relative, "/"-separated, no trailing slash; "" = the
+// whole index) are considered, and each is scored and returned RELATIVE
+// TO dir — the folder-scoped finder ("Find files in folder…") matches
+// "app/tab.go" typed inside internal/ against "app/tab.go", not against
+// "internal/app/tab.go", so the folder's own name never soaks up query
+// runes or basename-vs-dir bonuses. total is how many indexed files sit
+// under dir, so the UI can tell "folder has no indexed files" apart from
+// "nothing matched".
+//
+// The prefix test runs on the "/" form with the separator appended:
+// "internal/app" must not admit "internal/application/x.go", and the
+// fallback walk stores OS separators where `git ls-files` stores "/".
+// filepath.ToSlash never changes a path's byte length, so the trim can
+// slice the original string at the prefix's length.
+//
+// Same not-ready contract as Search: nil, 0 while idle or building.
+func (f *Finder) SearchUnder(dir, query string, limit int) ([]Result, int) {
+	if limit <= 0 {
+		limit = 10
+	}
+	f.mu.RLock()
+	paths := f.paths
+	state := f.state
+	f.mu.RUnlock()
+	if state == StateIdle || state == StateBuilding {
+		return nil, 0
+	}
+	if dir == "" {
+		return rank(paths, query, limit), len(paths)
+	}
+	prefix := strings.TrimSuffix(filepath.ToSlash(dir), "/") + "/"
+	scoped := make([]string, 0, 64)
+	for _, p := range paths {
+		if strings.HasPrefix(filepath.ToSlash(p), prefix) {
+			scoped = append(scoped, p[len(prefix):])
+		}
+	}
+	return rank(scoped, query, limit), len(scoped)
+}
+
+// rank is the scoring core shared by Search and SearchUnder: score every
+// path, drop non-matches, order best-first with an alphabetical
+// tie-break, cut to limit. An empty query is the "starter list" — the
+// first limit paths in index order (alphabetical, since both index
+// builders sort).
+func rank(paths []string, query string, limit int) []Result {
 	if query == "" {
 		out := make([]Result, 0, limit)
 		for i, p := range paths {

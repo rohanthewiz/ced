@@ -527,6 +527,11 @@ func builtinMenuGroups() []menuGroup {
 			// the folder it will search; with none active it explains
 			// how to pick one rather than dimming (projectsearch.go).
 			{action: (*App).menuFindInFolder, enabled: (*App).hasProjectSearch, labelFor: (*App).findInFolderLabel},
+			// The file finder narrowed to the active folder — ≡ twin of
+			// the tree folder row "Find files in folder…" (finder.go).
+			// Last, so the two folder-scoped rows sit together under the
+			// project-wide pair they narrow.
+			{action: (*App).menuFindFilesInFolder, enabled: (*App).hasFinder, labelFor: (*App).findFilesInFolderLabel},
 		}},
 		// Nav — getting somewhere else: back/forward through the file
 		// history (tree, tabs, finder and definition jumps all feed it),
@@ -2727,10 +2732,11 @@ func (a *App) editorSize() (int, int) {
 }
 
 // menuButtonRect returns the on-screen rectangle of the ≡ icon in the tab
-// bar. Click hit-tests in tabBarClick consult this directly. When the
-// left block is absent the icon shifts left to fill the corner.
+// bar, just right of the ✕ quit button (quitbutton.go). Click hit-tests in
+// tabBarClick consult this directly. When the left block is absent both
+// buttons shift left to fill the corner.
 func (a *App) menuButtonRect() (x, y, w, h int) {
-	return a.leftBlockW(), 0, menuButtonWidth, 1
+	return a.leftBlockW() + quitButtonWidth, 0, menuButtonWidth, 1
 }
 
 // menuPinnedRows is the fixed header of the action modal — top border,

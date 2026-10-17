@@ -30,7 +30,9 @@
 // It reveals and never re-roots, the favorites rule: every folder here is
 // inside the workspace, and re-rooting at `internal/app` would throw away
 // git, gopls and the finder index. Switching PROJECTS is still ≡ File →
-// Recent folders…, which this deliberately leaves alone.
+// Recent folders…, which this deliberately leaves alone — that picker (and
+// the tree's ⭑) borrows this list's top level for its bottom section
+// (recentFolderLocalRows), with the same reveal-or-drill rows.
 //
 // A USE is a file opened in a folder in a NEW tab (openFile's new-tab
 // branch — tab switching is not work in another place), or a folder picked
@@ -310,6 +312,31 @@ func (a *App) locationSections(under string, recent, frequent []string) []palett
 		items = append(items, row(d))
 	}
 	return items
+}
+
+// recentFolderLocalRows is the bottom half of "Recent folders…" (the
+// tree's ⭑): this repository's top-level recent locations, recent then
+// frequent, as one section. The inner spacer is dropped — the picker
+// already spends its one divider between the global and local halves, and
+// a second would read as a third kind of folder. Rows keep the `›` drill
+// marker and pickLocation's behaviour; the "./" prefix marks them local.
+func (a *App) recentFolderLocalRows() []paletteItem {
+	root := session.Normalize(a.rootDir)
+	idx := a.repoHistory().Folders
+	pick := &locationPick{have: map[string]bool{}}
+	recent := idx.Recent(root, locationsRecent, pick.accept)
+	frequent := idx.Frequent(root, locationsFrequent, pick.accept)
+	a.pruneGoneLocations(pick.gone)
+	sections := a.locationSections(root, recent, frequent)
+	out := make([]paletteItem, 0, len(sections))
+	for _, it := range sections {
+		if it.spacer {
+			continue
+		}
+		it.label = "." + string(filepath.Separator) + it.label
+		out = append(out, it)
+	}
+	return out
 }
 
 // locationRows is the height to ask for: the whole list when it fits under

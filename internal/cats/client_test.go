@@ -331,6 +331,48 @@ func TestPaneListAgentFields(t *testing.T) {
 	}
 }
 
+// workspace.list decodes the fields the recent-folder ladder reads, and
+// agent.focus addresses its pane the way cats' PaneParams spells it.
+func TestWorkspaceListAndAgentFocus(t *testing.T) {
+	s := startFake(t, func(req request, conn net.Conn) {
+		switch req.Method {
+		case MethodWorkspaceList:
+			reply(t, conn, WorkspaceListResult{Workspaces: []WorkspaceEntry{
+				{ID: "w1", Name: "ced", Active: true},
+				{ID: "w2", Name: "cats", Asleep: true, Locked: true, Host: "devbox", Cwd: "/w/cats"},
+			}})
+		default:
+			reply(t, conn, nil)
+		}
+	})
+	c := NewClient(s.path)
+
+	wss, err := c.WorkspaceList()
+	if err != nil || len(wss) != 2 {
+		t.Fatalf("workspace.list → %v, %v", wss, err)
+	}
+	if w := wss[1]; w.ID != "w2" || !w.Asleep || !w.Locked || w.Host != "devbox" || w.Cwd != "/w/cats" || wss[0].Name != "ced" {
+		t.Fatalf("got %+v", wss)
+	}
+	_ = s.nextReq()
+
+	if err := c.AgentFocus(21); err != nil {
+		t.Fatalf("agent.focus: %v", err)
+	}
+	req := s.nextReq()
+	if req.Method != MethodAgentFocus || params(t, req) != `{"pane":21}` {
+		t.Fatalf("agent.focus request = %s %s", req.Method, params(t, req))
+	}
+
+	// tab.create's workspace rides the wire only when set.
+	if _, err := c.TabCreate(TabCreateParams{Cwd: "/w", Workspace: "w2"}); err != nil {
+		t.Fatalf("tab.create: %v", err)
+	}
+	if got := params(t, s.nextReq()); got != `{"cwd":"/w","workspace":"w2"}` {
+		t.Fatalf("tab.create params = %s", got)
+	}
+}
+
 // -----------------------------------------------------------------------------
 // capture and pane.wait_for_output
 // -----------------------------------------------------------------------------

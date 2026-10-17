@@ -394,9 +394,24 @@ func (a *App) menuOpenFolder() {
 // Folders that have since been deleted are PRUNED here, not dimmed. A
 // list of places you can't go is worse than a shorter list, and the walk
 // is the only moment ced is in a position to notice.
+//
+// Two kinds of folder, top to bottom, with a spacer between them:
+//
+//	~/projs/go/cats  (3 tabs)     GLOBAL — other projects: ced's own
+//	~/notes  · cats                 recents, then the host's frecency list
+//	┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+//	./internal/app  ›             LOCAL — this repository's recent
+//	./ai_docs                       locations (recentlocations.go)
+//
+// A global row goes to the project (openRecentFolder: inside cats, to the
+// ced or workspace already on it; elsewhere, re-root this editor). A local
+// row stays in this workspace and reveals or drills in, exactly as it does
+// in ≡ Nav "Recent locations…". The "./" prefix tells the halves apart
+// once filtering has removed the spacer, and is typable to narrow to them.
 func (a *App) menuRecentFolders() {
 	a.closeMenu()
-	if a.sessionStore == nil && len(a.cats.recents) == 0 {
+	local := a.recentFolderLocalRows()
+	if a.sessionStore == nil && len(a.cats.recents) == 0 && len(local) == 0 {
 		a.flash("No recent folders recorded yet")
 		return
 	}
@@ -426,7 +441,7 @@ func (a *App) menuRecentFolders() {
 		}
 		items = append(items, paletteItem{
 			label: label,
-			run:   func(app *App) { app.requestOpenFolder(root) },
+			run:   func(app *App) { app.openRecentFolder(root) },
 		})
 	}
 	if pruned {
@@ -440,18 +455,25 @@ func (a *App) menuRecentFolders() {
 		dir := dir
 		items = append(items, paletteItem{
 			label: catsRecentLabel(dir),
-			run:   func(app *App) { app.requestOpenFolder(dir) },
+			run:   func(app *App) { app.openRecentFolder(dir) },
 		})
 	}
 	// Freshen the cache for the NEXT open. The picker runs on the main
 	// loop and path.list is a socket round trip, so this list is always
 	// one gesture behind by construction — see catsfrecency.go.
 	a.catsPollRecents()
+	if len(items) > 0 && len(local) > 0 {
+		items = append(items, paletteSpacer())
+	}
+	items = append(items, local...)
 	if len(items) == 0 {
 		a.flash("No other recent folders — use ≡ → File → Open folder…")
 		return
 	}
-	a.openPicker("Recent folders", items)
+	// Sized like Recent locations: the whole list when it fits under that
+	// picker's cap, since the local half sits at the bottom and an
+	// ordinary-height picker would hide it below the fold.
+	a.openPickerRows("Recent folders", items, locationRows(items), nil)
 }
 
 // recentFolderRoots is the editor's own recent list, or nothing when the
@@ -498,8 +520,9 @@ func (a *App) sessionToggleLabel() string {
 func (a *App) hasRecentFolders() bool {
 	// The host's frecency list stands on its own: inside cats the picker
 	// is worth opening on the very first run, before this editor has been
-	// anywhere (catsfrecency.go).
-	if len(a.cats.recents) > 0 {
+	// anywhere (catsfrecency.go). So does the local half: a repository
+	// with history has somewhere to go even on a first-ever folder.
+	if len(a.cats.recents) > 0 || a.hasRecentLocations() {
 		return true
 	}
 	if a.sessionStore == nil {

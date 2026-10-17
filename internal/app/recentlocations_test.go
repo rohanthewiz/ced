@@ -102,6 +102,35 @@ func TestRecentLocations_DrillThenReveal(t *testing.T) {
 	}
 }
 
+// TestRecentFolderLocalRows_OneMarkedSection pins the borrowed top level:
+// recent then frequent with the inner spacer dropped (the Recent folders
+// picker spends its one divider between halves), each row "./"-marked.
+func TestRecentFolderLocalRows_OneMarkedSection(t *testing.T) {
+	root := t.TempDir()
+	var names []string
+	for i := 0; i < 7; i++ {
+		names = append(names, fmt.Sprintf("r%d", i))
+	}
+	dirs := mkdirs(t, root, names...)
+	a := newTestApp(t, root)
+	useFolder(a, dirs[0], 3)
+	useFolder(a, dirs[1], 2)
+	for _, d := range dirs[2:] {
+		useFolder(a, d, 1)
+	}
+
+	var got []string
+	for _, it := range a.recentFolderLocalRows() {
+		if it.spacer {
+			t.Fatal("the local half must be one section")
+		}
+		got = append(got, it.label)
+	}
+	if want := "./r6,./r5,./r4,./r3,./r2,./r0,./r1"; strings.Join(got, ",") != want {
+		t.Fatalf("rows = %v, want %s", got, want)
+	}
+}
+
 // TestNoteFolderUse_OnlyInsideTheRepo pins what counts: a folder outside
 // the workspace belongs to another repository's history, and the root is
 // the top of every list rather than an entry in one.

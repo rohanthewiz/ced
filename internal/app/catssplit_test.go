@@ -54,6 +54,12 @@ type ctlSpy struct {
 	// panes carrying more than an id (an agent, a cwd). Nil falls back to
 	// panes, the plain id list the split sequence needs.
 	paneRows []cats.PaneInfo
+	// wsRows is what workspace.list reports, and tabPane the root pane a
+	// tab.create answers with (0 = an older host's empty ok) — the two
+	// listings and the spawn the recent-folder ladder reads
+	// (catsworkspace.go).
+	wsRows  []cats.WorkspaceEntry
+	tabPane uint32
 	// clipText is what clipboard.read answers with, and clipFails makes it
 	// refuse the way a host with no reader on PATH does. The zero values are
 	// the honest defaults: an empty clipboard, which is an ordinary answer.
@@ -139,6 +145,12 @@ func (s *ctlSpy) serve(conn net.Conn) {
 			rows = append(rows, map[string]any{"pane": p})
 		}
 		reply["data"] = map[string]any{"panes": rows}
+	case cats.MethodWorkspaceList:
+		reply["data"] = map[string]any{"workspaces": s.wsRows}
+	case cats.MethodTabCreate:
+		if s.tabPane != 0 {
+			reply["data"] = map[string]any{"num": 4, "pane": s.tabPane}
+		}
 	case cats.MethodCapture:
 		reply["data"] = map[string]any{"text": s.captureText}
 	case cats.MethodClipboardRead:

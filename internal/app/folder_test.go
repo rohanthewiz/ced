@@ -462,6 +462,63 @@ func TestRecentFolders_PickSwitches(t *testing.T) {
 	}
 }
 
+// TestRecentFolders_LocalFoldersAtTheBottom pins the picker's two halves:
+// other projects first, a spacer, then this repository's recent locations
+// marked "./" — and a local pick reveals in the tree, never re-roots.
+func TestRecentFolders_LocalFoldersAtTheBottom(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	sub := mkdirs(t, root, "pkg")[0]
+	a := newTestApp(t, root)
+	store := seedSessionStore(a)
+	store.Touch(other)
+	store.Touch(root)
+	useFolder(a, sub, 1)
+
+	a.menuRecentFolders()
+
+	m := paletteOf(a)
+	if m == nil {
+		t.Fatalf("modal = %T, want the picker", a.modal)
+	}
+	var got []string
+	for _, mt := range m.matches {
+		if mt.item.spacer {
+			got = append(got, "--")
+			continue
+		}
+		got = append(got, mt.item.label)
+	}
+	want := []string{displayPath(session.Normalize(other)), "--", "./pkg"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+	m.selected = 1 // the spacer is not counted: index 1 is the local row
+	m.runSelected(a)
+	if a.quit || a.nextRoot != "" {
+		t.Fatal("a local folder must be revealed, never re-rooted")
+	}
+}
+
+// TestRecentFolders_LocalHalfAloneOpensThePicker pins the gate: a first-ever
+// folder with repository history still has somewhere to go.
+func TestRecentFolders_LocalHalfAloneOpensThePicker(t *testing.T) {
+	root := t.TempDir()
+	sub := mkdirs(t, root, "pkg")[0]
+	a := newTestApp(t, root)
+	store := seedSessionStore(a)
+	store.Touch(root)
+	useFolder(a, sub, 1)
+
+	if !a.hasRecentFolders() {
+		t.Fatal("the row should be live on the local half alone")
+	}
+	a.menuRecentFolders()
+	if labels := pickerLabels(t, a); len(labels) != 1 || labels[0] != "./pkg" {
+		t.Fatalf("rows = %v, want [./pkg]", labels)
+	}
+}
+
 // TestDisplayPath_CollapsesHome pins the UI spelling of a path. Picker
 // rows are read at a glance, and a long absolute prefix the user already
 // knows is a third of the row spent saying nothing.

@@ -864,7 +864,16 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   in `DiagWarning` gold, ONE cell (`recentStarWidth`) — the two-cell emoji
   `⭐` was too big, `★` (U+2605, ambiguous width) a little too small; size
   within one cell = pick the glyph the fallback font draws bigger. One space after the project name on the root row;
-  click = `menuRecentFolders` (≡ File "Recent folders…" is the twin). A
+  click = `menuRecentFolders` (≡ File "Recent folders…" is the twin):
+  global rows (ced recents, then `· cats`), a spacer, then LOCAL rows =
+  Recent locations' top level as one section, `./`-marked
+  (`recentFolderLocalRows`). Global rows go through `openRecentFolder`
+  (catsworkspace.go): Tier 1 = running ced on the folder (agent.focus) →
+  new ced tab in the folder's awake, unlocked workspace → new tab in the
+  current one; Tier 0 = re-root. A workspace is matched by its
+  `workspace.list` `cwd` (stored identity folder, exact) first; for a cats
+  without that field, by evidence (name == folder label + a pane under
+  it, else a pane AT it), never the name alone. A
   narrow panel cuts the NAME, never the star (pinned to the last column;
   none under 4 cols). Render stamps the
   column, `RecentStarAt` reads it and is checked BEFORE `HitTest` (which

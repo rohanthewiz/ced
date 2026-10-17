@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-071**
+**Next ID: N-072**
 
 ## Open
 
@@ -213,6 +213,18 @@ and `raised`.
   of its three cells opens "Close the editor?" (dirty tabs → Save /
   Discard / Cancel), the red ✕ reads as distinct from the tree header's
   muted ✕ a few cells left, and the ≡ beside it still opens the menu.
+
+- **N-071** · raised `2026-1016-2111-recent-folders-local-and-workspace-routing` · value medium
+  Recent folders' Tier-1 routing (catsworkspace.go) has only run against
+  the control-socket spy. Hand check in a real cats, rebuilt with the
+  `workspace.list` `cwd` field (cats 2026-10-16): clicking a project in
+  the tree's ⭑ (1) with a ced open on it in another workspace brings
+  that workspace, tab and pane into view; (2) with only shells in its
+  workspace opens a new ced tab THERE and follows it; (3) with its
+  workspace asleep, or none, opens the tab in the current workspace.
+  Also with an OLDER cats (no `cwd`): the pane-evidence fallback still
+  finds the workspace. And the `./` local half at the bottom reveals,
+  never re-roots.
 
 ## Roadmap
 

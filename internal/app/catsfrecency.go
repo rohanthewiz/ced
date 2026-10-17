@@ -39,10 +39,8 @@ package app
 
 import (
 	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/rohanthewiz/ced/internal/cats"
 	"github.com/rohanthewiz/ced/internal/session"
 )
 
@@ -139,13 +137,9 @@ func (a *App) catsOpenProjectInTab(dir string) {
 		return
 	}
 	client, scr := a.cats.client, a.screen
-	params := cats.TabCreateParams{
-		// The tab wears the project's name, because a strip of tabs all
-		// labeled "ced" is a strip of tabs with no information in it.
-		Title:   filepath.Base(dir),
-		Cwd:     dir,
-		Command: []string{exe, "--root", dir},
-	}
+	// Shared with the recent-folder ladder (catsworkspace.go), so both
+	// spawn the same editor under the same project-named tab.
+	params := catsProjectTabParams(exe, dir)
 	shown := displayPath(dir)
 	go func() {
 		if _, err := client.TabCreate(params); err != nil {

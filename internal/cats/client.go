@@ -62,6 +62,16 @@ const (
 	MethodClipboardRead = "clipboard.read"
 )
 
+// MethodWorkspaceList and MethodAgentFocus serve "take me to the ced on
+// that folder" (app/catsworkspace.go): the first names the workspaces a
+// folder may belong to, the second reveals a pane in ANY workspace and tab —
+// pane.focus only moves focus inside a pane's own tab and leaves a
+// background tab hidden.
+const (
+	MethodWorkspaceList = "workspace.list"
+	MethodAgentFocus    = "agent.focus"
+)
+
 // request is the outbound envelope. ID is echoed back; ced sends one request
 // per connection, so the id is only ever used to sanity-check the reply.
 type request struct {
@@ -173,6 +183,33 @@ type PaneInfo struct {
 	AgentState string `json:"agent_state,omitempty"`
 	Title      string `json:"title,omitempty"`
 	Cwd        string `json:"cwd,omitempty"`
+	// Host is the cathost the pane's terminal runs on. A cwd is only half an
+	// identity — the same path on two machines names two folders — so any
+	// comparison of a pane's Cwd against a local path checks this first.
+	Host string `json:"host,omitempty"`
+}
+
+// WorkspaceEntry is one row of workspace.list. ID is the public handle
+// ("w1") that prefixes every pane handle in it and that tab.create's
+// Workspace field takes. Name is the custom name, or one derived from the
+// workspace's identity folder (its basename, "~" for home). Asleep is a
+// workspace kept in the list with no terminal behind it; Locked one closed
+// to automation (tab.create into it fails). Cwd is the workspace's stored
+// identity folder — the one its auto-name derives from, unmoved by shells
+// that cd away; a cats older than the field omits it, which reads as "".
+type WorkspaceEntry struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Active bool   `json:"active"`
+	Locked bool   `json:"locked,omitempty"`
+	Asleep bool   `json:"asleep,omitempty"`
+	Host   string `json:"host,omitempty"`
+	Cwd    string `json:"cwd,omitempty"`
+}
+
+// WorkspaceListResult is workspace.list's payload.
+type WorkspaceListResult struct {
+	Workspaces []WorkspaceEntry `json:"workspaces"`
 }
 
 // PaneListResult is pane.list's payload.
@@ -183,11 +220,14 @@ type PaneListResult struct {
 // TabCreateParams opens a tab. The zero value is a default shell inheriting
 // the neighbouring tab's cwd; Command makes the tab run a program directly
 // (its exit closes the pane), which is how ced spawns a sibling editor.
+// Workspace ("w2") puts the tab in a workspace other than the active one;
+// the viewport does not follow it there (AgentFocus does that).
 type TabCreateParams struct {
-	Title   string            `json:"title,omitempty"`
-	Cwd     string            `json:"cwd,omitempty"`
-	Command []string          `json:"command,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	Title     string            `json:"title,omitempty"`
+	Cwd       string            `json:"cwd,omitempty"`
+	Command   []string          `json:"command,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Workspace string            `json:"workspace,omitempty"`
 }
 
 // TabCreateResult names the new tab and its root pane, so a caller can drive
@@ -314,6 +354,25 @@ func (c *Client) PaneSplit(p SplitParams) (SplitResult, error) {
 	var r SplitResult
 	err := c.Call(MethodPaneSplit, p, &r)
 	return r, err
+}
+
+// WorkspaceList returns the session's workspaces in their sidebar order.
+func (c *Client) WorkspaceList() ([]WorkspaceEntry, error) {
+	var r WorkspaceListResult
+	if err := c.Call(MethodWorkspaceList, nil, &r); err != nil {
+		return nil, err
+	}
+	return r.Workspaces, nil
+}
+
+// AgentFocus reveals a pane wherever it lives: its workspace comes into
+// view, its tab becomes that workspace's active tab, and the pane takes
+// focus. The verb is named for the agents sidebar that introduced it, but
+// it addresses any pane.
+func (c *Client) AgentFocus(pane uint32) error {
+	return c.Call(MethodAgentFocus, struct {
+		Pane uint32 `json:"pane"`
+	}{pane}, nil)
 }
 
 // PaneFocus focuses a pane within its tab — the click-through for a status

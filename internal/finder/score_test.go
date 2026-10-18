@@ -128,3 +128,79 @@ func TestScore_MinimumOne(t *testing.T) {
 		t.Fatalf("expected score >= 1 for any real match, got %d", s)
 	}
 }
+
+// TestScore_ContiguousHighlightsTheSubstring is the reported bug: the
+// greedy walk took the "po" of "reports" for "pobc_kahua_canada/…",
+// highlighting stray letters. A query that occurs whole must be
+// highlighted as that one run.
+func TestScore_ContiguousHighlightsTheSubstring(t *testing.T) {
+	path := "custom_dm_reports/pobc_kahua_canada/prod.json"
+	query := "pobc_kahua_canada/prod.json"
+	_, idx := Score(query, path)
+	start := len("custom_dm_reports/")
+	if len(idx) != len(query) {
+		t.Fatalf("idx length: got %d, want %d", len(idx), len(query))
+	}
+	for k, got := range idx {
+		if got != start+k {
+			t.Fatalf("idx[%d]: got %d, want %d (contiguous run)", k, got, start+k)
+		}
+	}
+}
+
+// TestScore_ContiguousOutranksScattered pins the tier rule: any path
+// holding the query as a substring beats every path that only matches
+// it scattered — even one where the scattered letters all sit on word
+// boundaries in the basename, which per-rune bonuses alone would rank
+// higher.
+func TestScore_ContiguousOutranksScattered(t *testing.T) {
+	contiguous, _ := Score("abc", "deep/dir/xxabcxx.txt")
+	scattered, _ := Score("abc", "a_b_c.go")
+	if contiguous <= scattered {
+		t.Fatalf("contiguous (%d) should outrank scattered (%d)", contiguous, scattered)
+	}
+	// The screenshot's competitor shape: the query's letters strewn
+	// through a longer path must lose to the path that holds it whole.
+	whole, _ := Score("prod.json", "a/prod.json")
+	strewn, _ := Score("prod.json", "p/r/o/d/.j/s/o/n")
+	if whole <= strewn {
+		t.Fatalf("whole (%d) should outrank strewn (%d)", whole, strewn)
+	}
+}
+
+// TestScore_ContiguousPicksBestOccurrence checks that among several
+// substring hits the best-scoring one is highlighted — "app" lands on
+// the basename of "internal/app/app.go", not the directory.
+func TestScore_ContiguousPicksBestOccurrence(t *testing.T) {
+	path := "internal/app/app.go"
+	_, idx := Score("app", path)
+	want := len("internal/app/")
+	if len(idx) != 3 || idx[0] != want {
+		t.Fatalf("idx: got %v, want run starting at %d", idx, want)
+	}
+}
+
+// TestScore_ContiguousIsCaseInsensitive keeps the substring pass on the
+// same case rule as the fuzzy one, so "README" typed as "readme" still
+// gets the contiguous tier.
+func TestScore_ContiguousIsCaseInsensitive(t *testing.T) {
+	sub, idx := Score("readme", "docs/README.md")
+	scattered, _ := Score("readme", "r/e/a/d/m/e")
+	if sub <= scattered {
+		t.Fatalf("case-folded substring (%d) should outrank scattered (%d)", sub, scattered)
+	}
+	if len(idx) != 6 || idx[0] != len("docs/") {
+		t.Fatalf("idx: got %v", idx)
+	}
+}
+
+// TestContiguousFloor_BoundsScattered checks the floor against the
+// scattered ceiling directly: the best imaginable scattered alignment
+// (every rune earning every bonus) stays below the floor.
+func TestContiguousFloor_BoundsScattered(t *testing.T) {
+	for n := 1; n <= 40; n++ {
+		if n*maxRuneBonus >= contiguousFloor(n) {
+			t.Fatalf("n=%d: floor %d does not clear ceiling %d", n, contiguousFloor(n), n*maxRuneBonus)
+		}
+	}
+}

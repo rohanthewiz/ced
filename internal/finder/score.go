@@ -20,6 +20,13 @@
 //     so "tab" matches "tab.go" before it matches "stable.go".
 //   - Earlier match positions break ties.
 //
+// Above all of those sits one tier rule: a query that appears in the
+// path as a CONTIGUOUS run (case-insensitive substring) always outranks
+// one that only matches scattered. Typing "pobc_kahua_canada/prod.json"
+// means that folder and file, not any path that happens to hold those
+// letters in order — the fuzzy walk is the fallback for abbreviations
+// ("apgo" → "app/go"), not the first answer.
+//
 // The matcher returns both the score and the matched rune indexes so
 // the UI can highlight which characters of each result line up with
 // the query — the same trick `fzf` uses to make results scannable.
@@ -48,6 +55,12 @@ const (
 	bonusConsecutive  = 30 // match continues an unbroken run
 	bonusFirstChar    = 10 // first matched char is at position 0
 	penaltyGap        = 1  // each unmatched char between matches
+
+	// maxRuneBonus is the most one matched rune can earn from the
+	// bonuses above (first char + consecutive + basename + boundary).
+	// contiguousFloor multiplies it by the query length, so it bounds
+	// every scattered score for that query from above — see Score.
+	maxRuneBonus = bonusFirstChar + bonusConsecutive + bonusBasename + bonusWordBoundary
 )
 
 // Why bonusConsecutive (30) > bonusWordBoundary (20): a tight run
@@ -61,12 +74,29 @@ const (
 // score == 0 means "no match" — every query rune must appear in
 // path in order (case-insensitive) to score above zero.
 //
-// The matcher is greedy left-to-right: for each query rune we
-// take the first matching path rune we haven't consumed yet. This
-// is faster than a full DP and good enough for "find file" — the
-// degenerate cases people actually type ("foo", "tab.go", "format")
-// produce the same result either way. Pure greedy means N×M
-// runtime is dominated by the path length, not query length.
+// Two passes, tiered:
+//
+//  1. Contiguous: every case-insensitive occurrence of the whole query
+//     as a substring is scored with the usual heuristics and the best
+//     one kept (earliest on a tie). Scoring each occurrence rather than
+//     taking the first is what puts "app" on the basename of
+//     "internal/app/app.go" instead of the directory. The result is
+//     lifted by contiguousFloor so it outranks ANY scattered match.
+//
+//  2. Scattered (only when no substring exists): the greedy
+//     left-to-right walk — for each query rune take the first matching
+//     path rune not yet consumed. Faster than a full DP and good enough
+//     for abbreviations; its weakness (grabbing an early stray letter,
+//     e.g. the "po" of "reports" for "pobc…") is exactly the case pass
+//     1 now catches before it gets here.
+//
+// Why a floor and not a bigger bonus: a scattered match across word
+// boundaries can earn more per rune than a mid-word substring ("abc"
+// over "a_b_c" collects three boundary bonuses), so no fixed bonus
+// keeps the tiers apart for every query length. n×maxRuneBonus is the
+// ceiling of any scattered score for an n-rune query, so floor+1 is a
+// strict separation, and the tier stays comparable across paths
+// because every path is scored against the same query.
 func Score(query, path string) (int, []int) {
 	if query == "" {
 		// Empty query matches everything, with no highlighting and
@@ -80,11 +110,16 @@ func Score(query, path string) (int, []int) {
 
 	pathRunes := []rune(path)
 	queryRunes := []rune(query)
+	basenameStart := lastSeparatorIndex(pathRunes) + 1
+
+	if idx, s, ok := bestContiguous(queryRunes, pathRunes, basenameStart); ok {
+		return contiguousFloor(len(queryRunes)) + s, idx
+	}
+
 	matchedIdx := make([]int, 0, len(queryRunes))
 
-	// First pass: find the matched indexes via greedy walk. Bail as
-	// soon as we know the query can't fit — saves us scoring paths
-	// that already lost.
+	// Greedy walk. Bail as soon as we know the query can't fit —
+	// saves us scoring paths that already lost.
 	pi := 0
 	for qi := 0; qi < len(queryRunes); qi++ {
 		want := unicode.ToLower(queryRunes[qi])
@@ -104,10 +139,74 @@ func Score(query, path string) (int, []int) {
 		}
 	}
 
-	// Second pass: score the matches we found. Cheaper than scoring
-	// during the walk because it lets the matching loop stay tight.
+	// Floor at 1 — even a "bad" match (lots of gaps) should outrank
+	// a non-match (zero) so the result still appears.
+	score := scoreAlignment(pathRunes, matchedIdx, basenameStart)
+	if score < 1 {
+		score = 1
+	}
+	return score, matchedIdx
+}
+
+// contiguousFloor is the score every contiguous match of an n-rune
+// query starts from: one above the highest score a scattered match of
+// the same query can reach (n × maxRuneBonus; gaps only subtract).
+func contiguousFloor(n int) int {
+	return n*maxRuneBonus + 1
+}
+
+// bestContiguous finds the best-scoring case-insensitive occurrence of
+// query as a substring of path. ok is false when there is none. Ties go
+// to the earliest occurrence (strict > below) so the choice is stable.
+//
+// Rune-wise lowering (unicode.ToLower) never changes the rune count, so
+// an index into the lowered slices is an index into pathRunes — which
+// is what the highlighter needs.
+func bestContiguous(query, path []rune, basenameStart int) (idx []int, score int, ok bool) {
+	n := len(query)
+	if n > len(path) {
+		return nil, 0, false
+	}
+	lq := make([]rune, n)
+	for i, r := range query {
+		lq[i] = unicode.ToLower(r)
+	}
+	lp := make([]rune, len(path))
+	for i, r := range path {
+		lp[i] = unicode.ToLower(r)
+	}
+
+	cand := make([]int, n)
+	for start := 0; start+n <= len(lp); start++ {
+		hit := true
+		for k := range n {
+			if lp[start+k] != lq[k] {
+				hit = false
+				break
+			}
+		}
+		if !hit {
+			continue
+		}
+		for k := range cand {
+			cand[k] = start + k
+		}
+		s := scoreAlignment(path, cand, basenameStart)
+		if !ok || s > score {
+			idx = append(idx[:0], cand...)
+			score, ok = s, true
+		}
+	}
+	return idx, score, ok
+}
+
+// scoreAlignment applies the per-rune heuristics (first char,
+// consecutive run, basename, word boundary, gap penalty) to one set of
+// matched indexes. Shared by both passes of Score so a contiguous and
+// a scattered alignment are measured by the same rules — the tier
+// floor is the only difference between them.
+func scoreAlignment(pathRunes []rune, matchedIdx []int, basenameStart int) int {
 	score := 0
-	basenameStart := lastSeparatorIndex(pathRunes) + 1
 	prevIdx := -2 // -2 so the first match never counts as consecutive
 	for i, idx := range matchedIdx {
 		if i == 0 && idx == 0 {
@@ -119,7 +218,11 @@ func Score(query, path string) (int, []int) {
 		if idx >= basenameStart {
 			score += bonusBasename
 		}
-		if idx > 0 && isWordBoundary(pathRunes[idx-1]) {
+		// Position 0 starts a word as surely as the rune after a "/"
+		// does. Without that, a root-level "tab.go" (first-char bonus
+		// only) lost to "internal/app/tabbar.go" (boundary after "/")
+		// once both became contiguous hits for "tab".
+		if idx == 0 || isWordBoundary(pathRunes[idx-1]) {
 			score += bonusWordBoundary
 		}
 		gap := idx - (prevIdx + 1)
@@ -128,13 +231,7 @@ func Score(query, path string) (int, []int) {
 		}
 		prevIdx = idx
 	}
-
-	// Floor at 1 — even a "bad" match (lots of gaps) should outrank
-	// a non-match (zero) so the result still appears.
-	if score < 1 {
-		score = 1
-	}
-	return score, matchedIdx
+	return score
 }
 
 // lastSeparatorIndex returns the index of the last `/` (or `\\` on

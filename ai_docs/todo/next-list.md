@@ -195,8 +195,9 @@ and `raised`.
   Since `2026-1017-2208-conflict-side-names` also: the side names
   (conflictsides.go) on a real `git rebase` stop — "yours" on the lower
   side, the `=======` label's ▲/▼ colours readable on the grey wash
-  (pinned at 4.5:1 in tests, unseen in a terminal), and a conflicted
-  `stash pop` keeping the plain current / incoming words.
+  (pinned at 4.5:1 in tests; drawn correctly by the run-ced PTY capture
+  on a real rebase stop, but never seen in tmux, cats or Terminal.app),
+  and a conflicted `stash pop` keeping the plain current / incoming words.
 
 - **N-057** · raised `2026-1008-1724-tree-open-finder-terminal-shell-cmd` · value low
   The new tree rows' host branches have only run behind the `hostRun`

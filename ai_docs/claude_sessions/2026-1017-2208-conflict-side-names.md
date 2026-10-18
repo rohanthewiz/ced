@@ -71,7 +71,41 @@ label, and a REAL `git rebase` stop asserting "yours" is the lower side),
 editor `TestSourceNote_*`. Updated old-wording pins in conflictpanel /
 gitopstate / gitconflict tests.
 
-Not run in the real binary; on-screen checks used the simulation screen.
+## Real-binary check (run-ced)
+
+After the commit, the real `bin/ced` was driven through the run-ced PTY
+capture on a throwaway repo stopped mid-rebase: `feature` had two
+commits, the first (README only) replayed cleanly, and the second
+("Reject empty input", `return nil, errEmpty`) conflicted with `main`'s
+`return []string{}, nil`. That stopped the rebase at step 2 of 2. Script:
+open `parse.go` through the finder, then palette → "Show conflicts panel".
+At 150 columns it drew:
+
+```
+  10 ●<<<<<<< HEAD  Accept upstream (9a589ef) · Accept yours (97440ec) · Accept both · Compare sides
+  11          return []string{}, nil
+  12 ●=======  ▲ upstream (9a589ef)  ▼ yours (97440ec)
+  13          return nil, errEmpty
+  14 ●>>>>>>> 97440ec (Reject empty input)
+ ⚠ Rebase 2 of 2 · 97440ec “Reject empty input”        [ Continue ] [ Skip ] [ Abort ] ⟳
+   ▲ upstream (9a589ef) + your commits replayed so far · ▼ yours (97440ec)
+ ● parse.go  1 conflict · both modified                  [ All upstream ] [ All yours ]
+```
+
+- "yours" is on the lower side, which holds the feature commit's line;
+  upstream is `main`'s tip (`onto`).
+- Past step 1 the panel adds "+ your commits replayed so far".
+- At 150 columns the full lens labels fit. In the 120-column simulation
+  test they fall back to `Yours · Picked · …` (N-075).
+- gopls puts error dots (●) on all three marker lines. The `=======` label
+  still shows there, so a diagnostic doesn't push it off the line.
+- The status bar reads `⚠ rebase: 1 conflict`.
+
+Colour captures in Tokyo Night, Darcula and Solarized Light (the two
+themes where the label colours get boosted for contrast) were published as a private
+artifact: https://claude.ai/artifact/Vg9ffabHD7PJj7XBxKPfue. This is
+the capture tool's terminal emulator, not tmux, cats or Terminal.app; that
+hand check stays in N-047.
 
 ## Also committed
 

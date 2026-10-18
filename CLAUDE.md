@@ -89,6 +89,7 @@ internal/app/
   modal.go leader.go whichkey.go  Modal slot; leader table + namespaces; which-key band
   metakeys.go nav.go          ⌘ layer; back/forward history
   quitbutton.go               ✕ quit button left of ≡ (confirm, then menuQuit)
+  buttontip.go                Hover labels on chrome buttons (one enumerator)
   tabbar.go tablabel.go tabcontext.go tabgroups.go statusbar.go
   undercolor.go               May an underline be coloured (SGR 58): env allowlist
   toolwindow.go tooladapt.go toolheader.go toollayout.go toolmenu.go  Tool windows
@@ -935,6 +936,21 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Popup is passive (`overflowTipState`, not folded into
   `hoverDwellState`), 250ms delay, reuses the tooltip helpers. Units
   follow the surface. Auto-fit does not compensate for it.
+
+### Button labels (app/buttontip.go)
+- `buttonTips()` is the ONE enumerator (draw, arm, tick all ask it);
+  rects come from the click routers' own btnRect methods / stamped
+  rects, never a copy. A NEW CLICKABLE BUTTON gets a row there;
+  clickable status segments carry `statusSegment.tip`.
+- Text = what a click does; key twin via `keyFn` resolved lazily by
+  `leaderKeysFor` (code-pointer match on the leader table, one namespace
+  deep) — never a literal "Esc x"; `keys` only for non-leader doors.
+- Passive: never claims an event, closes on key/press/resize/
+  closeAllModals; anchored to the BUTTON (motion within it keeps it).
+  Re-resolved at draw (stale → not drawn). 500ms, every host.
+- Silent under the ≡ menu and every modal EXCEPT the unpinned Find-all
+  list — so the hook runs BEFORE handleMouse's modal dispatch and
+  `drawButtonTip` is the last call in draw.
 
 ### Terminal (app/terminal.go, termdiag.go, runexec.go)
 - Embedded grsh REPL strip — NOT a PTY, no VT emulator. POSIX-only;

@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-073**
+**Next ID: N-075**
 
 ## Open
 
@@ -103,6 +103,15 @@ plus the LSP work done in the seeding session itself
   but still list scattered hits below. Apply the same filter there only
   if the scattered tail turns out to be noise in practice (completion's
   server order makes it less clear-cut).
+
+- **N-074** · raised `2026-1017-2044-button-hover-labels` · value low
+  Button hover labels (buttontip.go) skip three spots: buttons inside
+  ordinary modals (Yes/No etc. — they already carry words, and the layer
+  is silent under every modal but the unpinned Find-all list), the
+  commit receipt's `[ Push <branch>… ]`, and the status bar's
+  ` · preview` / ` · wrap` pieces, which get no key line because their
+  onClick (`toggleMarkdownView`/`toggleSoftWrap`) is not the verb the
+  leader binds. Add only if someone misses them.
 
 ## Validate
 
@@ -233,6 +242,16 @@ and `raised`.
   Also with an OLDER cats (no `cwd`): the pane-evidence fallback still
   finds the workspace. And the `./` local half at the bottom reveals,
   never re-roots.
+
+- **N-073** · raised `2026-1017-2044-button-hover-labels` · value medium
+  Button hover labels have run in unit tests and in the run-ced PTY
+  driver (✕ label drawn over a bare PTY), never through a multiplexer.
+  Hand check in plain tmux (`mouse on`), cats, and macOS Terminal + tmux:
+  resting on ✕ / ≡ / a tab's × / status ⧉ / a panel ⟳ shows the label
+  after ~½s, moving across a multi-cell button (`Actions ▾`) doesn't
+  flicker, a click or key dismisses it without being eaten, and the
+  unpinned Find-all list's ⟳ ◇ ◨ labels draw ABOVE the list. Where no
+  motion is reported, nothing appears and nothing breaks.
 
 ## Roadmap
 

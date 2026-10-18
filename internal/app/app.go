@@ -1271,6 +1271,12 @@ type App struct {
 	// overflow.go.
 	overflowTip overflowTipState
 
+	// buttonTip is the hover label on the chrome's buttons (✕, ≡, a
+	// tab's ×, the status bar's ⧉, panel ⟳/✕ …): what a click does and
+	// its keyboard twin. Passive, on a dwell timer, every host. See
+	// buttontip.go.
+	buttonTip buttonTipState
+
 	// diagTip is the tooltip that shows a diagnostic's message when the
 	// pointer rests on its gutter dot or its underline. Passive, armed on
 	// every host (it reads the diagnostics cache, no round trip). See
@@ -2212,6 +2218,7 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.closeHoverDwell()
 		a.closeDiagTip()
 		a.closeHunkTip()
+		a.closeButtonTip()
 	case *tcell.EventKey:
 		// Any key means the user is at the keyboard and has seen the
 		// stop that put the Conflicts panel up (conflictpanel.go).
@@ -2249,6 +2256,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleHoverDwellTick(e)
 	case *overflowTipEvent:
 		a.handleOverflowTipTick(e)
+	case *buttonTipEvent:
+		a.handleButtonTipTick(e)
 	case *diagTipEvent:
 		a.handleDiagTipTick(e)
 	case *hunkTipEvent:
@@ -2876,6 +2885,7 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	a.closeHoverDwell()
 	a.closeDiagTip()
 	a.closeHunkTip()
+	a.closeButtonTip()
 	// The commit receipt goes the same way and for the same reason: it
 	// is chrome nobody asked for, so the first thing the user does next
 	// takes it down — and, like the ghost text, it must never cost them
@@ -3369,6 +3379,13 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	if ev.Modifiers()&tcell.ModShift != 0 {
 		a.lastShiftAt = time.Now()
 	}
+
+	// Button labels hear the pointer before the modal dispatch: the
+	// unpinned Find-all list is a modal, and its title buttons are the
+	// ones most in need of a label. The hook never claims an event, and
+	// for any other modal it finds no buttons and arms nothing. See
+	// buttontip.go.
+	a.noteButtonTipPointer(x, y, btn)
 
 	// The active modal absorbs all mouse input — same single-slot
 	// dispatch the keyboard router uses, so behavior stays predictable.
@@ -5366,6 +5383,13 @@ func (a *App) draw() {
 	if a.modal != nil {
 		a.modal.draw(a)
 	}
+
+	// Button labels go last of all, above the overlay layer: the one
+	// modal they speak over is the Find-all list (buttontip.go), and a
+	// label is anchored beside the button the pointer is on, so it can
+	// only ever cover what the pointer is not. Always called, because the
+	// call also clears the stamped box when nothing is shown.
+	a.drawButtonTip()
 }
 
 // iconsOn reports whether Nerd Font glyphs should render in places

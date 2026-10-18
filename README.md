@@ -726,6 +726,31 @@ Nothing gates the markers: they cost no layout, and a viewport that
 silently runs on past its last row is the one thing an editor must never
 do.
 
+### Button labels
+
+Rest the pointer on a button for half a second and a small label says
+what a click does, plus its keyboard shortcut when it has one:
+
+```
+ ✕  ≡ │ main.go × │ app.go × │
+┌───────────────────────┐
+│ Quit ced — asks first │
+│ Esc q                 │
+└───────────────────────┘
+```
+
+Labels cover the red **✕** (quit) and **≡** (menu) at the start of the
+tab bar, each tab's **×**, status marker and group chip (and the tab
+itself, which shows its full project-relative path), every clickable
+status-bar segment (the file name, **⧉**, `Ln, Col`, the branch, …),
+the find bar's `Aa` / `|W|` / `Find▾` / `Replace` / `All`, the find-all
+list's **⟳ ◇ ◨** buttons, the tree's **⭑**, and the header buttons of
+the panels (**✕ ⟳ ⏹**, `Actions ▾`, the problems chips, the git log's
+search modes, the Conflicts panel's Continue / Skip / Abort). A label
+disappears when you move off the button, click, or press a key. It
+needs a terminal that reports mouse motion; where none is reported,
+every button still works and no label ever appears.
+
 ### Soft wrap
 
 Right-click a file in the tree and choose **Soft Wrap**: the file opens

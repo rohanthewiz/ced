@@ -50,6 +50,11 @@ type statusSegment struct {
 	text    string
 	onClick func(*App)
 	rect    btnRect
+	// tip is the segment's hover label — what a click does, in words
+	// (buttontip.go). Held here because the segment list is the one
+	// place that knows what each span IS; a clickable segment without
+	// one simply gets no label.
+	tip string
 }
 
 // statusLeftSegments builds the left-hand run of segments: what file
@@ -67,7 +72,7 @@ func (a *App) statusLeftSegments() []statusSegment {
 	if tab.IsImage() && tab.Image != nil {
 		b := tab.Image.Bounds()
 		segs := []statusSegment{
-			{text: " " + filepath.Base(tab.Path), onClick: (*App).menuSwitchTab},
+			{text: " " + filepath.Base(tab.Path), onClick: (*App).menuSwitchTab, tip: "Switch tab…"},
 		}
 		segs = append(segs, a.statusPathSegments(tab.Path)...)
 		return append(segs, statusSegment{text: fmt.Sprintf(" · %s · %d×%d",
@@ -79,12 +84,12 @@ func (a *App) statusLeftSegments() []statusSegment {
 		// which scrolls out from under a dozen open files); clicking it
 		// opens the switch-tab picker — "which file?" and "another file,
 		// please" are the same thought.
-		{text: " " + tab.DisplayName(), onClick: (*App).menuSwitchTab},
+		{text: " " + tab.DisplayName(), onClick: (*App).menuSwitchTab, tip: "Switch tab…"},
 	}
 	if tab.Dirty {
 		// The dirty dot sits against the name it describes, and IS the
 		// save button — the state and the verb that clears it, one cell.
-		segs = append(segs, statusSegment{text: " ●", onClick: (*App).menuSave})
+		segs = append(segs, statusSegment{text: " ●", onClick: (*App).menuSave, tip: "Unsaved — click to save"})
 	}
 	// Where the file actually LIVES, and the one-click way to take that
 	// answer with you. See statusPathSegments.
@@ -94,10 +99,12 @@ func (a *App) statusLeftSegments() []statusSegment {
 		// the LSP-backed verbs — since "what does the editor know about
 		// this language?" is the question the label answers one word of.
 		statusSegment{text: " · " + detectLangLabel(tab.Path),
-			onClick: func(app *App) { app.openMenuAtSection("Code") }},
+			onClick: func(app *App) { app.openMenuAtSection("Code") },
+			tip:     "Code menu — language server verbs"},
 		statusSegment{text: " · "},
 		statusSegment{text: fmt.Sprintf("Ln %d, Col %d",
-			tab.Cursor.Line+1, tab.Cursor.Col+1), onClick: (*App).menuGoToLine},
+			tab.Cursor.Line+1, tab.Cursor.Col+1), onClick: (*App).menuGoToLine,
+			tip: "Go to line…"},
 		statusSegment{text: fmt.Sprintf(" · %d lines", tab.Buffer.LineCount())},
 	)
 	if s := a.caretStatusSuffix(); s != "" {
@@ -110,7 +117,7 @@ func (a *App) statusLeftSegments() []statusSegment {
 		// scope chip exists, and why opening it lands the highlight on
 		// this file's first problem.
 		segs = append(segs, statusSegment{text: s,
-			onClick: (*App).menuToggleProblems})
+			onClick: (*App).menuToggleProblems, tip: "Problems list"})
 	}
 	// What the language server is busy with (lspprogress.go). It trails
 	// the diagnostics it explains the absence of: a cold server reports
@@ -127,14 +134,14 @@ func (a *App) statusLeftSegments() []statusSegment {
 	// who just noticed the label wants next.
 	if tab.IsMarkdownView() {
 		segs = append(segs, statusSegment{text: " · preview",
-			onClick: (*App).toggleMarkdownView})
+			onClick: (*App).toggleMarkdownView, tip: "Stop preview — back to the source"})
 	}
 	// Soft wrap changes what Up and Down do, and a mode that changes the
 	// keys has to be visible. Clicking it unwraps — the reader who just
 	// noticed the label is usually asking how to turn it off.
 	if tab.IsSoftWrap() && !tab.IsMarkdownView() {
 		segs = append(segs, statusSegment{text: " · wrap",
-			onClick: (*App).toggleSoftWrap})
+			onClick: (*App).toggleSoftWrap, tip: "Turn soft wrap off"})
 	}
 	return segs
 }
@@ -195,7 +202,7 @@ func (a *App) statusPathSegments(path string) []statusSegment {
 	// — a location and the way to take it with you — rather than as a
 	// glyph wedged between the file name and its directory.
 	return append(segs, statusSegment{text: " " + statusCopyGlyph,
-		onClick: (*App).menuCopyAbsolutePath})
+		onClick: (*App).menuCopyAbsolutePath, tip: "Copy the full path: " + absolutePathFor(path)})
 }
 
 // statusPathDir is the directory half of the readout: project-relative,
@@ -237,21 +244,23 @@ func (a *App) statusRightSegments() []statusSegment {
 	// panes over is doing (catsagents.go). Empty outside cats, which is
 	// the whole Tier-0 story for this segment.
 	if s := a.catsAgentStatusSegment(); s != "" {
-		segs = append(segs, statusSegment{text: " " + s, onClick: (*App).catsFocusAgent})
+		segs = append(segs, statusSegment{text: " " + s, onClick: (*App).catsFocusAgent,
+			tip: "Go to the agent's pane"})
 	}
 	if s := a.copilotStatusSegment(); s != "" {
 		if len(segs) > 0 {
 			segs = append(segs, statusSegment{text: " ·"})
 		}
 		segs = append(segs, statusSegment{text: " " + s,
-			onClick: func(app *App) { app.openMenuAtSection("Copilot") }})
+			onClick: func(app *App) { app.openMenuAtSection("Copilot") },
+			tip:     "Copilot menu"})
 	}
 	if a.gitBranch != "" {
 		if len(segs) > 0 {
 			segs = append(segs, statusSegment{text: " ·"})
 		}
 		segs = append(segs, statusSegment{text: " " + a.gitBranch,
-			onClick: (*App).menuGitSwitchBranch})
+			onClick: (*App).menuGitSwitchBranch, tip: "Switch branch…"})
 		if s := a.gitPushStatusSuffix(); s != "" {
 			// The unpushed-commit count IS the push button — the same
 			// pairing as ● and Save on the left side: the fact, and the
@@ -260,7 +269,8 @@ func (a *App) statusRightSegments() []statusSegment {
 			// to be stolen from the other, and so the arrow can vanish
 			// (level with the upstream, or no remote) without taking the
 			// branch name with it.
-			segs = append(segs, statusSegment{text: s, onClick: (*App).menuGitPush})
+			segs = append(segs, statusSegment{text: s, onClick: (*App).menuGitPush,
+				tip: "Unpushed commits — click to push…"})
 		}
 	}
 	// A parked repository (conflictpanel.go): the standing ⚠ that says a
@@ -272,12 +282,13 @@ func (a *App) statusRightSegments() []statusSegment {
 		if len(segs) > 0 {
 			segs = append(segs, statusSegment{text: " ·"})
 		}
-		segs = append(segs, statusSegment{text: " " + s, onClick: (*App).menuToggleConflictPanel})
+		segs = append(segs, statusSegment{text: " " + s, onClick: (*App).menuToggleConflictPanel,
+			tip: "Stopped on conflicts — open the Conflicts panel"})
 	}
 	// Two-cell gap so the branch name never reads as part of the button.
 	segs = append(segs,
 		statusSegment{text: "  "},
-		statusSegment{text: "≡ ", onClick: (*App).openMenu},
+		statusSegment{text: "≡ ", onClick: (*App).openMenu, tip: "Action menu"},
 	)
 	return segs
 }

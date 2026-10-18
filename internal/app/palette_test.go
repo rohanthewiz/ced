@@ -646,3 +646,122 @@ func TestPaletteRow_Swatch(t *testing.T) {
 		t.Errorf("unswatched row starts with %q, want its label at the usual column", ru)
 	}
 }
+
+// panePicker opens a two-pane picker (the Recent folders shape, without
+// the filesystem): "alpha" holds a1, a2; "beta" holds b1, ab.
+func panePicker(a *App) *paletteModal {
+	row := func(l string) paletteItem { return paletteItem{label: l, run: func(*App) {}} }
+	return a.openPickerPanes("Panes", []palettePane{
+		{name: "alpha", items: []paletteItem{row("a1"), row("a2")}},
+		{name: "beta", items: []paletteItem{row("b1"), row("ab")}},
+	}, 0, 0)
+}
+
+// TestPalettePanes_TabCyclesAndKeepsTheQuery pins the keyboard switch:
+// Tab / Shift-Tab cycle the panes (wrapping), the query survives the
+// switch and re-filters the new list, and the highlight restarts.
+func TestPalettePanes_TabCyclesAndKeepsTheQuery(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := panePicker(a)
+	tab := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
+	back := tcell.NewEventKey(tcell.KeyBacktab, 0, tcell.ModNone)
+
+	typePalette(a, "a")
+	m.selected = 1
+	m.handleKey(a, tab)
+	if m.pane != 1 || m.field.String() != "a" || m.selected != 0 {
+		t.Fatalf("after Tab: pane %d, query %q, selected %d — want 1, \"a\", 0", m.pane, m.field.String(), m.selected)
+	}
+	if got := pickerLabels(t, a); len(got) != 1 || got[0] != "ab" {
+		t.Fatalf("beta under \"a\" = %v, want [ab]", got)
+	}
+	m.handleKey(a, tab) // wraps
+	if m.pane != 0 {
+		t.Fatalf("Tab past the last pane = %d, want 0", m.pane)
+	}
+	m.handleKey(a, back) // wraps the other way
+	if m.pane != 1 {
+		t.Fatalf("Shift-Tab from the first pane = %d, want 1", m.pane)
+	}
+}
+
+// TestPalettePanes_TabIsInertWithoutPanes pins that an ordinary picker
+// ignores Tab: no pane to switch to, and nothing typed into the query.
+func TestPalettePanes_TabIsInertWithoutPanes(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := spacerPicker(a, 2, 2)
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	if m.field.String() != "" || len(m.matches) != 5 {
+		t.Fatalf("Tab changed a single-list picker: query %q, %d matches", m.field.String(), len(m.matches))
+	}
+	if _, rects, _ := m.paneTabs(a); rects != nil {
+		t.Fatal("a single-list picker must draw no pane tabs")
+	}
+}
+
+// TestPalettePanes_CountsFollowTheQuery pins the numbers on the tabs:
+// every row unfiltered, the MATCH count under a query — for the inactive
+// pane too, which is what tells you to switch.
+func TestPalettePanes_CountsFollowTheQuery(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := panePicker(a)
+	if m.paneCount(0) != 2 || m.paneCount(1) != 2 {
+		t.Fatalf("unfiltered counts = %d / %d, want 2 / 2", m.paneCount(0), m.paneCount(1))
+	}
+	typePalette(a, "b")
+	if m.paneCount(0) != 0 || m.paneCount(1) != 2 {
+		t.Fatalf("counts under \"b\" = %d / %d, want 0 / 2", m.paneCount(0), m.paneCount(1))
+	}
+}
+
+// TestPalettePanes_ClickSwitchesAndDraws pins the mouse door and the one
+// geometry: the tabs are painted where paneTabs says, and a press on the
+// second one shows its list without closing the picker.
+func TestPalettePanes_ClickSwitchesAndDraws(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := panePicker(a)
+	m.draw(a)
+	a.screen.Show()
+	labels, rects, showTitle := m.paneTabs(a)
+	if len(rects) != 2 || !showTitle {
+		t.Fatalf("tabs = %v (title shown %v), want both beside the title", rects, showTitle)
+	}
+	rows := strings.Split(screenText(a), "\n")
+	if got := string([]rune(rows[rects[1].y])[rects[1].x : rects[1].x+rects[1].w]); got != labels[1] {
+		t.Fatalf("drawn tab = %q, want %q", got, labels[1])
+	}
+	m.handleMouse(a, rects[1].x+1, rects[1].y, tcell.Button1)
+	if a.modal != m || m.pane != 1 {
+		t.Fatalf("after clicking beta: modal %T, pane %d — want the picker on pane 1", a.modal, m.pane)
+	}
+	// Hover alone never switches.
+	m.handleMouse(a, rects[0].x+1, rects[0].y, tcell.ButtonNone)
+	if m.pane != 1 {
+		t.Fatal("hovering a tab switched panes")
+	}
+}
+
+// TestPalettePanes_TitleGivesWayWhenNarrow pins the squeeze rule: when
+// the tabs and the title don't both fit, the title is dropped, never the
+// tabs, and no tab runs into the esc hint.
+func TestPalettePanes_TitleGivesWayWhenNarrow(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	row := paletteItem{label: "x", run: func(*App) {}}
+	m := a.openPickerPanes("A rather long picker title", []palettePane{
+		{name: "Global", items: []paletteItem{row}},
+		{name: "Local", items: []paletteItem{row}},
+	}, 0, 0)
+	a.width = 34
+	_, rects, showTitle := m.paneTabs(a)
+	if showTitle {
+		t.Fatal("the title should give way at this width")
+	}
+	mx, _, mw, _ := m.rect(a)
+	if len(rects) == 0 || rects[0].x != mx+2 {
+		t.Fatalf("tabs = %v, want the first at the title's spot", rects)
+	}
+	last := rects[len(rects)-1]
+	if last.x+last.w > mx+mw-1-runeLen("esc ")-1 {
+		t.Fatalf("tab %v runs into the esc hint", last)
+	}
+}

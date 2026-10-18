@@ -29,6 +29,7 @@
 package app
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/gdamore/tcell/v2"
@@ -166,6 +167,22 @@ type paletteModal struct {
 	// agent blocked on the reply) set it via openPickerWithCancel;
 	// ordinary pickers leave it nil and dismissal stays a plain no-op.
 	cancel func(*App)
+
+	// panes, when it holds two or more lists, splits a picker into named
+	// lists shown ONE AT A TIME behind a switcher on the title row (Recent
+	// folders: Local / Global). Stacking two lists in one scroll buried
+	// the second below the fold whenever the first was long. m.items is
+	// always the ACTIVE pane's list, so filtering, counting, scrolling,
+	// drawing and hit-testing stay pane-blind; only the switcher knows.
+	panes []palettePane
+	// pane indexes panes: the list m.items currently holds.
+	pane int
+}
+
+// palettePane is one named list of a multi-pane picker.
+type palettePane struct {
+	name  string
+	items []paletteItem
 }
 
 // openPalette gathers items from every source and shows the palette.
@@ -203,6 +220,128 @@ func (a *App) openPickerRows(title string, items []paletteItem, rows int, cancel
 	a.openModal(m)
 	m.refresh()
 	return m
+}
+
+// openPickerPanes opens a picker over several named lists, showing
+// panes[start] first. Tab / Shift-Tab or a click on a pane's tab switches
+// lists. rows is fixed across every pane (callers size it for the
+// longest) so switching never moves the frame, and with it the tab you
+// just clicked, out from under the pointer.
+func (a *App) openPickerPanes(title string, panes []palettePane, start, rows int) *paletteModal {
+	m := &paletteModal{title: title, panes: panes, rows: rows}
+	if start >= 0 && start < len(panes) {
+		m.pane = start
+	}
+	if len(panes) > 0 {
+		m.items = panes[m.pane].items
+	}
+	a.openModal(m)
+	m.refresh()
+	return m
+}
+
+// switchPane shows pane i (wrapping either way, so Tab and Shift-Tab
+// cycle). The query is KEPT: the usual reason to switch is "not in this
+// list — is it in the other one?", and retyping would punish that. The
+// highlight restarts at the top since the old index means nothing here.
+func (m *paletteModal) switchPane(i int) {
+	n := len(m.panes)
+	if n < 2 {
+		return
+	}
+	i = ((i % n) + n) % n
+	if i == m.pane {
+		return
+	}
+	m.pane = i
+	m.items = m.panes[i].items
+	m.selected, m.top = 0, 0
+	m.refresh()
+}
+
+// paneCount is how many rows pane i would show for the current query —
+// the number on its tab. The active pane's count comes from the live
+// matches; another pane is scored on the spot (these lists are a few
+// dozen rows, and a draw is far rarer than that is costly). Counting the
+// inactive panes under the query is what makes the tabs useful while
+// filtering: "Global 2" says the folder is one Tab away.
+func (m *paletteModal) paneCount(i int) int {
+	if i == m.pane {
+		return m.countMatches()
+	}
+	query := m.field.String()
+	if query == "" {
+		return countItems(m.panes[i].items)
+	}
+	n := 0
+	for _, it := range m.panes[i].items {
+		if it.spacer {
+			continue
+		}
+		if score, _ := finder.Score(query, it.label); score > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+// paneTabs lays out the pane switcher on the title row — the ONE geometry
+// both draw and handleMouse read. Each tab is " name count ", one cell
+// apart, starting two cells after the title:
+//
+//	┌──────────────────────────────────────────────────────┐
+//	│ Recent folders   Local 15  Global 31            esc │
+//	├──────────────────────────────────────────────────────┤
+//
+// When the tabs and the title don't both fit before "esc", the TITLE gives
+// way (showTitle false) — the tabs are the controls. A tab that still
+// overruns is clipped, and any after it get no rect; Tab still reaches
+// them. Returns nothing for a single-list picker.
+func (m *paletteModal) paneTabs(a *App) (labels []string, rects []btnRect, showTitle bool) {
+	showTitle = true
+	if len(m.panes) < 2 {
+		return nil, nil, true
+	}
+	mx, my, mw, _ := m.rect(a)
+	labels = make([]string, len(m.panes))
+	total := len(m.panes) - 1 // the one-cell gaps
+	for i, p := range m.panes {
+		labels[i] = fmt.Sprintf(" %s %d ", p.name, m.paneCount(i))
+		total += runeLen(labels[i])
+	}
+	// right is exclusive: one blank cell before drawFrame's "esc " hint.
+	right := mx + mw - 1 - runeLen("esc ") - 1
+	x := mx + 2 + runeLen(m.title) + 2
+	if x+total > right {
+		x = mx + 2
+		showTitle = false
+	}
+	for _, l := range labels {
+		w := min(runeLen(l), right-x)
+		if w <= 0 {
+			break
+		}
+		rects = append(rects, btnRect{x: x, y: my + 1, w: w})
+		x += w + 1
+	}
+	return labels, rects, showTitle
+}
+
+// drawPaneTabs paints the switcher. The active tab takes the selected
+// row's block (theme BG under the title colour, bold) — the one "this is
+// the chosen one" look the modal already has, tuned per theme to stand off
+// the modal background. Inactive tabs are muted like the esc hint: still
+// readable, clearly not where the list below came from.
+func (m *paletteModal) drawPaneTabs(a *App, labels []string, rects []btnRect) {
+	c := a.chrome()
+	active := c.title.Background(a.theme.BG).Bold(true)
+	for i, r := range rects {
+		st := c.muted
+		if i == m.pane {
+			st = active
+		}
+		drawAt(a.screen, r.x, r.y, string([]rune(labels[i])[:r.w]), st)
+	}
 }
 
 // collectItems (re)gathers the inventory from every registered source.
@@ -331,6 +470,12 @@ func (m *paletteModal) handleKey(a *App, ev *tcell.EventKey) {
 		if m.selected < len(m.matches)-1 {
 			m.selected = m.choosable(m.selected+1, 1)
 		}
+	case tcell.KeyTab:
+		// The pane switcher's keyboard twin. A single-list picker has no
+		// use for Tab, and the text field ignores it, so it stays inert.
+		m.switchPane(m.pane + 1)
+	case tcell.KeyBacktab:
+		m.switchPane(m.pane - 1)
 	default:
 		if _, edited := m.field.handleKey(ev); edited {
 			m.selected = 0
@@ -342,6 +487,18 @@ func (m *paletteModal) handleKey(a *App, ev *tcell.EventKey) {
 // handleMouse mirrors the finder's mouse contract: hover highlights
 // the row under the cursor, click runs it, click outside dismisses.
 func (m *paletteModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
+	// A press on a pane tab switches lists. Checked first: the tabs sit
+	// on the title row, which the row hit-test below never claims, and a
+	// press there must not fall through to "outside the rows".
+	if btn&tcell.Button1 != 0 {
+		_, tabs, _ := m.paneTabs(a)
+		for i, r := range tabs {
+			if r.contains(x, y) {
+				m.switchPane(i)
+				return
+			}
+		}
+	}
 	mx, my, mw, mh := m.rect(a)
 	rowsStart := my + 4
 	row := y - rowsStart
@@ -469,7 +626,13 @@ func (m *paletteModal) draw(a *App) {
 	mx, my, mw, mh := m.rect(a)
 	c := a.chrome()
 	hitStyle := tcell.StyleDefault.Background(c.bg).Foreground(a.theme.FindCurrent).Bold(true)
-	c.drawFrame(a.screen, mx, my, mw, mh, m.title)
+	labels, tabs, showTitle := m.paneTabs(a)
+	title := m.title
+	if !showTitle {
+		title = ""
+	}
+	c.drawFrame(a.screen, mx, my, mw, mh, title)
+	m.drawPaneTabs(a, labels, tabs)
 
 	// Input row — the right side leaves room for the count tail.
 	inputStyle := tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Text)

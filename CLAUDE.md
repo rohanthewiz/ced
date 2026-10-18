@@ -866,9 +866,15 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `⭐` was too big, `★` (U+2605, ambiguous width) a little too small; size
   within one cell = pick the glyph the fallback font draws bigger. One space after the project name on the root row;
   click = `menuRecentFolders` (≡ File "Recent folders…" is the twin):
-  global rows (ced recents, then `· cats`), a spacer, then LOCAL rows =
-  Recent locations' top level as one section, `./`-marked
-  (`recentFolderLocalRows`). Global rows go through `openRecentFolder`
+  TWO PANES (`openPickerPanes`, palette.go: tabs on the title row via
+  `paneTabs` for draw + hit-test, Tab/Shift-Tab, query kept across a
+  switch, counts = match counts, title gives way when narrow, height fixed
+  to the taller pane) — Local FIRST = Recent locations' top level
+  verbatim (`recentFolderLocalRows`); Global = ced recents, then
+  `· cats`. Opens on Local, on Global when Local is empty; both tabs
+  always shown. One
+  list with a divider buried Local below the fold — don't merge them
+  back. Global rows go through `openRecentFolder`
   (catsworkspace.go): Tier 1 = running ced on the folder (agent.focus) →
   new ced tab in the folder's awake, unlocked workspace → new tab in the
   current one; Tier 0 = re-root. A workspace is matched by its

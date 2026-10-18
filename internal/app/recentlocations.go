@@ -31,7 +31,7 @@
 // inside the workspace, and re-rooting at `internal/app` would throw away
 // git, gopls and the finder index. Switching PROJECTS is still ≡ File →
 // Recent folders…, which this deliberately leaves alone — that picker (and
-// the tree's ⭑) borrows this list's top level for its bottom section
+// the tree's ⭑) borrows this list's top level for its Local pane
 // (recentFolderLocalRows), with the same reveal-or-drill rows.
 //
 // A USE is a file opened in a folder in a NEW tab (openFile's new-tab
@@ -314,12 +314,12 @@ func (a *App) locationSections(under string, recent, frequent []string) []palett
 	return items
 }
 
-// recentFolderLocalRows is the bottom half of "Recent folders…" (the
-// tree's ⭑): this repository's top-level recent locations, recent then
-// frequent, as one section. The inner spacer is dropped — the picker
-// already spends its one divider between the global and local halves, and
-// a second would read as a third kind of folder. Rows keep the `›` drill
-// marker and pickLocation's behaviour; the "./" prefix marks them local.
+// recentFolderLocalRows is the Local pane of "Recent folders…" (the
+// tree's ⭑): this repository's top-level recent locations, exactly as
+// Recent locations shows them — recent, a spacer, frequent — with the `›`
+// drill marker and pickLocation's behaviour. The pane has the list to
+// itself, so the old flattening (one section, "./"-prefixed to tell it
+// from the global rows sharing its scroll) no longer has a job.
 func (a *App) recentFolderLocalRows() []paletteItem {
 	root := session.Normalize(a.rootDir)
 	idx := a.repoHistory().Folders
@@ -327,16 +327,7 @@ func (a *App) recentFolderLocalRows() []paletteItem {
 	recent := idx.Recent(root, locationsRecent, pick.accept)
 	frequent := idx.Frequent(root, locationsFrequent, pick.accept)
 	a.pruneGoneLocations(pick.gone)
-	sections := a.locationSections(root, recent, frequent)
-	out := make([]paletteItem, 0, len(sections))
-	for _, it := range sections {
-		if it.spacer {
-			continue
-		}
-		it.label = "." + string(filepath.Separator) + it.label
-		out = append(out, it)
-	}
-	return out
+	return a.locationSections(root, recent, frequent)
 }
 
 // locationRows is the height to ask for: the whole list when it fits under

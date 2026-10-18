@@ -450,9 +450,12 @@ remembers which files were open and where the cursors were, and reopening
 it restores them. `≡` → File → **Open folder…** / **Recent folders…**
 switches projects without leaving the editor — or click the gold **⭑** after
 the project name at the top of the file tree for the same recent list.
-Other projects come first; below a divider are this project's own recent
-folders (marked `./`, the same rows as **Recent locations…**), which
-reveal in the tree instead of switching. Inside cats, picking another
+The picker has two panes, switched with `Tab` or by clicking the tabs on
+its title row (each shows its count, or its match count while you type).
+It opens on **Local**: this project's own recent folders (the same rows as
+**Recent locations…**), which reveal in the tree instead of switching.
+**Global** lists other projects (it opens there when this project has no
+folder history yet). Inside cats, picking another
 project doesn't re-root this editor: it switches to a ced already open on
 that folder, or else opens a new ced tab in the folder's workspace — or in
 the current workspace when the folder has no workspace or it's asleep.

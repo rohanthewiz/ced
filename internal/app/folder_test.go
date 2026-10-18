@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/session"
 	"github.com/rohanthewiz/ced/internal/userconfig"
@@ -462,10 +463,12 @@ func TestRecentFolders_PickSwitches(t *testing.T) {
 	}
 }
 
-// TestRecentFolders_LocalFoldersAtTheBottom pins the picker's two halves:
-// other projects first, a spacer, then this repository's recent locations
-// marked "./" — and a local pick reveals in the tree, never re-roots.
-func TestRecentFolders_LocalFoldersAtTheBottom(t *testing.T) {
+// TestRecentFolders_LocalThenGlobalPanes pins the picker's two panes:
+// Local (this repository's recent locations, unprefixed) comes first and
+// is where it opens, Tab switches to Global (other projects), both tabs
+// carry their counts, and a local pick reveals in the tree, never
+// re-roots.
+func TestRecentFolders_LocalThenGlobalPanes(t *testing.T) {
 	root := t.TempDir()
 	other := t.TempDir()
 	sub := mkdirs(t, root, "pkg")[0]
@@ -481,22 +484,43 @@ func TestRecentFolders_LocalFoldersAtTheBottom(t *testing.T) {
 	if m == nil {
 		t.Fatalf("modal = %T, want the picker", a.modal)
 	}
-	var got []string
-	for _, mt := range m.matches {
-		if mt.item.spacer {
-			got = append(got, "--")
-			continue
-		}
-		got = append(got, mt.item.label)
+	if len(m.panes) != 2 || m.panes[0].name != "Local" || m.panes[1].name != "Global" {
+		t.Fatalf("panes = %+v, want Local then Global", m.panes)
 	}
-	want := []string{displayPath(session.Normalize(other)), "--", "./pkg"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("rows = %v, want %v", got, want)
+	if m.pane != 0 {
+		t.Fatalf("opened on pane %d, want Local (0)", m.pane)
 	}
-	m.selected = 1 // the spacer is not counted: index 1 is the local row
+	if got := pickerLabels(t, a); len(got) != 1 || got[0] != "pkg" {
+		t.Fatalf("Local rows = %v, want [pkg]", got)
+	}
+	if m.paneCount(0) != 1 || m.paneCount(1) != 1 {
+		t.Fatalf("tab counts = %d / %d, want 1 / 1", m.paneCount(0), m.paneCount(1))
+	}
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone))
+	if got, want := pickerLabels(t, a), []string{displayPath(session.Normalize(other))}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("Global rows = %v, want %v", got, want)
+	}
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyBacktab, 0, tcell.ModNone))
 	m.runSelected(a)
 	if a.quit || a.nextRoot != "" {
 		t.Fatal("a local folder must be revealed, never re-rooted")
+	}
+}
+
+// TestRecentFolders_NoLocalHistoryOpensOnGlobal pins the fallback: with
+// nothing recorded in this repository the picker opens on Global, so the
+// first list shown is never an empty one.
+func TestRecentFolders_NoLocalHistoryOpensOnGlobal(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	a := newTestApp(t, root)
+	store := seedSessionStore(a)
+	store.Touch(other)
+	store.Touch(root)
+
+	a.menuRecentFolders()
+	if m := paletteOf(a); m == nil || m.pane != 1 {
+		t.Fatalf("modal = %T, want the picker on its Global pane", a.modal)
 	}
 }
 
@@ -514,8 +538,12 @@ func TestRecentFolders_LocalHalfAloneOpensThePicker(t *testing.T) {
 		t.Fatal("the row should be live on the local half alone")
 	}
 	a.menuRecentFolders()
-	if labels := pickerLabels(t, a); len(labels) != 1 || labels[0] != "./pkg" {
-		t.Fatalf("rows = %v, want [./pkg]", labels)
+	// Local is the first pane and the one the picker opens on.
+	if m := paletteOf(a); m == nil || m.pane != 0 {
+		t.Fatalf("modal = %T, want the picker on its Local pane", a.modal)
+	}
+	if labels := pickerLabels(t, a); len(labels) != 1 || labels[0] != "pkg" {
+		t.Fatalf("rows = %v, want [pkg]", labels)
 	}
 }
 

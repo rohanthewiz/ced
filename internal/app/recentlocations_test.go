@@ -102,10 +102,11 @@ func TestRecentLocations_DrillThenReveal(t *testing.T) {
 	}
 }
 
-// TestRecentFolderLocalRows_OneMarkedSection pins the borrowed top level:
-// recent then frequent with the inner spacer dropped (the Recent folders
-// picker spends its one divider between halves), each row "./"-marked.
-func TestRecentFolderLocalRows_OneMarkedSection(t *testing.T) {
+// TestRecentFolderLocalRows_MatchesRecentLocations pins the Local pane:
+// the same two sections Recent locations shows at the top level — recent,
+// a spacer, frequent — with no "./" prefix (the pane has the list to
+// itself, so nothing needs telling apart).
+func TestRecentFolderLocalRows_MatchesRecentLocations(t *testing.T) {
 	root := t.TempDir()
 	var names []string
 	for i := 0; i < 7; i++ {
@@ -122,11 +123,12 @@ func TestRecentFolderLocalRows_OneMarkedSection(t *testing.T) {
 	var got []string
 	for _, it := range a.recentFolderLocalRows() {
 		if it.spacer {
-			t.Fatal("the local half must be one section")
+			got = append(got, "--")
+			continue
 		}
 		got = append(got, it.label)
 	}
-	if want := "./r6,./r5,./r4,./r3,./r2,./r0,./r1"; strings.Join(got, ",") != want {
+	if want := "r6,r5,r4,r3,r2,--,r0,r1"; strings.Join(got, ",") != want {
 		t.Fatalf("rows = %v, want %s", got, want)
 	}
 }

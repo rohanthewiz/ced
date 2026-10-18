@@ -395,19 +395,31 @@ func (a *App) menuOpenFolder() {
 // list of places you can't go is worse than a shorter list, and the walk
 // is the only moment ced is in a position to notice.
 //
-// Two kinds of folder, top to bottom, with a spacer between them:
+// Two kinds of folder, in two PANES of one picker, switched by Tab or a
+// click on the title row's tabs:
 //
-//	~/projs/go/cats  (3 tabs)     GLOBAL — other projects: ced's own
-//	~/notes  · cats                 recents, then the host's frecency list
-//	┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
-//	./internal/app  ›             LOCAL — this repository's recent
-//	./ai_docs                       locations (recentlocations.go)
+//	│ Recent folders   Local 15  Global 31       esc │
+//	│ internal/app  ›                LOCAL — this repository's recent
+//	│ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄       locations (recentlocations.go),
+//	│ ai_docs                          recent then frequent
+//
+//	│ Recent folders   Local 15  Global 31       esc │
+//	│ ~/projs/go/cats  (3 tabs)      GLOBAL — other projects: ced's own
+//	│ ~/notes  · cats                  recents, then the host's frecency list
+//
+// Panes, not one list with a divider: the global half is routinely 30+
+// rows (the host's frecency list alone can be that long), which put the
+// local half below the fold where nobody saw it. Each pane's tab carries
+// its count — under a query, its MATCH count — so the other list is never
+// out of sight. Local comes FIRST and is where the picker opens: the
+// folders of the project you're in are the everyday jump, and the global
+// list is the occasional one. With no local history it opens on Global
+// instead, so the first thing shown is never an empty list.
 //
 // A global row goes to the project (openRecentFolder: inside cats, to the
 // ced or workspace already on it; elsewhere, re-root this editor). A local
 // row stays in this workspace and reveals or drills in, exactly as it does
-// in ≡ Nav "Recent locations…". The "./" prefix tells the halves apart
-// once filtering has removed the spacer, and is typable to narrow to them.
+// in ≡ Nav "Recent locations…".
 func (a *App) menuRecentFolders() {
 	a.closeMenu()
 	local := a.recentFolderLocalRows()
@@ -462,18 +474,25 @@ func (a *App) menuRecentFolders() {
 	// loop and path.list is a socket round trip, so this list is always
 	// one gesture behind by construction — see catsfrecency.go.
 	a.catsPollRecents()
-	if len(items) > 0 && len(local) > 0 {
-		items = append(items, paletteSpacer())
-	}
-	items = append(items, local...)
-	if len(items) == 0 {
+	if len(items) == 0 && len(local) == 0 {
 		a.flash("No other recent folders — use ≡ → File → Open folder…")
 		return
 	}
-	// Sized like Recent locations: the whole list when it fits under that
-	// picker's cap, since the local half sits at the bottom and an
-	// ordinary-height picker would hide it below the fold.
-	a.openPickerRows("Recent folders", items, locationRows(items), nil)
+	// Pane 0 is Local, pane 1 Global (see the order note above).
+	start := 0
+	if countItems(local) == 0 {
+		start = 1
+	}
+	// Both panes are always offered, even an empty one: a "Local 0" tab
+	// says the list exists and is merely empty in this repository, where a
+	// missing tab would hide the feature. The height is the taller pane's
+	// (each sized like Recent locations: the whole list up to that
+	// picker's cap) so switching never resizes the frame.
+	rows := max(locationRows(items), locationRows(local))
+	a.openPickerPanes("Recent folders", []palettePane{
+		{name: "Local", items: local},
+		{name: "Global", items: items},
+	}, start, rows)
 }
 
 // recentFolderRoots is the editor's own recent list, or nothing when the

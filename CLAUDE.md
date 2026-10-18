@@ -104,6 +104,7 @@ internal/app/
   gitrestore.go               Restore one file to HEAD (tree/tab/≡ Git rows)
   gitconflict.go gitopstate.go  Conflict picker + stop hook; parked-op / unmerged reads
   conflictview.go conflictpanel.go  In-editor conflict washes/lens/verbs; Conflicts tool window
+  conflictsides.go            Names the two sides per operation (yours/theirs/picked/upstream)
   cherrypick.go               Multi-commit cherry-pick dialog
   hunktip.go                  Change-bar popup: a hunk's diff, scrollable
   terminal.go termdiag.go runexec.go openineditor.go
@@ -250,8 +251,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   bracket < selection < find. Gutter precedence: git < validate < plugin
   < LSP (glyphs: validate `◇`, plugin `◆`, LSP `●`). Exceptions that are
   PAINTED not decorated: ghost text, secondary carets, end-of-line notes,
-  the bookmark line-number flag. Two optional source interfaces extend a
-  DecorationSource: `LineWashSource` (whole-row bg, gutter and past-EOL
+  the bookmark line-number flag. Three optional source interfaces extend a
+  DecorationSource (the third, `NoteSource`, is an end-of-line label of
+  coloured runs — see Conflicts below): `LineWashSource` (whole-row bg, gutter and past-EOL
   included; replaces the caret-line highlight, later source wins) and
   `LensSource` (clickable end-of-line buttons: full → short labels → shed
   from the right, never cut; outranks both notes on its line; Render
@@ -730,8 +732,19 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   N = the `conflict-marker-size` gitattribute (default 7), asked of git
   only for UNMERGED files (`loadConflictMarkerSizes`, one `check-attr
   --stdin` fork in the snapshot) and pushed onto tabs
-  (`applyConflictMarkerSizes`, wireTab); never a looser match. Sides are
-  CURRENT/INCOMING (positional — git's ours/theirs flips in a rebase).
+  (`applyConflictMarkerSizes`, wireTab); never a looser match. The MODEL
+  is positional (current above, incoming below; --ours/--theirs and XY
+  letters follow position in every op), but every LABEL goes through
+  `conflictsides.go`: role + name per op — merge yours/theirs,
+  cherry-pick yours/picked, revert yours/revert, rebase upstream/YOURS
+  (your commit is BELOW). Never hard-code "current"/"incoming" in a
+  label; no op known → exactly the positional words. Names from the op
+  record (`a.conflictPanel.info`, kept fresh by `refreshGitStatus` even
+  with the panel shut, summary reused via `reloadGitOpInfo`), gaps from
+  marker labels, never "HEAD"; a record for another op lends no names.
+  The `=======` (and diff3 `|||||||`) line carries a ▲/▼ label
+  (`editor.NoteSource`, a third optional source interface: lens > source
+  note > caret note > inlay), runs lifted to 4.5:1 (`liftToContrast`).
   Resolve = one structural undo step, bottom-up for all-blocks; never
   stages. The view (washes + lens, `conflictSource` in wireTab) is GATED on
   `a.gitConflicted[path]` — marker fixtures stay quiet. Lens IDs carry

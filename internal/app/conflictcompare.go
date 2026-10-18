@@ -94,10 +94,15 @@ func conflictSideLabel(word, marker string) string {
 }
 
 // conflictPairSides returns a pair's old and new lines and labels, and
-// the buffer line the new side starts on (compare.newLineBase).
-func conflictPairSides(b editor.ConflictBlock, lines []string, p conflictPair) (oldLabel string, oldLines []string, newLabel string, newLines []string, newBase int) {
+// the buffer line the new side starts on (compare.newLineBase). The sides
+// are labelled in the operation's words when one is known ("yours
+// (main)", conflictsides.go) and by git's markers otherwise.
+func conflictPairSides(b editor.ConflictBlock, lines []string, p conflictPair, sides conflictSides) (oldLabel string, oldLines []string, newLabel string, newLines []string, newBase int) {
 	cur := conflictSideLabel("current", b.CurrentLabel)
 	inc := conflictSideLabel("incoming", b.IncomingLabel)
+	if sides.known {
+		cur, inc = sides.cur.tag(), sides.inc.tag()
+	}
 	base := conflictSideLabel("base", b.BaseLabel)
 	switch p {
 	case pairBaseCurrent:
@@ -151,16 +156,22 @@ func (a *App) compareConflictBlock(t *editor.Tab, idx int) {
 		a.showConflictCompare(t, b.Start, pairCurrentIncoming)
 		return
 	}
-	// Rows name the SIDE in the user's words first and git's label second,
-	// so the picker reads without knowing which hash is whose.
+	// Rows name the SIDE in the user's words first and its name second,
+	// so the picker reads without knowing which hash is whose. With no
+	// operation known, the "name" is git's marker label, as before.
 	type row struct {
 		label string
 		pair  conflictPair
 	}
+	sides := a.conflictSidesFor(b)
+	curName, incName := nonEmpty(sides.cur.name, sides.cur.phrase()), nonEmpty(sides.inc.name, sides.inc.phrase())
+	if !sides.known {
+		curName, incName = nonEmpty(b.CurrentLabel, "current"), nonEmpty(b.IncomingLabel, "incoming")
+	}
 	rows := []row{
-		{"Current ↔ incoming — the two sides", pairCurrentIncoming},
-		{"Base ↔ current — what " + elide(nonEmpty(b.CurrentLabel, "current"), 24) + " changed", pairBaseCurrent},
-		{"Base ↔ incoming — what " + elide(nonEmpty(b.IncomingLabel, "incoming"), 24) + " changed", pairBaseIncoming},
+		{sides.cur.title() + " ↔ " + sides.inc.role + " — the two sides", pairCurrentIncoming},
+		{"Base ↔ " + sides.cur.role + " — what " + elide(curName, 24) + " changed", pairBaseCurrent},
+		{"Base ↔ " + sides.inc.role + " — what " + elide(incName, 24) + " changed", pairBaseIncoming},
 	}
 	items := make([]paletteItem, 0, len(rows))
 	for _, r := range rows {
@@ -171,7 +182,7 @@ func (a *App) compareConflictBlock(t *editor.Tab, idx int) {
 		}})
 	}
 	a.openPicker("Compare conflict "+itoa(idx+1)+" of "+itoa(len(blocks))+
-		" · "+conflictSidesNote(b), items)
+		" · "+a.conflictBlockSidesNote(b), items)
 }
 
 // nonEmpty returns s, or fallback when s is empty.
@@ -191,7 +202,7 @@ func (a *App) showConflictCompare(t *editor.Tab, start int, p conflictPair) bool
 		a.flash("That conflict is gone — resolved, or lines moved above it")
 		return false
 	}
-	oldLabel, oldLines, newLabel, newLines, newBase := conflictPairSides(b, t.Buffer.Lines, p)
+	oldLabel, oldLines, newLabel, newLines, newBase := conflictPairSides(b, t.Buffer.Lines, p, a.conflictSidesFor(b))
 	a.compareTexts(oldLabel, oldLines, newLabel, newLines)
 	a.compare.newPath = t.Path
 	a.compare.newLineBase = newBase

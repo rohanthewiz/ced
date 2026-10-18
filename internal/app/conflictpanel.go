@@ -14,9 +14,9 @@
 //
 //	─ Conflicts · 2 left ───────────────────────────────────────────── ✕ ─
 //	⚠ Cherry-pick 2 of 4 · 2a0370b “Fix parser”      [ Continue ] [ Skip ] [ Abort ] ⟳
-//	  current = main (HEAD) · incoming = 2a0370b
-//	● internal/parse.go    3 conflicts · both modified   [ All current ] [ All incoming ]
-//	● docs/old.md          deleted in incoming                  [ Keep ] [ Delete ]
+//	  ▲ yours (main) · ▼ picked (2a0370b)
+//	● internal/parse.go    3 conflicts · both modified     [ All yours ] [ All picked ]
+//	● docs/old.md          deleted on the picked side           [ Keep ] [ Delete ]
 //	✓ README.md            no markers left · both modified       [ Mark resolved ]
 //	✓ go.mod               marked resolved
 //
@@ -206,7 +206,7 @@ func (a *App) refreshConflictPanel() {
 	}
 	op := gitOpFromGitDir(gitDir)
 	top, files := loadConflictFiles(a.rootDir)
-	info := loadGitOpInfo(a.rootDir, gitDir, op)
+	info := reloadGitOpInfo(a.rootDir, gitDir, op, st.info)
 
 	// The settled-since-this-stop memory: kept while the stop is the same
 	// one, and grown by every file that was unmerged a refresh ago and is
@@ -360,29 +360,16 @@ func (a *App) conflictOpTitle() string {
 	return s
 }
 
-// conflictSidesNote names the two sides in the operation's own terms —
-// the line that makes "current" and "incoming" mean something. In a
-// rebase the sides are the reverse of what most people expect (current is
-// the upstream being replayed onto), which is exactly why this line
-// exists rather than leaving it to the marker labels.
+// conflictSidesNote names the two sides in the operation's own terms
+// (conflictsides.go) — "▲ yours (main) · ▼ picked (2a0370b)", the same
+// words as every lens and separator label. In a rebase the sides are the
+// reverse of what most people expect (your commit is the one coming in
+// below; above is the upstream plus your commits replayed so far), which
+// is exactly why this line exists rather than leaving it to the marker
+// labels.
 func (a *App) conflictSidesNote() string {
-	info := a.conflictPanel.info
-	branch := a.gitLogBranchLabel()
-	inc := info.short
-	if inc == "" {
-		inc = "the incoming commit"
-	}
-	switch info.op {
-	case "cherry-pick", "revert":
-		return "current = " + branch + " (HEAD) · incoming = " + inc
-	case "merge":
-		return "current = " + branch + " (HEAD) · incoming = the branch being merged"
-	case "rebase":
-		onto := info.onto
-		if onto == "" {
-			onto = "the upstream"
-		}
-		return "current = " + onto + " (rebasing onto) · incoming = your commit " + inc
+	if s := a.conflictSides(); s.known {
+		return s.note()
 	}
 	if len(a.conflictPanel.files) > 0 {
 		return "resolve each file, then mark it resolved"
@@ -599,13 +586,18 @@ func (a *App) conflictRowButtons(idx int) []conflictBtn {
 	default:
 		switch n := a.conflictFileCount(f.abs); {
 		case n > 0:
+			// Named by role ("[ All yours ]"), not by branch: the sides
+			// line right above names them, and a row of buttons that grew
+			// with branch names would push the file's own text out.
+			sides := a.conflictSides()
+			allCur, allInc := "[ All "+sides.cur.role+" ]", "[ All "+sides.inc.role+" ]"
 			btns = []conflictBtn{
-				{label: "[ All current ]", fg: th.GitAdded, enabled: true,
+				{label: allCur, fg: th.GitAdded, enabled: true,
 					run: func(app *App) { app.conflictAcceptAllIn(f, editor.ChooseCurrent) }},
-				{label: "[ All incoming ]", fg: th.AccentSoft, enabled: true,
+				{label: allInc, fg: th.AccentSoft, enabled: true,
 					run: func(app *App) { app.conflictAcceptAllIn(f, editor.ChooseIncoming) }},
 			}
-			drop = []string{"[ All incoming ]", "[ All current ]"}
+			drop = []string{allInc, allCur}
 		case n == 0:
 			btns = []conflictBtn{{label: "[ Mark resolved ]", fg: th.GitAdded, enabled: true,
 				run: func(app *App) { app.conflictMarkResolved(f) }}}
@@ -689,28 +681,29 @@ func (a *App) conflictRowContextItems(r conflictRow) []editorContextItem {
 		return []editorContextItem{open, copyPath}
 	}
 	items := []editorContextItem{open}
+	sides := a.conflictSides()
 	switch {
 	case f.xy == "DD":
 		items = append(items, editorContextItem{label: "Delete (both sides deleted it)", enabled: alwaysTrue,
 			action: func(app *App) { app.conflictDeleteFile(f) }})
 	case isPresenceConflict(f.xy):
 		items = append(items,
-			editorContextItem{label: "Keep file (" + conflictKindLabel(f.xy) + ")", enabled: alwaysTrue,
+			editorContextItem{label: "Keep file (" + conflictKindLabel(f.xy, sides) + ")", enabled: alwaysTrue,
 				action: func(app *App) { app.conflictKeepFile(f) }},
 			editorContextItem{label: "Delete file", enabled: alwaysTrue,
 				action: func(app *App) { app.conflictDeleteFile(f) }})
 	default:
 		items = append(items,
-			editorContextItem{label: "Accept all current", enabled: alwaysTrue,
+			editorContextItem{label: "Accept all " + sides.cur.tag(), enabled: alwaysTrue,
 				action: func(app *App) { app.conflictAcceptAllIn(f, editor.ChooseCurrent) }},
-			editorContextItem{label: "Accept all incoming", enabled: alwaysTrue,
+			editorContextItem{label: "Accept all " + sides.inc.tag(), enabled: alwaysTrue,
 				action: func(app *App) { app.conflictAcceptAllIn(f, editor.ChooseIncoming) }},
 			editorContextItem{label: "Mark resolved", enabled: alwaysTrue,
 				action: func(app *App) { app.conflictMarkResolved(f) }},
-			editorContextItem{label: "Use current version of the whole file…", enabled: alwaysTrue,
-				action: func(app *App) { app.conflictTakeWholeFile(f, "--ours", "current") }},
-			editorContextItem{label: "Use incoming version of the whole file…", enabled: alwaysTrue,
-				action: func(app *App) { app.conflictTakeWholeFile(f, "--theirs", "incoming") }})
+			editorContextItem{label: "Use " + sides.cur.phrase() + " for the whole file…", enabled: alwaysTrue,
+				action: func(app *App) { app.conflictTakeWholeFile(f, "--ours", sides.cur) }},
+			editorContextItem{label: "Use " + sides.inc.phrase() + " for the whole file…", enabled: alwaysTrue,
+				action: func(app *App) { app.conflictTakeWholeFile(f, "--theirs", sides.inc) }})
 	}
 	return append(items, copyPath)
 }
@@ -737,7 +730,7 @@ func (a *App) conflictOpenFile(f conflictFile) {
 		return
 	}
 	if _, err := os.Stat(f.abs); err != nil {
-		a.flash(f.rel + " is " + conflictKindLabel(f.xy) + " — Keep or Delete it")
+		a.flash(f.rel + " is " + conflictKindLabel(f.xy, a.conflictSides()) + " — Keep or Delete it")
 		return
 	}
 	a.openFile(f.abs)
@@ -832,23 +825,29 @@ func (a *App) conflictDeleteFile(f conflictFile) {
 
 // conflictTakeWholeFile replaces f with one side's ENTIRE version and
 // marks it resolved — JetBrains' "accept yours / theirs". Different from
-// "accept all current", which keeps git's clean auto-merged hunks and
+// "accept all yours", which keeps git's clean auto-merged hunks and
 // only settles the conflicting ones; this discards the other side's
 // changes to the file wholesale, so it confirms, and says so.
 //
 // --ours / --theirs name index stages 2 and 3, which are current and
-// incoming in EVERY operation (rebase included), so the positional words
-// stay true here.
-func (a *App) conflictTakeWholeFile(f conflictFile, flag, side string) {
+// incoming in EVERY operation (rebase included) — so the flag follows the
+// side's POSITION, and side only supplies the words: in a rebase "your
+// side" is the incoming one, and --theirs is the flag that takes it.
+func (a *App) conflictTakeWholeFile(f conflictFile, flag string, side conflictSide) {
+	name := filepath.Base(f.rel)
+	from := side.phrase()
+	if side.name != "" {
+		from += " (" + elide(side.name, conflictNameMax) + ")"
+	}
 	lines := []string{
-		"Replace " + filepath.Base(f.rel) + " with the " + side + " side's whole file?",
+		"Replace " + name + " with the whole file from " + from + "?",
 		"Every change from the other side to this file is dropped.",
 	}
 	if t := a.tabForPath(f.abs); t != nil && t.Dirty {
 		lines = append(lines, "Your unsaved edits to it are discarded too.")
 	}
-	a.openConfirmLines("Use "+side+" version", lines, func(app *App) {
-		app.runGitCmdSeq("Use "+side+" version of "+filepath.Base(f.rel), [][]string{
+	a.openConfirmLines("Use "+side.phrase(), lines, func(app *App) {
+		app.runGitCmdSeq("Use "+side.phrase()+" for "+name, [][]string{
 			{"checkout", flag, "--", f.abs},
 			{"add", "--", f.abs},
 		})
@@ -1035,7 +1034,7 @@ func (a *App) conflictRowState(r conflictRow) (rune, tcell.Color, string) {
 		return '✓', th.Muted, "marked resolved"
 	}
 	f := r.file
-	kind := conflictKindLabel(f.xy)
+	kind := conflictKindLabel(f.xy, a.conflictSides())
 	if isPresenceConflict(f.xy) {
 		return '●', th.Error, kind
 	}
@@ -1128,11 +1127,14 @@ func (a *App) conflictStatusSegment() string {
 
 // refreshConflictPanelInfo re-reads the operation details even while the
 // panel is shut — the keyboard's Skip row (gitconflict.go) confirms with
-// the stopped commit's name, which lives in the panel's state.
+// the stopped commit's name, which lives in the panel's state, and the
+// side names on every lens and separator label (conflictsides.go) read
+// it on every frame. A stopped commit that has not moved costs file
+// reads only (reloadGitOpInfo reuses its summary).
 func (a *App) refreshConflictPanelInfo() {
 	gitDir := a.gitDir
 	if gitDir == "" {
 		gitDir = gitAbsoluteDir(a.rootDir)
 	}
-	a.conflictPanel.info = loadGitOpInfo(a.rootDir, gitDir, gitOpFromGitDir(gitDir))
+	a.conflictPanel.info = reloadGitOpInfo(a.rootDir, gitDir, gitOpFromGitDir(gitDir), a.conflictPanel.info)
 }

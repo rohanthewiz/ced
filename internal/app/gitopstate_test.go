@@ -47,8 +47,9 @@ func TestParseConflictStatusZ(t *testing.T) {
 	}
 }
 
-// TestConflictKindLabel pins the positional vocabulary for every unmerged
-// code, and that only the presence codes count as presence conflicts.
+// TestConflictKindLabel pins the label for every unmerged code with no
+// operation known (the positional fallback), and that only the presence
+// codes count as presence conflicts.
 func TestConflictKindLabel(t *testing.T) {
 	cases := map[string]struct {
 		label    string
@@ -57,18 +58,36 @@ func TestConflictKindLabel(t *testing.T) {
 		"UU": {"both modified", false},
 		"AA": {"both added", false},
 		"DD": {"both deleted", true},
-		"DU": {"deleted in current", true},
-		"UD": {"deleted in incoming", true},
-		"AU": {"added in current only", true},
-		"UA": {"added in incoming only", true},
+		"DU": {"deleted on the current side", true},
+		"UD": {"deleted on the incoming side", true},
+		"AU": {"added on the current side only", true},
+		"UA": {"added on the incoming side only", true},
 	}
 	for xy, c := range cases {
-		if got := conflictKindLabel(xy); got != c.label {
+		if got := conflictKindLabel(xy, positionalSides()); got != c.label {
 			t.Errorf("%s: label %q, want %q", xy, got, c.label)
 		}
 		if got := isPresenceConflict(xy); got != c.presence {
 			t.Errorf("%s: presence %v, want %v", xy, got, c.presence)
 		}
+	}
+}
+
+// TestConflictKindLabel_FollowsTheOperation pins the presence labels in a
+// rebase, where the letters' positions and the user's ownership cross:
+// DU (deleted at stage 2, the upstream) is NOT the user's deletion, and
+// UD is.
+func TestConflictKindLabel_FollowsTheOperation(t *testing.T) {
+	s := conflictSidesFromInfo(gitOpInfo{op: "rebase", onto: "abc1234", short: "2a0370b"}, "")
+	if got := conflictKindLabel("DU", s); got != "deleted on the upstream side" {
+		t.Errorf("DU = %q", got)
+	}
+	if got := conflictKindLabel("UD", s); got != "deleted on your side" {
+		t.Errorf("UD = %q", got)
+	}
+	pick := conflictSidesFromInfo(gitOpInfo{op: "cherry-pick", short: "2a0370b"}, "main")
+	if got := conflictKindLabel("UA", pick); got != "added on the picked side only" {
+		t.Errorf("UA = %q", got)
 	}
 }
 
@@ -274,5 +293,26 @@ func TestParseConflictMarkerSizes(t *testing.T) {
 	}
 	if got := parseConflictMarkerSizes(out, abs[:2]); got != nil {
 		t.Errorf("count mismatch should return nil, got %v", got)
+	}
+}
+
+// TestReloadGitOpInfo_ReusesTheSummary pins the fork-free refresh: with
+// the stopped commit unchanged the previous summary is kept (no `git log`),
+// and a moved commit fetches its own.
+func TestReloadGitOpInfo_ReusesTheSummary(t *testing.T) {
+	repo := cherryPickConflictRepo(t)
+	gitDir := filepath.Join(repo, ".git")
+	fresh := loadGitOpInfo(repo, gitDir, "cherry-pick")
+	if fresh.short == "" || fresh.subject != "side edits the middle" {
+		t.Fatalf("fresh = %+v", fresh)
+	}
+	prev := fresh
+	prev.short, prev.subject = "sentinel", "kept"
+	if got := reloadGitOpInfo(repo, gitDir, "cherry-pick", prev); got.short != "sentinel" || got.subject != "kept" {
+		t.Errorf("same commit re-read its summary: %+v", got)
+	}
+	prev.commit = "0000000000000000000000000000000000000000"
+	if got := reloadGitOpInfo(repo, gitDir, "cherry-pick", prev); got.short != fresh.short {
+		t.Errorf("moved commit kept the old summary: %+v", got)
 	}
 }

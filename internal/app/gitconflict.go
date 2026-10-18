@@ -336,12 +336,12 @@ func (a *App) gitConflictItems(op, root string, rels []string) []paletteItem {
 		f := conflictFile{rel: rel, abs: filepath.Join(root, rel), xy: xy}
 		if xy != "DD" {
 			items = append(items, paletteItem{
-				label: "Keep " + rel + " (" + conflictKindLabel(xy) + ")",
+				label: "Keep " + rel + " (" + conflictKindLabel(xy, a.conflictSides()) + ")",
 				run:   func(app *App) { app.conflictKeepFile(f) },
 			})
 		}
 		items = append(items, paletteItem{
-			label: "Delete " + rel + " (" + conflictKindLabel(xy) + ")",
+			label: "Delete " + rel + " (" + conflictKindLabel(xy, a.conflictSides()) + ")",
 			run:   func(app *App) { app.conflictDeleteFile(f) },
 		})
 	}

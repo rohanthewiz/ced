@@ -10,9 +10,9 @@
 // reports as unmerged gets three things on top of its text:
 //
 //	  12 │ func parse(s string) error {
-//	  13 │ <<<<<<< HEAD  Accept current · Accept incoming · Accept both   ← lens
+//	  13 │ <<<<<<< HEAD  Accept yours (main) · Accept picked (2a0370b) · …  ← lens
 //	  14 │     if s == "" { return nil }          ░ current wash (green)
-//	  15 │ =======                                ▒ separator (neutral)
+//	  15 │ =======  ▲ yours (main)  ▼ picked (2a0370b)                    ← label
 //	  16 │     if len(s) == 0 { return errEmpty } ▓ incoming wash (mauve)
 //	  17 │ >>>>>>> 2a0370b (Fix parser crash)
 //
@@ -21,6 +21,10 @@
 //     raw marker file makes you answer by counting `=` signs.
 //   - LENSES (editor.LensSource): clickable verbs on each `<<<<<<<` line.
 //     One click settles the block as one undo step (editor/conflict.go).
+//   - SEPARATOR LABEL (editor.NoteSource): the `=======` line says which
+//     side is above it and which below, in the operation's own terms —
+//     git's markers only say HEAD and a hash. Every side's name comes from
+//     conflictsides.go, so the lens, the label and every other door agree.
 //   - VERB TWINS: every lens button has a keyboard door — the editor's
 //     right-click rows, the ≡ Git "Resolve conflict at caret…" picker, and
 //     next/previous conflict rows that walk across files. A lens is a
@@ -99,8 +103,9 @@ func (a *App) conflictViewOn(t *editor.Tab) bool {
 // -----------------------------------------------------------------------------
 
 // conflictSource paints a conflicted file: marker rows emphasised (a
-// span), every row of every block washed by side (LineWashSource), and
-// the verb lens on each opener (LensSource). Registered in wireTab with
+// span), every row of every block washed by side (LineWashSource), the
+// verb lens on each opener (LensSource), and the sides label on each
+// separator (NoteSource). Registered in wireTab with
 // the other app-owned sources; it costs one map lookup per frame on any
 // tab git does not list as unmerged.
 type conflictSource struct {
@@ -218,11 +223,12 @@ func (s conflictSource) Lenses(t *editor.Tab, th theme.Theme, first, last int) m
 			continue // the opener is scrolled off; its row is not painted
 		}
 		idx := conflictIndexOf(all, b.Start)
+		sides := s.app.conflictSidesFor(b)
 		set := []editor.Lens{
-			{Label: editor.ChooseCurrent.Label(), Short: "Current", FG: th.GitAdded,
-				ID: conflictLensID(idx, editor.ChooseCurrent)},
-			{Label: editor.ChooseIncoming.Label(), Short: "Incoming", FG: th.AccentSoft,
-				ID: conflictLensID(idx, editor.ChooseIncoming)},
+			{Label: sides.choiceLabel(editor.ChooseCurrent), Short: sides.choiceShort(editor.ChooseCurrent),
+				FG: th.GitAdded, ID: conflictLensID(idx, editor.ChooseCurrent)},
+			{Label: sides.choiceLabel(editor.ChooseIncoming), Short: sides.choiceShort(editor.ChooseIncoming),
+				FG: th.AccentSoft, ID: conflictLensID(idx, editor.ChooseIncoming)},
 			{Label: editor.ChooseBoth.Label(), Short: "Both", FG: th.Accent,
 				ID: conflictLensID(idx, editor.ChooseBoth)},
 		}
@@ -233,6 +239,28 @@ func (s conflictSource) Lenses(t *editor.Tab, th theme.Theme, first, last int) m
 		set = append(set, editor.Lens{Label: "Compare sides", Short: "Compare",
 			FG: th.Text, ID: conflictLensID(idx, conflictCompareLens)})
 		out[b.Start] = set
+	}
+	return out
+}
+
+// Notes labels each visible block's separator with the two sides' names
+// (conflictSides.separatorNotes). Only while an operation names them: with
+// no operation the label could only restate "current" / "incoming",
+// which the marker lines and the lens already say.
+func (s conflictSource) Notes(t *editor.Tab, th theme.Theme, first, last int) map[int][]editor.NoteRun {
+	blocks := s.visibleBlocks(t, first, last)
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make(map[int][]editor.NoteRun)
+	for _, b := range blocks {
+		sides := s.app.conflictSidesFor(b)
+		if !sides.known {
+			return nil
+		}
+		for line, runs := range sides.separatorNotes(b, th) {
+			out[line] = runs
+		}
 	}
 	return out
 }
@@ -307,22 +335,29 @@ func (a *App) conflictLensPress(x, y int) bool {
 // resolveConflictBlock settles one block and reports the outcome. The
 // single write path behind the lens, the context menu and the picker.
 func (a *App) resolveConflictBlock(t *editor.Tab, idx int, choice editor.ConflictChoice) {
+	// Named before the write: the block is gone after it, and its marker
+	// labels are what fill a name the operation's record lacks.
+	label := choice.Label()
+	if blocks := t.Conflicts(); idx >= 0 && idx < len(blocks) {
+		label = a.conflictSidesFor(blocks[idx]).choiceLabel(choice)
+	}
 	if !t.ResolveConflict(idx, choice) {
-		a.flash("Can't " + lowerFirst(choice.Label()) + " here")
+		a.flash("Can't " + lowerFirst(label) + " here")
 		return
 	}
-	a.afterConflictResolve(t, choice.Label())
+	a.afterConflictResolve(t, label)
 }
 
 // resolveAllConflictsIn settles every block in t with one choice, as one
 // undo step, and reports how many it rewrote.
 func (a *App) resolveAllConflictsIn(t *editor.Tab, choice editor.ConflictChoice) int {
+	label := a.conflictSidesForTab(t).choiceLabel(choice)
 	n := t.ResolveAllConflicts(choice)
 	if n == 0 {
-		a.flash("No conflicts here can " + lowerFirst(choice.Label()))
+		a.flash("No conflicts here can " + lowerFirst(label))
 		return 0
 	}
-	a.afterConflictResolve(t, choice.Label()+" ×"+itoa(n))
+	a.afterConflictResolve(t, label+" ×"+itoa(n))
 	return n
 }
 
@@ -391,29 +426,52 @@ func (a *App) menuResolveConflictAtCaret() {
 		return
 	}
 	b := t.Conflicts()[idx]
+	sides := a.conflictSidesFor(b)
 	var items []paletteItem
 	for _, c := range conflictChoiceItems(b) {
 		c := c
-		items = append(items, paletteItem{label: c.Label(), run: func(app *App) {
+		items = append(items, paletteItem{label: sides.choiceLabel(c), run: func(app *App) {
 			app.resolveConflictBlock(t, idx, c)
 		}})
 	}
 	if n := len(t.Conflicts()); n > 1 {
+		all := a.conflictSidesForTab(t)
 		for _, c := range []editor.ConflictChoice{editor.ChooseCurrent, editor.ChooseIncoming} {
 			c := c
 			items = append(items, paletteItem{
-				label: "All " + itoa(n) + " conflicts in this file: " + lowerFirst(c.Label()),
+				label: "All " + itoa(n) + " conflicts in this file: " + lowerFirst(all.choiceLabel(c)),
 				run:   func(app *App) { app.resolveAllConflictsIn(t, c) },
 			})
 		}
 	}
 	a.openPicker("Conflict "+itoa(idx+1)+" of "+itoa(len(t.Conflicts()))+
-		" · "+conflictSidesNote(b), items)
+		" · "+a.conflictBlockSidesNote(b), items)
+}
+
+// conflictSidesForTab names the sides for a verb that spans every block
+// in t (accept all): the first block fills the names, which in one stop
+// every block shares — git writes the same labels on all of them.
+func (a *App) conflictSidesForTab(t *editor.Tab) conflictSides {
+	if blocks := t.Conflicts(); len(blocks) > 0 {
+		return a.conflictSidesFor(blocks[0])
+	}
+	return a.conflictSides()
+}
+
+// conflictBlockSidesNote says which side of block b is which, for a
+// picker's title — opened from the keyboard, it has no lens colours to
+// lean on. In the operation's words when one is known ("▲ yours (main) ·
+// ▼ picked (2a0370b)"), else by git's marker labels.
+func (a *App) conflictBlockSidesNote(b editor.ConflictBlock) string {
+	if s := a.conflictSidesFor(b); s.known {
+		return s.note()
+	}
+	return conflictSidesNote(b)
 }
 
 // conflictSidesNote names the two sides of a block by their marker
-// labels — "HEAD ↔ 2a0370b (Fix parser crash)" — so a picker opened from
-// the keyboard says which side is which without the lens's colours.
+// labels — "HEAD ↔ 2a0370b (Fix parser crash)" — the fallback when no
+// operation is known to say whose each side is.
 func conflictSidesNote(b editor.ConflictBlock) string {
 	cur, inc := b.CurrentLabel, b.IncomingLabel
 	if cur == "" {
@@ -434,11 +492,12 @@ func (a *App) conflictContextItems() []editorContextItem {
 		return nil
 	}
 	b := t.Conflicts()[idx]
+	sides := a.conflictSidesFor(b)
 	var out []editorContextItem
 	for _, c := range conflictChoiceItems(b) {
 		c := c
 		out = append(out, editorContextItem{
-			label:   c.Label(),
+			label:   sides.choiceLabel(c),
 			action:  func(app *App) { app.resolveConflictBlock(t, idx, c) },
 			enabled: alwaysTrue,
 		})

@@ -1162,6 +1162,7 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	// are nil on a tab no source cares about, which is nearly all of them.
 	washes := t.collectLineWashes(th, t.ScrollY, t.ScrollY+h-1)
 	lenses := t.collectLenses(th, t.ScrollY, t.ScrollY+h-1)
+	srcNotes := t.collectNotes(th, t.ScrollY, t.ScrollY+h-1)
 	caretLines := t.caretLineSet()
 	// Bookmarks are reconciled against the buffer here, once per frame,
 	// so an edit that moved them is reflected in the very frame it lands
@@ -1413,13 +1414,17 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 			// past the pane: there is no empty room, and the `›` above
 			// already owns the last cell. See linenote.go.
 			// The caret's note, when there is one, takes the slot instead.
-			// A lens set outranks both notes on its line: an action you can
-			// take beats a remark you can read (lens.go).
+			// A lens set outranks every note on its line: an action you can
+			// take beats a remark you can read (lens.go). A source's label
+			// comes next (linenote.go's NoteSource says why it beats the
+			// caret's note).
 			if lastRow {
 				if used := visualCol - scrollVisual; used >= 0 && used <= contentW {
 					if set := lenses[lineIdx]; len(set) > 0 &&
 						t.paintLens(scr, th, lineIdx, set, cy, contentX, contentW, used, lineBg, x, y) {
 						// The buttons took the note slot.
+					} else if runs := srcNotes[lineIdx]; len(runs) > 0 {
+						paintSourceNote(scr, runs, cy, contentX, contentW, used, lineBg)
 					} else if n, ok := t.liveCaretNote(lineIdx); ok {
 						paintCaretNote(scr, n, cy, contentX, contentW, used, lineBg)
 					} else if liveNotes != nil {

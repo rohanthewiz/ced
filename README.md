@@ -67,8 +67,9 @@ The goals, in order:
   another branch in one dialog (already-applied ones marked, likely
   conflicts flagged `⚠`). When a cherry-pick, merge, revert or rebase
   stops, the conflicts open tinted by side with clickable **Accept
-  current · Accept incoming · Accept both** buttons, and a Conflicts
-  panel shows the operation, its progress, and Continue / Skip / Abort.
+  yours · Accept picked · Accept both** buttons — every side named by
+  whose it is, even in a rebase — and a Conflicts panel shows the
+  operation, its progress, and Continue / Skip / Abort.
   See [Cherry-picking and merge conflicts](#cherry-picking-and-merge-conflicts).
 - **Syntax highlighting** for dozens of languages via Chroma.
 - **Code intelligence from the language servers you already have** —
@@ -1074,39 +1075,51 @@ shows up as a `⚠` in the status bar instead; click it for the same
 panel.
 
 ```
-  10 <<<<<<< HEAD  Accept current · Accept incoming · Accept both
-  11         return []string{}, nil              ← current side (green)
-  12 =======
-  13         return nil, errEmpty                ← incoming side (tinted)
+  10 <<<<<<< HEAD  Accept yours (main) · Accept picked (683e1dc) · Accept both
+  11         return []string{}, nil              ← your side (green)
+  12 =======  ▲ yours (main)  ▼ picked (683e1dc)
+  13         return nil, errEmpty                ← the picked commit (tinted)
   14 >>>>>>> 683e1dc (Reject empty input)
 ─ Conflicts · 1 left ───────────────────────────────────────────────── ✕ ─
  ⚠ Cherry-pick 1 of 3 · 683e1dc “Reject empty input”   [ Continue ] [ Skip ] [ Abort ] ⟳
-   current = main (HEAD) · incoming = 683e1dc
- ● parse.go  1 conflict · both modified               [ All current ] [ All incoming ]
+   ▲ yours (main) · ▼ picked (683e1dc)
+ ● parse.go  1 conflict · both modified                   [ All yours ] [ All picked ]
 ```
 
 - **In the file**, each side of a conflict is tinted, and the
   `<<<<<<<` line carries the verbs. Click one and that conflict becomes
   that side — one `Undo` puts the markers back. Right-click inside a
-  conflict for two more: *both, incoming first* and *neither*. With
+  conflict for two more: *both, picked first* and *neither*. With
   `merge.conflictStyle=diff3` there's an *Accept base* too.
 - **Compare sides** (the last button on the `<<<<<<<` line, also on
   the right-click menu) diffs the conflict's two sides in the compare
   panel, so a one-line difference inside a long block stands out. With
-  `diff3` it asks which pair: the two sides, or *base ↔ current* /
-  *base ↔ incoming* — what each side changed. Double-click a `+` line
+  `diff3` it asks which pair: the two sides, or *base ↔ yours* /
+  *base ↔ picked* — what each side changed. Double-click a `+` line
   to jump to it in the file; ⟳ re-reads the conflict after you edit it.
-- **"Current" is the branch you're on, "incoming" is what's being
-  applied.** The panel's second line spells that out per operation —
-  in a rebase they're the other way round from what most people expect,
-  and that line says so.
-- **Each file row** offers what that file needs: *All current / All
-  incoming* while it has conflicts, **Mark resolved** once it has none
-  (it saves the file first, exactly as you see it, then `git add`s it),
-  or **Keep / Delete** when one side deleted the file. Right-click a row
-  for *Use current/incoming version of the whole file* — which, unlike
-  *All current*, also throws away the other side's non-conflicting
-  changes to that file.
+- **Every side is named by whose it is**, in every button, menu, label
+  and panel line, and the `=======` line says which is above (▲) and
+  which below (▼):
+
+  | operation   | above `=======`      | below `=======`   |
+  |-------------|----------------------|-------------------|
+  | merge       | yours (your branch)  | theirs (the branch merged in) |
+  | cherry-pick | yours (your branch)  | picked (the commit) |
+  | revert      | yours (your branch)  | revert (the commit) |
+  | rebase      | upstream (the commit you're rebasing onto) | yours (your commit) |
+
+  A rebase is the one that surprises people: it replays *your* commits
+  onto the upstream, so your work is the side coming in **below**. The
+  panel's line adds that the upper side also holds your commits replayed
+  so far. A conflict with no operation behind it (a `stash pop`) keeps
+  the neutral *current* (above) / *incoming* (below).
+- **Each file row** offers what that file needs: *All yours / All
+  picked* (or whatever the sides are called) while it has conflicts,
+  **Mark resolved** once it has none (it saves the file first, exactly
+  as you see it, then `git add`s it), or **Keep / Delete** when one side
+  deleted the file. Right-click a row for *Use your side / the picked
+  side for the whole file* — which, unlike *All yours*, also throws away
+  the other side's non-conflicting changes to that file.
 - **Continue** is dimmed — and says what's in the way when clicked —
   until every file is settled. When the only thing left is marking
   marker-free files resolved, it becomes **Resolve all & continue**.

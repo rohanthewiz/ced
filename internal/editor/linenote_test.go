@@ -159,3 +159,97 @@ func TestCaretNote_FollowsTheCaretAndTheRevision(t *testing.T) {
 		t.Errorf("an empty note still painted: %q", row)
 	}
 }
+
+// fakeNoteSource labels fixed lines and paints nothing else.
+type fakeNoteSource struct {
+	byLine map[int][]NoteRun
+}
+
+// Decorations satisfies DecorationSource with nothing to paint.
+func (fakeNoteSource) Decorations(*Tab, theme.Theme, int, int) ([]Span, []GutterMark) {
+	return nil, nil
+}
+
+// Notes returns the fixed labels.
+func (s fakeNoteSource) Notes(*Tab, theme.Theme, int, int) map[int][]NoteRun { return s.byLine }
+
+// TestSourceNote_PaintsRunsInTheirColours pins a source note's placement
+// (the note slot after the line) and that each run keeps its own colour,
+// upright.
+func TestSourceNote_PaintsRunsInTheirColours(t *testing.T) {
+	green := tcell.NewRGBColor(0x9e, 0xce, 0x6a)
+	mauve := tcell.NewRGBColor(0xbb, 0x9a, 0xf7)
+	tab := &Tab{Buffer: NewBuffer("a\n=======\nb\n")}
+	tab.DecoSources = []DecorationSource{fakeNoteSource{byLine: map[int][]NoteRun{
+		1: {{Text: "▲ yours", FG: green}, {Text: "  ▼ picked", FG: mauve}},
+	}}}
+	scr := noteScreen(t, tab, 60, 4)
+
+	row := noteRow(scr, 1, 60)
+	if !strings.Contains(row, "=======  ▲ yours  ▼ picked") {
+		t.Fatalf("row 1 = %q", row)
+	}
+	col := func(sub string) int { return len([]rune(row[:strings.Index(row, sub)])) }
+	for _, c := range []struct {
+		at   string
+		want tcell.Color
+	}{{"▲", green}, {"▼", mauve}} {
+		_, _, st, _ := scr.GetContent(col(c.at), 1)
+		if fg, _, attr := st.Decompose(); fg != c.want || attr&tcell.AttrItalic != 0 {
+			t.Errorf("%s fg=%v italic=%v, want %v upright", c.at, fg, attr&tcell.AttrItalic != 0, c.want)
+		}
+	}
+	if row := noteRow(scr, 0, 60); strings.Contains(row, "▲") {
+		t.Errorf("row 0 has a note it was never given: %q", row)
+	}
+}
+
+// TestSourceNote_Precedence pins the note slot's order: a lens beats a
+// source note, and a source note beats both the caret's diagnostic note
+// and an inlay hint.
+func TestSourceNote_Precedence(t *testing.T) {
+	tab := &Tab{Buffer: NewBuffer("<<<<<<< HEAD\n=======\n>>>>>>> x\n")}
+	runs := []NoteRun{{Text: "▲ yours", FG: tcell.ColorWhite}}
+	tab.DecoSources = []DecorationSource{
+		fakeNoteSource{byLine: map[int][]NoteRun{0: runs, 1: runs}},
+		fakeLensSource{byLine: map[int][]Lens{0: threeLenses()}},
+	}
+	tab.SetLineNotes(map[int]string{1: "inlay"})
+	tab.Cursor = Position{Line: 1}
+	tab.SetCaretNote(1, "✗ expected statement", tcell.ColorRed)
+	scr := noteScreen(t, tab, 90, 4)
+
+	if row := noteRow(scr, 0, 90); !strings.Contains(row, "Accept current") || strings.Contains(row, "▲") {
+		t.Errorf("row 0 = %q, want the lens and no source note", row)
+	}
+	row := noteRow(scr, 1, 90)
+	if !strings.Contains(row, "=======  ▲ yours") || strings.Contains(row, "expected") || strings.Contains(row, "inlay") {
+		t.Errorf("row 1 = %q, want the source note over the caret and inlay notes", row)
+	}
+}
+
+// TestSourceNote_CutLikeAnyNote pins the shared placement rule for
+// coloured runs: too long for the room → cut with a mark, the last column
+// left free; a full line → no note at all.
+func TestSourceNote_CutLikeAnyNote(t *testing.T) {
+	tab := &Tab{Buffer: NewBuffer("=======\n")}
+	tab.DecoSources = []DecorationSource{fakeNoteSource{byLine: map[int][]NoteRun{
+		0: {{Text: strings.Repeat("▲", 100), FG: tcell.ColorWhite}},
+	}}}
+	scr := noteScreen(t, tab, 40, 2)
+	if row := noteRow(scr, 0, 40); !strings.Contains(row, "…") {
+		t.Errorf("an over-long source note should be cut with a mark: %q", row)
+	}
+	if r, _, _, _ := scr.GetContent(39, 0); r != ' ' && r != 0 {
+		t.Errorf("the last column must stay free, got %q", r)
+	}
+
+	tab = &Tab{Buffer: NewBuffer(strings.Repeat("=", 50) + "\n")}
+	tab.DecoSources = []DecorationSource{fakeNoteSource{byLine: map[int][]NoteRun{
+		0: {{Text: "▲ yours", FG: tcell.ColorWhite}},
+	}}}
+	scr = noteScreen(t, tab, 60, 2)
+	if row := noteRow(scr, 0, 60); strings.Contains(row, "▲") {
+		t.Errorf("a full line still drew a source note: %q", row)
+	}
+}

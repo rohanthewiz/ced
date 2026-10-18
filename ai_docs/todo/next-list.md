@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-075**
+**Next ID: N-076**
 
 ## Open
 
@@ -113,6 +113,14 @@ plus the LSP work done in the seeding session itself
   onClick (`toggleMarkdownView`/`toggleSoftWrap`) is not the verb the
   leader binds. Add only if someone misses them.
 
+- **N-075** · raised `2026-1017-2208-conflict-side-names` · value low
+  The conflict lens's full labels now carry names ("Accept yours (main) ·
+  Accept picked (2a0370b) · Accept both · Compare sides") and no longer
+  fit at ~120 columns, so a typical window shows the short roles
+  (`Yours · Picked · Both · Compare`); the full names live on the
+  `=======` label. If the short form reads as too terse in practice,
+  try a middle tier (role + name without "Accept") in `layoutLens`.
+
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -184,6 +192,11 @@ and `raised`.
   check in tmux, cats and macOS Terminal.app: the side washes' contrast
   (light themes especially), a real mouse click on the `<<<<<<<` lens,
   and the cats "blocked" badge firing on a stop (`conflictPanel.unseen`).
+  Since `2026-1017-2208-conflict-side-names` also: the side names
+  (conflictsides.go) on a real `git rebase` stop — "yours" on the lower
+  side, the `=======` label's ▲/▼ colours readable on the grey wash
+  (pinned at 4.5:1 in tests, unseen in a terminal), and a conflicted
+  `stash pop` keeping the plain current / incoming words.
 
 - **N-057** · raised `2026-1008-1724-tree-open-finder-terminal-shell-cmd` · value low
   The new tree rows' host branches have only run behind the `hostRun`

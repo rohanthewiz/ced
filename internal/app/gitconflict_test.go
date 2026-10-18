@@ -667,7 +667,7 @@ func TestGitConflictItems_PresenceConflictRows(t *testing.T) {
 	root, rels := gitConflictedPaths(repo)
 	labels := rowLabels(a.gitConflictItems("cherry-pick", root, rels))
 	got := strings.Join(labels, "|")
-	for _, want := range []string{"Keep g.txt (deleted in incoming)", "Delete g.txt (deleted in incoming)", "Skip this commit…"} {
+	for _, want := range []string{"Keep g.txt (deleted on the incoming side)", "Delete g.txt (deleted on the incoming side)", "Skip this commit…"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rows %q missing %q", got, want)
 		}

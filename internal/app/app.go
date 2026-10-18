@@ -2095,8 +2095,13 @@ func (a *App) refreshGitStatus() {
 	a.refreshGitLogCommits()
 	// The Conflicts panel too, for the same reason: a resolve staged from
 	// a terminal, or a continue run there, shows up on the next tick.
+	// Shut, it still keeps the operation's record fresh while there is an
+	// operation (or a record of one to retire): the side names on every
+	// lens and separator label read it (conflictsides.go).
 	if a.conflictPanel.open {
 		a.refreshConflictPanel()
+	} else if a.gitOp != "" || a.conflictPanel.info.op != "" {
+		a.refreshConflictPanelInfo()
 	}
 }
 

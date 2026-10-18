@@ -77,6 +77,16 @@ type gitOpInfo struct {
 // effort per field: a missing file leaves its field empty, and the
 // header composes from whatever was found.
 func loadGitOpInfo(rootDir, gitDir, op string) gitOpInfo {
+	return reloadGitOpInfo(rootDir, gitDir, op, gitOpInfo{})
+}
+
+// reloadGitOpInfo is loadGitOpInfo that reuses prev's commit summary when
+// the stopped commit has not moved. The files under the git directory are
+// cheap reads; the summary is a `git log` fork — and the conflict side
+// names (conflictsides.go) want the info fresh on every status tick, not
+// only while the panel is up. A commit's short hash and subject cannot
+// change, so a same-hash reuse is never stale.
+func reloadGitOpInfo(rootDir, gitDir, op string, prev gitOpInfo) gitOpInfo {
 	info := gitOpInfo{op: op}
 	if op == "" || gitDir == "" {
 		return info
@@ -118,7 +128,11 @@ func loadGitOpInfo(rootDir, gitDir, op string) gitOpInfo {
 			info.onto = onto[:7]
 		}
 	}
-	if info.commit != "" {
+	switch {
+	case info.commit == "":
+	case info.commit == prev.commit && prev.short != "":
+		info.short, info.subject = prev.short, prev.subject
+	default:
 		info.short, info.subject = gitCommitSummary(rootDir, info.commit)
 	}
 	return info
@@ -237,12 +251,15 @@ func parseConflictStatusZ(out []byte, toplevel string) []conflictFile {
 	return files
 }
 
-// conflictKindLabel describes an XY pair in POSITIONAL words. git's own
-// "deleted by us / by them" flips meaning in a rebase (where "us" is the
-// upstream), and this editor names the sides current / incoming
-// everywhere (editor/conflict.go) so one vocabulary holds in every
-// operation.
-func conflictKindLabel(xy string) string {
+// conflictKindLabel describes an XY pair by the SIDES' names for this
+// operation (conflictsides.go): "deleted on your side", "added on the
+// picked side only". git's own "deleted by us / by them" flips meaning in
+// a rebase (where "us" is the upstream); the XY letters themselves are
+// positional (X = stage 2 = current, Y = stage 3 = incoming) in every
+// operation, so mapping them through the sides keeps the words true.
+// With no operation known the sides fall back to "the current side" /
+// "the incoming side".
+func conflictKindLabel(xy string, s conflictSides) string {
 	switch xy {
 	case "UU":
 		return "both modified"
@@ -251,13 +268,13 @@ func conflictKindLabel(xy string) string {
 	case "DD":
 		return "both deleted"
 	case "DU":
-		return "deleted in current"
+		return "deleted on " + s.cur.phrase()
 	case "UD":
-		return "deleted in incoming"
+		return "deleted on " + s.inc.phrase()
 	case "AU":
-		return "added in current only"
+		return "added on " + s.cur.phrase() + " only"
 	case "UA":
-		return "added in incoming only"
+		return "added on " + s.inc.phrase() + " only"
 	}
 	return "unmerged"
 }

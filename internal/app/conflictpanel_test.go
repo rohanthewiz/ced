@@ -55,7 +55,7 @@ func TestConflictPanel_ReadsTheStop(t *testing.T) {
 	if got := a.conflictOpTitle(); !strings.HasPrefix(got, "Cherry-pick · ") || !strings.Contains(got, "“side edits the middle”") {
 		t.Errorf("op line = %q", got)
 	}
-	if got := a.conflictSidesNote(); !strings.Contains(got, "current = main (HEAD)") {
+	if got := a.conflictSidesNote(); !strings.HasPrefix(got, "▲ yours (main) · ▼ picked (") {
 		t.Errorf("sides = %q", got)
 	}
 	rows := a.conflictRows()
@@ -88,16 +88,16 @@ func TestConflictPanel_ContinueExplainsItself(t *testing.T) {
 }
 
 // TestConflictPanel_RowButtonsFollowTheBuffer pins the buffer-first
-// counts: the row offers All current / All incoming while the open tab has
+// counts: the row offers All yours / All picked while the open tab has
 // a block, and Mark resolved the moment the buffer's last block goes —
 // before any save.
 func TestConflictPanel_RowButtonsFollowTheBuffer(t *testing.T) {
 	a, _ := conflictPanelApp(t)
-	findBtn(t, a.conflictRowButtons(0), "[ All incoming ]")
-	a.pressConflictBtn(findBtn(t, a.conflictRowButtons(0), "[ All incoming ]"))
+	findBtn(t, a.conflictRowButtons(0), "[ All picked ]")
+	a.pressConflictBtn(findBtn(t, a.conflictRowButtons(0), "[ All picked ]"))
 	tab := a.activeTabPtr()
 	if tab == nil || !tab.Dirty || strings.Contains(tab.Buffer.String(), "<<<<<<<") {
-		t.Fatalf("All incoming did not resolve the open buffer: %v", tab)
+		t.Fatalf("All picked did not resolve the open buffer: %v", tab)
 	}
 	findBtn(t, a.conflictRowButtons(0), "[ Mark resolved ]")
 	if b := findBtn(t, a.conflictOpButtons(), "[ Resolve all & continue ]"); !b.enabled {
@@ -111,7 +111,7 @@ func TestConflictPanel_RowButtonsFollowTheBuffer(t *testing.T) {
 // panel put itself away with the commit landed.
 func TestConflictPanel_EndToEnd(t *testing.T) {
 	a, repo := conflictPanelApp(t)
-	a.pressConflictBtn(findBtn(t, a.conflictRowButtons(0), "[ All incoming ]"))
+	a.pressConflictBtn(findBtn(t, a.conflictRowButtons(0), "[ All picked ]"))
 	a.pressConflictBtn(findBtn(t, a.conflictRowButtons(0), "[ Mark resolved ]"))
 	if tab := a.activeTabPtr(); tab.Dirty {
 		t.Fatal("Mark resolved staged without saving the buffer first")
@@ -194,10 +194,10 @@ func TestConflictPanel_PresenceConflict(t *testing.T) {
 	a.refreshGitStatus()
 	a.showTool(toolConflicts)
 	if len(a.conflictPanel.files) != 1 || a.conflictPanel.files[0].xy != "UD" {
-		t.Fatalf("files = %+v, want g.txt deleted in incoming", a.conflictPanel.files)
+		t.Fatalf("files = %+v, want g.txt deleted on the picked side", a.conflictPanel.files)
 	}
 	_, _, detail := a.conflictRowState(a.conflictRows()[0])
-	if detail != "deleted in incoming" {
+	if detail != "deleted on the picked side" {
 		t.Errorf("detail = %q", detail)
 	}
 	if b := findBtn(t, a.conflictOpButtons(), "[ Continue ]"); b.enabled {
@@ -272,7 +272,7 @@ func TestConflictPanel_Draw(t *testing.T) {
 		t.Errorf("op row = %q", op)
 	}
 	row := screenRow(t, a, py+conflictPanelHeadRows, px, pw)
-	for _, want := range []string{"f.txt", "1 conflict · both modified", "[ All current ]"} {
+	for _, want := range []string{"f.txt", "1 conflict · both modified", "[ All yours ]"} {
 		if !strings.Contains(row, want) {
 			t.Errorf("file row = %q, missing %q", row, want)
 		}
@@ -296,7 +296,8 @@ func TestConflictPanel_RowPressOpensTheFile(t *testing.T) {
 }
 
 // TestConflictPanel_ContextItems pins the right-click vocabulary for a
-// content conflict, including the two whole-file takes.
+// content conflict in a cherry-pick — the sides named as yours / picked
+// (conflictsides.go) — including the two whole-file takes.
 func TestConflictPanel_ContextItems(t *testing.T) {
 	a, _ := conflictPanelApp(t)
 	var labels []string
@@ -304,8 +305,8 @@ func TestConflictPanel_ContextItems(t *testing.T) {
 		labels = append(labels, it.label)
 	}
 	got := strings.Join(labels, "|")
-	for _, want := range []string{"Open f.txt", "Accept all incoming", "Mark resolved",
-		"Use current version of the whole file…", "Copy path"} {
+	for _, want := range []string{"Open f.txt", "Accept all yours (main)", "Accept all picked (", "Mark resolved",
+		"Use your side for the whole file…", "Use the picked side for the whole file…", "Copy path"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rows %q missing %q", got, want)
 		}
@@ -376,7 +377,7 @@ func TestConflictPanel_CountsReadTheLiveBuffer(t *testing.T) {
 	tab.ResolveAllConflicts(editor.ChooseIncoming) // behind the panel's back
 	findBtn(t, a.conflictRowButtons(0), "[ Mark resolved ]")
 	tab.Undo()
-	findBtn(t, a.conflictRowButtons(0), "[ All current ]")
+	findBtn(t, a.conflictRowButtons(0), "[ All yours ]")
 }
 
 // TestConflictPanel_ContinueIntoTheNextConflict_OpenTab is the same stop

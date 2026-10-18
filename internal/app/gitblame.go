@@ -683,27 +683,37 @@ func blameBandColor(th theme.Theme, idx int) tcell.Color {
 // under. A band nobody can read is the one way this feature can fail
 // quietly, so the fix is computed rather than tuned per theme.
 func blameBandFG(th theme.Theme, band tcell.Color) tcell.Color {
-	if band == tcell.ColorDefault || contrastRatio(th.Text, band) >= 4.5 {
-		return th.Text
+	return liftToContrast(th.Text, band)
+}
+
+// liftToContrast returns fg when it reads at 4.5:1 on bg, otherwise fg
+// pushed toward white (dark bg) or black (light bg) in tenth steps just
+// far enough to get there. The hue survives the push — a green stays a
+// paler (or deeper) green — so a colour that MEANS something (the
+// conflict labels' side colours) keeps its meaning while becoming
+// legible. A colour with no RGB form comes back unchanged.
+func liftToContrast(fg, bg tcell.Color) tcell.Color {
+	if bg == tcell.ColorDefault || contrastRatio(fg, bg) >= 4.5 {
+		return fg
 	}
-	tr, tg, tb := th.Text.RGB()
+	tr, tg, tb := fg.RGB()
 	if tr < 0 {
-		return th.Text
+		return fg
 	}
 	var target int32 // toward black on a light band…
-	if relLuminance(band) < 0.5 {
+	if relLuminance(bg) < 0.5 {
 		target = 255 // …toward white on a dark one.
 	}
-	fg := th.Text
+	out := fg
 	for step := 1; step <= 10; step++ {
 		f := float64(step) / 10
 		mix := func(c int32) int32 { return int32(float64(c)*(1-f) + float64(target)*f + 0.5) }
-		fg = tcell.NewRGBColor(mix(tr), mix(tg), mix(tb))
-		if contrastRatio(fg, band) >= 4.5 {
+		out = tcell.NewRGBColor(mix(tr), mix(tg), mix(tb))
+		if contrastRatio(out, bg) >= 4.5 {
 			break
 		}
 	}
-	return fg
+	return out
 }
 
 // relLuminance is the WCAG relative luminance of an RGB color, 0..1.

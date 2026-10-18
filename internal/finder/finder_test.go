@@ -266,3 +266,34 @@ func TestFinder_SearchUnderNotReady(t *testing.T) {
 		t.Fatalf("SearchUnder before Rebuild = %v, %d; want nil, 0", got, total)
 	}
 }
+
+// TestRank_HidesScatteredWhenContiguousExists pins the filter: a path
+// holding the query whole hides paths that only match it scattered.
+func TestRank_HidesScatteredWhenContiguousExists(t *testing.T) {
+	paths := []string{
+		"custom_dm_reports/pobc_kahua_canada/prod.json",
+		"p/r/o/d/x.json",
+	}
+	got := rank(paths, "prod.json", 10)
+	if len(got) != 1 || got[0].Path != paths[0] {
+		t.Fatalf("got %v, want only the contiguous hit", got)
+	}
+}
+
+// TestRank_KeepsScatteredWithoutContiguous is the fallback side: when
+// nothing holds the query whole, abbreviations still find files.
+func TestRank_KeepsScatteredWithoutContiguous(t *testing.T) {
+	paths := []string{"app/go/main.go", "unrelated.txt"}
+	got := rank(paths, "apgo", 10)
+	if len(got) != 1 || got[0].Path != "app/go/main.go" {
+		t.Fatalf("got %v, want the scattered hit kept", got)
+	}
+}
+
+// TestDropScattered_NoResults is the trivial edge: nothing in, nothing
+// out, no panic on the empty slice.
+func TestDropScattered_NoResults(t *testing.T) {
+	if got := dropScattered(nil, "abc"); len(got) != 0 {
+		t.Fatalf("got %v, want empty", got)
+	}
+}

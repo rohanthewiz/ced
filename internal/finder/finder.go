@@ -234,6 +234,13 @@ func (f *Finder) SearchUnder(dir, query string, limit int) ([]Result, int) {
 // tie-break, cut to limit. An empty query is the "starter list" — the
 // first limit paths in index order (alphabetical, since both index
 // builders sort).
+//
+// When ANY path holds the query contiguously, the scattered matches are
+// dropped rather than just ranked below: once the user has typed
+// something that exists whole, paths that merely contain its letters in
+// order are noise. With no contiguous hit the scattered list is all
+// there is and is kept, so abbreviations still find files. The filter
+// runs before the limit cut so the count reflects what survived.
 func rank(paths []string, query string, limit int) []Result {
 	if query == "" {
 		out := make([]Result, 0, limit)
@@ -254,6 +261,7 @@ func rank(paths []string, query string, limit int) []Result {
 		}
 		results = append(results, Result{Path: p, Score: score, MatchedIndexes: idx})
 	}
+	results = dropScattered(results, query)
 	sort.SliceStable(results, func(i, j int) bool {
 		if results[i].Score != results[j].Score {
 			return results[i].Score > results[j].Score
@@ -267,4 +275,31 @@ func rank(paths []string, query string, limit int) []Result {
 		results = results[:limit]
 	}
 	return results
+}
+
+// dropScattered returns only the contiguous hits in results when there
+// is at least one, else results unchanged. A score at or above
+// contiguousFloor marks a contiguous hit — the floor is above every
+// scattered score for the same query (see Score), so the threshold
+// alone tells the tiers apart without Score reporting a separate flag.
+// Filters in place; results is the caller's own scratch slice.
+func dropScattered(results []Result, query string) []Result {
+	floor := contiguousFloor(len([]rune(query)))
+	hasContiguous := false
+	for _, r := range results {
+		if r.Score >= floor {
+			hasContiguous = true
+			break
+		}
+	}
+	if !hasContiguous {
+		return results
+	}
+	kept := results[:0]
+	for _, r := range results {
+		if r.Score >= floor {
+			kept = append(kept, r)
+		}
+	}
+	return kept
 }

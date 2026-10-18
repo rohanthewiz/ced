@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-072**
+**Next ID: N-073**
 
 ## Open
 
@@ -95,6 +95,14 @@ plus the LSP work done in the seeding session itself
   language, a string to the SQL grammar). A long DDL line or a messy
   function body stays as written. Revisit only if someone hits it; any
   change must keep the re-lex token check (`sameSQLTokens`).
+
+- **N-072** · raised `2026-1017-2029-finder-contiguous-matches` · value low
+  The file finder now hides scattered matches whenever a contiguous one
+  exists (`dropScattered` in finder.go). The command palette and LSP
+  completion share `finder.Score` and get the contiguous-first RANKING,
+  but still list scattered hits below. Apply the same filter there only
+  if the scattered tail turns out to be noise in practice (completion's
+  server order makes it less clear-cut).
 
 ## Validate
 

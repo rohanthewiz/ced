@@ -799,17 +799,41 @@ func seedDirtyApp(t *testing.T) *App {
 	return a
 }
 
-// TestOpenDirtyClose_DefaultsToCancel pins down the "an accidental
-// Enter never loses work" property: focus lands on Cancel (idx 0) when
-// the modal opens, so a stray Enter just dismisses.
-func TestOpenDirtyClose_DefaultsToCancel(t *testing.T) {
+// TestOpenDirtyClose_DefaultsToSave pins the default: focus lands on
+// Save (idx 2) when the modal opens, so Enter saves and never discards.
+func TestOpenDirtyClose_DefaultsToSave(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.openDirtyClose("T", "M", func(*App) {}, func(*App) {})
 	if dirtyOf(a) == nil {
 		t.Fatal("modal should open")
 	}
-	if dirtyOf(a).hover != 0 {
-		t.Fatalf("default focus should be Cancel (0), got %d", dirtyOf(a).hover)
+	if dirtyOf(a).hover != 2 {
+		t.Fatalf("default focus should be Save (2), got %d", dirtyOf(a).hover)
+	}
+}
+
+// TestRequestCloseTab_EnterSavesAndCloses walks the default end to end:
+// a dirty tab's close dialog plus a bare Enter writes the file and closes
+// the tab — and Discard never ran.
+func TestRequestCloseTab_EnterSavesAndCloses(t *testing.T) {
+	a := seedDirtyApp(t)
+	target := a.tabs[0].Path
+
+	a.requestCloseTab(0)
+	if dirtyOf(a) == nil {
+		t.Fatal("dirty close should open the modal")
+	}
+	dirtyOf(a).handleKey(a, keyEv(tcell.KeyEnter, 0))
+
+	if len(a.tabs) != 0 {
+		t.Fatalf("tab should be closed after Enter-to-save, have %d tabs", len(a.tabs))
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != " editseed" {
+		t.Fatalf("Enter should have saved the buffer; disk has %q", got)
 	}
 }
 
@@ -961,7 +985,9 @@ func TestHandleDirtyKey_AllBranches(t *testing.T) {
 		func(*App) { saveCalled = true },
 		func(*App) { discardCalled = true })
 
-	// Right walks Cancel -> Discard -> Save and stops at Save.
+	// Right walks Cancel -> Discard -> Save and stops at Save. Start on
+	// Cancel explicitly — the modal opens on Save.
+	dirtyOf(a).hover = 0
 	dirtyOf(a).handleKey(a, keyEv(tcell.KeyRight, 0))
 	if dirtyOf(a).hover != 1 {
 		t.Fatalf("Right(0->1) got %d", dirtyOf(a).hover)
@@ -991,7 +1017,7 @@ func TestHandleDirtyKey_AllBranches(t *testing.T) {
 		t.Fatalf("Tab cycle should land back on 0, got %d", dirtyOf(a).hover)
 	}
 
-	// Enter on Cancel (default) — runs neither callback.
+	// Enter on Cancel — runs neither callback.
 	dirtyOf(a).handleKey(a, keyEv(tcell.KeyEnter, 0))
 	if saveCalled || discardCalled {
 		t.Fatalf("Enter on Cancel should run neither cb (save=%v discard=%v)",

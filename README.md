@@ -530,8 +530,8 @@ Then:
 - Click `≡` (top-left), right-click anywhere, or double-tap `Esc`
   for the action menu — including New file, Rename, Delete.
 - The red `✕` just left of `≡` closes the editor. It always asks first:
-  "Close the editor?" (No is the default), or Save / Discard / Cancel
-  when files have unsaved changes. `Esc q` and `≡` → Quit do the same.
+  "Close the editor?" (Yes is the default), or Save / Discard / Cancel
+  (Save is the default) when files have unsaved changes. `Esc q` and `≡` → Quit do the same.
 - If your terminal forwards Button3, right-click on a file or folder
   in the tree opens a per-item context menu (New File on folders,
   Rename, Delete, Copy / Paste, Copy to…). macOS Terminal + tmux often

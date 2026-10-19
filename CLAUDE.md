@@ -270,7 +270,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   half-way to its own grey, `desaturateColor`, lifted to 4.5:1; `quitButtonRect`)
   then `≡` (`menuButtonRect`); the strip starts after `tabBarLeadW` —
   never measure tabs from `menuButtonWidth` alone. ✕ ALWAYS asks: dirty
-  tabs → menuQuit's Save/Discard/Cancel directly (one question, not two),
+  tabs → menuQuit's Save/Discard/Cancel directly (one question, not two;
+  every unsaved-changes dialog opens on SAVE, `openDirtyClose`),
   clean → Yes/No with YES the default (nothing unsaved at stake — the only
   confirm that flips `openConfirm`'s No default) whose Yes re-enters `menuQuit`.
 - `tabScroll` is DERIVED each frame (`ensureActiveTabVisible`, including

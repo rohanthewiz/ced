@@ -806,7 +806,7 @@ const (
 // picks Save (typically: save the tab(s), then proceed); discardCB runs
 // when the user picks Discard (skip saving, proceed anyway). Cancel just
 // dismisses without running anything. hover indexes the button row:
-// 0 = Cancel (safe default for an accidental Enter), 1 = Discard, 2 = Save.
+// 0 = Cancel, 1 = Discard, 2 = Save (the default — see openDirtyClose).
 type dirtyModal struct {
 	title     string
 	message   string
@@ -815,11 +815,15 @@ type dirtyModal struct {
 	discardCB func(*App)
 }
 
-// openDirtyClose shows the unsaved-changes modal. Default focus is Cancel
-// so a stray Enter is non-destructive — same safety pattern the delete
-// confirm uses.
+// openDirtyClose shows the unsaved-changes modal with focus on Save.
+// Save is the productive answer and loses nothing, so Enter can just
+// finish the job: the edits land on disk and the close / quit / folder
+// switch proceeds. Discard, the one button that throws work away, sits
+// two steps from the default and never takes focus on its own. A failed
+// save keeps everything open (every saveCB checks the save before going
+// on), so even a mistaken Enter can't turn into lost edits.
 func (a *App) openDirtyClose(title, message string, saveCB, discardCB func(*App)) {
-	a.openModal(&dirtyModal{title: title, message: message, saveCB: saveCB, discardCB: discardCB})
+	a.openModal(&dirtyModal{title: title, message: message, hover: 2, saveCB: saveCB, discardCB: discardCB})
 }
 
 // discard runs the discard callback and dismisses the modal.

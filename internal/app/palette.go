@@ -831,9 +831,13 @@ func (m *paletteModal) draw(a *App) {
 	c.drawFrame(a.screen, mx, my, mw, mh, title)
 	m.drawPaneTabs(a, labels, tabs)
 
-	// Input row — the right side leaves room for the count tail.
+	// Input row — the right side leaves room for the count tail. The
+	// text starts at mx+2, the column every row label starts at
+	// (drawRow's startCol), so the query sits directly above what it
+	// matches; the field's one-cell inset then lands on mx+1, flush
+	// with the frame like a selected row's highlight.
 	inputStyle := tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Text)
-	m.field.draw(a.screen, my+3, mx+3, mx+mw-10, inputStyle, true)
+	m.field.draw(a.screen, my+3, mx+2, mx+mw-10, inputStyle, true)
 
 	tail := countLabel(m.countMatches(), countItems(m.items)) + " "
 	drawAt(a.screen, mx+mw-1-runeLen(tail), my+3, tail, c.muted)

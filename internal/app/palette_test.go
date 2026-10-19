@@ -342,6 +342,31 @@ func TestPaletteDraw_RendersTitleAndRows(t *testing.T) {
 	}
 }
 
+// TestPaletteDraw_QueryLinesUpWithRows pins the input row's alignment:
+// the first rune of the typed query sits in the same column as the first
+// rune of each row label, so the query reads directly above what it
+// matches instead of one cell to the right of it.
+func TestPaletteDraw_QueryLinesUpWithRows(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openPalette()
+	typePalette(a, "quit")
+	m := paletteOf(a)
+	m.draw(a)
+	a.screen.Show()
+
+	mx, my, _, _ := m.rect(a)
+	if got := screenRuneAt(t, a, mx+2, my+3); got != 'q' {
+		t.Errorf("query should start at the rows' column (mx+2); got %q there", got)
+	}
+	if got := screenRuneAt(t, a, mx+1, my+3); got != ' ' {
+		t.Errorf("the cell left of the query should be the field's blank inset; got %q", got)
+	}
+	label := []rune(m.matches[0].item.label)
+	if got := screenRuneAt(t, a, mx+2, my+4); got != label[0] {
+		t.Errorf("first row should start at mx+2 with %q; got %q", label[0], got)
+	}
+}
+
 // screenText flattens the simulation screen into one string per row,
 // joined by newlines, so tests can substring-match drawn output
 // without caring about styles.

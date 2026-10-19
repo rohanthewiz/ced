@@ -355,9 +355,11 @@ func (m *finderModal) draw(a *App) {
 	}
 	c.drawFrame(a.screen, mx, my, mw, mh, title)
 
-	// Input row — the right side leaves room for the count tail.
+	// Input row — the right side leaves room for the count tail. The
+	// text starts at mx+2, the result rows' column, so the query lines
+	// up with the paths it filters (same as the palette).
 	inputStyle := tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Text)
-	m.field.draw(a.screen, my+3, mx+3, mx+mw-12, inputStyle, true)
+	m.field.draw(a.screen, my+3, mx+2, mx+mw-12, inputStyle, true)
 
 	// Match count tail.
 	state, total, viaGit := finder.StateIdle, 0, false

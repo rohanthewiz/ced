@@ -358,6 +358,28 @@ func TestFinderIn_DrawNamesTheFolderAndExplainsAnEmptyOne(t *testing.T) {
 	}
 }
 
+// TestFinderDraw_QueryLinesUpWithRows pins the input row's alignment:
+// the typed query starts in the same column as the result paths below
+// it (mx+2), matching the palette.
+func TestFinderDraw_QueryLinesUpWithRows(t *testing.T) {
+	a, _ := withFinder(t)
+	a.openFinder()
+	for _, r := range "main" {
+		finderOf(a).handleKey(a, tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone))
+	}
+	m := finderOf(a)
+	m.draw(a)
+	a.screen.Show()
+
+	mx, my, _, _ := m.rect(a)
+	if got := screenRuneAt(t, a, mx+2, my+3); got != 'm' {
+		t.Errorf("query should start at the rows' column (mx+2); got %q there", got)
+	}
+	if got := screenRuneAt(t, a, mx+2, my+4); got == ' ' {
+		t.Error("first result row should start at mx+2")
+	}
+}
+
 // TestTreeContext_FindFilesInFolderOnFoldersOnly pins the tree row:
 // offered on a folder and on the root (labelled as the project finder),
 // never on a file; activating it opens the finder scoped to the folder.

@@ -20,7 +20,11 @@
 // accident, and quitting drops every tab's undo history. One question,
 // never two: with unsaved tabs the click goes straight to menuQuit's
 // Save / Discard / Cancel modal (itself the confirmation); with none it
-// asks a plain Yes/No whose No is the default, so a stray Enter is safe.
+// asks a plain Yes/No whose YES is the default. Nothing is lost on that
+// path (no unsaved tabs), so the deliberate click plus Enter should just
+// finish the job; the confirm still guards against the stray click, and
+// a stray Enter can only follow a stray click. This is the one confirm
+// that flips the shared default — Delete and friends keep No.
 // Yes re-enters menuQuit rather than setting a.quit directly, so the
 // dirty check is made again at the moment of quitting — the single quit
 // path stays menuQuit (≡ Quit and Esc-q are the other doors).
@@ -47,13 +51,22 @@ func (a *App) quitButtonRect() (x, y, w, h int) {
 	return a.leftBlockW(), 0, quitButtonWidth, 1
 }
 
-// drawQuitButton paints ✕ in the error colour on the tab bar's ground.
-// Error rather than Accent: the ≡ beside it is Accent, and the tree's own
-// ✕ (hide the panel) is Muted — the red is what says this one closes the
-// whole editor.
+// quitButtonDesat is how far the ✕'s red is pulled toward its own grey
+// (0 = the theme's full error red, 1 = grey). The full DiagError shouted
+// from the corner of every frame like a live error; half-way keeps it
+// unmistakably red-family while letting it sit with the chrome.
+const quitButtonDesat = 0.5
+
+// drawQuitButton paints ✕ in a muted error colour on the tab bar's ground.
+// Error-derived rather than Accent: the ≡ beside it is Accent, and the
+// tree's own ✕ (hide the panel) is Muted — the red cast is what says this
+// one closes the whole editor. Desaturated so it reads as chrome, not as
+// a diagnostic; liftToContrast is the backstop for a theme whose greyed
+// red lands too close to the sidebar ground.
 func (a *App) drawQuitButton() {
 	qx, qy, qw, _ := a.quitButtonRect()
-	style := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(a.theme.DiagError).Bold(true)
+	fg := liftToContrast(desaturateColor(a.theme.DiagError, quitButtonDesat), a.theme.SidebarBG)
+	style := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(fg).Bold(true)
 	for cx := qx; cx < qx+qw; cx++ {
 		a.screen.SetContent(cx, qy, ' ', nil, style)
 	}
@@ -69,5 +82,20 @@ func (a *App) requestQuitFromButton() {
 		a.menuQuit()
 		return
 	}
-	a.openConfirm("Quit ced", "Close the editor?", (*App).menuQuit)
+	m := a.openConfirm("Quit ced", "Close the editor?", (*App).menuQuit)
+	m.hover = 1 // Yes — see the file header for why this confirm differs
+}
+
+// desaturateColor pulls c toward the grey of the same (Rec. 601) luma by
+// t (0 = unchanged, 1 = grey). Blending toward its OWN grey rather than
+// toward the background keeps the lightness — and so the contrast against
+// the ground — roughly where the theme put it; only the chroma drops. A
+// colour with no RGB form comes back unchanged (blendColor's rule).
+func desaturateColor(c tcell.Color, t float64) tcell.Color {
+	r, g, b := c.RGB()
+	if r < 0 {
+		return c
+	}
+	y := int32(0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b) + 0.5)
+	return blendColor(c, tcell.NewRGBColor(y, y, y), t)
 }

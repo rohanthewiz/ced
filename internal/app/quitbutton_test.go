@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // TestQuitButtonRect_SitsLeftOfTheMenuButton pins the layout: ✕ takes
@@ -54,8 +56,8 @@ func TestDrawTabBar_PaintsQuitButton(t *testing.T) {
 }
 
 // TestQuitButton_CleanTabsConfirmFirst: with nothing unsaved a click asks
-// a Yes/No question and does NOT quit; No leaves the editor running, Yes
-// quits.
+// a Yes/No question (Yes focused) and does NOT quit; No leaves the editor
+// running, Yes quits.
 func TestQuitButton_CleanTabsConfirmFirst(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	qx, _, _, _ := a.quitButtonRect()
@@ -68,8 +70,8 @@ func TestQuitButton_CleanTabsConfirmFirst(t *testing.T) {
 	if a.quit {
 		t.Fatal("the click alone must not quit")
 	}
-	if m.hover != 0 {
-		t.Error("the default button should be No, so a stray Enter is safe")
+	if m.hover != 1 {
+		t.Error("the default button should be Yes — nothing unsaved is at stake")
 	}
 	m.cancel(a)
 	if a.quit || a.modal != nil {
@@ -106,5 +108,71 @@ func TestQuitButton_DirtyTabsGoStraightToSaveDiscard(t *testing.T) {
 	}
 	if a.quit {
 		t.Fatal("the click alone must not quit")
+	}
+}
+
+// TestQuitButton_EnterConfirmsQuit: the clean-tabs confirm opens on Yes,
+// so click + Enter quits without reaching for the mouse again.
+func TestQuitButton_EnterConfirmsQuit(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.requestQuitFromButton()
+	m := confirmOf(a)
+	if m == nil {
+		t.Fatalf("modal = %T, want the quit confirmation", a.modal)
+	}
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	if !a.quit {
+		t.Fatal("Enter on the quit confirm should quit")
+	}
+}
+
+// TestOpenConfirm_DefaultStaysNo guards the shared default: only the quit
+// button flips to Yes, every other confirm (Delete, Discard…) keeps No.
+func TestOpenConfirm_DefaultStaysNo(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	if m := a.openConfirm("Delete", "Delete x?", nil); m.hover != 0 {
+		t.Errorf("openConfirm hover = %d, want 0 (No)", m.hover)
+	}
+}
+
+// TestDrawQuitButton_RedIsDesaturated: the ✕ is drawn in a duller red
+// than the theme's DiagError — same red cast, less chroma — and still
+// reads against the tab bar's ground.
+func TestDrawQuitButton_RedIsDesaturated(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.draw()
+	qx, qy, qw, _ := a.quitButtonRect()
+	_, _, style, _ := a.screen.GetContent(qx+qw/2, qy)
+	fg, _, _ := style.Decompose()
+	if fg == a.theme.DiagError {
+		t.Fatal("✕ still painted in the full DiagError red")
+	}
+	chroma := func(c tcell.Color) int32 {
+		r, g, b := c.RGB()
+		return max(r, g, b) - min(r, g, b)
+	}
+	if chroma(fg) >= chroma(a.theme.DiagError) {
+		t.Errorf("✕ chroma %d not below DiagError's %d", chroma(fg), chroma(a.theme.DiagError))
+	}
+	if r, g, b := fg.RGB(); r <= g || r <= b {
+		t.Errorf("✕ colour %d,%d,%d lost its red cast", r, g, b)
+	}
+	if contrastRatio(fg, a.theme.SidebarBG) < 4.5 {
+		t.Errorf("✕ contrast %.2f under 4.5:1", contrastRatio(fg, a.theme.SidebarBG))
+	}
+}
+
+// TestDesaturateColor covers the helper's ends and its non-RGB pass-through.
+func TestDesaturateColor(t *testing.T) {
+	red := tcell.NewRGBColor(0xf7, 0x76, 0x8e)
+	if got := desaturateColor(red, 0); got != red {
+		t.Errorf("t=0 changed the colour: %v", got)
+	}
+	// ±1: blendColor's +0.5 rounds a downward step toward the source.
+	if r, g, b := desaturateColor(red, 1).RGB(); max(r, g, b)-min(r, g, b) > 1 {
+		t.Errorf("t=1 should be grey, got %d,%d,%d", r, g, b)
+	}
+	if got := desaturateColor(tcell.ColorDefault, 0.5); got != tcell.ColorDefault {
+		t.Errorf("non-RGB colour should pass through, got %v", got)
 	}
 }

@@ -266,11 +266,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   count).
 
 ### Tabs, labels, status bar
-- **Tab bar lead (quitbutton.go)**: `✕` (DiagError, `quitButtonRect`)
+- **Tab bar lead (quitbutton.go)**: `✕` (DiagError desaturated
+  half-way to its own grey, `desaturateColor`, lifted to 4.5:1; `quitButtonRect`)
   then `≡` (`menuButtonRect`); the strip starts after `tabBarLeadW` —
   never measure tabs from `menuButtonWidth` alone. ✕ ALWAYS asks: dirty
   tabs → menuQuit's Save/Discard/Cancel directly (one question, not two),
-  clean → Yes/No (No default) whose Yes re-enters `menuQuit`.
+  clean → Yes/No with YES the default (nothing unsaved at stake — the only
+  confirm that flips `openConfirm`'s No default) whose Yes re-enters `menuQuit`.
 - `tabScroll` is DERIVED each frame (`ensureActiveTabVisible`, including
   pull-back). A tab that doesn't fit gets no rect (only the active tab on
   a too-narrow strip). `switchToTab` is the single place a switch records

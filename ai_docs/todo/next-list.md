@@ -244,6 +244,10 @@ and `raised`.
   of its three cells opens "Close the editor?" (dirty tabs → Save /
   Discard / Cancel), the red ✕ reads as distinct from the tree header's
   muted ✕ a few cells left, and the ≡ beside it still opens the menu.
+  Since `2026-1018-2005-quit-button-tweaks-0.6.1` (ced 0.6.1) the ✕ is a
+  DESATURATED red and the clean-tabs confirm opens on Yes: also check the
+  dusty red still reads as "close the editor" (not as muted chrome) in a
+  couple of themes, and that click + Enter quits.
 
 - **N-071** · raised `2026-1016-2111-recent-folders-local-and-workspace-routing` · value medium
   Recent folders' Tier-1 routing (catsworkspace.go) has only run against

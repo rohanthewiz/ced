@@ -341,7 +341,7 @@ func (a *App) locationSections(under string, recent, frequent []string) []palett
 // pasted. The " ›" drill marker is picker furniture and never copied.
 func (a *App) locationHeading(name string, key rune, dirs []string) paletteItem {
 	heading := fmt.Sprintf("%s %d", name, len(dirs))
-	return paletteHeading(heading, key, func(app *App) error {
+	it := paletteHeading(heading, key, func(app *App) error {
 		lines := make([]string, len(dirs))
 		for i, d := range dirs {
 			lines[i] = app.locationLabel(d)
@@ -354,6 +354,26 @@ func (a *App) locationHeading(name string, key rune, dirs []string) paletteItem 
 		app.flash("Copied " + what)
 		return nil
 	})
+	it.tip = locationHeadingTip(name)
+	it.copyTip = []string{
+		"Copy " + plural(len(dirs), "folder", "folders") + ", one per line",
+		"(paths from the project root)",
+	}
+	return it
+}
+
+// locationHeadingTip spells out a section heading's initialism for its
+// hover label. MFU's second line is the rule that shapes the section —
+// a folder already listed under MRU is not repeated — which otherwise
+// reads as a folder "missing" from the frequent list.
+func locationHeadingTip(name string) []string {
+	switch name {
+	case "MRU":
+		return []string{"Most recently used — newest first"}
+	case "MFU":
+		return []string{"Most frequently used — most visited first", "(folders already under MRU are left out)"}
+	}
+	return nil
 }
 
 // recentFolderLocalRows is the Local pane of "Recent folders…" (the

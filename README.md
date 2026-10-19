@@ -748,7 +748,9 @@ tab bar, each tab's **×**, status marker and group chip (and the tab
 itself, which shows its full project-relative path), every clickable
 status-bar segment (the file name, **⧉**, `Ln, Col`, the branch, …),
 the find bar's `Aa` / `|W|` / `Find▾` / `Replace` / `All`, the find-all
-list's **⟳ ◇ ◨** buttons, the tree's **⭑**, and the header buttons of
+list's **⟳ ◇ ◨** buttons, the tree's **⭑**, the **MRU** / **MFU**
+headings and their **⧉ copy** in the Recent folders and Recent locations
+pickers (what the initials stand for), and the header buttons of
 the panels (**✕ ⟳ ⏹**, `Actions ▾`, the problems chips, the git log's
 search modes, the Conflicts panel's Continue / Skip / Abort). A label
 disappears when you move off the button, click, or press a key. It

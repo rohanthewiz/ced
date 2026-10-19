@@ -436,3 +436,17 @@ func TestHistoryNoSave_NotARepositoryIsNotAProblem(t *testing.T) {
 		t.Fatalf("label = %q, want it bare outside a repository", got)
 	}
 }
+
+// TestLocationHeadingTip names both sections (MFU with its dedupe rule)
+// and nothing for a name it doesn't know.
+func TestLocationHeadingTip(t *testing.T) {
+	if got := locationHeadingTip("MRU"); len(got) != 1 || !strings.HasPrefix(got[0], "Most recently used") {
+		t.Errorf("MRU tip = %q", got)
+	}
+	if got := locationHeadingTip("MFU"); len(got) != 2 || !strings.Contains(got[1], "already under MRU") {
+		t.Errorf("MFU tip = %q", got)
+	}
+	if got := locationHeadingTip("XYZ"); got != nil {
+		t.Errorf("unknown tip = %q, want nil", got)
+	}
+}

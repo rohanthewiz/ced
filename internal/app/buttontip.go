@@ -45,12 +45,15 @@
 //     not simply never shows one — every button still works and every
 //     verb still has its ≡ row, so nothing depends on the label.
 //
-// The one modal it speaks over is the unpinned Find-all list: its title
+// It speaks over two modals. The unpinned Find-all list: its title
 // buttons (⟳ ◇ ◨) are the most cryptic glyphs in the editor, and a
-// label is the cheapest way to learn them. That is why the pointer hook
-// runs BEFORE handleMouse's modal dispatch and the box is drawn after
-// the overlay layer — for any other modal, or with the ≡ menu up, the
-// enumerator returns nothing and the layer is inert.
+// label is the cheapest way to learn them. And a picker's section
+// headings (Recent folders' "MRU 5" / "MFU 10" and their ⧉ copy): the
+// initialisms say nothing to someone who hasn't met them, and the
+// heading is a divider row with no room to spell them out. That is why
+// the pointer hook runs BEFORE handleMouse's modal dispatch and the box
+// is drawn after the overlay layer — for any other modal, or with the ≡
+// menu up, the enumerator returns nothing and the layer is inert.
 
 package app
 
@@ -289,14 +292,18 @@ func (a *App) buttonTipVisible() bool {
 //
 // With the ≡ menu up nothing is labelled (it covers the chrome and has
 // its own text); with a modal up only the unpinned Find-all list's
-// buttons are, for the reason in the file header.
+// buttons and a picker's section headings are, for the reasons in the
+// file header.
 func (a *App) buttonTips() []buttonTip {
 	if a.menuOpen {
 		return nil
 	}
 	if a.modal != nil {
-		if m, ok := a.modal.(*findAllModal); ok {
+		switch m := a.modal.(type) {
+		case *findAllModal:
 			return a.findAllButtonTips(m)
+		case *paletteModal:
+			return a.paletteHeadingButtonTips(m)
 		}
 		return nil
 	}
@@ -458,6 +465,41 @@ func (a *App) findAllButtonTips(m *findAllModal) []buttonTip {
 	if f := m.fieldsLayout(a); f.button.w > 0 {
 		tips = append(tips, buttonTip{rect: f.button,
 			text: []string{"Replace every listed match (one undo step)"}})
+	}
+	return tips
+}
+
+// paletteHeadingButtonTips labels a picker's section headings — Recent
+// folders' and Recent locations' "MRU 5" / "MFU 10" — on the rows the
+// last draw put them: the name with the row's tip, the ⧉ with its
+// copyTip and Alt twin. Rows are walked exactly as draw walks them (from
+// m.top, visibleRows deep, rows from my+4), and both rects come from the
+// helpers draw itself uses (headingNameRect, headingCopyRect). A picker
+// with no headings — almost all of them, and every picker while its
+// query filters, since headings vanish then — labels nothing.
+func (a *App) paletteHeadingButtonTips(m *paletteModal) []buttonTip {
+	mx, my, mw, mh := m.rect(a)
+	var tips []buttonTip
+	for i := 0; i < m.visibleRows(mh) && m.top+i < len(m.matches); i++ {
+		it := m.matches[m.top+i].item
+		if it.heading == "" {
+			continue
+		}
+		ry := my + 4 + i
+		if len(it.tip) > 0 {
+			tips = append(tips, buttonTip{rect: headingNameRect(mx, ry, mw, it), text: it.tip})
+		}
+		if r, ok := headingCopyRect(mx, ry, mw, it); ok {
+			text := it.copyTip
+			if len(text) == 0 {
+				text = []string{"Copy this section"}
+			}
+			t := buttonTip{rect: r, text: text}
+			if it.copyKey != 0 {
+				t.keys = "Alt+" + string(it.copyKey)
+			}
+			tips = append(tips, t)
+		}
 	}
 	return tips
 }

@@ -975,8 +975,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   closeAllModals; anchored to the BUTTON (motion within it keeps it).
   Re-resolved at draw (stale → not drawn). 500ms, every host.
 - Silent under the ≡ menu and every modal EXCEPT the unpinned Find-all
-  list — so the hook runs BEFORE handleMouse's modal dispatch and
-  `drawButtonTip` is the last call in draw.
+  list and a picker's section headings (Recent folders / Recent
+  locations "MRU n" / "MFU n" + ⧉: `paletteItem.tip`/`copyTip`, rects
+  from `headingNameRect`/`headingCopyRect`) — so the hook runs BEFORE
+  handleMouse's modal dispatch and `drawButtonTip` is the last call in draw.
 
 ### Terminal (app/terminal.go, termdiag.go, runexec.go)
 - Embedded grsh REPL strip — NOT a PTY, no VT emulator. POSIX-only;

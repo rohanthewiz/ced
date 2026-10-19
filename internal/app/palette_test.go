@@ -1019,3 +1019,15 @@ func TestPaletteHeading_FailedCopyClaimsNothing(t *testing.T) {
 		t.Fatalf("copied = %q after a failed copy, want nothing marked", m.copied)
 	}
 }
+
+// TestHeadingNameRect pins the heading name's span: at the rows' column,
+// as wide as the name, and clipped like the draw on a narrow frame.
+func TestHeadingNameRect(t *testing.T) {
+	it := paletteHeading("MRU 5", 'r', nil)
+	if r := headingNameRect(10, 4, 60, it); r != (btnRect{x: 12, y: 4, w: 5}) {
+		t.Errorf("wide frame: %+v, want {12 4 5}", r)
+	}
+	if r := headingNameRect(0, 0, 8, it); r.w != 3 {
+		t.Errorf("narrow frame width = %d, want 3 (clipped to mw-5)", r.w)
+	}
+}

@@ -81,6 +81,15 @@ type paletteItem struct {
 	// (markCopied); the caller flashes its own failure.
 	copy    func(*App) error
 	copyKey rune
+	// tip and copyTip, on a heading row, are its hover labels
+	// (buttontip.go): tip over the heading's NAME — what the section is,
+	// since "MRU"/"MFU" are initialisms a first-timer has to be told —
+	// and copyTip over its ⧉ button (nil = a generic "Copy this
+	// section"). Held on the row rather than in the label layer because
+	// the row's builder is the one place that knows what its section
+	// holds; nil tip = an unlabelled name.
+	tip     []string
+	copyTip []string
 	// swatch, when set, is drawn as a two-cell block of that colour in
 	// front of the label: a row that offers a COLOUR (the tab-group
 	// colour picker) shows it instead of only naming it. It's not part
@@ -948,6 +957,14 @@ func headingCopyRect(mx, ry, mw int, it paletteItem) (btnRect, bool) {
 	return btnRect{x: x, y: ry, w: w}, true
 }
 
+// headingNameRect is the cell span of a heading's NAME on row ry — the
+// ONE geometry drawHeading and the hover label (paletteHeadingButtonTips)
+// share. Clipped exactly as drawn: to the dotted rule's end, two cells in
+// from either side of the frame.
+func headingNameRect(mx, ry, mw int, it paletteItem) btnRect {
+	return btnRect{x: mx + 2, y: ry, w: runeLen(clipRunes(it.heading, max(mw-5, 0)))}
+}
+
 // drawHeading paints a section heading: the name in the title colour, the
 // spacer's dotted rule filling the gap, and the copy button at the right.
 // The name takes the accent so it reads as a label for what follows, not
@@ -961,9 +978,9 @@ func (m *paletteModal) drawHeading(a *App, mx, ry, mw int, it paletteItem) {
 		a.screen.SetContent(cx, ry, ' ', nil, c.bgSt)
 	}
 	ruleEnd := mx + mw - 3 // exclusive, as in drawSpacer
-	name := clipRunes(it.heading, max(ruleEnd-mx-2, 0))
-	drawAt(a.screen, mx+2, ry, name, c.title)
-	x := mx + 2 + runeLen(name)
+	nr := headingNameRect(mx, ry, mw, it)
+	drawAt(a.screen, nr.x, ry, clipRunes(it.heading, nr.w), c.title)
+	x := nr.x + nr.w
 	if r, ok := headingCopyRect(mx, ry, mw, it); ok {
 		if it.heading == m.copied {
 			// The answer, right-aligned inside the button's own rect so the

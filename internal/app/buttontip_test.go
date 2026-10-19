@@ -345,3 +345,60 @@ func TestGitLogChipTip(t *testing.T) {
 		}
 	}
 }
+
+// TestButtonTip_RecentFoldersHeadingsAreLabelled: the picker is the
+// second modal the layer speaks over — resting on "MRU n" / "MFU n"
+// spells the initialism out, the ⧉ says what it copies plus its Alt
+// twin, and a filtering query (headings gone) leaves nothing to label.
+func TestButtonTip_RecentFoldersHeadingsAreLabelled(t *testing.T) {
+	root := t.TempDir()
+	dirs := mkdirs(t, root, "a", "b", "c", "d", "e", "f", "g")
+	a := newTestApp(t, root)
+	useFolder(a, dirs[0], 3)
+	for _, d := range dirs[1:] {
+		useFolder(a, d, 1)
+	}
+	a.menuRecentFolders()
+	m := paletteOf(a)
+	if m == nil {
+		t.Fatal("Recent folders picker did not open")
+	}
+	a.draw()
+
+	mx, my, mw, _ := m.rect(a)
+	byHeading := map[string]int{} // heading name → screen row
+	for i := 0; m.top+i < len(m.matches); i++ {
+		if h := m.matches[m.top+i].item.heading; h != "" {
+			byHeading[strings.Fields(h)[0]] = my + 4 + i
+		}
+	}
+	mru, okR := byHeading["MRU"]
+	mfu, okF := byHeading["MFU"]
+	if !okR || !okF {
+		t.Fatalf("headings on screen = %v, want MRU and MFU", byHeading)
+	}
+
+	hoverButton(t, a, mx+3, mru)
+	if !a.buttonTipVisible() || !strings.Contains(screenText(a), "Most recently used") {
+		t.Fatalf("no MRU label drawn: %+v", a.buttonTip)
+	}
+	hoverButton(t, a, mx+3, mfu)
+	if !strings.Contains(screenText(a), "Most frequently used") {
+		t.Fatal("no MFU label drawn")
+	}
+
+	r, ok := headingCopyRect(mx, mru, mw, m.matches[mru-my-4+m.top].item)
+	if !ok {
+		t.Fatal("MRU heading has no copy button at this width")
+	}
+	tip, ok := a.buttonTipAt(r.x, r.y)
+	if !ok || tip.text[0] != "Copy 5 folders, one per line" || tip.tipLinesKeys() != "Alt+r" {
+		t.Fatalf("copy label = %+v keys %q", tip, tip.tipLinesKeys())
+	}
+
+	// Typing filters the list; headings vanish with the sections.
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'a', 0))
+	if tips := a.buttonTips(); len(tips) != 0 {
+		t.Errorf("filtered picker: %d tips, want none", len(tips))
+	}
+}

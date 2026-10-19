@@ -2309,6 +2309,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleGitCommitReceipt(e)
 	case *commitReceiptExpireEvent:
 		a.handleCommitReceiptExpire(e)
+	case *paletteCopiedExpireEvent:
+		a.handlePaletteCopiedExpire(e)
 	case *gitPushRefsEvent:
 		a.handleGitPushRefs(e)
 	case *cherryPickLoadEvent:

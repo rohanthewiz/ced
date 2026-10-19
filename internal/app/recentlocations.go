@@ -341,7 +341,7 @@ func (a *App) locationSections(under string, recent, frequent []string) []palett
 // pasted. The " ›" drill marker is picker furniture and never copied.
 func (a *App) locationHeading(name string, key rune, dirs []string) paletteItem {
 	heading := fmt.Sprintf("%s %d", name, len(dirs))
-	return paletteHeading(heading, key, func(app *App) {
+	return paletteHeading(heading, key, func(app *App) error {
 		lines := make([]string, len(dirs))
 		for i, d := range dirs {
 			lines[i] = app.locationLabel(d)
@@ -349,9 +349,10 @@ func (a *App) locationHeading(name string, key rune, dirs []string) paletteItem 
 		what := plural(len(dirs), name+" folder", name+" folders")
 		if err := locationsCopyFn(strings.Join(lines, "\n")); err != nil {
 			app.flash("Copy failed: " + err.Error())
-			return
+			return err
 		}
 		app.flash("Copied " + what)
+		return nil
 	})
 }
 

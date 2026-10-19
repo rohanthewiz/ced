@@ -31,6 +31,7 @@ package app
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/ced/internal/finder"
@@ -75,8 +76,10 @@ type paletteItem struct {
 	// (headingCopyRect) or copyKey with Alt runs it. The picker stays
 	// open — copying a list is a side errand, not a pick. Alt because a
 	// modal owns the keyboard (plain runes edit the query) and can't
-	// reach the ≡ menu, so the button needs an in-surface key twin.
-	copy    func(*App)
+	// reach the ≡ menu, so the button needs an in-surface key twin. A
+	// nil error is what turns the button into "✓ copied" for a moment
+	// (markCopied); the caller flashes its own failure.
+	copy    func(*App) error
 	copyKey rune
 	// swatch, when set, is drawn as a two-cell block of that colour in
 	// front of the label: a row that offers a COLOUR (the tab-group
@@ -94,13 +97,41 @@ func paletteSpacer() paletteItem { return paletteItem{spacer: true} }
 
 // paletteHeading is a divider row that names its section, with an
 // optional ⧉ copy button (copy nil = no button) and its Alt key twin.
-func paletteHeading(heading string, copyKey rune, copy func(*App)) paletteItem {
+func paletteHeading(heading string, copyKey rune, copy func(*App) error) paletteItem {
 	return paletteItem{spacer: true, heading: heading, copy: copy, copyKey: copyKey}
 }
 
 // paletteCopyGlyph is the heading's copy button glyph — statusCopyGlyph,
 // the editor's one symbol for "take this with you".
 const paletteCopyGlyph = statusCopyGlyph
+
+// paletteCopiedLabel is what the copy button says right after a copy, and
+// paletteCopiedFor how long it says it.
+//
+// The answer is drawn ON the button because the status bar's "Copied …"
+// flash is at the far edge of the screen from a popup centred in the
+// upper third: an eye on the button never sees it, and the click reads
+// as a no-op. 1.5s is long enough to register at a glance and short
+// enough that a second copy (of the other section) is not confused with
+// this one's answer.
+const (
+	paletteCopiedLabel = "✓ copied"
+	paletteCopiedFor   = 1500 * time.Millisecond
+)
+
+// paletteCopiedExpireEvent is the one-shot tick that turns "✓ copied"
+// back into "⧉ copy". It names its modal and seq so a tick outliving its
+// picker, or one superseded by a later copy, changes nothing.
+type paletteCopiedExpireEvent struct {
+	when time.Time
+	m    *paletteModal
+	seq  int
+}
+
+// When satisfies tcell.Event.
+func (e *paletteCopiedExpireEvent) When() time.Time { return e.when }
+
+var _ tcell.Event = (*paletteCopiedExpireEvent)(nil)
 
 // paletteMatch pairs an item with its fuzzy score and matched rune
 // indexes for the current query, so the renderer can highlight which
@@ -201,6 +232,13 @@ type paletteModal struct {
 	panes []palettePane
 	// pane indexes panes: the list m.items currently holds.
 	pane int
+
+	// copied names the heading whose copy just succeeded — drawn as
+	// "✓ copied" until the expiry tick whose seq matches copiedSeq clears
+	// it. Keyed by heading TEXT (the counts make it unique per list), so a
+	// pane switch to a list without that heading simply shows nothing.
+	copied    string
+	copiedSeq int
 }
 
 // palettePane is one named list of a multi-pane picker.
@@ -575,11 +613,44 @@ func (m *paletteModal) handleKey(a *App, ev *tcell.EventKey) {
 func (m *paletteModal) runHeadingCopy(a *App, r rune) bool {
 	for _, it := range m.items {
 		if it.copy != nil && it.copyKey == r {
-			it.copy(a)
+			m.runCopy(a, it)
 			return true
 		}
 	}
 	return false
+}
+
+// runCopy is the one door both the ⧉ click and its Alt key go through:
+// run the heading's copy, and on success show the answer on the button.
+func (m *paletteModal) runCopy(a *App, it paletteItem) {
+	if err := it.copy(a); err == nil {
+		m.markCopied(a, it.heading)
+	}
+}
+
+// markCopied shows "✓ copied" on heading's button and arms the one-shot
+// tick that takes it back. One AfterFunc per copy, nothing standing: the
+// event loop stays idle once the tick has fired. The tick POSTS — timers
+// never touch UI state off the main loop.
+func (m *paletteModal) markCopied(a *App, heading string) {
+	m.copied = heading
+	m.copiedSeq++
+	if a.screen == nil {
+		return
+	}
+	seq, scr := m.copiedSeq, a.screen
+	time.AfterFunc(paletteCopiedFor, func() {
+		_ = scr.PostEvent(&paletteCopiedExpireEvent{when: time.Now(), m: m, seq: seq})
+	})
+}
+
+// handlePaletteCopiedExpire reverts the button, when the tick still
+// belongs to the latest copy of a picker that is still open (a stale tick
+// is dropped; the loop's redraw after any event does the repaint).
+func (a *App) handlePaletteCopiedExpire(e *paletteCopiedExpireEvent) {
+	if m, ok := a.modal.(*paletteModal); ok && m == e.m && m.copiedSeq == e.seq {
+		m.copied = ""
+	}
 }
 
 // handleMouse mirrors the finder's mouse contract: hover highlights
@@ -615,7 +686,7 @@ func (m *paletteModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	if btn&tcell.Button1 != 0 && row >= 0 && row < len(m.matches) {
 		if it := m.matches[row].item; it.copy != nil {
 			if r, ok := headingCopyRect(mx, y, mw, it); ok && r.contains(x, y) {
-				it.copy(a)
+				m.runCopy(a, it)
 				return
 			}
 		}
@@ -894,10 +965,21 @@ func (m *paletteModal) drawHeading(a *App, mx, ry, mw int, it paletteItem) {
 	drawAt(a.screen, mx+2, ry, name, c.title)
 	x := mx + 2 + runeLen(name)
 	if r, ok := headingCopyRect(mx, ry, mw, it); ok {
-		button, hint := headingCopyLabel(it)
-		drawAt(a.screen, r.x, ry, button, c.body)
-		drawAt(a.screen, r.x+runeLen(button)+2, ry, hint, c.muted)
-		ruleEnd = r.x - 1
+		if it.heading == m.copied {
+			// The answer, right-aligned inside the button's own rect so the
+			// click target never moves (a second press copies again). Green
+			// + bold: the git panel's "added" tone, the editor's existing
+			// word for "done, nothing wrong".
+			w := runeLen(paletteCopiedLabel)
+			done := c.bgSt.Foreground(a.theme.GitAdded).Bold(true)
+			drawAt(a.screen, r.x+r.w-w, ry, paletteCopiedLabel, done)
+			ruleEnd = r.x + r.w - w - 1
+		} else {
+			button, hint := headingCopyLabel(it)
+			drawAt(a.screen, r.x, ry, button, c.body)
+			drawAt(a.screen, r.x+runeLen(button)+2, ry, hint, c.muted)
+			ruleEnd = r.x - 1
+		}
 	}
 	for cx := x + 1; cx < ruleEnd; cx++ {
 		a.screen.SetContent(cx, ry, '┄', nil, c.border)

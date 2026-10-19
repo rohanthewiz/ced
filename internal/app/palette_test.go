@@ -8,6 +8,7 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -842,7 +843,7 @@ func TestDropScatteredMatches_NoMatches(t *testing.T) {
 // Recent folders MRU / MFU shape — over n rows, then a second heading
 // with no copy button over one more row. copied counts the copies run.
 func headingPicker(a *App, n int, copied *int) *paletteModal {
-	items := []paletteItem{paletteHeading("One "+itoa(n), 'o', func(*App) { *copied++ })}
+	items := []paletteItem{paletteHeading("One "+itoa(n), 'o', func(*App) error { *copied++; return nil })}
 	for i := 0; i < n; i++ {
 		items = append(items, paletteItem{label: "row" + itoa(i), run: func(*App) {}})
 	}
@@ -963,11 +964,58 @@ func TestHeadingCopyRect_Refusals(t *testing.T) {
 	if _, ok := headingCopyRect(0, 0, 60, paletteHeading("MRU 5", 'r', nil)); ok {
 		t.Error("a heading with no copy got a button")
 	}
-	it := paletteHeading("MRU 5", 'r', func(*App) {})
+	it := paletteHeading("MRU 5", 'r', func(*App) error { return nil })
 	if _, ok := headingCopyRect(0, 0, 60, it); !ok {
 		t.Error("a 60-cell frame should fit the button")
 	}
 	if _, ok := headingCopyRect(0, 0, 20, it); ok {
 		t.Error("a 20-cell frame cannot fit name and button, want no button")
+	}
+}
+
+// TestPaletteHeading_CopyAnswersOnTheButton pins the in-place answer: a
+// successful copy turns that heading's button into "✓ copied" (the status
+// bar flash is too far from a centred popup to be seen), its own expiry
+// tick turns it back, and a stale tick — superseded by a later copy —
+// leaves the newer answer alone.
+func TestPaletteHeading_CopyAnswersOnTheButton(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	var copied int
+	m := headingPicker(a, 2, &copied)
+	_, my, _, _ := m.rect(a)
+	row := func() string {
+		m.draw(a)
+		a.screen.Show()
+		return strings.Split(screenText(a), "\n")[my+4]
+	}
+	alt := tcell.NewEventKey(tcell.KeyRune, 'o', tcell.ModAlt)
+
+	m.handleKey(a, alt)
+	if got := row(); !strings.Contains(got, paletteCopiedLabel) || strings.Contains(got, "⧉ copy") {
+		t.Fatalf("after a copy the heading row = %q, want %q in place of the button", got, paletteCopiedLabel)
+	}
+	stale := &paletteCopiedExpireEvent{m: m, seq: m.copiedSeq}
+	m.handleKey(a, alt) // a second copy re-arms; the first tick is now stale
+	a.handlePaletteCopiedExpire(stale)
+	if m.copied == "" {
+		t.Fatal("a superseded tick cleared the newer copy's answer")
+	}
+	a.handlePaletteCopiedExpire(&paletteCopiedExpireEvent{m: m, seq: m.copiedSeq})
+	if got := row(); !strings.Contains(got, "⧉ copy  alt+o") {
+		t.Fatalf("after the expiry the heading row = %q, want the button back", got)
+	}
+}
+
+// TestPaletteHeading_FailedCopyClaimsNothing pins that a copy reporting an
+// error never shows "✓ copied" — the caller's failure flash is the answer.
+func TestPaletteHeading_FailedCopyClaimsNothing(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := a.openPickerRows("Headed", []paletteItem{
+		paletteHeading("One 1", 'o', func(*App) error { return errors.New("no tty") }),
+		{label: "row", run: func(*App) {}},
+	}, 0, nil)
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'o', tcell.ModAlt))
+	if m.copied != "" {
+		t.Fatalf("copied = %q after a failed copy, want nothing marked", m.copied)
 	}
 }

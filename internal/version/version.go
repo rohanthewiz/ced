@@ -12,4 +12,4 @@ package version
 
 // Version is the ced release version, displayed in the menu footer.
 // Bump this constant on each release.
-const Version = "0.6.0"
+const Version = "0.6.1"

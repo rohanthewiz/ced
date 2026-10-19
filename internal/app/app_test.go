@@ -220,6 +220,11 @@ func newTestApp(t *testing.T, root string) *App {
 	copilotCopyCode = func(string) error { return nil }
 	copilotOpenBrowser = func(string) {}
 	t.Cleanup(func() { copilotCopyCode, copilotOpenBrowser = prevCopilotCopy, prevCopilotOpen })
+	// The Recent folders / Recent locations section copy (⧉ on a heading)
+	// writes OSC 52 too; tests that assert on it swap in a recorder.
+	prevLocationsCopy := locationsCopyFn
+	locationsCopyFn = func(string) error { return nil }
+	t.Cleanup(func() { locationsCopyFn = prevLocationsCopy })
 	// Stub out the builtin Go formatter for the same reason: saving a
 	// .go fixture must not shell out to whatever goimports/gofmt the
 	// machine running the tests has on PATH. Tests that exercise the

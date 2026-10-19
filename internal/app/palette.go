@@ -64,6 +64,20 @@ type paletteItem struct {
 	// filtering, the list is ranked by score and "sections" no longer
 	// describe it.
 	spacer bool
+	// heading, on a spacer row, turns the dotted rule into a SECTION
+	// HEADING: the name (and count) of the rows below it, then the rule
+	// (Recent folders' "MRU 5 ┄┄┄ ⧉ copy alt+r"). Everything a spacer
+	// is still holds — never selected, never counted, gone while
+	// filtering — so a heading is a labelled divider, not a new row kind
+	// every list walk has to learn about.
+	heading string
+	// copy, on a heading row, is the section's ⧉ button: a click on it
+	// (headingCopyRect) or copyKey with Alt runs it. The picker stays
+	// open — copying a list is a side errand, not a pick. Alt because a
+	// modal owns the keyboard (plain runes edit the query) and can't
+	// reach the ≡ menu, so the button needs an in-surface key twin.
+	copy    func(*App)
+	copyKey rune
 	// swatch, when set, is drawn as a two-cell block of that colour in
 	// front of the label: a row that offers a COLOUR (the tab-group
 	// colour picker) shows it instead of only naming it. It's not part
@@ -77,6 +91,16 @@ const paletteSwatchW = 3
 
 // paletteSpacer is the one spelling of a divider row.
 func paletteSpacer() paletteItem { return paletteItem{spacer: true} }
+
+// paletteHeading is a divider row that names its section, with an
+// optional ⧉ copy button (copy nil = no button) and its Alt key twin.
+func paletteHeading(heading string, copyKey rune, copy func(*App)) paletteItem {
+	return paletteItem{spacer: true, heading: heading, copy: copy, copyKey: copyKey}
+}
+
+// paletteCopyGlyph is the heading's copy button glyph — statusCopyGlyph,
+// the editor's one symbol for "take this with you".
+const paletteCopyGlyph = statusCopyGlyph
 
 // paletteMatch pairs an item with its fuzzy score and matched rune
 // indexes for the current query, so the renderer can highlight which
@@ -510,8 +534,13 @@ func (m *paletteModal) handleKey(a *App, ev *tcell.EventKey) {
 	case tcell.KeyEnter:
 		m.runSelected(a)
 	case tcell.KeyUp:
+		// choosable answers its own start when nothing is choosable that
+		// way, which for a list that LEADS with a heading is the heading
+		// itself — so only move onto a real row.
 		if m.selected > 0 {
-			m.selected = m.choosable(m.selected-1, -1)
+			if j := m.choosable(m.selected-1, -1); !m.matches[j].item.spacer {
+				m.selected = j
+			}
 		}
 	case tcell.KeyDown:
 		if m.selected < len(m.matches)-1 {
@@ -523,12 +552,34 @@ func (m *paletteModal) handleKey(a *App, ev *tcell.EventKey) {
 		m.switchPane(m.pane + 1)
 	case tcell.KeyBacktab:
 		m.switchPane(m.pane - 1)
+	case tcell.KeyRune:
+		if ev.Modifiers()&tcell.ModAlt != 0 && m.runHeadingCopy(a, ev.Rune()) {
+			return
+		}
+		if _, edited := m.field.handleKey(ev); edited {
+			m.selected = 0
+			m.refresh()
+		}
 	default:
 		if _, edited := m.field.handleKey(ev); edited {
 			m.selected = 0
 			m.refresh()
 		}
 	}
+}
+
+// runHeadingCopy runs the copy of the heading bound to Alt+r, reporting
+// whether one was. It walks m.items, not the matches: a query hides the
+// headings but the sections are still there, and "copy the MRU list"
+// means the whole list whatever is typed.
+func (m *paletteModal) runHeadingCopy(a *App, r rune) bool {
+	for _, it := range m.items {
+		if it.copy != nil && it.copyKey == r {
+			it.copy(a)
+			return true
+		}
+	}
+	return false
 }
 
 // handleMouse mirrors the finder's mouse contract: hover highlights
@@ -557,6 +608,17 @@ func (m *paletteModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	}
 	if row >= 0 {
 		row += m.top
+	}
+	// A press on a heading's ⧉ copies its section — checked before the
+	// spacer veto below, which would otherwise swallow the press as a
+	// click on a divider.
+	if btn&tcell.Button1 != 0 && row >= 0 && row < len(m.matches) {
+		if it := m.matches[row].item; it.copy != nil {
+			if r, ok := headingCopyRect(mx, y, mw, it); ok && r.contains(x, y) {
+				it.copy(a)
+				return
+			}
+		}
 	}
 	if row >= len(m.matches) || (row >= 0 && m.matches[row].item.spacer) {
 		row = -1
@@ -649,6 +711,14 @@ func (m *paletteModal) scrollToSelection(visible int) {
 	if m.selected >= m.top+visible {
 		m.top = m.selected - visible + 1
 	}
+	// Pull in a heading sitting just above the window when the selection
+	// leaves room for it: arrowing back up to a section's first row should
+	// show the section's name, not stop one row short of it (the top row
+	// of a list that leads with a heading is never selectable, so without
+	// this ↑ could never scroll it back into view).
+	for m.top > 0 && m.matches[m.top-1].item.spacer && m.selected-(m.top-1) < visible {
+		m.top--
+	}
 	if maxTop := max(len(m.matches)-visible, 0); m.top > maxTop {
 		m.top = maxTop
 	}
@@ -707,8 +777,12 @@ func (m *paletteModal) draw(a *App) {
 			}
 			continue
 		}
-		if visible[i].item.spacer {
-			m.drawSpacer(a, mx, ry, mw)
+		if it := visible[i].item; it.spacer {
+			if it.heading != "" {
+				m.drawHeading(a, mx, ry, mw, it)
+			} else {
+				m.drawSpacer(a, mx, ry, mw)
+			}
 			continue
 		}
 		m.drawRow(a, mx, ry, mw, visible[i], m.top+i == m.selected, hitStyle, c.bg)
@@ -769,6 +843,63 @@ func (m *paletteModal) drawSpacer(a *App, mx, ry, mw int) {
 		a.screen.SetContent(cx, ry, ' ', nil, c.bgSt)
 	}
 	for cx := mx + 3; cx < mx+mw-3; cx++ {
+		a.screen.SetContent(cx, ry, '┄', nil, c.border)
+	}
+}
+
+// headingCopyLabel is the text of a heading's copy button: the glyph, the
+// verb (⧉ alone is a house symbol, but a picker is where a first-timer
+// meets it) and the Alt key twin, muted like the frame's esc hint.
+func headingCopyLabel(it paletteItem) (button, hint string) {
+	return paletteCopyGlyph + " copy", "alt+" + string(it.copyKey)
+}
+
+// headingCopyRect is the ⧉ button's cell span on a heading drawn at row
+// ry — the ONE geometry drawHeading and handleMouse share. Right-aligned
+// to the dotted rule's end (two cells in from the frame), the hint
+// included so the whole "⧉ copy alt+r" is one target. ok is false for a
+// heading with no copy, or a frame too narrow to fit the button beside
+// the heading's name.
+//
+//	│ MRU 5 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄ ⧉ copy  alt+r  │
+//	  ^mx+2                                     ^r.x         ^mx+mw-3
+func headingCopyRect(mx, ry, mw int, it paletteItem) (btnRect, bool) {
+	if it.copy == nil {
+		return btnRect{}, false
+	}
+	button, hint := headingCopyLabel(it)
+	w := runeLen(button) + 2 + runeLen(hint)
+	x := mx + mw - 3 - w
+	// Leave the name and one cell of rule either side of it.
+	if x < mx+2+runeLen(it.heading)+2 {
+		return btnRect{}, false
+	}
+	return btnRect{x: x, y: ry, w: w}, true
+}
+
+// drawHeading paints a section heading: the name in the title colour, the
+// spacer's dotted rule filling the gap, and the copy button at the right.
+// The name takes the accent so it reads as a label for what follows, not
+// as one more row; the rule keeps the border tone, exactly as drawSpacer,
+// so a heading still reads as a divider. The button's glyph and verb are
+// body text (it is a control, and the muted tone sits too close to the
+// rule beside it); only the key hint is muted, like the frame's "esc".
+func (m *paletteModal) drawHeading(a *App, mx, ry, mw int, it paletteItem) {
+	c := a.chrome()
+	for cx := mx + 1; cx < mx+mw-1; cx++ {
+		a.screen.SetContent(cx, ry, ' ', nil, c.bgSt)
+	}
+	ruleEnd := mx + mw - 3 // exclusive, as in drawSpacer
+	name := clipRunes(it.heading, max(ruleEnd-mx-2, 0))
+	drawAt(a.screen, mx+2, ry, name, c.title)
+	x := mx + 2 + runeLen(name)
+	if r, ok := headingCopyRect(mx, ry, mw, it); ok {
+		button, hint := headingCopyLabel(it)
+		drawAt(a.screen, r.x, ry, button, c.body)
+		drawAt(a.screen, r.x+runeLen(button)+2, ry, hint, c.muted)
+		ruleEnd = r.x - 1
+	}
+	for cx := x + 1; cx < ruleEnd; cx++ {
 		a.screen.SetContent(cx, ry, '┄', nil, c.border)
 	}
 }

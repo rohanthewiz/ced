@@ -10,16 +10,19 @@
 // behind the recent-files ring (internal/history).
 //
 // EVERY LEVEL IS THE SAME TWO SECTIONS: the five most recently used
-// folders, a thin spacer, then the ten most frequently used that the first
-// section didn't already name. The top level is the repository's own
-// folders; picking one that has used subfolders opens the same picker one
-// level down, and so on for as many levels as there is history to show.
+// folders (MRU), then the ten most frequently used that the first section
+// didn't already name (MFU), each under a heading that names it, counts
+// it and offers a ⧉ copy of its folders (Alt+r / Alt+f in the picker).
+// The top level is the repository's own folders; picking one that has
+// used subfolders opens the same picker one level down, and so on for as
+// many levels as there is history to show.
 //
 //	Recent locations                  Folders in internal
-//	  internal  ›                       Reveal internal in tree
+//	  MRU 5 ┄┄┄┄┄┄┄┄ ⧉ copy  alt+r       Reveal internal in tree
+//	  internal  ›                       MRU 5 ┄┄┄┄┄┄┄┄ ⧉ copy  alt+r
 //	  ai_docs/plans                     app
 //	  …5 recent                         …5 recent
-//	  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄       ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄
+//	  MFU 10 ┄┄┄┄┄┄┄ ⧉ copy  alt+f       MFU 10 ┄┄┄┄┄┄┄ ⧉ copy  alt+f
 //	  …10 frequent                      …10 frequent
 //
 // A folder with nothing used below it has nothing to drill into, so
@@ -50,6 +53,7 @@ import (
 	"strings"
 
 	"github.com/rohanthewiz/bytdb"
+	"github.com/rohanthewiz/ced/internal/clipboard"
 	"github.com/rohanthewiz/ced/internal/history"
 	"github.com/rohanthewiz/ced/internal/session"
 )
@@ -60,9 +64,14 @@ const (
 	// locationsFrequent is the frequent section's length at every level.
 	locationsFrequent = 10
 	// locationsMaxRows caps the picker's requested height: both sections,
-	// the spacer, and a drill-in's reveal row.
+	// their two headings, and a drill-in's reveal row.
 	locationsMaxRows = 20
 )
+
+// locationsCopyFn puts a section's folders on the system clipboard. A
+// seam (newTestApp neuters it) so no test run writes OSC 52 into the
+// developer's terminal.
+var locationsCopyFn = clipboard.CopyToSystem
 
 // historyPathFn resolves a repository's history database. A package var
 // for the reason every config seam here is one: newTestApp points it at a
@@ -284,11 +293,16 @@ func (a *App) pruneGoneLocations(gone []string) {
 	}
 }
 
-// locationSections builds the two sections as picker rows: recent, a
-// spacer (only when both have rows — a divider with nothing on one side
-// divides nothing), frequent. Rows are labelled relative to the folder
-// being listed: its path is in the title already, and repeating it on
-// every row would spend the width the distinguishing tail needs.
+// locationSections builds the two sections as picker rows, each under
+// its heading: "MRU n", recent, "MFU n", frequent. A section with no rows
+// gets no heading — a name over nothing labels nothing. Rows are labelled
+// relative to the folder being listed: its path is in the title already,
+// and repeating it on every row would spend the width the distinguishing
+// tail needs.
+//
+// The headings replaced a bare dotted spacer: once each section can be
+// copied it needs a name to say WHICH list the ⧉ takes, and the count
+// says how many lines the clipboard will get.
 func (a *App) locationSections(under string, recent, frequent []string) []paletteItem {
 	idx := a.repoHistory().Folders
 	row := func(dir string) paletteItem {
@@ -301,12 +315,15 @@ func (a *App) locationSections(under string, recent, frequent []string) []palett
 		}
 		return paletteItem{label: label, run: func(app *App) { app.pickLocation(dir) }}
 	}
-	items := make([]paletteItem, 0, len(recent)+len(frequent)+1)
+	items := make([]paletteItem, 0, len(recent)+len(frequent)+2)
+	if len(recent) > 0 {
+		items = append(items, a.locationHeading("MRU", 'r', recent))
+	}
 	for _, d := range recent {
 		items = append(items, row(d))
 	}
-	if len(recent) > 0 && len(frequent) > 0 {
-		items = append(items, paletteSpacer())
+	if len(frequent) > 0 {
+		items = append(items, a.locationHeading("MFU", 'f', frequent))
 	}
 	for _, d := range frequent {
 		items = append(items, row(d))
@@ -314,12 +331,37 @@ func (a *App) locationSections(under string, recent, frequent []string) []palett
 	return items
 }
 
+// locationHeading is one section's heading row — "MRU 5" — whose ⧉ (or
+// Alt+key) copies the section's folders, one per line, in list order.
+//
+// The copy spells each folder relative to the WORKSPACE ROOT
+// (locationLabel), not relative to the drill-in being shown as the rows
+// are: "app" means nothing once it has left the picker, while
+// "internal/app" is still a path in this repository wherever it is
+// pasted. The " ›" drill marker is picker furniture and never copied.
+func (a *App) locationHeading(name string, key rune, dirs []string) paletteItem {
+	heading := fmt.Sprintf("%s %d", name, len(dirs))
+	return paletteHeading(heading, key, func(app *App) {
+		lines := make([]string, len(dirs))
+		for i, d := range dirs {
+			lines[i] = app.locationLabel(d)
+		}
+		what := plural(len(dirs), name+" folder", name+" folders")
+		if err := locationsCopyFn(strings.Join(lines, "\n")); err != nil {
+			app.flash("Copy failed: " + err.Error())
+			return
+		}
+		app.flash("Copied " + what)
+	})
+}
+
 // recentFolderLocalRows is the Local pane of "Recent folders…" (the
 // tree's ⭑): this repository's top-level recent locations, exactly as
-// Recent locations shows them — recent, a spacer, frequent — with the `›`
-// drill marker and pickLocation's behaviour. The pane has the list to
-// itself, so the old flattening (one section, "./"-prefixed to tell it
-// from the global rows sharing its scroll) no longer has a job.
+// Recent locations shows them — MRU then MFU, each under its copyable
+// heading — with the `›` drill marker and pickLocation's behaviour. The
+// pane has the list to itself, so the old flattening (one section,
+// "./"-prefixed to tell it from the global rows sharing its scroll) no
+// longer has a job.
 func (a *App) recentFolderLocalRows() []paletteItem {
 	root := session.Normalize(a.rootDir)
 	idx := a.repoHistory().Folders

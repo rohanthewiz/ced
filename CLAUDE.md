@@ -888,7 +888,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   to the taller pane) — Local FIRST = Recent locations' top level
   verbatim (`recentFolderLocalRows`); Global = ced recents, then
   `· cats`. Opens on Local, on Global when Local is empty; both tabs
-  always shown. One
+  always shown. Local's sections (shared with Recent locations via
+  `locationSections`) sit under HEADINGS "MRU n" / "MFU n"
+  (`paletteHeading`: a spacer row with a name and a ⧉ copy, geometry only
+  via `headingCopyRect`, Alt+r / Alt+f twins, picker stays open); the
+  copy spells folders ROOT-relative, never the drill-in's short labels. One
   list with a divider buried Local below the fold — don't merge them
   back. Global rows go through `openRecentFolder`
   (catsworkspace.go): Tier 1 = running ced on the folder (agent.focus) →

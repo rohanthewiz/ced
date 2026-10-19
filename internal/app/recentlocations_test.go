@@ -12,12 +12,14 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/ced/internal/history"
 	"github.com/rohanthewiz/ced/internal/session"
 )
@@ -29,10 +31,11 @@ func useFolder(a *App, dir string, n int) {
 	}
 }
 
-// TestRecentLocations_RecentThenSpacerThenFrequent pins the top level's
-// shape: the repository's five most recent folders, a spacer, then the
-// most frequent of the rest — relative to the root, never a folder twice.
-func TestRecentLocations_RecentThenSpacerThenFrequent(t *testing.T) {
+// TestRecentLocations_HeadedRecentThenFrequent pins the top level's
+// shape: an "MRU n" heading over the repository's five most recent
+// folders, then an "MFU n" heading over the most frequent of the rest —
+// relative to the root, never a folder twice.
+func TestRecentLocations_HeadedRecentThenFrequent(t *testing.T) {
 	root := t.TempDir()
 	var names []string
 	for i := 0; i < 8; i++ {
@@ -54,12 +57,12 @@ func TestRecentLocations_RecentThenSpacerThenFrequent(t *testing.T) {
 	var got []string
 	for _, mt := range m.matches {
 		if mt.item.spacer {
-			got = append(got, "--")
+			got = append(got, "["+mt.item.heading+"]")
 			continue
 		}
 		got = append(got, mt.item.label)
 	}
-	if want := "r7,r6,r5,r4,r3,--,r0,r1,r2"; strings.Join(got, ",") != want {
+	if want := "[MRU 5],r7,r6,r5,r4,r3,[MFU 3],r0,r1,r2"; strings.Join(got, ",") != want {
 		t.Fatalf("rows = %v, want %s", got, want)
 	}
 }
@@ -81,7 +84,7 @@ func TestRecentLocations_DrillThenReveal(t *testing.T) {
 	if len(labels) != 2 || labels[0] != filepath.Join("internal", "app") || labels[1] != "internal  ›" {
 		t.Fatalf("top rows = %v, want [internal/app, internal  ›]", labels)
 	}
-	paletteOf(a).selected = 1
+	selectPickerLabel(t, a, "internal  ›")
 	paletteOf(a).runSelected(a)
 
 	m := paletteOf(a)
@@ -92,7 +95,7 @@ func TestRecentLocations_DrillThenReveal(t *testing.T) {
 	if len(labels) != 2 || labels[0] != "Reveal internal in tree" || labels[1] != "app" {
 		t.Fatalf("drill rows = %v, want [Reveal internal in tree, app]", labels)
 	}
-	m.selected = 1
+	selectPickerLabel(t, a, "app")
 	m.runSelected(a)
 	if a.quit || a.nextRoot != "" {
 		t.Fatal("a location must be revealed, never re-rooted")
@@ -103,8 +106,8 @@ func TestRecentLocations_DrillThenReveal(t *testing.T) {
 }
 
 // TestRecentFolderLocalRows_MatchesRecentLocations pins the Local pane:
-// the same two sections Recent locations shows at the top level — recent,
-// a spacer, frequent — with no "./" prefix (the pane has the list to
+// the same two headed sections Recent locations shows at the top level —
+// MRU, then MFU — with no "./" prefix (the pane has the list to
 // itself, so nothing needs telling apart).
 func TestRecentFolderLocalRows_MatchesRecentLocations(t *testing.T) {
 	root := t.TempDir()
@@ -123,13 +126,78 @@ func TestRecentFolderLocalRows_MatchesRecentLocations(t *testing.T) {
 	var got []string
 	for _, it := range a.recentFolderLocalRows() {
 		if it.spacer {
-			got = append(got, "--")
+			got = append(got, "["+it.heading+"]")
 			continue
 		}
 		got = append(got, it.label)
 	}
-	if want := "r6,r5,r4,r3,r2,--,r0,r1"; strings.Join(got, ",") != want {
+	if want := "[MRU 5],r6,r5,r4,r3,r2,[MFU 2],r0,r1"; strings.Join(got, ",") != want {
 		t.Fatalf("rows = %v, want %s", got, want)
+	}
+}
+
+// selectPickerLabel highlights the open picker's row with that label —
+// by label, not index, since headings sit among the rows.
+func selectPickerLabel(t *testing.T, a *App, label string) {
+	t.Helper()
+	m := paletteOf(a)
+	for i, mt := range m.matches {
+		if !mt.item.spacer && mt.item.label == label {
+			m.selected = i
+			return
+		}
+	}
+	t.Fatalf("no row %q in the picker", label)
+}
+
+// TestLocationHeading_CopiesRootRelativeFolders pins what a section's ⧉
+// puts on the clipboard: its folders one per line in list order, spelled
+// from the WORKSPACE root even inside a drill-in (where the rows show
+// "app"), never the " ›" marker — and that a lone section gets a heading
+// while an empty one gets none.
+func TestLocationHeading_CopiesRootRelativeFolders(t *testing.T) {
+	root := t.TempDir()
+	dirs := mkdirs(t, root, "internal/app", "internal/lsp")
+	a := newTestApp(t, root)
+	useFolder(a, dirs[0], 1)
+	useFolder(a, dirs[1], 1)
+	var copied string
+	locationsCopyFn = func(s string) error { copied = s; return nil }
+
+	a.openLocations(filepath.Dir(dirs[0]))
+	m := paletteOf(a)
+	var headings []string
+	for _, it := range m.items {
+		if it.heading != "" {
+			headings = append(headings, it.heading)
+		}
+	}
+	if len(headings) != 1 || headings[0] != "MRU 2" {
+		t.Fatalf("headings = %v, want only [MRU 2] (no MFU rows, so no MFU heading)", headings)
+	}
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModAlt))
+	want := filepath.Join("internal", "lsp") + "\n" + filepath.Join("internal", "app")
+	if copied != want {
+		t.Fatalf("copied %q, want %q", copied, want)
+	}
+	if paletteOf(a) == nil || !strings.Contains(a.statusMsg, "Copied 2 MRU folders") {
+		t.Fatalf("open %v, status %q — want the picker kept and the copy flashed", paletteOf(a) != nil, a.statusMsg)
+	}
+}
+
+// TestLocationHeading_CopyFailureFlashes pins the failure path: a
+// clipboard error is reported, not swallowed as "Copied".
+func TestLocationHeading_CopyFailureFlashes(t *testing.T) {
+	root := t.TempDir()
+	dirs := mkdirs(t, root, "pkg")
+	a := newTestApp(t, root)
+	useFolder(a, dirs[0], 1)
+	locationsCopyFn = func(string) error { return errors.New("no tty") }
+
+	items := a.recentFolderLocalRows()
+	items[0].copy(a)
+	if !strings.Contains(a.statusMsg, "Copy failed: no tty") {
+		t.Fatalf("status = %q, want the failure flashed", a.statusMsg)
 	}
 }
 

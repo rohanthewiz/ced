@@ -399,9 +399,10 @@ func (a *App) menuOpenFolder() {
 // click on the title row's tabs:
 //
 //	│ Recent folders   Local 15  Global 31       esc │
-//	│ internal/app  ›                LOCAL — this repository's recent
-//	│ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄       locations (recentlocations.go),
-//	│ ai_docs                          recent then frequent
+//	│ MRU 5 ┄┄┄┄┄┄ ⧉ copy  alt+r      LOCAL — this repository's recent
+//	│ internal/app  ›                  locations (recentlocations.go),
+//	│ MFU 10 ┄┄┄┄┄ ⧉ copy  alt+f        recent then frequent, each section
+//	│ ai_docs                          headed, counted and copyable
 //
 //	│ Recent folders   Local 15  Global 31       esc │
 //	│ ~/projs/go/cats  (3 tabs)      GLOBAL — other projects: ced's own

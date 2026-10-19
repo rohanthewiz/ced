@@ -837,3 +837,137 @@ func TestDropScatteredMatches_NoMatches(t *testing.T) {
 		t.Fatalf("got %v, want empty", got)
 	}
 }
+
+// headingPicker opens a picker that LEADS with a copyable heading — the
+// Recent folders MRU / MFU shape — over n rows, then a second heading
+// with no copy button over one more row. copied counts the copies run.
+func headingPicker(a *App, n int, copied *int) *paletteModal {
+	items := []paletteItem{paletteHeading("One "+itoa(n), 'o', func(*App) { *copied++ })}
+	for i := 0; i < n; i++ {
+		items = append(items, paletteItem{label: "row" + itoa(i), run: func(*App) {}})
+	}
+	items = append(items, paletteHeading("Two 1", 0, nil),
+		paletteItem{label: "last", run: func(*App) {}})
+	return a.openPickerRows("Headed", items, 0, nil)
+}
+
+// TestPaletteHeading_DrawsNameRuleAndCopy pins the heading row's look: the
+// section name at the rows' column, the dotted rule, and "⧉ copy alt+o"
+// where headingCopyRect says — while a heading with no copy is name and
+// rule only.
+func TestPaletteHeading_DrawsNameRuleAndCopy(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	var copied int
+	m := headingPicker(a, 2, &copied)
+	m.draw(a)
+	a.screen.Show()
+	mx, my, mw, _ := m.rect(a)
+	lines := strings.Split(screenText(a), "\n")
+
+	first := lines[my+4]
+	if !strings.Contains(first, "One 2 ┄") || !strings.Contains(first, "⧉ copy  alt+o") {
+		t.Fatalf("heading row = %q, want name, rule and the copy button", first)
+	}
+	r, ok := headingCopyRect(mx, my+4, mw, m.matches[0].item)
+	if !ok {
+		t.Fatal("headingCopyRect refused a heading with a copy")
+	}
+	if ru, _, _, _ := a.screen.GetContent(r.x, r.y); string(ru) != paletteCopyGlyph {
+		t.Fatalf("cell at the copy rect = %q, want %s", ru, paletteCopyGlyph)
+	}
+	second := lines[my+4+3]
+	if !strings.Contains(second, "Two 1 ┄") || strings.Contains(second, "copy") {
+		t.Fatalf("copyless heading row = %q, want name and rule only", second)
+	}
+}
+
+// TestPaletteHeading_ClickCopiesAndStaysOpen pins the ⧉ door: a press on
+// the button runs the section's copy and leaves the picker open (copying
+// is not a pick), while a press on the heading's name does nothing.
+func TestPaletteHeading_ClickCopiesAndStaysOpen(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	var copied int
+	m := headingPicker(a, 2, &copied)
+	m.draw(a)
+	mx, my, mw, _ := m.rect(a)
+	r, _ := headingCopyRect(mx, my+4, mw, m.matches[0].item)
+
+	m.handleMouse(a, mx+3, my+4, tcell.Button1) // on the name
+	if copied != 0 || paletteOf(a) == nil || m.selected != 1 {
+		t.Fatalf("press on the name: copied %d, open %v, selected %d — want 0, true, 1",
+			copied, paletteOf(a) != nil, m.selected)
+	}
+	m.handleMouse(a, r.x+r.w-1, my+4, tcell.Button1) // last cell of "alt+o"
+	if copied != 1 {
+		t.Fatalf("press on the copy button copied %d times, want 1", copied)
+	}
+	if paletteOf(a) == nil {
+		t.Fatal("copying closed the picker")
+	}
+}
+
+// TestPaletteHeading_AltKeyCopiesWhileFiltering pins the keyboard twin:
+// Alt+<key> copies even when a query has hidden the headings (the section
+// is still there), and is not typed into the query. Plain <key> types.
+func TestPaletteHeading_AltKeyCopiesWhileFiltering(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	var copied int
+	m := headingPicker(a, 2, &copied)
+	typePalette(a, "row")
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'o', tcell.ModAlt))
+	if copied != 1 || m.field.String() != "row" {
+		t.Fatalf("Alt+o: copied %d, query %q — want 1, \"row\"", copied, m.field.String())
+	}
+	typePalette(a, "o")
+	if copied != 1 || m.field.String() != "rowo" {
+		t.Fatalf("plain o: copied %d, query %q — want it typed, not copied", copied, m.field.String())
+	}
+}
+
+// TestPaletteHeading_LeadingHeadingStaysVisible pins the two list-walk
+// fixes a leading heading needed: ↑ from the first real row stays put
+// instead of landing on the heading, and walking back up from a scrolled
+// window brings the heading above the first row back into view.
+func TestPaletteHeading_LeadingHeadingStaysVisible(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	var copied int
+	m := headingPicker(a, 15, &copied) // 18 rows, 10 visible
+	up := tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModNone)
+	down := tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone)
+	if m.selected != 1 {
+		t.Fatalf("opened on %d, want the first real row (1)", m.selected)
+	}
+	m.handleKey(a, up)
+	if m.selected != 1 {
+		t.Fatalf("↑ from the first row selected %d, want it to stay on 1", m.selected)
+	}
+	for i := 0; i < 16; i++ {
+		m.handleKey(a, down)
+	}
+	m.draw(a)
+	if m.top == 0 {
+		t.Fatal("the window never scrolled")
+	}
+	for i := 0; i < 20; i++ {
+		m.handleKey(a, up)
+	}
+	m.draw(a)
+	if m.selected != 1 || m.top != 0 {
+		t.Fatalf("back at the top: selected %d, top %d — want 1, 0 (heading shown)", m.selected, m.top)
+	}
+}
+
+// TestHeadingCopyRect_Refusals pins when there is no button: a heading
+// without a copy, and a frame too narrow to fit it beside the name.
+func TestHeadingCopyRect_Refusals(t *testing.T) {
+	if _, ok := headingCopyRect(0, 0, 60, paletteHeading("MRU 5", 'r', nil)); ok {
+		t.Error("a heading with no copy got a button")
+	}
+	it := paletteHeading("MRU 5", 'r', func(*App) {})
+	if _, ok := headingCopyRect(0, 0, 60, it); !ok {
+		t.Error("a 60-cell frame should fit the button")
+	}
+	if _, ok := headingCopyRect(0, 0, 20, it); ok {
+		t.Error("a 20-cell frame cannot fit name and button, want no button")
+	}
+}

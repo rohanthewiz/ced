@@ -765,3 +765,75 @@ func TestPalettePanes_TitleGivesWayWhenNarrow(t *testing.T) {
 		t.Fatalf("tab %v runs into the esc hint", last)
 	}
 }
+
+// labelPicker opens a single-list picker over the given labels, each a
+// no-op row — the smallest fixture that exercises refresh's filtering.
+func labelPicker(a *App, labels ...string) *paletteModal {
+	var items []paletteItem
+	for _, l := range labels {
+		items = append(items, paletteItem{label: l, run: func(*App) {}})
+	}
+	return a.openPickerRows("Labels", items, 0, nil)
+}
+
+// matchLabels lists the labels of the current matches in order.
+func matchLabels(m *paletteModal) []string {
+	var out []string
+	for _, mt := range m.matches {
+		out = append(out, mt.item.label)
+	}
+	return out
+}
+
+// TestPaletteRefresh_HidesScatteredWhenContiguousExists pins the finder's
+// rule in the palette: once a row holds the query whole, rows that only
+// hold its letters in order ("Recent folders…" for "ref") are dropped,
+// not just ranked below.
+func TestPaletteRefresh_HidesScatteredWhenContiguousExists(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := labelPicker(a, "Recent folders…", "Find references…", "Remote open: off")
+	typePalette(a, "ref")
+	if got := matchLabels(m); len(got) != 1 || got[0] != "Find references…" {
+		t.Fatalf("matches = %q, want only the contiguous hit", got)
+	}
+}
+
+// TestPaletteRefresh_KeepsScatteredWithoutContiguous is the fallback
+// side: with no row holding the query whole, an abbreviation still
+// finds its row.
+func TestPaletteRefresh_KeepsScatteredWithoutContiguous(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := labelPicker(a, "Close tab", "Recent files…")
+	typePalette(a, "rcf")
+	if got := matchLabels(m); len(got) != 1 || got[0] != "Recent files…" {
+		t.Fatalf("matches = %q, want the scattered hit kept", got)
+	}
+}
+
+// TestPalettePanes_CountsHideScatteredLikeTheList pins that a tab's
+// number is the row count a switch would show: the pane holding the
+// query whole counts only that row, the pane with nothing contiguous
+// counts its scattered hit.
+func TestPalettePanes_CountsHideScatteredLikeTheList(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	row := func(l string) paletteItem { return paletteItem{label: l, run: func(*App) {}} }
+	m := a.openPickerPanes("Panes", []palettePane{
+		{name: "alpha", items: []paletteItem{row("Recent folders…"), row("Find references…")}},
+		{name: "beta", items: []paletteItem{row("Recent folders…")}},
+	}, 0, 0)
+	typePalette(a, "ref")
+	if m.paneCount(0) != 1 || m.paneCount(1) != 1 {
+		t.Fatalf("counts under \"ref\" = %d / %d, want 1 / 1", m.paneCount(0), m.paneCount(1))
+	}
+	if len(m.matches) != m.paneCount(0) {
+		t.Fatalf("active list has %d rows, its tab says %d", len(m.matches), m.paneCount(0))
+	}
+}
+
+// TestDropScatteredMatches_NoMatches is the trivial edge: nothing in,
+// nothing out, no panic on the empty slice.
+func TestDropScatteredMatches_NoMatches(t *testing.T) {
+	if got := dropScatteredMatches(nil, "abc"); len(got) != 0 {
+		t.Fatalf("got %v, want empty", got)
+	}
+}

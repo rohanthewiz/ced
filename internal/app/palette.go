@@ -273,16 +273,27 @@ func (m *paletteModal) paneCount(i int) int {
 	if query == "" {
 		return countItems(m.panes[i].items)
 	}
-	n := 0
+	// Counted the way refresh lists: the contiguous hits when there are
+	// any, else every match — so the number on an inactive tab is the
+	// row count that tab would show after a switch.
+	all, contiguous := 0, 0
 	for _, it := range m.panes[i].items {
 		if it.spacer {
 			continue
 		}
-		if score, _ := finder.Score(query, it.label); score > 0 {
-			n++
+		score, _ := finder.Score(query, it.label)
+		if score == 0 {
+			continue
+		}
+		all++
+		if finder.IsContiguous(query, score) {
+			contiguous++
 		}
 	}
-	return n
+	if contiguous > 0 {
+		return contiguous
+	}
+	return all
 }
 
 // paneTabs lays out the pane switcher on the title row — the ONE geometry
@@ -382,6 +393,16 @@ func (a *App) menuSearchFrom(r rune) {
 // menu's own order, so the palette doubles as a menu you can read);
 // otherwise items are ranked by fzy score, with source order breaking
 // ties via the stable sort.
+//
+// Like the file finder (finder.rank), a query that some row holds WHOLE
+// hides the rows that only match it scattered. Measured on the ≡ menu's
+// 178 labels, the scattered tail under a real word is unrelated rows
+// ("ref" → Find references… plus 20 like "Recent folders…" and "Remote
+// open"; "git" → 7 git rows plus 16 others). Abbreviations with no
+// contiguous hit ("rcf" → Recent files…) still get the scattered list.
+// LSP completion shares Score but deliberately keeps its scattered rows:
+// servers return camel-hump matches on purpose ("nt" → NewTab), and a
+// stray contiguous "nt" in Count would hide the one the user meant.
 func (m *paletteModal) refresh() {
 	query := m.field.String()
 	m.matches = m.matches[:0]
@@ -401,6 +422,7 @@ func (m *paletteModal) refresh() {
 		m.matches = append(m.matches, paletteMatch{item: it, score: score, hits: hits})
 	}
 	if query != "" {
+		m.matches = dropScatteredMatches(m.matches, query)
 		sort.SliceStable(m.matches, func(i, j int) bool {
 			return m.matches[i].score > m.matches[j].score
 		})
@@ -412,6 +434,31 @@ func (m *paletteModal) refresh() {
 		m.selected = 0
 	}
 	m.selected = m.choosable(m.selected, 1)
+}
+
+// dropScatteredMatches is finder.dropScattered over palette rows: only
+// the contiguous hits when there is at least one, else matches
+// unchanged. Filters in place — matches is the modal's own scratch
+// slice, rebuilt by every refresh. Only called with a non-empty query,
+// so no spacer rows are present to keep or drop.
+func dropScatteredMatches(matches []paletteMatch, query string) []paletteMatch {
+	hasContiguous := false
+	for _, mt := range matches {
+		if finder.IsContiguous(query, mt.score) {
+			hasContiguous = true
+			break
+		}
+	}
+	if !hasContiguous {
+		return matches
+	}
+	kept := matches[:0]
+	for _, mt := range matches {
+		if finder.IsContiguous(query, mt.score) {
+			kept = append(kept, mt)
+		}
+	}
+	return kept
 }
 
 // choosable returns the nearest non-spacer match at or after i walking

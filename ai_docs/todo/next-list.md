@@ -96,23 +96,6 @@ plus the LSP work done in the seeding session itself
   function body stays as written. Revisit only if someone hits it; any
   change must keep the re-lex token check (`sameSQLTokens`).
 
-- **N-072** · raised `2026-1017-2029-finder-contiguous-matches` · value low
-  The file finder now hides scattered matches whenever a contiguous one
-  exists (`dropScattered` in finder.go). The command palette and LSP
-  completion share `finder.Score` and get the contiguous-first RANKING,
-  but still list scattered hits below. Apply the same filter there only
-  if the scattered tail turns out to be noise in practice (completion's
-  server order makes it less clear-cut).
-
-- **N-074** · raised `2026-1017-2044-button-hover-labels` · value low
-  Button hover labels (buttontip.go) skip three spots: buttons inside
-  ordinary modals (Yes/No etc. — they already carry words, and the layer
-  is silent under every modal but the unpinned Find-all list), the
-  commit receipt's `[ Push <branch>… ]`, and the status bar's
-  ` · preview` / ` · wrap` pieces, which get no key line because their
-  onClick (`toggleMarkdownView`/`toggleSoftWrap`) is not the verb the
-  leader binds. Add only if someone misses them.
-
 - **N-075** · raised `2026-1017-2208-conflict-side-names` · value low
   The conflict lens's full labels now carry names ("Accept yours (main) ·
   Accept picked (2a0370b) · Accept both · Compare sides") and no longer
@@ -284,6 +267,15 @@ Wanted, but not next. Parked, not declined.
   advertising `loadSession` and on solving the replay-doubles-the-transcript
   problem; the archive deliberately does not store the agent session id.
 
+- **N-074** · raised `2026-1017-2044-button-hover-labels` · value low
+  Button hover labels (buttontip.go) skip three spots: buttons inside
+  ordinary modals (Yes/No etc. — they already carry words, and the layer
+  is silent under every modal but the unpinned Find-all list), the
+  commit receipt's `[ Push <branch>… ]`, and the status bar's
+  ` · preview` / ` · wrap` pieces, which get no key line because their
+  onClick (`toggleMarkdownView`/`toggleSoftWrap`) is not the verb the
+  leader binds. Add only if someone misses them.
+
 ## Non-goals
 
 - **N-020** · declined `2026-0910-2016-tool-windows` — polishing a bottom-docked
@@ -318,6 +310,16 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-18, `2026-1018-2021-n072-palette-hides-scattered` —
+  **N-072** palette yes, completion no. Measured over the ≡ menu's 178
+  labels: under a real word the scattered tail was unrelated rows ("ref"
+  → 1 hit + 20 others, "git" 7 + 16, "line" 7 + 16), so the palette
+  (every `openPicker` list) now drops scattered rows when a contiguous
+  one exists (`dropScatteredMatches`), and `paneCount` counts the same
+  way. New `finder.IsContiguous` is the shared tier check. Completion
+  keeps them: servers return camel-hump matches on purpose ("nt" →
+  NewTab) that a stray contiguous hit would hide.
 
 - closed 2026-10-14, `2026-1014-1447-n042-tab-group-colours` —
   **N-042** both extras. Group menu (and the ≡

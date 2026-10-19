@@ -155,6 +155,16 @@ func contiguousFloor(n int) int {
 	return n*maxRuneBonus + 1
 }
 
+// IsContiguous reports whether score — as returned by Score(query, …) —
+// is a contiguous (whole-substring) hit rather than a scattered one.
+// Exported so the other Score callers (the picker palette) can apply the
+// finder's "hide scattered when something holds the query whole" rule
+// without Score growing a separate flag: the floor alone tells the tiers
+// apart, so the score already carries the answer.
+func IsContiguous(query string, score int) bool {
+	return score >= contiguousFloor(len([]rune(query)))
+}
+
 // bestContiguous finds the best-scoring case-insensitive occurrence of
 // query as a substring of path. ok is false when there is none. Ties go
 // to the earliest occurrence (strict > below) so the choice is stable.

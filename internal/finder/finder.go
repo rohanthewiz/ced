@@ -278,16 +278,14 @@ func rank(paths []string, query string, limit int) []Result {
 }
 
 // dropScattered returns only the contiguous hits in results when there
-// is at least one, else results unchanged. A score at or above
-// contiguousFloor marks a contiguous hit — the floor is above every
-// scattered score for the same query (see Score), so the threshold
-// alone tells the tiers apart without Score reporting a separate flag.
+// is at least one, else results unchanged. IsContiguous tells the tiers
+// apart by score alone — contiguousFloor is above every scattered score
+// for the same query (see Score) — so Score reports no separate flag.
 // Filters in place; results is the caller's own scratch slice.
 func dropScattered(results []Result, query string) []Result {
-	floor := contiguousFloor(len([]rune(query)))
 	hasContiguous := false
 	for _, r := range results {
-		if r.Score >= floor {
+		if IsContiguous(query, r.Score) {
 			hasContiguous = true
 			break
 		}
@@ -297,7 +295,7 @@ func dropScattered(results []Result, query string) []Result {
 	}
 	kept := results[:0]
 	for _, r := range results {
-		if r.Score >= floor {
+		if IsContiguous(query, r.Score) {
 			kept = append(kept, r)
 		}
 	}

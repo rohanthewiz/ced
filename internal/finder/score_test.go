@@ -204,3 +204,18 @@ func TestContiguousFloor_BoundsScattered(t *testing.T) {
 		}
 	}
 }
+
+// TestIsContiguous_SplitsTheTiers pins the exported tier check against
+// real Score output: a whole-substring hit is contiguous, the same query
+// scattered across word boundaries is not — even though the scattered
+// one collects more per-rune bonuses.
+func TestIsContiguous_SplitsTheTiers(t *testing.T) {
+	sub, _ := Score("abc", "abc.go")
+	scattered, _ := Score("abc", "a_b_c.go")
+	if !IsContiguous("abc", sub) {
+		t.Fatalf("substring score %d should be contiguous", sub)
+	}
+	if IsContiguous("abc", scattered) {
+		t.Fatalf("scattered score %d should not be contiguous", scattered)
+	}
+}

@@ -445,6 +445,51 @@ func (a *App) menuGitSwitchBranch() {
 	a.openPicker("Switch branch", items)
 }
 
+// menuGitNewBranch prompts for a name, then creates that branch at HEAD
+// and switches to it in one step (`git switch --create`). Create-AND-
+// switch rather than a bare `git branch` because starting work on the
+// new branch is what "New branch" means nearly every time, and a branch
+// made but not checked out is the classic way to commit to the wrong
+// one. Uncommitted changes ride along (git carries them across a switch
+// to a branch at the same commit), which is also the rescue for "I
+// started this on main" — the hint says so, so it is never a surprise.
+//
+// Validation is git's, not ours: check-ref-format's rules (no spaces,
+// no "..", no leading "-", no trailing ".lock", …) are intricate enough
+// that a local copy would drift, and git's refusal ("'a b' is not a
+// valid branch name", "a branch named 'x' already exists") lands in the
+// failure modal verbatim. The prompt itself already drops empty submits.
+func (a *App) menuGitNewBranch() {
+	a.closeMenu()
+	a.openPrompt("New branch", newBranchHint(a.gitBranch, a.hasGitChanges()), "", func(app *App, name string) {
+		app.runGitCmd("New branch "+name, newBranchArgs(name)...)
+	})
+}
+
+// newBranchArgs is the git argv for creating and switching to name. The
+// value is GLUED to the flag (`--create=<name>`) so a name that starts
+// with "-" is always the flag's value, never parsed as another option —
+// git then refuses it as an invalid branch name instead of doing
+// something else. Split out so that guarantee is pinned by a test.
+func newBranchArgs(name string) []string {
+	return []string{"switch", "--create=" + name}
+}
+
+// newBranchHint is the prompt's subtitle: where the branch will start
+// (the status bar's branch label, which is a short hash on a detached
+// HEAD — still the right answer) and, when the tree is dirty, that the
+// changes come along rather than staying behind.
+func newBranchHint(from string, dirty bool) string {
+	if from == "" {
+		from = "HEAD"
+	}
+	hint := "from " + from
+	if dirty {
+		hint += " · uncommitted changes come along"
+	}
+	return hint
+}
+
 // loadGitBranches returns the repo's local branch names, best-effort:
 // non-repos, missing git, and any other failure yield nil and the
 // caller shows "No other branches". Detached-HEAD placeholder lines

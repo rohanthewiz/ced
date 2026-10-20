@@ -741,6 +741,10 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Pop stash", action: (*App).menuGitStashPop, enabled: (*App).hasGitStash},
 			{label: "Switch branch", action: (*App).menuGitSwitchBranch, enabled: (*App).hasGitRepo},
 			{label: "Recent branches", action: (*App).menuGitRecentBranches, enabled: (*App).hasGitRepo},
+			// Creates at HEAD and switches to it (gitcmd.go). Enabled on
+			// any repo — an unborn branch included, where git simply
+			// renames the branch-to-be.
+			{label: "New branch…", action: (*App).menuGitNewBranch, enabled: (*App).hasGitRepo},
 			{shortcut: "esc g", action: (*App).menuToggleGitPanel, enabled: (*App).hasGitRepo, labelFor: (*App).gitPanelToggleLabel},
 			// The pre-commit survey (gitpanelwalk.go). It opens the panel
 			// on the way in — walking the changes and showing the panel

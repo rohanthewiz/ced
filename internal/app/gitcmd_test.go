@@ -315,6 +315,109 @@ func TestMenuGitSwitchBranch_NoOtherBranches(t *testing.T) {
 	}
 }
 
+// TestMenuGitNewBranch_CreatesAndSwitches drives the whole verb: the row
+// opens a prompt whose hint names the starting branch, and submitting a
+// name creates that branch and moves HEAD onto it, with the status-bar
+// label following once the done-event's refresh lands.
+func TestMenuGitNewBranch_CreatesAndSwitches(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	repo := initRepo(t)
+	writeFileT(t, filepath.Join(repo, "f.txt"), "x\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-q", "-m", "init")
+
+	a := newTestApp(t, repo)
+	a.refreshGitStatus()
+	from := a.gitBranch
+	a.menuGitNewBranch()
+
+	pm, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the name prompt", a.modal)
+	}
+	if pm.title != "New branch" || pm.hint != "from "+from {
+		t.Fatalf("prompt = %q / %q, want New branch / from %s", pm.title, pm.hint, from)
+	}
+	pm.field = newTextField("feature/x")
+	pm.submit(a)
+	pumpAppEvents(t, a, func() bool {
+		return strings.Contains(a.statusMsg, "New branch feature/x — done")
+	})
+	if br := loadGitBranch(repo); br != "feature/x" {
+		t.Fatalf("branch after create = %q, want feature/x", br)
+	}
+	if a.gitBranch != "feature/x" {
+		t.Fatalf("status-bar branch = %q, want feature/x (refresh missing?)", a.gitBranch)
+	}
+}
+
+// TestMenuGitNewBranch_InvalidNameShowsGitsRefusal pins the validation
+// contract: ced does no name checking of its own, so a name git rejects
+// lands in the failure modal with git's explanation, and HEAD stays put.
+func TestMenuGitNewBranch_InvalidNameShowsGitsRefusal(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	repo := initRepo(t)
+	writeFileT(t, filepath.Join(repo, "f.txt"), "x\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-q", "-m", "init")
+
+	a := newTestApp(t, repo)
+	a.refreshGitStatus()
+	from := a.gitBranch
+	a.menuGitNewBranch()
+	pm := a.modal.(*promptModal)
+	pm.field = newTextField("bad name")
+	pm.submit(a)
+	pumpAppEvents(t, a, func() bool {
+		_, ok := a.modal.(*confirmModal)
+		return ok
+	})
+	m := a.modal.(*confirmModal)
+	if m.title != "Git failed: New branch bad name" {
+		t.Fatalf("title = %q", m.title)
+	}
+	if joined := strings.Join(m.lines, "\n"); !strings.Contains(joined, "not a valid branch name") {
+		t.Fatalf("modal body missing git's refusal: %q", joined)
+	}
+	if br := loadGitBranch(repo); br != from {
+		t.Fatalf("branch = %q, want unchanged %q", br, from)
+	}
+}
+
+// TestNewBranchArgs_DashNameStaysAValue pins the option-injection guard:
+// the name is glued to --create so a leading "-" can never be read as a
+// separate flag.
+func TestNewBranchArgs_DashNameStaysAValue(t *testing.T) {
+	got := newBranchArgs("-f")
+	want := []string{"switch", "--create=-f"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+}
+
+// TestNewBranchHint covers the subtitle's three shapes: a named start,
+// the HEAD fallback when no label is known, and the dirty-tree note.
+func TestNewBranchHint(t *testing.T) {
+	cases := []struct {
+		from  string
+		dirty bool
+		want  string
+	}{
+		{"main", false, "from main"},
+		{"", false, "from HEAD"},
+		{"main", true, "from main · uncommitted changes come along"},
+	}
+	for _, c := range cases {
+		if got := newBranchHint(c.from, c.dirty); got != c.want {
+			t.Errorf("newBranchHint(%q, %v) = %q, want %q", c.from, c.dirty, got, c.want)
+		}
+	}
+}
+
 // TestMenuGitUnstageFile_AsyncRoundTrip drives the mirror pipeline of
 // the stage test: a staged file enables the Unstage row, unstaging runs
 // `git reset` on a goroutine, and the done-event refresh empties the

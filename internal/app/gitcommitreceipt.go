@@ -161,9 +161,12 @@ var (
 	_ tcell.Event = (*commitReceiptExpireEvent)(nil)
 )
 
-// commitReceiptState is the whole feature's state. Empty hash means
-// closed; there is no separate flag to keep in step with it.
-type commitReceiptState struct {
+// receiptContent is what one receipt SAYS — everything openGitReceipt
+// replaces whole. Split from commitReceiptState's bookkeeping (seq, held,
+// box) so a new receipt is a single assignment: a field added here can
+// never be left over from the previous receipt because some opener
+// forgot to reset it.
+type receiptContent struct {
 	// hash is the full 40-character object name of the commit being
 	// reported. Empty for a push receipt, which has no single object to
 	// name — see head.
@@ -184,6 +187,23 @@ type commitReceiptState struct {
 	// panel is up, and a button appearing or vanishing mid-window would
 	// resize the box under a pointer already on its way to it.
 	pushBranch string
+	// link is the URL a push's remote printed for the user to visit
+	// (GitHub's "Create a pull request" link, GitLab's merge-request
+	// one). Non-empty puts "[ Open link ]  [ Copy link ]" on the button
+	// row — see gitpushreceipt.go. Never set on a commit receipt, so the
+	// two button sets never share the row.
+	link string
+	// width is the panel's preferred width; 0 means commitReceiptWidth.
+	// A push widens it to its longest line so a PR URL stays on ONE row
+	// — a link hard-wrapped across two rows is one no terminal can
+	// detect and no reader can copy by selecting.
+	width int
+}
+
+// commitReceiptState is the whole feature's state. Empty hash and head
+// means closed; there is no separate flag to keep in step with it.
+type commitReceiptState struct {
+	receiptContent
 	// seq counts receipts. A scheduled expiry carries the seq current
 	// when it was armed and is ignored unless it still matches — the
 	// hoverdwell generation trick, and what makes "commit twice quickly"
@@ -260,11 +280,15 @@ func (a *App) handleGitCommitReceipt(e *gitCommitReceiptEvent) {
 // is also what keeps a push receipt replacing a commit receipt from
 // inheriting its button.
 func (a *App) openGitReceipt(title, hash, head, pushBranch string, lines []string) {
-	a.commitReceipt.title = title
-	a.commitReceipt.hash = hash
-	a.commitReceipt.head = head
-	a.commitReceipt.lines = lines
-	a.commitReceipt.pushBranch = pushBranch
+	a.openReceiptContent(receiptContent{title: title, hash: hash, head: head, pushBranch: pushBranch, lines: lines})
+}
+
+// openReceiptContent is openGitReceipt for a caller with more to say than
+// its parameters carry — the push receipt's link and width. One
+// assignment replaces the content whole (see receiptContent); the window
+// is armed last because its length reads the new content.
+func (a *App) openReceiptContent(c receiptContent) {
+	a.commitReceipt.receiptContent = c
 	// A replacement starts with a live timer, so it is not held — even
 	// if the pointer happens to sit where the old box was. The next
 	// motion inside the new box holds it again.
@@ -348,12 +372,12 @@ func commitReceiptBody(msg string, width int) []string {
 }
 
 // commitReceiptWindow is how long the receipt on screen stays up
-// unattended: the longer commitReceiptPushFor while it offers a push,
-// else commitReceiptFor. Read at every arm — the first one in
+// unattended: the longer commitReceiptPushFor while it offers a button
+// to act on — a push, or a push's link — else commitReceiptFor. Read at every arm — the first one in
 // openGitReceipt and the re-arm when the pointer leaves the box — so a
 // held-then-released push receipt gets its full longer window back.
 func (a *App) commitReceiptWindow() time.Duration {
-	if a.commitReceipt.pushBranch != "" {
+	if a.commitReceiptHasButtons() {
 		return commitReceiptPushFor
 	}
 	return commitReceiptFor
@@ -386,11 +410,7 @@ func (a *App) handleCommitReceiptExpire(e *commitReceiptExpireEvent) {
 // expiry. Cheap and safe when nothing is open, which is what lets the
 // keyboard and mouse paths call it unconditionally.
 func (a *App) closeCommitReceipt() {
-	a.commitReceipt.hash = ""
-	a.commitReceipt.title = ""
-	a.commitReceipt.head = ""
-	a.commitReceipt.lines = nil
-	a.commitReceipt.pushBranch = ""
+	a.commitReceipt.receiptContent = receiptContent{}
 	a.commitReceipt.box = struct{ x, y, w, h int }{}
 	a.commitReceipt.held = false
 	a.commitReceipt.seq++
@@ -450,18 +470,30 @@ func (a *App) commitReceiptContains(x, y int) bool {
 //	4        blank
 //	5..5+n-1 the message (or git push's output)
 //	5+n      blank
-//	6+n      "[ Push main… ]", right-aligned — only when pushBranch is set
+//	6+n      the button row, right-aligned — "[ Push main… ]" on a
+//	         commit receipt, "[ Open link ]  [ Copy link ]" on a push
+//	         that printed a link; absent when there is neither
 //	6+n/7+n  bottom border
 func (a *App) commitReceiptRect() (x, y, w, h int) {
 	w = commitReceiptWidth
+	if a.commitReceipt.width > 0 {
+		w = a.commitReceipt.width
+	}
 	if w > a.width {
 		w = a.width
 	}
 	h = len(a.commitReceipt.lines) + 7
-	if a.commitReceipt.pushBranch != "" {
+	if a.commitReceiptHasButtons() {
 		h++
 	}
 	return a.centeredRect(w, h)
+}
+
+// commitReceiptHasButtons reports whether the receipt reserves its
+// button row. One predicate for the height, the window length and the
+// draw, so the three can never disagree about whether the row exists.
+func (a *App) commitReceiptHasButtons() bool {
+	return a.commitReceipt.pushBranch != "" || a.commitReceipt.link != ""
 }
 
 // commitReceiptPushLabel is the button's text. The branch is named for
@@ -537,5 +569,9 @@ func (a *App) drawCommitReceipt() {
 	// default the keyboard would fire — nothing here owns the keyboard.
 	if b, ok := a.commitReceiptPushBtn(); ok {
 		drawButton(a.screen, b.x, b.y, a.commitReceiptPushLabel(), c.bg, a.theme.Accent, false)
+	}
+	if open, cp, ok := a.commitReceiptLinkBtns(); ok {
+		drawButton(a.screen, open.x, open.y, receiptOpenLinkLabel, c.bg, a.theme.Accent, false)
+		drawButton(a.screen, cp.x, cp.y, receiptCopyLinkLabel, c.bg, a.theme.Accent, false)
 	}
 }

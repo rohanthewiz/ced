@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-076**
+**Next ID: N-079**
 
 ## Open
 
@@ -103,6 +103,19 @@ plus the LSP work done in the seeding session itself
   (`Yours · Picked · Both · Compare`); the full names live on the
   `=======` label. If the short form reads as too terse in practice,
   try a middle tier (role + name without "Accept") in `layoutLens`.
+
+- **N-076** · raised `2026-1020-1857-push-receipt-pr-link` · value low
+  The status bar's branch label opens the "Switch branch" picker, which
+  has no way to make a branch. Add a "+ New branch…" row there (top of
+  the picker, running `menuGitNewBranch`); it would also replace the
+  "No other branches" flash on a one-branch repo with something to do.
+
+- **N-077** · raised `2026-1020-1857-push-receipt-pr-link` · value low
+  The push receipt's `[ Open link ]` / `[ Copy link ]` are click-only
+  (the receipt lets keys pass through). The keyboard path today is ≡ Git
+  "Show last push output" + selecting the URL, which is now on one row.
+  If that proves clumsy, add a ≡ Git "Copy last push link" row (dim
+  until a push printed a link).
 
 ## Validate
 
@@ -253,6 +266,18 @@ and `raised`.
   flicker, a click or key dismisses it without being eaten, and the
   unpinned Find-all list's ⟳ ◇ ◨ labels draw ABOVE the list. Where no
   motion is reported, nothing appears and nothing breaks.
+
+- **N-078** · raised `2026-1020-1857-push-receipt-pr-link` · value medium
+  The push receipt rework (ced 0.6.5) has run only in unit tests on a
+  simulated screen. Hand check a REAL first push of a new branch to
+  GitHub from the Push dialog, in tmux and in cats: the whole output is
+  shown, the `pull/new/<branch>` URL sits on one row (terminal
+  Cmd/Shift-click opens it), `[ Copy link ]` lands it on the Mac
+  clipboard over SSH (OSC 52 through tmux), `[ Open link ]` opens the
+  browser locally, the box stays ~20s / while hovered, and ≡ Git "Show
+  last push output" brings it back. Also try ≡ Git "New branch…" (bad
+  name → git's refusal modal; dirty tree → the "changes come along"
+  hint).
 
 ## Roadmap
 

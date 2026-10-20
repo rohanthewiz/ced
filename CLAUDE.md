@@ -806,8 +806,16 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   anything without consuming the key; reads `git log -1` via
   `gitCmdDoneEvent.onOK`. A successful push shows git's own output in
   the SAME panel ("Pushed", gitpushreceipt.go) via `onOKOutput` /
-  `runGitCmdOKOutput`; both open through `openGitReceipt`, one replaces
-  the other. A COMMIT receipt carries `[ Push <branch>… ]` (click only,
+  `runGitCmdOKOutput`; both open through `openGitReceipt` /
+  `openReceiptContent` (content replaced WHOLE via `receiptContent`), one
+  replaces the other. The push receipt shows ALL the output: capped only
+  by the window (`pushReceiptMaxLines`), widened to its longest line
+  (`pushReceiptWidth`) so a PR URL is never hard-wrapped. The first URL
+  on a `remote:` line (never the `To <url>` line) is the link →
+  `[ Open link ]` (`browserArgv` via `hostRunAsync`) / `[ Copy link ]`
+  (OSC 52), click only, longer window. Output is remembered
+  (`App.lastPush`) even when the panel declines; ≡ Git "Show last push
+  output" reopens it. A COMMIT receipt carries `[ Push <branch>… ]` (click only,
   keys still pass through) under the Actions row's condition
   (`hasGitPushTarget` + branch), captured at open; it runs `openGitPush`.
   Offering the button lengthens the window (`commitReceiptPushFor` 20s
@@ -1164,8 +1172,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 179 group
-  actions + 15 headers (196), height 202, dividers `[2, 5, 199]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 180 group
+  actions + 15 headers (197), height 203, dividers `[2, 5, 200]`; also
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

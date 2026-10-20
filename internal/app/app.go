@@ -737,6 +737,11 @@ func builtinMenuGroups() []menuGroup {
 			// keyboard twin of the three click targets (both panels' headers
 			// and the status bar's arrow) that open the same dialog.
 			{label: "Push…", action: (*App).menuGitPush, enabled: (*App).hasGitPushTarget},
+			// The push receipt again (gitpushreceipt.go): the receipt is
+			// dismissed by any key, and the PR link a first push prints
+			// is still wanted after that. Beside Push because it is that
+			// verb's answer; dim until a push has succeeded this session.
+			{label: "Show last push output", action: (*App).menuGitLastPush, enabled: (*App).hasLastPush},
 			{label: "Stash changes", action: (*App).menuGitStash, enabled: (*App).hasGitChanges},
 			{label: "Pop stash", action: (*App).menuGitStashPop, enabled: (*App).hasGitStash},
 			{label: "Switch branch", action: (*App).menuGitSwitchBranch, enabled: (*App).hasGitRepo},
@@ -1715,6 +1720,11 @@ type App struct {
 	// chrome like the dwell tooltip — it never takes the modal slot,
 	// and any keystroke dismisses it without being consumed.
 	commitReceipt commitReceiptState
+
+	// lastPush is the most recent successful push's output, kept so
+	// ≡ Git "Show last push output" can reopen its receipt — and the PR
+	// link in it — after the passive panel has gone (gitpushreceipt.go).
+	lastPush lastPushState
 
 	// copilot holds the GitHub Copilot sidecar state: the
 	// copilot-language-server connection and the sign-in machinery.
@@ -3483,13 +3493,24 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// interrupted by a nudge of the mouse (they only hold its expiry,
 	// above). A left press on its push button opens the push dialog —
 	// the panel is closed first, since the dialog takes the modal slot
-	// and the receipt paints below it.
+	// and the receipt paints below it. A push receipt's link buttons
+	// open or copy the remote's link; the link is read BEFORE the close
+	// that empties it.
 	if btn&(tcell.Button1|tcell.Button2|tcell.Button3) != 0 && a.commitReceiptOpen() {
 		hit := a.commitReceiptContains(x, y)
 		push := btn&tcell.Button1 != 0 && a.commitReceiptPushHit(x, y)
+		linkAct, link := "", a.commitReceipt.link
+		if btn&tcell.Button1 != 0 {
+			linkAct = a.commitReceiptLinkHit(x, y)
+		}
 		a.closeCommitReceipt()
-		if push {
+		switch {
+		case push:
 			a.openGitPush()
+		case linkAct == "open":
+			a.openReceiptLink(link)
+		case linkAct == "copy":
+			a.copyPathToSystemClipboard(link, "link")
 		}
 		if hit {
 			return

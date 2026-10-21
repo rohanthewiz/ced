@@ -96,14 +96,6 @@ plus the LSP work done in the seeding session itself
   function body stays as written. Revisit only if someone hits it; any
   change must keep the re-lex token check (`sameSQLTokens`).
 
-- **N-075** · raised `2026-1017-2208-conflict-side-names` · value low
-  The conflict lens's full labels now carry names ("Accept yours (main) ·
-  Accept picked (2a0370b) · Accept both · Compare sides") and no longer
-  fit at ~120 columns, so a typical window shows the short roles
-  (`Yours · Picked · Both · Compare`); the full names live on the
-  `=======` label. If the short form reads as too terse in practice,
-  try a middle tier (role + name without "Accept") in `layoutLens`.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -287,6 +279,14 @@ Wanted, but not next. Parked, not declined.
   ` · preview` / ` · wrap` pieces, which get no key line because their
   onClick (`toggleMarkdownView`/`toggleSoftWrap`) is not the verb the
   leader binds. Add only if someone misses them.
+
+- **N-075** · raised `2026-1017-2208-conflict-side-names` · value low
+  The conflict lens's full labels now carry names ("Accept yours (main) ·
+  Accept picked (2a0370b) · Accept both · Compare sides") and no longer
+  fit at ~120 columns, so a typical window shows the short roles
+  (`Yours · Picked · Both · Compare`); the full names live on the
+  `=======` label. If the short form reads as too terse in practice,
+  try a middle tier (role + name without "Accept") in `layoutLens`.
 
 - **N-077** · raised `2026-1020-1857-push-receipt-pr-link` · value low
   The push receipt's `[ Open link ]` / `[ Copy link ]` are click-only

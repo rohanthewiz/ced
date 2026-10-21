@@ -250,9 +250,9 @@ func TestRunGitCmdSeq_StopsAtFirstFailure(t *testing.T) {
 }
 
 // TestMenuGitSwitchBranch_PickerExcludesCurrent verifies the picker
-// contents — every local branch except the one we're on, under its own
-// title, immune to source re-collection — and that choosing an entry
-// actually moves HEAD.
+// contents — the "+ New branch…" row first, then every local branch
+// except the one we're on, under its own title, immune to source
+// re-collection — and that choosing a branch actually moves HEAD.
 func TestMenuGitSwitchBranch_PickerExcludesCurrent(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git not on PATH")
@@ -279,10 +279,11 @@ func TestMenuGitSwitchBranch_PickerExcludesCurrent(t *testing.T) {
 	if m.sourced {
 		t.Fatal("picker items must not be source-backed")
 	}
-	if len(m.items) != 1 || m.items[0].label != "feature" {
-		t.Fatalf("picker items = %+v, want just 'feature'", m.items)
+	if len(m.items) != 2 || m.items[0].label != newBranchRowLabel || m.items[1].label != "feature" {
+		t.Fatalf("picker items = %+v, want the new-branch row then 'feature'", m.items)
 	}
 
+	m.selected = 1 // past the new-branch row
 	m.runSelected(a)
 	pumpAppEvents(t, a, func() bool {
 		return strings.Contains(a.statusMsg, "Switch to feature — done")
@@ -295,10 +296,11 @@ func TestMenuGitSwitchBranch_PickerExcludesCurrent(t *testing.T) {
 	}
 }
 
-// TestMenuGitSwitchBranch_NoOtherBranches pins the empty-picker guard:
-// with nowhere to switch to, the action flashes instead of opening a
-// modal with zero rows.
-func TestMenuGitSwitchBranch_NoOtherBranches(t *testing.T) {
+// TestMenuGitSwitchBranch_OneBranchOffersNewBranch pins what replaced
+// the old "No other branches" flash: on a one-branch repo the picker
+// still opens, holding only the "+ New branch…" row, and choosing it
+// opens the New branch prompt (the picker gave up the modal slot first).
+func TestMenuGitSwitchBranch_OneBranchOffersNewBranch(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git not on PATH")
 	}
@@ -307,11 +309,21 @@ func TestMenuGitSwitchBranch_NoOtherBranches(t *testing.T) {
 	a.refreshGitStatus()
 	a.menuGitSwitchBranch()
 
-	if a.modal != nil {
-		t.Fatalf("modal = %T, want none", a.modal)
+	m := paletteOf(a)
+	if m == nil {
+		t.Fatalf("modal = %T, want the Switch branch picker", a.modal)
 	}
-	if !strings.Contains(a.statusMsg, "No other branches") {
-		t.Fatalf("statusMsg = %q, want the no-branches flash", a.statusMsg)
+	if len(m.items) != 1 || m.items[0].label != newBranchRowLabel {
+		t.Fatalf("picker items = %+v, want only the new-branch row", m.items)
+	}
+
+	m.runSelected(a)
+	p, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal after picking the row = %T, want the New branch prompt", a.modal)
+	}
+	if p.title != "New branch" {
+		t.Fatalf("prompt title = %q, want New branch", p.title)
 	}
 }
 

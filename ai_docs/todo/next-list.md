@@ -104,19 +104,6 @@ plus the LSP work done in the seeding session itself
   `=======` label. If the short form reads as too terse in practice,
   try a middle tier (role + name without "Accept") in `layoutLens`.
 
-- **N-076** · raised `2026-1020-1857-push-receipt-pr-link` · value low
-  The status bar's branch label opens the "Switch branch" picker, which
-  has no way to make a branch. Add a "+ New branch…" row there (top of
-  the picker, running `menuGitNewBranch`); it would also replace the
-  "No other branches" flash on a one-branch repo with something to do.
-
-- **N-077** · raised `2026-1020-1857-push-receipt-pr-link` · value low
-  The push receipt's `[ Open link ]` / `[ Copy link ]` are click-only
-  (the receipt lets keys pass through). The keyboard path today is ≡ Git
-  "Show last push output" + selecting the URL, which is now on one row.
-  If that proves clumsy, add a ≡ Git "Copy last push link" row (dim
-  until a push printed a link).
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -301,6 +288,13 @@ Wanted, but not next. Parked, not declined.
   onClick (`toggleMarkdownView`/`toggleSoftWrap`) is not the verb the
   leader binds. Add only if someone misses them.
 
+- **N-077** · raised `2026-1020-1857-push-receipt-pr-link` · value low
+  The push receipt's `[ Open link ]` / `[ Copy link ]` are click-only
+  (the receipt lets keys pass through). The keyboard path today is ≡ Git
+  "Show last push output" + selecting the URL, which is now on one row.
+  If that proves clumsy, add a ≡ Git "Copy last push link" row (dim
+  until a push printed a link).
+
 ## Non-goals
 
 - **N-020** · declined `2026-0910-2016-tool-windows` — polishing a bottom-docked
@@ -335,6 +329,15 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-20, `2026-1020-1913-n076-new-branch-row` —
+  **N-076** the Switch branch picker (≡ Git row and the status bar's
+  branch label) now leads with "+ New branch…" (`newBranchRowLabel`,
+  runs `menuGitNewBranch`). The picker always opens, so a one-branch
+  repo gets that row instead of the "No other branches" flash
+  (`TestMenuGitSwitchBranch_OneBranchOffersNewBranch`). The row is the
+  initial highlight, so Enter on an unfiltered list now creates rather
+  than switches.
 
 - closed 2026-10-18, `2026-1018-2021-n072-palette-hides-scattered` —
   **N-072** palette yes, completion no. Measured over the ≡ menu's 178

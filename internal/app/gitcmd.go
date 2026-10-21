@@ -425,9 +425,24 @@ func (a *App) menuGitCommit() {
 // a no-op row only clutters the list. The branch listing runs inline
 // (one fork, same budget as refreshGitStatus) because the picker needs
 // the list before it can open.
+//
+// The list leads with a "+ New branch…" row (menuGitNewBranch). The
+// status bar's branch label opens this picker, so without that row the
+// one surface a user reaches by clicking "the branch" could only move
+// between existing branches. It also means the picker always has a row
+// to offer: a one-branch repo used to get a "No other branches" flash
+// and nothing to do. The row sits FIRST so it is the steady anchor of
+// an unfiltered list rather than drifting with the branch count; typing
+// filters it out like any other row once the query stops matching.
 func (a *App) menuGitSwitchBranch() {
 	a.closeMenu()
 	items := make([]paletteItem, 0, 8)
+	// The picker closes itself before running a row (runSelected), so
+	// the New branch prompt lands in a free modal slot.
+	items = append(items, paletteItem{
+		label: newBranchRowLabel,
+		run:   (*App).menuGitNewBranch,
+	})
 	for _, br := range loadGitBranches(a.rootDir) {
 		if br == a.gitBranch {
 			continue
@@ -438,12 +453,13 @@ func (a *App) menuGitSwitchBranch() {
 			run:   func(app *App) { app.runGitCmd("Switch to "+br, "switch", br) },
 		})
 	}
-	if len(items) == 0 {
-		a.flash("No other branches")
-		return
-	}
 	a.openPicker("Switch branch", items)
 }
+
+// newBranchRowLabel is the Switch branch picker's create row. The "+"
+// sets it apart from the branch names below it as an action, and the
+// ellipsis says a prompt follows rather than an immediate git command.
+const newBranchRowLabel = "+ New branch…"
 
 // menuGitNewBranch prompts for a name, then creates that branch at HEAD
 // and switches to it in one step (`git switch --create`). Create-AND-
@@ -492,7 +508,7 @@ func newBranchHint(from string, dirty bool) string {
 
 // loadGitBranches returns the repo's local branch names, best-effort:
 // non-repos, missing git, and any other failure yield nil and the
-// caller shows "No other branches". Detached-HEAD placeholder lines
+// Switch branch picker shows only its "+ New branch…" row. Detached-HEAD placeholder lines
 // ("(HEAD detached at …)") are filtered — they name a state, not a
 // branch you can switch to.
 func loadGitBranches(rootDir string) []string {

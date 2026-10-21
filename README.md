@@ -393,6 +393,7 @@ names what it will run rather than the variable:
 │ Open in Finder       │   ← "Open file manager" off macOS
 │ Open in terminal     │
 │ Shell command…       │
+│ Refresh              │   ← re-reads the whole tree now
 │ Run in terminal…     │   ← executables
 └──────────────────────┘
 ```

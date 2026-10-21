@@ -1158,6 +1158,13 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	items = append(items, contextItem{label: fileManagerLabel(), action: ctxRevealInFileManager})
 	items = append(items, contextItem{label: "Open in terminal", action: ctxOpenTerminal})
 	items = append(items, contextItem{label: "Shell command…", action: ctxEntryCommand})
+	// Refresh (app.go, refreshTreeVerb) re-reads the whole tree, not the
+	// clicked node, so it is offered on every row: whatever row the
+	// pointer happens to be on, right-click → Refresh is the gesture.
+	// Unconditional, so it joins the fixed vocabulary at its end — after
+	// the "outside ced" family it would otherwise split, and above Run,
+	// which stays last as the one conditional row.
+	items = append(items, contextItem{label: "Refresh", action: ctxRefreshTree})
 
 	// Run sits LAST, and only on a file the tree has already marked
 	// executable (runexec.go). Appended rather than placed at the top for

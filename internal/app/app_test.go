@@ -400,7 +400,7 @@ func TestMenuModalRect_Centered(t *testing.T) {
 	// The menu (141 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 203
+	a.height = 204
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -2123,16 +2123,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 203 {
-		t.Errorf("modalHeight = %d, want 203", h)
+	if h != 204 {
+		t.Errorf("modalHeight = %d, want 204", h)
 	}
-	if got := len(items); got != 197 {
-		t.Errorf("row count = %d, want 197 (2 top-zone + 180 group actions + 15 headers)", got)
+	if got := len(items); got != 198 {
+		t.Errorf("row count = %d, want 198 (2 top-zone + 181 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (200) — headers separate the
+	// one setting off the headerless Quit group (201) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 200}
+	wantDiv := []int{2, 5, 201}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2283,7 +2283,7 @@ func menuRowIndex(items []menuItemDef, label string) int {
 // expands it again.
 func TestMenuHeaderClickToggles(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	a.height = 203 // whole menu fits, scroll 0
+	a.height = 204 // whole menu fits, scroll 0
 	a.openMenu()
 
 	// clickGitHeader hits the current on-screen position of the Git
@@ -2716,8 +2716,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 206 { // 203 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 206", h)
+	if h != 207 { // 204 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 207", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -3171,7 +3171,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 203
+	a.height = 204
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}
@@ -3414,5 +3414,54 @@ func TestWheelOutsideModal_ShiftRotatesToHorizontal(t *testing.T) {
 	a.wheelOutsideModal(x, y, tcell.WheelDown)
 	if tab.ScrollX == 0 {
 		t.Fatal("Shift+wheel must scroll the editor horizontally")
+	}
+}
+
+// TestRefreshTree_PicksUpExternalFiles pins both refresh doors — the tree
+// popup's Refresh row and ≡ View "Refresh file tree": a file written
+// behind ced's back appears in the tree at once rather than on the next
+// background tick, whichever node the popup was opened on.
+func TestRefreshTree_PicksUpExternalFiles(t *testing.T) {
+	dir := t.TempDir()
+	a := newTestApp(t, dir)
+	hasChild := func(name string) bool {
+		for _, c := range a.tree.Root.Children {
+			if c.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "late.txt"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if hasChild("late.txt") {
+		t.Fatal("precondition: the tree should not see the file before a refresh")
+	}
+	a.openTreeContext(a.tree.Root, 5, 5)
+	m := contextOf(a)
+	m.hover = len(m.items) - 1
+	if m.items[m.hover].label != "Refresh" {
+		t.Fatalf("last root row = %q, want Refresh", m.items[m.hover].label)
+	}
+	m.activate(a)
+	if !hasChild("late.txt") {
+		t.Fatal("Refresh row should load the new file into the tree")
+	}
+	if a.statusMsg != "File tree refreshed" {
+		t.Fatalf("flash = %q, want the refresh confirmation", a.statusMsg)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "later.txt"), []byte("y"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a.menuOpen = true
+	menuItemByLabel(t, a, "Refresh file tree").action(a)
+	if !hasChild("later.txt") {
+		t.Fatal("≡ Refresh file tree should load the new file into the tree")
+	}
+	if a.menuOpen {
+		t.Fatal("the ≡ row should close the menu")
 	}
 }

@@ -435,6 +435,10 @@ func builtinMenuGroups() []menuGroup {
 			// Keyboard focus for the tree (treenav.go) — sits under the
 			// row that shows/hides it, same subject one step deeper.
 			{label: "Focus file tree", shortcut: "esc T", action: (*App).menuFocusTree, enabled: alwaysTrue},
+			// On-demand refresh (refreshTreeVerb): twin of the tree
+			// popup's Refresh row, since right-click is never the only
+			// path. No leader — the flat table is out of letters.
+			{label: "Refresh file tree", action: (*App).menuRefreshTree, enabled: alwaysTrue},
 			// Auto-fit sits under the tree rows it governs, above the
 			// exec-marks row: all three are about the sidebar, and this
 			// one is the only path back after a splitter drag turned it
@@ -5174,13 +5178,31 @@ func (a *App) menuToggleLineComment() {
 	a.flash("Toggled line comment")
 }
 
-// menuRefreshTree forces an immediate sidebar reload. Currently unwired
-// from the menu — the 10s background poller covers the common case — but
-// the method is kept so re-adding the menu row (see menuItems) only
-// requires uncommenting one line.
+// menuRefreshTree is the ≡ View "Refresh file tree" row — the menu twin
+// of the tree popup's Refresh row (ctxRefreshTree), so a terminal that
+// swallows right-click still has a door.
 func (a *App) menuRefreshTree() {
 	a.closeMenu()
-	a.tree.Refresh()
+	a.refreshTreeVerb()
+}
+
+// ctxRefreshTree is the tree popup's Refresh row. The clicked node is
+// ignored: a refresh is about the whole tree, and a partial one would
+// leave git marks and the finder index disagreeing with the rows above.
+func ctxRefreshTree(a *App, _ *filetree.Node) {
+	a.refreshTreeVerb()
+}
+
+// refreshTreeVerb forces, on demand, the pipeline the 10s background tick
+// runs (refreshTreeNow): tree rows (expansion kept), git status, finder
+// index, and open tabs reconciled with disk. The tick covers the common
+// case; this is for the moment something outside ced (a git checkout, a
+// generator, an scp) just wrote files and waiting up to ten seconds reads
+// as "ced didn't notice". The whole pipeline rather than tree.Refresh
+// alone, because a tree that shows a new file while its tab, git mark and
+// finder entry stay stale is a worse kind of out-of-date.
+func (a *App) refreshTreeVerb() {
+	a.refreshTreeNow()
 	a.flash("File tree refreshed")
 }
 

@@ -731,3 +731,103 @@ func TestMenuToggleFindRegex(t *testing.T) {
 		t.Fatal("menu row did not flip regex")
 	}
 }
+
+// TestFindPrompt_CaseAndWordChips: the text-find prompts carry the bar's
+// other two options too, keyed by the bar's own chords — alt+c / alt+w
+// flip the App's toggles (the ones the search reads when it runs), never
+// leak into the field, and the labels report the new state.
+func TestFindPrompt_CaseAndWordChips(t *testing.T) {
+	a := seedFindApp(t, "foo")
+	a.openFindPrompt("Find all in file", "lists every occurrence", "foo", nil)
+	m, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the prompt", a.modal)
+	}
+	labels := func() []string {
+		var out []string
+		for _, e := range m.extras {
+			out = append(out, e.label(a))
+		}
+		return out
+	}
+	if got := strings.Join(labels(), " "); got != "[regex: off] [word: off] [case: off]" {
+		t.Fatalf("chips (right to left) = %q", got)
+	}
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModAlt))
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModAlt))
+	if !a.findCase || !a.findWord || a.findRegex {
+		t.Fatalf("case=%v word=%v regex=%v, want only case + word on", a.findCase, a.findWord, a.findRegex)
+	}
+	if got := strings.Join(labels(), " "); got != "[regex: off] [word: on] [case: on]" {
+		t.Fatalf("chips after alt+c / alt+w = %q", got)
+	}
+	if m.field.String() != "foo" {
+		t.Fatalf("a chord leaked into the field: %q", m.field.String())
+	}
+	if got := a.findOptions(); !got.CaseSensitive || !got.WholeWord {
+		t.Fatalf("findOptions = %+v, want the search to read the flipped toggles", got)
+	}
+}
+
+// TestFindPrompt_ChipWidthsCoverEveryLabel: each chip's reserved width
+// holds its longest label, so a toggle never draws past its click target.
+func TestFindPrompt_ChipWidthsCoverEveryLabel(t *testing.T) {
+	a := seedFindApp(t, "foo")
+	a.openFindPrompt("T", "H", "", nil)
+	m := a.modal.(*promptModal)
+	for _, on := range []bool{false, true} {
+		a.findCase, a.findWord, a.findRegex = on, on, on
+		for i, e := range m.extras {
+			if n := runeLen(e.label(a)); n > e.width {
+				t.Errorf("extras[%d] %q is %d cells, reserved %d", i, e.label(a), n, e.width)
+			}
+		}
+	}
+}
+
+// TestFindPrompt_AllChipsFitEightyColumns: on the most common terminal
+// width the prompt grows to carry all three chips, drawn left to right
+// as case · word · regex (regex keeps the right edge, like the bar's .*),
+// and each is clickable. Fails if the chip widths creep past what 80
+// columns can hold.
+func TestFindPrompt_AllChipsFitEightyColumns(t *testing.T) {
+	a := seedFindApp(t, "foo")
+	a.screen.SetSize(80, 24)
+	a.width, a.height = 80, 24
+	a.openFindPrompt("Find all in file", "lists every occurrence", "", nil)
+	m := a.modal.(*promptModal)
+	rects := m.extraRects(a)
+	if len(rects) != 3 {
+		t.Fatalf("%d of 3 chips fit at 80 columns (prompt width %d)", len(rects), m.width(a))
+	}
+	if !(rects[2].x < rects[1].x && rects[1].x < rects[0].x) {
+		t.Fatalf("chip order = %+v, want case < word < regex left to right", rects)
+	}
+	m.draw(a)
+	if !screenHasText(t, a, "[case: off] [word: off] [regex: off]") {
+		t.Error("the three chips are not drawn side by side")
+	}
+	m.handleMouse(a, rects[2].x, rects[2].y, tcell.Button1)
+	if !a.findCase || a.modal != m {
+		t.Fatal("clicking [case] did not flip match case in place")
+	}
+}
+
+// TestFindPrompt_NarrowKeepsRegexAndEveryChord: a terminal too narrow to
+// grow the prompt drops chips from the LEFT, so regex — the one that
+// changes what the typed text means — survives; the dropped chips' chords
+// still work.
+func TestFindPrompt_NarrowKeepsRegexAndEveryChord(t *testing.T) {
+	a := seedFindApp(t, "foo")
+	a.screen.SetSize(60, 24)
+	a.width, a.height = 60, 24
+	a.openFindPrompt("T", "H", "", nil)
+	m := a.modal.(*promptModal)
+	if rects := m.extraRects(a); len(rects) != 1 {
+		t.Fatalf("%d chips drawn at 60 columns, want regex alone", len(rects))
+	}
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'w', tcell.ModAlt))
+	if !a.findWord {
+		t.Fatal("alt+w did nothing once its chip was dropped")
+	}
+}

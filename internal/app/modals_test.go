@@ -17,6 +17,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
@@ -559,6 +560,29 @@ func TestPromptModalRect(t *testing.T) {
 	x, y, _, _ = m.rect(a)
 	if x != 0 || y != 0 {
 		t.Fatalf("clamp: (%d,%d)", x, y)
+	}
+}
+
+// TestPromptDraw_ClipsALongHint: a hint wider than the box (a deep
+// folder path, several chords) stops at the border with an ellipsis
+// instead of painting across the frame.
+func TestPromptDraw_ClipsALongHint(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openPrompt("T", strings.Repeat("h", 200), "", nil)
+	m := promptOf(a)
+	m.draw(a)
+	mx, my, mw, _ := m.rect(a)
+	scr := a.screen.(tcell.SimulationScreen)
+	scr.Show()
+	cells, w, _ := scr.GetContents()
+	if r := cells[(my+3)*w+mx+mw-1].Runes; len(r) == 0 || r[0] == 'h' {
+		t.Fatalf("hint overwrote the right border: %q", r)
+	}
+	if r := cells[(my+3)*w+mx+mw-3].Runes; len(r) == 0 || r[0] != '…' {
+		t.Fatalf("last hint cell = %q, want the ellipsis", r)
+	}
+	if r := cells[(my+3)*w+mx+mw+1].Runes; len(r) != 0 && r[0] == 'h' {
+		t.Fatal("hint painted outside the modal")
 	}
 }
 

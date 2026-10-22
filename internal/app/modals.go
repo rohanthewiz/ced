@@ -473,7 +473,11 @@ func (m *promptModal) draw(a *App) {
 	c.drawFrame(a.screen, mx, my, mw, mh, m.title)
 
 	if m.hint != "" {
-		drawAt(a.screen, mx+2, my+3, m.hint, c.muted)
+		// Clipped at the border: a hint built from a path (a deep folder
+		// in "Find all in folder") or one naming several chords can be
+		// wider than the box, and drawAt would paint it across the frame
+		// and onto whatever is beside the modal.
+		drawAt(a.screen, mx+2, my+3, clipRunes(m.hint, mw-4), c.muted)
 	}
 
 	fy, start, end := m.fieldSpan(a)

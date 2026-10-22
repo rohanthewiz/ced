@@ -421,6 +421,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   bar `.*` (Alt+r, rightmost), ≡ Find "Regex: …", and the
   `openFindPrompt` chip on the three text-find prompts. Regex lists'
   filter box opens EMPTY (`findAllFilterSeed`: it's a substring box).
+- Find prompts carry all three options as chips (case · word · regex,
+  alt+c/w/r like the bar; regex is `extras[0]`, rightmost, last dropped
+  when narrow). Chip widths are exact so all three fit 80 columns
+  (`TestFindPrompt_AllChipsFitEightyColumns`) — don't add padding.
 - Bar height: always ask `findBarRows()`. Inputs are `textField`. In-bar
   Alt chords + clickable `Aa` / `|W|` + ≡ rows.
 - Replace = one undo step; ReplaceAll re-scans and goes bottom-up via

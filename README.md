@@ -879,8 +879,10 @@ the row reads **Find in project…**.
 The list and project search match the way the bar's `Aa`, `|W|` and `.*`
 are set when they run — the title says "(match case)" / "(whole word)" /
 "(regex)" when any is on, and `⟳` re-runs under the same options. Their
-prompts carry a `[regex: off]` chip (`Alt+r`) so you can switch to a
-pattern without leaving the prompt; a regex list's filter box opens
+prompts carry the same three as chips — `[case: off]` (`Alt+c`),
+`[word: off]` (`Alt+w`) and `[regex: off]` (`Alt+r`), the bar's own
+keys — so you can change how the search matches without leaving the
+prompt; a regex list's filter box opens
 empty (it filters by plain text), and its replace box takes `$1` too.
 `Esc j` (or
 `≡` → **Go to line…**, or `⌘G`) jumps to a line, and accepts

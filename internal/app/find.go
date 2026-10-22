@@ -257,31 +257,49 @@ func findOptionsNote(opts editor.FindOptions) string {
 	return " (" + strings.Join(parts, ", ") + ")"
 }
 
-// findPromptRegexChipWidth is the regex chip's reserved width — the
-// longer of its two labels, so flipping it never leaves a stale cell.
-const findPromptRegexChipWidth = 13 // len("[regex: off]") + 1 spare
+// The find prompts' chip widths: each is its longest label exactly
+// ("[regex: off]", "[case: off]", "[word: off]"), so flipping one never
+// leaves a stale cell (padTo fills the shorter "on" form). No spare cell:
+// with all three the prompt grows to 79 columns, which is what still fits
+// an 80-column terminal — one spare per chip would push it to 82 and the
+// modal would refuse to grow, dropping two of the three on the most
+// common terminal size.
+const (
+	findPromptRegexChipWidth = 12
+	findPromptCaseChipWidth  = 11
+	findPromptWordChipWidth  = 11
+)
 
 // openFindPrompt is openSearchPrompt for a TEXT search (Find all in
-// file, Find in project / folder): find history, plus a [regex: on|off]
-// chip on the button row with alt+r as its key twin.
+// file, Find in project / folder): find history, plus the find bar's
+// three options as chips on the button row, keyed by the bar's own
+// chords so the hands don't have to learn a second set:
 //
-// The chip exists because a prompt owns the keyboard: the ≡ Find row
-// "Regex: …" can't be reached from inside one, and a query typed as a
-// pattern needs a way to be READ as one without cancelling, opening
-// the menu, and starting over (the keyboard-owning-surface rule). It
-// flips the App's own toggle rather than a prompt-local copy — the
-// callbacks read app.findOptions() when the search runs, and the bar
-// opened next should agree with the search just run.
+//	[case: off] [word: off] [regex: off]      alt+c   alt+w   alt+r
 //
-// Only regex gets a chip: it is the toggle that changes what the typed
-// TEXT means. Match case / whole word narrow a search whose query reads
-// the same either way, and stay where they were (≡ Find, the bar).
+// The chips exist because a prompt owns the keyboard: the ≡ Find rows
+// ("Match case: …", "Whole word: …", "Regex: …") can't be reached from
+// inside one, so a search whose options are wrong would otherwise mean
+// cancelling, opening the menu, and starting over (the
+// keyboard-owning-surface rule). Each flips the App's own toggle rather
+// than a prompt-local copy — the callbacks read app.findOptions() when
+// the search runs, and the bar opened next should agree with the search
+// just run.
+//
+// Order: extras lay out right to left (promptModal.extras), so regex is
+// extras[0] and keeps the right edge — the same place the bar puts `.*`
+// — and is the LAST to be dropped on a terminal too narrow for all
+// three. That priority is deliberate: regex changes what the typed TEXT
+// means, while case / word only narrow a query that reads the same
+// either way. All three chords work whether or not their chip is drawn
+// (fireExtraKey), so the narrow case loses only the click target.
 func (a *App) openFindPrompt(title, hint, initial string, callback func(*App, string)) {
 	a.openModal(&promptModal{
 		title: title,
-		// Kept short so the hint row's right-aligned "↑ recent" still
-		// fits beside it at the prompt's width.
-		hint:     hint + " · alt+r regex",
+		// Each key named beside its word; the draw clips the hint at the
+		// border on a prompt too narrow to grow, and the right-aligned
+		// "↑ recent" gives way first.
+		hint:     hint + " · alt+c case · alt+w word · alt+r regex",
 		field:    newTextField(initial),
 		callback: callback,
 		histKind: history.SearchFind,
@@ -290,6 +308,16 @@ func (a *App) openFindPrompt(title, hint, initial string, callback func(*App, st
 			width: findPromptRegexChipWidth,
 			key:   'r',
 			run:   (*App).toggleFindRegex,
+		}, {
+			label: func(app *App) string { return "[word: " + onOff(app.findWord) + "]" },
+			width: findPromptWordChipWidth,
+			key:   'w',
+			run:   (*App).toggleFindWord,
+		}, {
+			label: func(app *App) string { return "[case: " + onOff(app.findCase) + "]" },
+			width: findPromptCaseChipWidth,
+			key:   'c',
+			run:   (*App).toggleFindCase,
 		}},
 	})
 }

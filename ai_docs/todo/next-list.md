@@ -114,14 +114,6 @@ plus the LSP work done in the seeding session itself
   status, New branch) into one "Git…" picker row to keep the popup
   short.
 
-- **N-083** · raised `2026-1021-2124-regex-find` · value low
-  The three text-find prompts (Find all in file, Find in project, Find
-  all in folder) carry only a `[regex: …]` chip (alt+r,
-  `openFindPrompt`). Match case / whole word are still reachable only
-  from the find bar and ≡ Find, which a prompt can't reach. Offered as a
-  follow-up, not picked; two more chips would be a few lines in
-  `openFindPrompt` (watch the prompt width and the "↑ recent" hint).
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -375,6 +367,17 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-22, `2026-1022-1207-n083-find-prompt-chips` —
+  **N-083** the three text-find prompts now carry `[case: …]` (alt+c)
+  and `[word: …]` (alt+w) beside `[regex: …]` (alt+r) — the bar's own
+  chords, flipping the App's toggles. Regex stays rightmost and is the
+  last chip dropped on a narrow terminal; chip widths are exact so all
+  three fit 80 columns (the prompt grows to 79,
+  `TestFindPrompt_AllChipsFitEightyColumns`). The hint names all three
+  keys; the prompt's hint row is now clipped at the border
+  (`TestPromptDraw_ClipsALongHint`), which also fixes a deep folder path
+  in "Find all in folder" painting across the frame.
 
 - closed 2026-10-20, `2026-1020-1913-n076-new-branch-row` —
   **N-076** the Switch branch picker (≡ Git row and the status bar's

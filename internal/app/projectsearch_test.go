@@ -733,8 +733,8 @@ func TestFindInProject_PromptCarriesTheRegexChip(t *testing.T) {
 	if !ok {
 		t.Fatalf("modal = %T, want the prompt", a.modal)
 	}
-	if len(m.extras) != 1 || m.extras[0].label(a) != "[regex: off]" {
-		t.Fatalf("extras = %+v, want the regex chip", m.extras)
+	if len(m.extras) != 3 || m.extras[0].label(a) != "[regex: off]" {
+		t.Fatalf("extras = %+v, want the regex chip rightmost of three", m.extras)
 	}
 	field := m.field.String()
 	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModAlt))

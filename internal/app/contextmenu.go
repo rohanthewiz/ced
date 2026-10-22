@@ -284,7 +284,17 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	// row about the clicked LINE — the caret is already there, so it shows
 	// that line's commit without switching the blame column on. A saved
 	// file only; an untitled buffer has no history to blame.
+	//
+	// "Show change…" (hunkview.go) goes first of all, and only when the
+	// clicked line is part of a change: it is the same question the
+	// change bar answers, asked of the line rather than of a one-cell
+	// gutter target.
 	if a.hasGitRepo() {
+		if a.hasHunkAtCaret() {
+			items = append(items, editorContextItem{
+				label: "Show change…", action: (*App).menuShowHunkAtCaret, enabled: alwaysTrue,
+			})
+		}
 		if tab.Path != "" {
 			items = append(items, editorContextItem{
 				label: "Blame this line…", action: (*App).menuBlameCommit, enabled: alwaysTrue,

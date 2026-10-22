@@ -232,6 +232,9 @@ func (a *App) handleGitDiff(e *gitDiffEvent) {
 	if a.fileDiffs == nil {
 		a.fileDiffs = map[string][]diffHunk{}
 	}
+	// A disk diff replaces whatever a hunk revert had made exact for the
+	// buffer (hunkview.go): these hunks are measured on the saved file.
+	delete(a.fileDiffsRev, e.path)
 	if len(e.hunks) == 0 {
 		delete(a.fileDiffs, e.path)
 		return

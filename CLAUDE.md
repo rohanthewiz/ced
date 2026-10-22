@@ -107,6 +107,7 @@ internal/app/
   conflictsides.go            Names the two sides per operation (yours/theirs/picked/upstream)
   cherrypick.go               Multi-commit cherry-pick dialog
   hunktip.go                  Change-bar popup: a hunk's diff, scrollable
+  hunkview.go                 Change view: one hunk's diff + original, Revert
   terminal.go termdiag.go runexec.go openineditor.go
   hostopen.go openterminal.go entrycmd.go  Open in Finder / terminal; {{DIR_ENTRY}} shell command
   autosave.go format.go validate.go syntax.go zipops.go
@@ -578,6 +579,21 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Code clipped (`clipRunes`), never wrapped; tabs → 4 cells; body capped
   at `hunkTipMaxRows` then scrolls, announced by ▴/▾ on its own border
   and "a–b of n" in the bottom border. NOT an overflow-marker surface.
+- A LEFT press inside the popup opens the change view (hunkview.go):
+  the hunk's diff, then the ORIGINAL in place (buffer context, shown
+  only when the hunk's place verifies), `[ Revert change ]` alt+r /
+  `[ Close ]` (default). Doors: that click, ≡ Git "Show change at
+  caret…" (gated `hasDiffHunks`, flashes off a change), editor
+  right-click "Show change…" (changed lines only, first git row).
+  "Original" = the gutter's baseline, the INDEX. Revert edits the
+  BUFFER as one undo step (`ApplyMultiEdit`), never saves, no confirm.
+  The hunk is VERIFIED before writing: "+" lines must sit at Start..End;
+  a removal (nothing to verify) needs `hunksMatchBuffer` — clean with no
+  stamp, or `fileDiffsRev[path] == EditRev` (stamped by a revert on
+  exact hunks, -1 otherwise, cleared by `handleGitDiff`). Mismatch →
+  refuse with the reason, never guess. EOF "\ No newline" states are
+  restored exactly (`TestRevertHunk_RoundTripsRealDiffs`).
+  `dropRevertedHunk` removes the bar and shifts later hunks by the delta.
 
 ### Data formats (internal/format/kinds.go, inprocess.go, validate.go, app/validate.go)
 - `format.kindFor` is the ONE table for formatter + in-process pass +
@@ -1172,8 +1188,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 181 group
-  actions + 15 headers (198), height 204, dividers `[2, 5, 201]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 182 group
+  actions + 15 headers (199), height 205, dividers `[2, 5, 202]`; also
+  the Git fold count in `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,

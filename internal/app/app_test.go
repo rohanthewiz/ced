@@ -400,7 +400,7 @@ func TestMenuModalRect_Centered(t *testing.T) {
 	// The menu (141 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 204
+	a.height = 205
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -2123,16 +2123,16 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 204 {
-		t.Errorf("modalHeight = %d, want 204", h)
+	if h != 205 {
+		t.Errorf("modalHeight = %d, want 205", h)
 	}
-	if got := len(items); got != 198 {
-		t.Errorf("row count = %d, want 198 (2 top-zone + 181 group actions + 15 headers)", got)
+	if got := len(items); got != 199 {
+		t.Errorf("row count = %d, want 199 (2 top-zone + 182 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (201) — headers separate the
+	// one setting off the headerless Quit group (202) — headers separate the
 	// rest.
-	wantDiv := []int{2, 5, 201}
+	wantDiv := []int{2, 5, 202}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2228,17 +2228,17 @@ func TestMenuLayout_CollapseHidesSectionRows(t *testing.T) {
 	a.customActions = nil
 	before, _, hBefore := a.menuLayout()
 
-	// Git is the largest section (34 rows) — a clear signal.
+	// Git is the largest section (35 rows) — a clear signal.
 	a.toggleMenuSection("Git")
 	if !a.sectionCollapsed("Git") {
 		t.Fatal("toggle should collapse Git")
 	}
 	after, _, hAfter := a.menuLayout()
-	if got := len(before) - len(after); got != 34 {
-		t.Errorf("collapsing Git hid %d rows, want 34", got)
+	if got := len(before) - len(after); got != 35 {
+		t.Errorf("collapsing Git hid %d rows, want 35", got)
 	}
-	if got := hBefore - hAfter; got != 34 {
-		t.Errorf("height shrank by %d, want 34", got)
+	if got := hBefore - hAfter; got != 35 {
+		t.Errorf("height shrank by %d, want 35", got)
 	}
 	// The Git header itself must survive so the user can unfold.
 	if menuHeaderIndex(after, "Git") < 0 {
@@ -2283,7 +2283,7 @@ func menuRowIndex(items []menuItemDef, label string) int {
 // expands it again.
 func TestMenuHeaderClickToggles(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	a.height = 204 // whole menu fits, scroll 0
+	a.height = 205 // whole menu fits, scroll 0
 	a.openMenu()
 
 	// clickGitHeader hits the current on-screen position of the Git
@@ -2716,8 +2716,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 207 { // 204 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 207", h)
+	if h != 208 { // 205 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 208", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -3171,7 +3171,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 204
+	a.height = 205
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

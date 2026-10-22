@@ -25,10 +25,15 @@
 //   - CLICK the bar: opens at once, a second click closes. The mouse door
 //     for a terminal that reports presses but no motion (macOS
 //     Terminal.app), the diagnostic tooltip's rule (diagtip.go).
+//   - CLICK INSIDE the popup: opens the change view (hunkview.go) —
+//     the same diff, the original in place, and Revert. The popup is
+//     passive and can't own a button, so the click is the way in; the
+//     bottom border says so.
 //   - The keyboard already has the full diff: ≡ Git "Show file's
-//     uncommitted changes" opens the changes panel on this file. A
-//     popup that keys could scroll would have to own the keyboard, and
-//     every passive layer here gives it straight back.
+//     uncommitted changes" opens the changes panel on this file, and
+//     "Show change at caret…" opens the change view. A popup that keys
+//     could scroll would have to own the keyboard, and every passive
+//     layer here gives it straight back.
 //
 // Design choices:
 //
@@ -51,8 +56,9 @@
 //     would slide the bar away from the box that describes it. A wheel
 //     anywhere else closes the popup and scrolls what it always did.
 //   - **Any key, any press closes it**, the passive-layer contract. A
-//     press inside the box is swallowed: it covers code the user cannot
-//     see, so it must not move the caret there.
+//     press inside the box never reaches the code under it (it must not
+//     move the caret onto text the user cannot see); a LEFT press there
+//     opens the change view instead.
 //   - **The bar loses to a diagnostic dot.** The mark cell shows one mark
 //     by precedence (git < validate < plugin < LSP), and on a line with a
 //     dot that cell answers with the diagnostic tooltip; showing the
@@ -93,6 +99,9 @@ const (
 
 	// hunkTipTabWidth is how many cells a tab in a diff line becomes.
 	hunkTipTabWidth = 4
+
+	// hunkTipClickHint names what a click inside the popup does.
+	hunkTipClickHint = "click: revert…"
 )
 
 // hunkTipEvent is the dwell timer's tick; seq pins it to the pointer
@@ -121,6 +130,7 @@ type hunkTipState struct {
 	path   string
 	title  string
 	lines  []string // body rows, tabs expanded, in diff order
+	hunk   diffHunk // what a click inside the box opens (hunkview.go)
 	scroll int      // first body row shown
 	ax, ay int      // the anchor cell: the bar the popup describes
 	box    struct{ x, y, w, h int }
@@ -154,7 +164,15 @@ func (a *App) noteHunkTipPointer(x, y int, btn tcell.ButtonMask) bool {
 	if btn != tcell.ButtonNone {
 		hit := inBox && btn&(tcell.Button1|tcell.Button2|tcell.Button3) != 0
 		a.hunkTip.pressClosed = a.hunkTip.open && x == a.hunkTip.ax && y == a.hunkTip.ay
+		// Captured before the close, which forgets it. The popup only
+		// shows for the active tab (hunkTipVisible), so that is the tab.
+		h := a.hunkTip.hunk
 		a.closeHunkTip()
+		if hit && btn&tcell.Button1 != 0 {
+			if t := a.activeTabPtr(); t != nil {
+				a.openHunkView(t, h)
+			}
+		}
 		return hit
 	}
 
@@ -201,6 +219,7 @@ func (a *App) armHunkTip() {
 func (a *App) closeHunkTip() {
 	a.hunkTip.open = false
 	a.hunkTip.lines = nil
+	a.hunkTip.hunk = diffHunk{}
 	a.hunkTip.scroll = 0
 	a.hunkTip.box = struct{ x, y, w, h int }{}
 	a.hunkTip.seq++
@@ -236,6 +255,7 @@ func (a *App) openHunkTipAt(x, y int) bool {
 	a.hunkTip.path = a.activeTabPtr().Path
 	a.hunkTip.title = hunkTipTitle(h)
 	a.hunkTip.lines = lines
+	a.hunkTip.hunk = h
 	a.hunkTip.scroll = 0
 	a.hunkTip.ax, a.hunkTip.ay = x, y
 	// One box at a time over the editor: the others are about cells this
@@ -477,6 +497,13 @@ func (a *App) drawHunkTip() {
 		}
 		ln := a.hunkTip.lines[idx]
 		drawAt(a.screen, mx+2, my+1+i, clipRunes(ln, textW), hunkTipLineStyle(ln, a.theme, c.bg))
+	}
+
+	// The way into the change view, bottom-left in the border. Drawn
+	// before the scroll position so a narrow box keeps the position (the
+	// position is about this box; the hint can be learned elsewhere).
+	if hint := " " + hunkTipClickHint + " "; runeLen(hint)+2 < mw {
+		drawAt(a.screen, mx+1, my+mh-1, hint, c.muted)
 	}
 
 	if n > body {

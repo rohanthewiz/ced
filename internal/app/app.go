@@ -690,6 +690,11 @@ func builtinMenuGroups() []menuGroup {
 		{title: "Git", collapsible: true, items: []menuItemDef{
 			{label: "Next change", shortcut: "esc h", action: (*App).menuNextHunk, enabled: (*App).hasDiffHunks},
 			{label: "Previous change", shortcut: "esc H", action: (*App).menuPrevHunk, enabled: (*App).hasDiffHunks},
+			// The change on the caret's line, its original, and Revert
+			// (hunkview.go) — the keyboard door to what clicking the
+			// change popup opens. Gated like its two neighbours; a caret
+			// off every change gets the flash, not a dimmed row.
+			{label: "Show change at caret…", action: (*App).menuShowHunkAtCaret, enabled: (*App).hasDiffHunks},
 			// Blame sits with the other two rows that are about the file
 			// in front of you rather than about the repository
 			// (gitblame.go). The toggle shows the column; the row under
@@ -1661,6 +1666,12 @@ type App struct {
 	// only from the main loop (handleGitDiff); nil until the first
 	// diff lands, and nil-map reads are safe, so no eager init needed.
 	fileDiffs map[string][]diffHunk
+	// fileDiffsRev records, per path, the buffer EditRev for which
+	// fileDiffs[path] was made exact by ced's own hunk revert
+	// (hunkview.go dropRevertedHunk) rather than by a disk diff. Lets a
+	// second revert trust the shifted hunks on a buffer the first one
+	// dirtied; handleGitDiff clears it, since a fresh diff is disk again.
+	fileDiffsRev map[string]int
 
 	// The blame layer (gitblame.go). blameOn is the toggle; fileBlames
 	// holds the finished annotations per path; blameSeq is the

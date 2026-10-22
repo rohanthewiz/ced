@@ -684,3 +684,175 @@ func TestTreeContext_ScrollsWhenTallerThanTheWindow(t *testing.T) {
 		t.Fatalf("Enter on the scrolled-to row ran %q", ran)
 	}
 }
+
+// TestEditorContextNewBranchRow pins the right-click repo rows: absent
+// outside a git work tree (no dead rows), "Git status…" then "New
+// branch…" last inside one, and activating New branch closes the popup
+// and opens the same "New branch" prompt as the ≡ Git row.
+func TestEditorContextNewBranchRow(t *testing.T) {
+	root := t.TempDir()
+	p := writeStatusTestFile(t, root, "br.txt", "alpha\n")
+	a := newTestApp(t, root)
+	a.openFile(p)
+
+	m := openEditorContextAt(t, a, 1, 0)
+	if i := contextRowIndex(m, "New branch"); i >= 0 {
+		t.Fatalf("New branch offered outside a repo: %v", labelsOf(m))
+	}
+	a.closeModal()
+
+	a.gitIsRepo = true
+	m = openEditorContextAt(t, a, 1, 0)
+	i := contextRowIndex(m, "New branch")
+	if i != len(m.items)-1 {
+		t.Fatalf("New branch row at %d, want last; rows: %v", i, labelsOf(m))
+	}
+	if s := contextRowIndex(m, "Git status"); s != i-1 {
+		t.Fatalf("Git status row at %d, want just above New branch; rows: %v", s, labelsOf(m))
+	}
+	m.hover = i
+	m.activate(a)
+	pm, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal after the row = %T, want the New branch prompt", a.modal)
+	}
+	if pm.title != "New branch" {
+		t.Fatalf("prompt title = %q, want New branch", pm.title)
+	}
+}
+
+// TestEditorContextGitStatusRow runs the right-click "Git status…" row
+// against a real repo: the popup gives up the modal slot first, so the
+// report (which declines an occupied slot) lands in the info modal.
+func TestEditorContextGitStatusRow(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	repo := initRepo(t)
+	p := writeStatusTestFile(t, repo, "st.txt", "alpha\n")
+	a := newTestApp(t, repo)
+	a.refreshGitStatus()
+	a.openFile(p)
+
+	m := openEditorContextAt(t, a, 1, 0)
+	i := contextRowIndex(m, "Git status")
+	if i < 0 {
+		t.Fatalf("no Git status row in a repo; rows: %v", labelsOf(m))
+	}
+	m.hover = i
+	m.activate(a)
+	pumpAppEvents(t, a, func() bool {
+		cm, ok := a.modal.(*confirmModal)
+		return ok && cm.info
+	})
+	if cm := a.modal.(*confirmModal); cm.title != "Git status" {
+		t.Fatalf("info title = %q, want Git status", cm.title)
+	}
+}
+
+// localXForCol finds the editor-local screen x that maps to buffer
+// (line 0, col), so a right-click can land inside a selection whatever
+// the gutter width.
+func localXForCol(t *testing.T, a *App, tab *editor.Tab, col int) int {
+	t.Helper()
+	_, _, ew, eh := a.editorRect()
+	for x := 0; x < ew; x++ {
+		if pos, ok := tab.HitTest(x, 0, ew, eh); ok && pos.Line == 0 && pos.Col == col {
+			return x
+		}
+	}
+	t.Fatalf("could not locate buffer col %d on screen", col)
+	return -1
+}
+
+// TestEditorContextToggleCommentRow pins the right-click comment row:
+// offered only where the language has a line-comment prefix, and
+// activating it comments the clicked line.
+func TestEditorContextToggleCommentRow(t *testing.T) {
+	root := t.TempDir()
+	txt := writeStatusTestFile(t, root, "plain.txt", "alpha\n")
+	src := writeStatusTestFile(t, root, "code.go", "package main\n")
+	a := newTestApp(t, root)
+
+	a.openFile(txt)
+	m := openEditorContextAt(t, a, 1, 0)
+	if i := contextRowIndex(m, "Toggle line comment"); i >= 0 {
+		t.Fatalf("comment row offered on a .txt: %v", labelsOf(m))
+	}
+	a.closeModal()
+
+	a.openFile(src)
+	tab := a.activeTabPtr()
+	m = openEditorContextAt(t, a, 1, 0)
+	i := contextRowIndex(m, "Toggle line comment")
+	if i < 0 {
+		t.Fatalf("no comment row on a .go file: %v", labelsOf(m))
+	}
+	m.hover = i
+	m.activate(a)
+	if got := tab.Buffer.Lines[0]; !strings.HasPrefix(got, "//") {
+		t.Fatalf("line 0 = %q, want it commented", got)
+	}
+}
+
+// TestEditorContextBlameRow pins "Blame this line…": absent outside a
+// repo, and inside one it leads the git rows (Blame, Git status, New
+// branch).
+func TestEditorContextBlameRow(t *testing.T) {
+	root := t.TempDir()
+	p := writeStatusTestFile(t, root, "b.txt", "alpha\n")
+	a := newTestApp(t, root)
+	a.openFile(p)
+
+	m := openEditorContextAt(t, a, 1, 0)
+	if i := contextRowIndex(m, "Blame this line"); i >= 0 {
+		t.Fatalf("blame row offered outside a repo: %v", labelsOf(m))
+	}
+	a.closeModal()
+
+	a.gitIsRepo = true
+	m = openEditorContextAt(t, a, 1, 0)
+	b := contextRowIndex(m, "Blame this line")
+	s := contextRowIndex(m, "Git status")
+	n := contextRowIndex(m, "New branch")
+	if b < 0 || s != b+1 || n != s+1 {
+		t.Fatalf("git rows at blame=%d status=%d branch=%d, want consecutive; rows: %v", b, s, n, labelsOf(m))
+	}
+}
+
+// TestEditorContextSelectionHandOffRows pins the Summarize / GoNotes
+// rows: present only while the right-click keeps a selection (it landed
+// inside one), labelled for the selection, and gone after a click
+// elsewhere collapses it — the whole-file forms stay ≡ AI rows.
+func TestEditorContextSelectionHandOffRows(t *testing.T) {
+	root := t.TempDir()
+	p := writeStatusTestFile(t, root, "sel.txt", "alpha beta gamma\n")
+	a := newTestApp(t, root)
+	a.openFile(p)
+	tab := a.activeTabPtr()
+
+	m := openEditorContextAt(t, a, 1, 0)
+	for _, prefix := range []string{"Summarize", "Send selection to GoNotes"} {
+		if i := contextRowIndex(m, prefix); i >= 0 {
+			t.Fatalf("%q row offered with no selection: %v", prefix, labelsOf(m))
+		}
+	}
+	a.closeModal()
+
+	tab.Anchor = editor.Position{Line: 0, Col: 6}
+	tab.Cursor = editor.Position{Line: 0, Col: 10}
+	m = openEditorContextAt(t, a, localXForCol(t, a, tab, 8), 0)
+	if i := contextRowIndex(m, "Summarize selection (1 lines)"); i < 0 {
+		t.Fatalf("no Summarize selection row: %v", labelsOf(m))
+	}
+	gi := contextRowIndex(m, "Send selection to GoNotes")
+	if gi < 0 {
+		t.Fatalf("no GoNotes row: %v", labelsOf(m))
+	}
+	// The GoNotes row opens its title prompt (no network until submit).
+	m.hover = gi
+	m.activate(a)
+	if _, ok := a.modal.(*promptModal); !ok {
+		t.Fatalf("modal after the GoNotes row = %T, want the note prompt", a.modal)
+	}
+}

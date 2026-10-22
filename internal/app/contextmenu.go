@@ -166,6 +166,16 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 		{label: "Select all", action: (*App).selectAllInFile, enabled: alwaysTrue},
 		{label: "Compare selection with paste…", action: (*App).compareSelectionWithPaste, enabled: (*App).hasSelection},
 	}
+	// Toggle line comment, the ≡ Edit row's twin (Esc /). It aims at the
+	// clicked line, or every line of a selection the click landed inside.
+	// Appended rather than joining the fixed vocabulary above because it
+	// needs a known comment prefix for the file's language: on a .txt or
+	// an unknown extension it would be a permanently dimmed row.
+	if a.hasCommentableTab() {
+		items = append(items, editorContextItem{
+			label: "Toggle line comment", action: (*App).menuToggleLineComment, enabled: alwaysTrue,
+		})
+	}
 	// The cats split (catssplit.go), appended conditionally like the search
 	// row below rather than listed above with the fixed vocabulary: a row
 	// that would be dimmed in every terminal but one does not earn a
@@ -190,6 +200,29 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 		items = append(items, editorContextItem{
 			label: "Ask cats chat about selection", action: (*App).menuCatsAskChat, enabled: alwaysTrue,
 		})
+	}
+	// Handing the selection to ced's own chat (summarize.go, Esc a z) and
+	// to GoNotes (gonotes.go, Esc a n). Both verbs fall back to the WHOLE
+	// FILE when nothing is selected, but here they appear only WITH a
+	// selection: a right-click is about a spot in the text, and "summarize
+	// this file" is a ≡ AI question, not a pointer one. The selection
+	// survives the click only when it landed inside it (see the caret
+	// rule above), which is exactly when these rows are about what the
+	// user is pointing at. Labels come from the ≡ rows' own labelFor
+	// ("Summarize selection (N lines)…"), resolved now — the popup is
+	// rebuilt on every open. Neither asks whether the agent / server is
+	// up: both verbs discover that by trying and explain the refusal.
+	if tab.HasSelection() {
+		if a.canSummarize() {
+			items = append(items, editorContextItem{
+				label: a.summarizeLabel(), action: (*App).menuSummarize, enabled: alwaysTrue,
+			})
+		}
+		if a.canSendToNotes() {
+			items = append(items, editorContextItem{
+				label: a.sendToNotesLabel(), action: (*App).menuSendToNotes, enabled: alwaysTrue,
+			})
+		}
 	}
 	// The markdown viewer (markdown.go). Appended conditionally like the
 	// cats rows rather than joining the dimmed fixed vocabulary above:
@@ -233,6 +266,34 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 			action:  func(app *App) { app.startProjectSearch(word, app.findOptions()) },
 			enabled: (*App).hasProjectSearch,
 		})
+	}
+	// The repo rows: Git status (gitstatusreport.go) and New branch
+	// (gitcmd.go), right-click twins of the ≡ Git rows of the same names
+	// (New branch is also the Switch branch picker's "+ New branch…") —
+	// same verbs, so the report, the prompt and git's own refusals are
+	// identical at every door. Appended only inside a work tree, for the
+	// cats rows' reason: rows that are dead in every non-repo folder don't
+	// earn a slot in a popup this small. Last, because they act on the
+	// repo rather than on the spot in the text every row above aims at;
+	// the read-only report leads, the one that changes HEAD closes the
+	// list. activate closes the popup before running a row, so the prompt
+	// opens in a free modal slot and the status report (which declines an
+	// occupied slot) finds it empty.
+	//
+	// "Blame this line…" (gitblame.go) leads the block: it is the one git
+	// row about the clicked LINE — the caret is already there, so it shows
+	// that line's commit without switching the blame column on. A saved
+	// file only; an untitled buffer has no history to blame.
+	if a.hasGitRepo() {
+		if tab.Path != "" {
+			items = append(items, editorContextItem{
+				label: "Blame this line…", action: (*App).menuBlameCommit, enabled: alwaysTrue,
+			})
+		}
+		items = append(items,
+			editorContextItem{label: "Git status…", action: (*App).menuGitStatus, enabled: alwaysTrue},
+			editorContextItem{label: "New branch…", action: (*App).menuGitNewBranch, enabled: alwaysTrue},
+		)
 	}
 	// A click inside a live merge conflict leads with the ways to settle
 	// it (conflictview.go) — the right-click twin of the lens, and the one

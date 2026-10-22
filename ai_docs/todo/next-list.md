@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-079**
+**Next ID: N-082**
 
 ## Open
 
@@ -54,7 +54,10 @@ plus the LSP work done in the seeding session itself
   `2026-1011-2142-n054-n036-n052-theme-counts-readme-leaders-conflicted-tabs`
   the LEADER table is pinned (`TestREADME_LeaderTableListsEveryBinding`:
   every top-level binding and every static `Esc a` sub-binding needs a
-  row); prose sections and ≡ rows are still unguarded.
+  row); prose sections and ≡ rows are still unguarded. Hit again in
+  `2026-1021-2049-editor-context-rows-change-view`: the change view (hunkview.go) landed
+  without its README sentence, caught only by this list's re-check and
+  added to the Change bars bullet by hand.
 
 - **N-005** · raised `2026-0913-1919-cats-plugin` · value low
   cats-side decision: should two ced launch paths share ONE sidebar group
@@ -95,6 +98,21 @@ plus the LSP work done in the seeding session itself
   language, a string to the SQL grammar). A long DDL line or a messy
   function body stays as written. Revisit only if someone hits it; any
   change must keep the re-lex token check (`sameSQLTokens`).
+
+- **N-080** · raised `2026-1021-2049-editor-context-rows-change-view` · value medium
+  `summarizeLabel` (summarize.go) says "Summarize selection (1 lines)…"
+  for a one-line selection — visible in the ≡ AI row and, since this
+  session, the editor right-click row. Use `plural` like the other
+  counted labels.
+
+- **N-081** · raised `2026-1021-2049-editor-context-rows-change-view` · value low
+  The editor right-click menu carries six LSP verbs; "Go to
+  implementation", "Go to type definition" and "Highlight symbol uses"
+  aim at the symbol under the caret just the same but are ≡ Code rows
+  only. Suggested this session alongside the rows that shipped; not
+  picked. If they go in, fold the git rows (Show change, Blame, Git
+  status, New branch) into one "Git…" picker row to keep the popup
+  short.
 
 ## Validate
 
@@ -257,6 +275,17 @@ and `raised`.
   last push output" brings it back. Also try ≡ Git "New branch…" (bad
   name → git's refusal modal; dirty tree → the "changes come along"
   hint).
+
+- **N-079** · raised `2026-1021-2049-editor-context-rows-change-view` · value low
+  The change view (hunkview.go) ran in the real binary through run-ced
+  (≡ Git "Show change at caret…" drew the diff + original; `{esc}r` as
+  alt+r reverted the buffer, the bar went, disk untouched). Hand check in
+  tmux and cats: a real click INSIDE the change-bar popup opens it (the
+  popup's "click: revert…" hint reads), alt+r arrives through tmux's Esc
+  folding, the editor right-click rows added the same session (Show
+  change…, Blame this line…, Git status…, New branch…, Toggle line
+  comment, Summarize selection…, Send selection to GoNotes…) appear
+  where expected, and a removal revert after a save lands in place.
 
 ## Roadmap
 

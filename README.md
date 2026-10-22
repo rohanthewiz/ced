@@ -62,6 +62,10 @@ The goals, in order:
   the gutter (green added, blue changed, red `▁` where lines were
   removed). Rest the pointer on a bar — or click it — and a popup shows
   that change's diff; the scroll wheel scrolls it when it's long.
+  Click inside the popup (or right-click the line → *Show change…*, or
+  ≡ Git → *Show change at caret…*) for the change view: the diff, the
+  original lines in place, and **Revert change** (`alt+r`), which puts
+  the original back as one `Undo`-able edit without saving.
   `Esc h` / `Esc H` jump between changes.
 - **Cherry-picking and merge conflicts** — pick several commits from
   another branch in one dialog (already-applied ones marked, likely

@@ -1648,3 +1648,77 @@ func TestFindAll_RestoreGivesBackTheTabsOptions(t *testing.T) {
 		t.Errorf("tab find state = %q/%d, want its own \"counter\" search back", tab.FindQuery, len(tab.FindMatches))
 	}
 }
+
+// TestFindAll_RegexListsVariableWidthHits: with the regex toggle on, the
+// list matches a pattern, each row carries its own hit width, the title
+// says "(regex)", and the filter box opens EMPTY — a pattern is not a
+// substring the box could keep narrowing by.
+func TestFindAll_RegexListsVariableWidthHits(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.findRegex = true
+	m := openFindAllT(t, a, `count( :=|\+\+)`)
+	if len(m.rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (count := and count++)", len(m.rows))
+	}
+	if m.rows[0].width != 8 || m.rows[1].width != 7 {
+		t.Errorf("widths = %d, %d, want 8, 7", m.rows[0].width, m.rows[1].width)
+	}
+	if !strings.Contains(m.titleText(), "(regex)") {
+		t.Errorf("title %q does not name the regex option", m.titleText())
+	}
+	if m.filter.String() != "" || m.seed != "" {
+		t.Errorf("filter seeded with %q under regex", m.filter.String())
+	}
+	for _, r := range m.rows {
+		if m.rowStale(a, r) {
+			t.Errorf("fresh regex row at line %d reads stale", r.line)
+		}
+	}
+}
+
+// TestFindAll_BadRegexExplainsInsteadOfMissing: a pattern that doesn't
+// compile flashes the reason and opens nothing — never "no occurrences".
+func TestFindAll_BadRegexExplainsInsteadOfMissing(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.findRegex = true
+	a.showFindAll(`count(`)
+	if a.modal != nil {
+		t.Fatalf("a bad pattern opened %T", a.modal)
+	}
+	if !strings.Contains(a.statusMsg, "bad regex") || strings.Contains(a.statusMsg, "no occurrences") {
+		t.Fatalf("flash = %q, want the regex error", a.statusMsg)
+	}
+}
+
+// TestFindAll_RegexReplaceExpandsCaptures: "Replace in N" under regex
+// expands $1 per row, against the buffer it edits.
+func TestFindAll_RegexReplaceExpandsCaptures(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	a.findRegex = true
+	a.findCase = true
+	m := openFindAllT(t, a, `(count)(\+\+)`)
+	plan, skipped, err := m.buildReplacePlan(a, "${1} += 1 // was $2")
+	if err != nil || skipped != 0 || plan.count != 1 {
+		t.Fatalf("plan = %+v, skipped %d, err %v", plan, skipped, err)
+	}
+	if ok, reason := a.commitWorkspaceEdit(plan); !ok {
+		t.Fatalf("commit failed: %s", reason)
+	}
+	if !strings.Contains(tab.Buffer.String(), "count += 1 // was ++") {
+		t.Fatalf("buffer did not get the expanded text:\n%s", tab.Buffer.String())
+	}
+}
+
+// TestFindAll_RegexReplaceWithQueryTextIsAllowed: the "replacement is
+// the search text" refusal is a literal-mode rule — under regex,
+// replacing what `c.unt` found with "c.unt" is a real edit.
+func TestFindAll_RegexReplaceWithQueryTextIsAllowed(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.findRegex = true
+	m := openFindAllT(t, a, `c.unt`)
+	m.replace = newTextField(`c.unt`)
+	m.confirmReplace(a)
+	if strings.Contains(a.statusMsg, "is the search text") {
+		t.Fatalf("regex replace refused as a no-op: %q", a.statusMsg)
+	}
+}

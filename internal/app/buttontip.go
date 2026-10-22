@@ -341,7 +341,7 @@ func (a *App) tabBarButtonTips() []buttonTip {
 
 	if ox, oy, ow, hidden, ok := a.tabOverflowRect(); ok {
 		tips = append(tips, buttonTip{rect: btnRect{x: ox, y: oy, w: ow},
-			text: []string{plural(hidden, "more tab", "more tabs") + " — switch tab…"},
+			text:  []string{plural(hidden, "more tab", "more tabs") + " — switch tab…"},
 			keyFn: (*App).menuSwitchTab})
 	}
 
@@ -426,6 +426,7 @@ func (a *App) findBarButtonTips() []buttonTip {
 	tips := []buttonTip{
 		{rect: a.findCaseRect(), text: []string{"Match case: " + onOff(a.findCase)}, keys: "Alt+c"},
 		{rect: a.findWordRect(), text: []string{"Whole word: " + onOff(a.findWord)}, keys: "Alt+w"},
+		{rect: a.findRegexRect(), text: []string{"Regex: " + onOff(a.findRegex), "Replace takes $1, ${name}"}, keys: "Alt+r"},
 		{rect: a.findHistBtnRect(findFocusQuery), text: []string{"Recent searches"}, keys: "↑ in the field"},
 	}
 	if a.findReplaceOpen {

@@ -30,6 +30,11 @@
 // of a different length invalidates them by a different amount per line,
 // which is the flavor of bug that survives a whole test suite because it
 // only shows up when the replacement isn't the same width as the query.
+//
+// UNDER REGEX the replacement is a template, expanded per hit by
+// Matcher.Expand ($1, ${name}, $$) — so each hit can get different text,
+// which is one more reason the bottom-up order above is load-bearing.
+// In literal mode the replacement goes in verbatim.
 
 package editor
 
@@ -51,6 +56,13 @@ func (t *Tab) ReplaceCurrent(replacement string) bool {
 		return false
 	}
 	m := t.FindMatches[t.FindIndex]
+	// Expanded against the hit BEFORE it is overwritten — the captures
+	// live in the text the insert is about to replace. A pattern that
+	// fails to compile can't have produced FindMatches, so the error is
+	// only possible on a hand-built tab; it degrades to verbatim.
+	if mt, err := NewMatcher(t.FindQuery, t.FindOpts); err == nil {
+		replacement = mt.Expand(t.Buffer.LineRunes(m.Line), m.Col, m.Width, replacement)
+	}
 	// Secondary carets would fan the insert out to every one of them —
 	// "replace this hit" must touch exactly one place, so drop them the
 	// same way any other explicit jump does.
@@ -80,7 +92,11 @@ func (t *Tab) ReplaceAll(replacement string) int {
 	// Re-scan rather than trusting FindMatches: the cached list is what
 	// the last SetFindQuery produced, and any edit since then (a manual
 	// keystroke, a previous single replace) may have moved it.
-	matches := FindAllOpts(t.Buffer, t.FindQuery, t.FindOpts)
+	mt, err := NewMatcher(t.FindQuery, t.FindOpts)
+	if err != nil {
+		return 0
+	}
+	matches := mt.All(t.Buffer)
 	if len(matches) == 0 {
 		return 0
 	}
@@ -94,9 +110,11 @@ func (t *Tab) ReplaceAll(replacement string) int {
 	edits := make([]Edit, len(matches))
 	for i, m := range matches {
 		edits[i] = Edit{
-			Start:   MatchPosition(m),
-			End:     MatchEndPosition(m),
-			NewText: replacement,
+			Start: MatchPosition(m),
+			End:   MatchEndPosition(m),
+			// Expanded now, against the untouched buffer: every hit's
+			// captures are read before any edit lands.
+			NewText: mt.Expand(t.Buffer.LineRunes(m.Line), m.Col, m.Width, replacement),
 		}
 	}
 	if _, ok := t.ApplyMultiEdit(edits); !ok {

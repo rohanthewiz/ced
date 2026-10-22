@@ -514,12 +514,13 @@ func builtinMenuGroups() []menuGroup {
 			// Replace opens the same bar with its second row showing —
 			// one surface, two rows, rather than a separate dialog.
 			{label: "Replace in file", shortcut: "esc e", action: (*App).menuReplace, enabled: (*App).hasReplaceable},
-			// The two search modifiers. They have buttons in the bar, but
+			// The three search modifiers. They have buttons in the bar, but
 			// the bar OWNS the keyboard while it's open, so these rows are
 			// the only way to set one from the menu — and the only path at
 			// all on a terminal that eats clicks (the macOS-Terminal rule).
 			{action: (*App).menuToggleFindCase, enabled: alwaysTrue, labelFor: (*App).findCaseToggleLabel},
 			{action: (*App).menuToggleFindWord, enabled: alwaysTrue, labelFor: (*App).findWordToggleLabel},
+			{action: (*App).menuToggleFindRegex, enabled: alwaysTrue, labelFor: (*App).findRegexToggleLabel},
 			{label: "Find file in project", shortcut: "esc p", action: (*App).menuFindFile, enabled: (*App).hasFinder},
 			// Text across the whole tree, listed in the same panel the
 			// in-file list uses (projectsearch.go). Sits under its
@@ -1541,8 +1542,9 @@ type App struct {
 	// the USER searches, not a property of one file — flipping "match
 	// case" then switching tabs must not silently switch it back.
 	// Session-only, deliberately not persisted: see applyFindOptions.
-	findCase bool
-	findWord bool
+	findCase  bool
+	findWord  bool
+	findRegex bool
 
 	// Auto-scroll while drag-selecting past the editor's top/bottom edge.
 	// lastDragX/Y is the most recent mouse position so the auto-scroll

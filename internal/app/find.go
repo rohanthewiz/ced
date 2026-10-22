@@ -31,6 +31,7 @@ package app
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
@@ -56,10 +57,12 @@ const (
 // right):
 //
 //	Aa   match case          |W|  whole word (the bars are the boundaries)
+//	.*   regex (the pattern every regex user reads as "anything")
 //	Replace  swap this hit   All  swap every hit
 const (
 	findCaseLabel    = " Aa "
 	findWordLabel    = " |W| "
+	findRegexLabel   = " .* "
 	findReplaceLabel = " Replace "
 	findAllLabel     = " All "
 )
@@ -213,7 +216,21 @@ func (a *App) applyFindOptions() {
 // lists quietly matched a case-insensitive substring whatever the
 // toggles said.
 func (a *App) findOptions() editor.FindOptions {
-	return editor.FindOptions{CaseSensitive: a.findCase, WholeWord: a.findWord}
+	return editor.FindOptions{CaseSensitive: a.findCase, WholeWord: a.findWord, Regex: a.findRegex}
+}
+
+// findLiteral turns text the user POINTED AT (a selection, the word
+// under the caret) into a query that finds exactly that text under the
+// current options: verbatim normally, regexp.QuoteMeta'd while regex is
+// on. Without it, selecting "foo.Bar(" and pressing Esc-f in regex mode
+// would search for a broken pattern — or worse, a working one that
+// matches "fooXBar". Text the user TYPED (the bar's own field, a
+// history entry) never comes through here; it is already a pattern.
+func (a *App) findLiteral(text string) string {
+	if a.findRegex && text != "" {
+		return regexp.QuoteMeta(text)
+	}
+	return text
 }
 
 // findOptionsNote names the non-default options as a parenthetical —
@@ -231,10 +248,50 @@ func findOptionsNote(opts editor.FindOptions) string {
 	if opts.WholeWord {
 		parts = append(parts, "whole word")
 	}
+	if opts.Regex {
+		parts = append(parts, "regex")
+	}
 	if len(parts) == 0 {
 		return ""
 	}
 	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+// findPromptRegexChipWidth is the regex chip's reserved width — the
+// longer of its two labels, so flipping it never leaves a stale cell.
+const findPromptRegexChipWidth = 13 // len("[regex: off]") + 1 spare
+
+// openFindPrompt is openSearchPrompt for a TEXT search (Find all in
+// file, Find in project / folder): find history, plus a [regex: on|off]
+// chip on the button row with alt+r as its key twin.
+//
+// The chip exists because a prompt owns the keyboard: the ≡ Find row
+// "Regex: …" can't be reached from inside one, and a query typed as a
+// pattern needs a way to be READ as one without cancelling, opening
+// the menu, and starting over (the keyboard-owning-surface rule). It
+// flips the App's own toggle rather than a prompt-local copy — the
+// callbacks read app.findOptions() when the search runs, and the bar
+// opened next should agree with the search just run.
+//
+// Only regex gets a chip: it is the toggle that changes what the typed
+// TEXT means. Match case / whole word narrow a search whose query reads
+// the same either way, and stay where they were (≡ Find, the bar).
+func (a *App) openFindPrompt(title, hint, initial string, callback func(*App, string)) {
+	a.openModal(&promptModal{
+		title: title,
+		// Kept short so the hint row's right-aligned "↑ recent" still
+		// fits beside it at the prompt's width.
+		hint:     hint + " · alt+r regex",
+		field:    newTextField(initial),
+		callback: callback,
+		histKind: history.SearchFind,
+		extras: []promptExtra{{
+			label: func(app *App) string { return "[regex: " + onOff(app.findRegex) + "]" },
+			width: findPromptRegexChipWidth,
+			key:   'r',
+			run:   (*App).toggleFindRegex,
+		}},
+	})
 }
 
 // toggleFindCase flips case sensitivity and re-runs the search.
@@ -246,6 +303,16 @@ func (a *App) toggleFindCase() {
 // toggleFindWord flips whole-word matching and re-runs the search.
 func (a *App) toggleFindWord() {
 	a.findWord = !a.findWord
+	a.applyFindOptions()
+}
+
+// toggleFindRegex flips regex matching and re-runs the search. The
+// query text is left exactly as typed in both directions — rewriting it
+// (quoting on the way in, unquoting on the way out) would surprise the
+// user who flipped the toggle precisely to have what they typed read the
+// other way.
+func (a *App) toggleFindRegex() {
+	a.findRegex = !a.findRegex
 	a.applyFindOptions()
 }
 
@@ -334,6 +401,12 @@ func (a *App) menuToggleFindWord() {
 	a.toggleFindWord()
 }
 
+// menuToggleFindRegex flips regex matching from the ≡ menu.
+func (a *App) menuToggleFindRegex() {
+	a.closeMenu()
+	a.toggleFindRegex()
+}
+
 // findCaseToggleLabel / findWordToggleLabel render as the state, not the
 // action, unlike most toggle rows: "Match case: on" answers "how am I
 // searching?" at a glance, which is the question a search modifier
@@ -345,6 +418,11 @@ func (a *App) findCaseToggleLabel() string {
 // findWordToggleLabel names the whole-word state; see findCaseToggleLabel.
 func (a *App) findWordToggleLabel() string {
 	return "Whole word: " + onOff(a.findWord)
+}
+
+// findRegexToggleLabel names the regex state; see findCaseToggleLabel.
+func (a *App) findRegexToggleLabel() string {
+	return "Regex: " + onOff(a.findRegex)
 }
 
 // onOff renders a boolean the way the menu's state-labelled rows do.
@@ -398,20 +476,28 @@ func (a *App) findBarContains(x, y int) bool {
 	return x >= bx && x < bx+bw && y >= by && y < by+bh
 }
 
-// findCaseRect / findWordRect return the two option buttons, right-
-// aligned on the query row just left of the counter. Both are btnRects
-// so draw and hit-test read the same geometry (the btnRect house rule).
+// findCaseRect / findWordRect / findRegexRect return the three option
+// buttons, right-aligned on the query row just left of the counter, in
+// the order the common editors use (Aa |W| .*). All are btnRects so draw
+// and hit-test read the same geometry (the btnRect house rule). Aa stays
+// the LEFTMOST, so it is still the edge the field and labels stop at.
 func (a *App) findCaseRect() btnRect {
 	w := a.findWordRect()
 	return btnRect{x: w.x - runeLen(findCaseLabel), y: w.y, w: runeLen(findCaseLabel)}
 }
 
-// findWordRect is the whole-word button, the rightmost control on the
-// query row — every other right-hand item (counter, hint) is a label and
-// yields to it on a narrow window.
+// findWordRect is the whole-word button, between Aa and .*.
 func (a *App) findWordRect() btnRect {
+	r := a.findRegexRect()
+	return btnRect{x: r.x - runeLen(findWordLabel), y: r.y, w: runeLen(findWordLabel)}
+}
+
+// findRegexRect is the regex button, the rightmost control on the query
+// row — every other right-hand item (counter, hint) is a label and
+// yields to the toggles on a narrow window.
+func (a *App) findRegexRect() btnRect {
 	bx, by, bw, _ := a.findBarRect()
-	return btnRect{x: bx + bw - runeLen(findWordLabel) - 1, y: by, w: runeLen(findWordLabel)}
+	return btnRect{x: bx + bw - runeLen(findRegexLabel) - 1, y: by, w: runeLen(findRegexLabel)}
 }
 
 // findReplaceBtnRect / findAllBtnRect return the replace row's two
@@ -559,7 +645,7 @@ func (a *App) drawFindHist() {
 //	Up                      recent searches / replacements for the
 //	                        focused row (searchhistory.go)
 //	Down                    list every occurrence (findall.go)
-//	Alt+c / Alt+w           toggle match case / whole word
+//	Alt+c / Alt+w / Alt+r   toggle match case / whole word / regex
 //	Alt+a                   replace all
 //	everything else         standard single-line editing in the focused
 //	                        field (live re-search on the query row)
@@ -588,6 +674,9 @@ func (a *App) handleFindKey(ev *tcell.EventKey) {
 			return
 		case 'w':
 			a.toggleFindWord()
+			return
+		case 'r':
+			a.toggleFindRegex()
 			return
 		case 'a':
 			if a.findReplaceOpen {
@@ -665,6 +754,9 @@ func (a *App) findBarPress(x, y int) bool {
 		return false
 	}
 	switch {
+	case a.findRegexRect().contains(x, y):
+		a.toggleFindRegex()
+		return true
 	case a.findWordRect().contains(x, y):
 		a.toggleFindWord()
 		return true
@@ -716,7 +808,7 @@ func (a *App) findBarPress(x, y int) bool {
 
 // drawFindBar renders the bar at the bottom of the editor area:
 //
-//	Find: <input>            Aa  |W|   3 of 12   Enter: next · Esc: close
+//	Find: <input>            Aa  |W|  .*   3 of 12   Enter: next · Esc: close
 //	Repl: <input>                            Replace   All
 //
 // The hint on the right is dropped first when the window is too narrow to
@@ -753,6 +845,7 @@ func (a *App) drawFindBar() {
 	// Option toggles: lit when active, muted when not.
 	a.drawFindToggle(a.findCaseRect(), findCaseLabel, a.findCase)
 	a.drawFindToggle(a.findWordRect(), findWordLabel, a.findWord)
+	a.drawFindToggle(a.findRegexRect(), findRegexLabel, a.findRegex)
 
 	// Counter, then hint — each drawn only if what's left of the row can
 	// hold it, walking leftwards from the toggles.
@@ -813,6 +906,13 @@ func (a *App) drawFindToggle(r btnRect, label string, on bool) {
 
 // findCounterText renders the "N of M" indicator. Returns "" when there
 // is no query so the renderer can skip drawing the field entirely.
+//
+// A regex that doesn't compile says WHY in the counter's place ("regex:
+// missing closing )"): mid-typing, `(foo` is the normal state of a
+// pattern, and a bare red "no results" would read as "your file has no
+// foo" when the truth is "I haven't searched yet". It is still drawn in
+// the no-match red (findHasNoMatches) — nothing is highlighted, and the
+// colour should say so.
 func (a *App) findCounterText() string {
 	if len(a.findField.value) == 0 {
 		return ""
@@ -820,6 +920,9 @@ func (a *App) findCounterText() string {
 	tab := a.activeTabPtr()
 	if tab == nil {
 		return ""
+	}
+	if err := editor.FindQueryError(a.findField.String(), a.findOptions()); err != nil {
+		return "regex: " + err.Error()
 	}
 	if len(tab.FindMatches) == 0 {
 		return "no results"

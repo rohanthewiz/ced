@@ -707,3 +707,41 @@ func TestCtxFindInFolder_IgnoresFiles(t *testing.T) {
 		t.Errorf("a file node opened %T", a.modal)
 	}
 }
+
+// TestStartProjectSearch_BadRegexFlashesBeforeTheWalk: a pattern that
+// doesn't compile is explained up front; no scan is started.
+func TestStartProjectSearch_BadRegexFlashesBeforeTheWalk(t *testing.T) {
+	a, _ := projectSearchApp(t)
+	before := a.projectSearchSeq
+	a.startProjectSearch("needle(", editor.FindOptions{Regex: true})
+	if a.projectSearchSeq != before || a.projectSearchActive != 0 {
+		t.Fatal("a bad pattern started a walk")
+	}
+	if !strings.Contains(a.statusMsg, "bad regex") {
+		t.Fatalf("flash = %q, want the regex error", a.statusMsg)
+	}
+}
+
+// TestFindInProject_PromptCarriesTheRegexChip: the prompt owns the
+// keyboard, so it carries its own door onto the regex toggle — alt+r
+// flips the App's option (the one the search reads when it runs).
+func TestFindInProject_PromptCarriesTheRegexChip(t *testing.T) {
+	a, root := projectSearchApp(t)
+	a.openFile(filepath.Join(root, "alpha.go"))
+	a.menuFindInProject()
+	m, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the prompt", a.modal)
+	}
+	if len(m.extras) != 1 || m.extras[0].label(a) != "[regex: off]" {
+		t.Fatalf("extras = %+v, want the regex chip", m.extras)
+	}
+	field := m.field.String()
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModAlt))
+	if !a.findRegex || m.extras[0].label(a) != "[regex: on]" {
+		t.Fatal("alt+r did not flip the regex option")
+	}
+	if m.field.String() != field {
+		t.Fatalf("alt+r leaked into the field: %q → %q", field, m.field.String())
+	}
+}

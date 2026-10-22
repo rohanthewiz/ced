@@ -621,3 +621,113 @@ func TestFindOptions_MirrorsTheToggles(t *testing.T) {
 		t.Errorf("findOptions = %+v", got)
 	}
 }
+
+// TestFindKey_AltRTogglesRegex: Alt+r is the bar's regex chord, and the
+// query is re-read as a pattern on the spot — each hit with its own
+// width.
+func TestFindKey_AltRTogglesRegex(t *testing.T) {
+	a := seedFindApp(t, "a1 a22 a.b")
+	a.openFind()
+	for _, r := range `a\d+` {
+		a.handleFindKey(tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone))
+	}
+	if got := len(a.activeTabPtr().FindMatches); got != 0 {
+		t.Fatalf("literal `a\\d+` matched %d, want 0", got)
+	}
+	a.handleFindKey(tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModAlt))
+	if !a.findRegex {
+		t.Fatal("alt+r did not set regex")
+	}
+	got := a.activeTabPtr().FindMatches
+	if len(got) != 2 || got[0].Width != 2 || got[1].Width != 3 {
+		t.Fatalf("regex matches = %+v, want widths 2 and 3", got)
+	}
+	if a.findField.String() != `a\d+` {
+		t.Fatalf("toggling rewrote the query: %q", a.findField.String())
+	}
+}
+
+// TestFindBarPress_RegexButton: the .* button is clickable, sits right
+// of |W|, and is drawn.
+func TestFindBarPress_RegexButton(t *testing.T) {
+	a := seedFindApp(t, "foo")
+	a.openFind()
+	r, w := a.findRegexRect(), a.findWordRect()
+	if r.x <= w.x || r.y != w.y {
+		t.Fatalf(".* at %+v should sit right of |W| at %+v", r, w)
+	}
+	if !a.findBarPress(r.x, r.y) || !a.findRegex {
+		t.Fatal("clicking .* did not set regex")
+	}
+	a.drawFindBar()
+	if !screenHasText(t, a, ".*") {
+		t.Error("bar does not show the regex button")
+	}
+}
+
+// TestCounterText_BadRegexSaysWhy: a half-typed pattern shows the
+// parser's reason in the counter's place, in the no-match colour —
+// not a bare "no results".
+func TestCounterText_BadRegexSaysWhy(t *testing.T) {
+	a := seedFindApp(t, "(foo")
+	a.findRegex = true
+	a.openFind()
+	a.findField = newTextField("(foo")
+	a.findApplyQuery()
+	if got := a.findCounterText(); got != "regex: missing closing )" {
+		t.Fatalf("counter = %q", got)
+	}
+	if !a.findHasNoMatches() {
+		t.Error("a bad pattern should paint in the no-match colour")
+	}
+	a.findRegex = false
+	a.applyFindOptions()
+	if got := a.findCounterText(); got != "1 of 1" {
+		t.Fatalf("literal counter = %q, want 1 of 1", got)
+	}
+}
+
+// TestOpenFind_RegexQuotesTheSelection: pointed-at text is QUOTED under
+// regex so it still finds exactly itself — "a.b" must not match "axb".
+func TestOpenFind_RegexQuotesTheSelection(t *testing.T) {
+	a := seedFindApp(t, "a.b axb")
+	a.findRegex = true
+	tab := a.activeTabPtr()
+	tab.Anchor = editor.Position{Line: 0, Col: 0}
+	tab.Cursor = editor.Position{Line: 0, Col: 3}
+	a.openFind()
+	if got := a.findField.String(); got != `a\.b` {
+		t.Fatalf("seed = %q, want the quoted selection", got)
+	}
+	if got := len(tab.FindMatches); got != 1 {
+		t.Fatalf("quoted seed matched %d, want 1", got)
+	}
+}
+
+// TestFindOptionsNote_NamesRegex extends the parenthetical to the third
+// toggle, in toggle order.
+func TestFindOptionsNote_NamesRegex(t *testing.T) {
+	if got := findOptionsNote(editor.FindOptions{Regex: true}); got != " (regex)" {
+		t.Errorf("got %q", got)
+	}
+	if got := findOptionsNote(editor.FindOptions{CaseSensitive: true, Regex: true}); got != " (match case, regex)" {
+		t.Errorf("got %q", got)
+	}
+	a := &App{findRegex: true}
+	if got := a.findOptions(); got != (editor.FindOptions{Regex: true}) {
+		t.Errorf("findOptions = %+v", got)
+	}
+}
+
+// TestMenuToggleFindRegex: the ≡ Find row flips the option and labels
+// itself with the state.
+func TestMenuToggleFindRegex(t *testing.T) {
+	a := seedFindApp(t, "x")
+	if a.findRegexToggleLabel() != "Regex: off" {
+		t.Fatalf("label = %q", a.findRegexToggleLabel())
+	}
+	a.menuToggleFindRegex()
+	if !a.findRegex || a.findRegexToggleLabel() != "Regex: on" {
+		t.Fatal("menu row did not flip regex")
+	}
+}

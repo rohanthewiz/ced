@@ -99,7 +99,7 @@ func (a *App) menuFindInProject() {
 	// Captured before openPrompt for the reason openFindAll documents:
 	// opening a modal clears the find bar that may be seeding this.
 	seed := a.projectSearchSeed()
-	a.openSearchPrompt("Find in project", "searches every file", seed, history.SearchFind, func(app *App, v string) {
+	a.openFindPrompt("Find in project", "searches every file", seed, func(app *App, v string) {
 		// The toggles are read when the search RUNS, not when the prompt
 		// opened — the same moment the query itself is final.
 		app.startProjectSearch(v, app.findOptions())
@@ -149,6 +149,13 @@ func (a *App) startFolderSearch(query string, opts editor.FindOptions, dir strin
 	}
 	dir = a.searchScopeDir(dir)
 	verb := a.projectSearchVerb(dir)
+	// Checked before the walk (and before the index checks): a bad
+	// pattern is the user's to fix right now, and a goroutine scanning a
+	// thousand files to report nothing would hide that.
+	if err := editor.FindQueryError(query, opts); err != nil {
+		a.flash(fmt.Sprintf("%s: bad regex %q: %v", verb, query, err))
+		return
+	}
 	if a.finder == nil {
 		a.flash(verb + ": no file index yet")
 		return
@@ -229,8 +236,8 @@ func (a *App) handleProjectSearch(e *projectSearchEvent) {
 		// expression, inert until edited (findall.go's seed rule). It
 		// matters more here — narrowing a whole-tree answer in the box
 		// costs nothing, re-running the walk costs a walk.
-		filter: newTextField(e.query),
-		seed:   e.query,
+		filter: newTextField(findAllFilterSeed(e.query, e.opts)),
+		seed:   findAllFilterSeed(e.query, e.opts),
 	}
 	if e.dir != "" {
 		m.scopeName = a.relativeFolderLabel(e.dir)
@@ -313,7 +320,7 @@ func (a *App) promptFindInFolder(dir string) {
 	if dir == "" {
 		title, hint = "Find in project", "searches every file"
 	}
-	a.openSearchPrompt(title, hint, seed, history.SearchFind, func(app *App, v string) {
+	a.openFindPrompt(title, hint, seed, func(app *App, v string) {
 		app.startFolderSearch(v, app.findOptions(), dir)
 	})
 }

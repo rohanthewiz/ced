@@ -405,8 +405,22 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 
 ### Find, replace, go to line (editor/find.go, replace.go, app/find.go, goto.go)
 - ONE scanner (`matchCols`); case folding per rune (`foldRunes`).
-- Options live on App (`findCase`/`findWord`), pushed via
+- Options live on App (`findCase`/`findWord`/`findRegex`), pushed via
   `applyFindOptions`, not persisted.
+- **Regex** (`FindOptions.Regex`): every scan/stale check/replace goes
+  through `editor.Matcher` (`NewMatcher` once per search — project
+  search shares one across workers; Find-all caches it, `matcher()`).
+  RE2, per LINE; `(?i)` for case; whole word = the same `wordBounded`
+  post-filter, never `\b` (ASCII-only); zero-width hits DROPPED. Hits
+  vary in width, so a stale check needs the width (`MatchesAt` /
+  `Matcher.At` take it). Replacement is a template (`Matcher.Expand`,
+  `$1`) under regex only, expanded before any edit lands. Bad pattern =
+  no hits; `FindQueryError` explains (bar counter, list/project flash
+  BEFORE the walk). Pointed-at seeds (selection, caret word) go through
+  `findLiteral` (QuoteMeta under regex); typed queries never do. Doors:
+  bar `.*` (Alt+r, rightmost), ≡ Find "Regex: …", and the
+  `openFindPrompt` chip on the three text-find prompts. Regex lists'
+  filter box opens EMPTY (`findAllFilterSeed`: it's a substring box).
 - Bar height: always ask `findBarRows()`. Inputs are `textField`. In-bar
   Alt chords + clickable `Aa` / `|W|` + ≡ rows.
 - Replace = one undo step; ReplaceAll re-scans and goes bottom-up via
@@ -1188,8 +1202,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 182 group
-  actions + 15 headers (199), height 205, dividers `[2, 5, 202]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 183 group
+  actions + 15 headers (200), height 206, dividers `[2, 5, 203]`; also
   the Git fold count in `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.

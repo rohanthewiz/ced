@@ -799,7 +799,7 @@ as `"wordhl": "off"` in `~/.config/ced/config.json`.
 bar directly under the editor, above the status bar:
 
 ```
- Find▾ foo█        Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: close   3 of 12   Aa  |W|
+ Find▾ foo█        Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: close   3 of 12   Aa  |W|  .*
 ```
 
 - Type to search — results highlight live as you type. Matching is a
@@ -808,6 +808,12 @@ bar directly under the editor, above the status bar:
   word boundaries). Click them, press `Alt+c` / `Alt+w` in the bar, or
   use the **Match case** / **Whole word** rows under `≡` → **Find**. A
   lit button is on. The options last for the session.
+- `.*` turns on **regex** (Go's RE2 syntax): click it, press `Alt+r`,
+  or use `≡` → **Find** → **Regex**. Patterns match within one line, a
+  half-typed pattern shows why it isn't valid yet in place of the
+  counter (`regex: missing closing )`), and matches that would be empty
+  (`^`, `x*`) are skipped. A selection used as the seed is escaped, so
+  it still finds exactly itself. `Aa` and `|W|` still apply.
 - `Enter` jumps to the next match (wraps at the end), `Shift+Enter` to
   the previous one. The active match is painted brighter than the rest,
   and the counter turns red when nothing matches.
@@ -838,6 +844,9 @@ query) opens a second row under the first:
 `Tab` moves between the two boxes. `Enter` in the replace box (or
 **Replace**) swaps the highlighted match and moves to the next one;
 `Alt+a` (or **All**) swaps every match. Either way it is one undo step.
+With regex on, the replacement can use the match's groups — `$1`,
+`${name}`, and `$$` for a literal `$` — e.g. find `get_(\w+)`, replace
+with `Get${1}`. With regex off, `$1` is just text.
 
 **Every match at once.** `Esc F` (or `⌘F`, or `≡` → **Find all in file**, or `↓`
 in the bar) lists each hit as a row — line number, then the line with the
@@ -867,9 +876,13 @@ it over the same folder. `≡` → **Find all in folder (sub/)** is the same
 search on the folder you last clicked in the tree. On the project root
 the row reads **Find in project…**.
 
-The list and project search match the way the bar's `Aa` and `|W|` are
-set when they run — the title says "(match case)" / "(whole word)" when
-either is on, and `⟳` re-runs under the same options. There's no regex. `Esc j` (or
+The list and project search match the way the bar's `Aa`, `|W|` and `.*`
+are set when they run — the title says "(match case)" / "(whole word)" /
+"(regex)" when any is on, and `⟳` re-runs under the same options. Their
+prompts carry a `[regex: off]` chip (`Alt+r`) so you can switch to a
+pattern without leaving the prompt; a regex list's filter box opens
+empty (it filters by plain text), and its replace box takes `$1` too.
+`Esc j` (or
 `≡` → **Go to line…**, or `⌘G`) jumps to a line, and accepts
 `line:col` — or a whole `app.go:314:22` pasted from a compiler message
 (the filename is ignored; it stays in the current file).

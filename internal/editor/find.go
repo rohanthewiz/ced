@@ -20,14 +20,52 @@
 // (matchCols). Two implementations of "what counts as a hit" would drift,
 // and the user would have no way to tell which one answered.
 //
-// Regex is still deliberately out of scope: it needs its own input
-// grammar, its own error surface for a half-typed pattern, and a
-// different replacement language ($1). None of that is the 80/20 of the
-// type-and-jump loop.
+// REGEX is the third toggle (FindOptions.Regex), and it brings the three
+// things that kept it out for so long: its own input grammar, an error
+// surface for a half-typed pattern, and a replacement language ($1).
+// They are all answered in one place, the Matcher below, so no caller
+// has to know which kind of query it holds:
+//
+//	query + FindOptions ──NewMatcher──► *Matcher ──┬─ All / Line   (scan)
+//	                          │                    ├─ At           (still a hit?)
+//	                          └─ error (bad regex) └─ Expand       ($1 replacement)
+//
+//   - Grammar: Go's RE2 (regexp), matched one LINE at a time. The buffer
+//     is a []string of lines and every hit is a (line, col, width)
+//     triple, so a pattern can never span a newline — `\n` simply finds
+//     nothing. That is the same "find matches within a line" contract
+//     the literal search always had, not a regex-specific limitation.
+//   - Errors: NewMatcher returns the compile error and every scan entry
+//     point treats a bad pattern as "no hits". The UI asks
+//     FindQueryError for the reason, so a half-typed `(foo` paints an
+//     explanation instead of an alarming "no results".
+//   - Replacement: in regex mode the replacement is a TEMPLATE expanded
+//     per hit ($1, ${name}, $$ for a literal dollar — regexp.Expand's
+//     language). In literal mode it is inserted verbatim, so a "$" typed
+//     into a plain replace still means a dollar sign.
+//
+// The two other toggles compose with it rather than being re-implemented
+// in pattern syntax. Case-insensitive is the `(?i)` flag (RE2's folding
+// is per rune, so columns stay exact). Whole word is the SAME
+// wordBounded post-filter the literal scan uses, not `\b`: RE2's `\b`
+// is ASCII-only and would disagree with IsWordRune on "café", and one
+// definition of "a word" across both modes beats a faster wrong one.
+//
+// Zero-width hits (`^`, `x*` on a line without x) are DROPPED. A hit
+// paints, counts and jumps as a run of cells; a zero-width one has no
+// cells to paint, would inflate "1 of N" with invisible stops, and
+// would make Replace all an insert-everywhere. A pattern that only ever
+// matches emptily therefore reports no results.
 
 package editor
 
-import "unicode"
+import (
+	"errors"
+	"regexp"
+	"regexp/syntax"
+	"unicode"
+	"unicode/utf8"
+)
 
 // Match describes one find hit. Line and Col follow the same rune-indexed
 // convention as Position; Width is the rune count of the query so the
@@ -50,6 +88,204 @@ type FindOptions struct {
 	// "err" stops matching "errors". Boundaries use IsWordRune — the
 	// programmer's definition, shared with double-click word select.
 	WholeWord bool
+	// Regex reads the query as an RE2 pattern (see the file header for
+	// how it composes with the two toggles above and with replace).
+	Regex bool
+}
+
+// Matcher is a query compiled under a set of FindOptions — the one
+// object every scan, staleness check and replacement goes through, so
+// the literal and regex paths can't drift apart per caller. Build it
+// once per search (NewMatcher) and reuse it: a project search shares
+// one across every file and worker goroutine, which is safe because
+// both of its forms are read-only after construction (*regexp.Regexp
+// is documented safe for concurrent use).
+//
+// A nil *Matcher is valid and matches nothing — what NewMatcher returns
+// for an empty query — so callers never need a separate "is there a
+// search?" branch.
+type Matcher struct {
+	opts FindOptions
+	// needle is the folded literal query (literal mode only).
+	needle []rune
+	// re is the compiled pattern (regex mode only).
+	re *regexp.Regexp
+}
+
+// NewMatcher compiles query under opts. An empty query yields a nil
+// Matcher (matches nothing) and no error; a pattern RE2 rejects yields
+// the compile error, which FindQueryError shortens for display.
+func NewMatcher(query string, opts FindOptions) (*Matcher, error) {
+	if query == "" {
+		return nil, nil
+	}
+	if !opts.Regex {
+		needle := foldRunes([]rune(query), opts.CaseSensitive)
+		if len(needle) == 0 {
+			return nil, nil
+		}
+		return &Matcher{opts: opts, needle: needle}, nil
+	}
+	pattern := query
+	if !opts.CaseSensitive {
+		// A flag group rather than lowercasing the pattern: folding the
+		// pattern text would corrupt escapes (`\S` → `\s`).
+		pattern = "(?i)" + pattern
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	return &Matcher{opts: opts, re: re}, nil
+}
+
+// FindQueryError reports why query can't be searched under opts, or nil
+// when it can. Only a regex can fail. The message is the parser's own
+// reason without its "error parsing regexp:" preamble — "missing closing
+// )" — because it is shown in tight places (the find bar's counter, a
+// flash) where the preamble would crowd out the part that helps.
+func FindQueryError(query string, opts FindOptions) error {
+	if !opts.Regex {
+		return nil
+	}
+	_, err := NewMatcher(query, opts)
+	if err == nil {
+		return nil
+	}
+	var se *syntax.Error
+	if errors.As(err, &se) {
+		return errors.New(string(se.Code))
+	}
+	return err
+}
+
+// IsRegex reports whether m reads its query as a pattern — the question
+// a replace asks before treating its replacement as a template.
+func (m *Matcher) IsRegex() bool {
+	return m != nil && m.re != nil
+}
+
+// All returns every hit in buf, in document order.
+func (m *Matcher) All(buf *Buffer) []Match {
+	if m == nil || buf == nil {
+		return nil
+	}
+	var out []Match
+	for lineIdx, raw := range buf.Lines {
+		out = append(out, m.Line(lineIdx, raw)...)
+	}
+	return out
+}
+
+// Line returns the hits on one line (raw is its text, lineIdx goes into
+// each Match), left to right and non-overlapping.
+func (m *Matcher) Line(lineIdx int, raw string) []Match {
+	if m == nil {
+		return nil
+	}
+	if m.re == nil {
+		hay := foldRunes([]rune(raw), m.opts.CaseSensitive)
+		var out []Match
+		for _, col := range matchCols(hay, m.needle, m.opts.WholeWord) {
+			out = append(out, Match{Line: lineIdx, Col: col, Width: len(m.needle)})
+		}
+		return out
+	}
+	var out []Match
+	for _, h := range m.regexHits(raw) {
+		out = append(out, Match{Line: lineIdx, Col: h.col, Width: h.width})
+	}
+	return out
+}
+
+// regexHit is one regex match in rune coordinates, plus the byte-offset
+// submatch slice Expand needs to fill in $1.
+type regexHit struct {
+	col, width int
+	sub        []int
+}
+
+// regexHits runs the pattern over one line and converts each match from
+// byte offsets (what regexp speaks) to rune columns (what Position
+// speaks), dropping zero-width matches and, under WholeWord, matches
+// that sit inside a longer word (see the file header for both rules).
+//
+// The byte→rune conversion walks the line once, incrementally: each
+// match's start is counted from the previous match's start, so a line
+// with many hits costs O(len) rather than O(len × hits).
+func (m *Matcher) regexHits(raw string) []regexHit {
+	idx := m.re.FindAllStringSubmatchIndex(raw, -1)
+	if len(idx) == 0 {
+		return nil
+	}
+	var runes []rune // decoded lazily: only WholeWord needs the neighbours
+	if m.opts.WholeWord {
+		runes = []rune(raw)
+	}
+	var out []regexHit
+	prevByte, prevCol := 0, 0
+	for _, sub := range idx {
+		start, end := sub[0], sub[1]
+		col := prevCol + utf8.RuneCountInString(raw[prevByte:start])
+		prevByte, prevCol = start, col
+		width := utf8.RuneCountInString(raw[start:end])
+		if width == 0 {
+			continue
+		}
+		if runes != nil && !wordBounded(runes, col, width) {
+			continue
+		}
+		out = append(out, regexHit{col: col, width: width, sub: sub})
+	}
+	return out
+}
+
+// At reports whether line holds a hit starting at col and exactly width
+// runes wide — the one-range "is this still a match?" question
+// (MatchesAt's contract, below).
+//
+// Regex mode re-scans the whole line rather than trying the pattern at
+// col alone: whether a pattern matches at a column depends on what
+// precedes it (`^`, and RE2's leftmost-first choice among overlapping
+// candidates), so only the full-line scan agrees with All exactly.
+func (m *Matcher) At(line []rune, col, width int) bool {
+	if m == nil || col < 0 {
+		return false
+	}
+	if m.re == nil {
+		n := len(m.needle)
+		if width != n || col+n > len(line) {
+			return false
+		}
+		if !runesEqual(foldRunes(line[col:col+n], m.opts.CaseSensitive), m.needle) {
+			return false
+		}
+		return !m.opts.WholeWord || wordBounded(line, col, n)
+	}
+	for _, h := range m.regexHits(string(line)) {
+		if h.col == col && h.width == width {
+			return true
+		}
+	}
+	return false
+}
+
+// Expand returns the text that replaces the hit at (col, width) on line.
+// Literal mode returns template verbatim. Regex mode expands $1 /
+// ${name} / $$ against that hit's submatches; a hit that is no longer
+// there (the caller should have checked At) also falls back to the
+// template verbatim rather than inventing captures.
+func (m *Matcher) Expand(line []rune, col, width int, template string) string {
+	if !m.IsRegex() {
+		return template
+	}
+	raw := string(line)
+	for _, h := range m.regexHits(raw) {
+		if h.col == col && h.width == width {
+			return string(m.re.ExpandString(nil, template, raw, h.sub))
+		}
+	}
+	return template
 }
 
 // FindAll returns every case-insensitive substring match of query inside
@@ -67,22 +303,15 @@ func FindAll(buf *Buffer, query string) []Match {
 // clear its UI rather than show "0 of 0" results. Matches do not overlap:
 // after a hit the scanner advances past the matched run, so "aaaa" with
 // query "aa" yields two matches at columns 0 and 2.
+//
+// A regex that doesn't compile also returns nil — a half-typed pattern
+// is "no hits yet", not a failure; FindQueryError says why.
 func FindAllOpts(buf *Buffer, query string, opts FindOptions) []Match {
-	if query == "" || buf == nil {
+	m, err := NewMatcher(query, opts)
+	if err != nil {
 		return nil
 	}
-	needle := foldRunes([]rune(query), opts.CaseSensitive)
-	if len(needle) == 0 {
-		return nil
-	}
-	var out []Match
-	for lineIdx, raw := range buf.Lines {
-		hay := foldRunes([]rune(raw), opts.CaseSensitive)
-		for _, col := range matchCols(hay, needle, opts.WholeWord) {
-			out = append(out, Match{Line: lineIdx, Col: col, Width: len(needle)})
-		}
-	}
-	return out
+	return m.All(buf)
 }
 
 // matchCols returns the starting columns of every non-overlapping hit of
@@ -127,8 +356,9 @@ func wordBounded(hay []rune, col, n int) bool {
 	return true
 }
 
-// MatchesAt reports whether line holds a hit of query starting at col
-// under opts — the one-range question "is this still a match?", asked by
+// MatchesAt reports whether line holds a hit of query starting at col,
+// width runes wide, under opts — the one-range question "is this still a
+// match?", asked by
 // callers that hold a hit's coordinates from an earlier scan (the
 // Find-all list's stale-row check and its replace plan) and need to know
 // whether the text under them has moved.
@@ -136,18 +366,21 @@ func wordBounded(hay []rune, col, n int) bool {
 // It must agree with FindAllOpts exactly: a check stricter than the scan
 // (say, a byte compare after a case-insensitive scan) would call a fresh
 // "Count" hit for "count" stale, dim it, and skip it on replace. So it
-// folds and bounds through the same helpers matchCols uses. The one thing
-// it does not re-check is overlap with an earlier hit on the line; a
-// caller asking about a single range has no earlier hit to overlap.
-func MatchesAt(line []rune, col int, query string, opts FindOptions) bool {
-	needle := foldRunes([]rune(query), opts.CaseSensitive)
-	if len(needle) == 0 || col < 0 || col+len(needle) > len(line) {
+// folds and bounds through the same helpers matchCols uses. In literal
+// mode the one thing it does not re-check is overlap with an earlier hit
+// on the line; a caller asking about a single range has no earlier hit
+// to overlap. width matters because a regex's hits differ in width: a
+// row recorded as "foo123" must not stay live when the line now reads
+// "foo1".
+//
+// Callers checking many ranges against one query should build a Matcher
+// once and call At — this compiles per call.
+func MatchesAt(line []rune, col, width int, query string, opts FindOptions) bool {
+	m, err := NewMatcher(query, opts)
+	if err != nil {
 		return false
 	}
-	if !runesEqual(foldRunes(line[col:col+len(needle)], opts.CaseSensitive), needle) {
-		return false
-	}
-	return !opts.WholeWord || wordBounded(line, col, len(needle))
+	return m.At(line, col, width)
 }
 
 // foldRunes lowercases rs for a case-insensitive compare, or returns it

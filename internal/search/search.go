@@ -25,10 +25,10 @@
 //     reads as "that's all of them", which is the one wrong answer a
 //     search tool can give.
 //
-// Matching itself is delegated to editor.FindAllOpts, so a project search
+// Matching itself is delegated to editor.Matcher, so a project search
 // and an in-file search agree on what counts as a hit — every occurrence
 // on a line, no overlaps, case-insensitive substring unless the caller
-// passes the find bar's match-case / whole-word options through. One
+// passes the find bar's match-case / whole-word / regex options through. One
 // matcher, two callers; a second implementation here would drift.
 package search
 
@@ -104,6 +104,14 @@ func Project(rootDir string, paths []string, opts Options) (hits []Hit, truncate
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxFileBytes
 	}
+	// Compiled ONCE for the whole walk and shared by every worker: a
+	// regex compiled per file would cost more than reading small files.
+	// A pattern that doesn't compile finds nothing — the caller is
+	// expected to have asked editor.FindQueryError first and explained.
+	matcher, err := editor.NewMatcher(opts.Query, opts.FindOptions)
+	if err != nil || matcher == nil {
+		return nil, false
+	}
 
 	// Bounded fan-out: enough to keep the disk busy, few enough that a
 	// search can't exhaust file descriptors on a large tree.
@@ -119,7 +127,7 @@ func Project(rootDir string, paths []string, opts Options) (hits []Hit, truncate
 		go func() {
 			defer wg.Done()
 			for rel := range jobs {
-				found := searchFile(filepath.Join(rootDir, rel), opts.Query, opts.FindOptions, maxBytes)
+				found := searchFile(filepath.Join(rootDir, rel), matcher, maxBytes)
 				if len(found) == 0 {
 					continue
 				}
@@ -153,9 +161,9 @@ func Project(rootDir string, paths []string, opts Options) (hits []Hit, truncate
 	return out, false
 }
 
-// searchFile returns every hit in one file under match, or nothing if
+// searchFile returns every hit match finds in one file, or nothing if
 // the file can't or shouldn't be searched.
-func searchFile(path, query string, match editor.FindOptions, maxBytes int64) []Hit {
+func searchFile(path string, match *editor.Matcher, maxBytes int64) []Hit {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() || info.Size() > maxBytes {
 		return nil
@@ -165,7 +173,7 @@ func searchFile(path, query string, match editor.FindOptions, maxBytes int64) []
 		return nil
 	}
 	buf := editor.NewBuffer(string(data))
-	matches := editor.FindAllOpts(buf, query, match)
+	matches := match.All(buf)
 	if len(matches) == 0 {
 		return nil
 	}

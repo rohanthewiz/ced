@@ -9,6 +9,7 @@ package editor
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -302,7 +303,7 @@ func TestMatchesAt_AgreesWithTheScanner(t *testing.T) {
 			hitAt[m.Col] = true
 		}
 		for col := range line {
-			if got := MatchesAt(line, col, "count", opts); got != hitAt[col] {
+			if got := MatchesAt(line, col, 5, "count", opts); got != hitAt[col] {
 				t.Errorf("opts %+v col %d: MatchesAt = %v, scan says %v", opts, col, got, hitAt[col])
 			}
 		}
@@ -315,11 +316,133 @@ func TestMatchesAt_AgreesWithTheScanner(t *testing.T) {
 func TestMatchesAt_RejectsOutOfRangeAndEmpty(t *testing.T) {
 	line := []rune("count")
 	for _, col := range []int{-1, 1, 5, 99} {
-		if MatchesAt(line, col, "count", FindOptions{}) {
+		if MatchesAt(line, col, 5, "count", FindOptions{}) {
 			t.Errorf("col %d should not match", col)
 		}
 	}
-	if MatchesAt(line, 0, "", FindOptions{}) {
+	if MatchesAt(line, 0, 0, "", FindOptions{}) {
 		t.Error("an empty query should never match")
+	}
+}
+
+// TestFindAllOpts_RegexMatchesVariableWidthHits pins the core of regex
+// mode: each hit carries its OWN width (the literal path's "width = query
+// length" no longer holds), columns are runes not bytes, and the default
+// is case-insensitive like the literal search.
+func TestFindAllOpts_RegexMatchesVariableWidthHits(t *testing.T) {
+	buf := NewBuffer("é foo1 FOO22\nbar")
+	got := FindAllOpts(buf, `foo\d+`, FindOptions{Regex: true})
+	want := []Match{{Line: 0, Col: 2, Width: 4}, {Line: 0, Col: 7, Width: 5}}
+	if len(got) != len(want) {
+		t.Fatalf("hits = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("hit %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if n := len(FindAllOpts(buf, `foo\d+`, FindOptions{Regex: true, CaseSensitive: true})); n != 1 {
+		t.Errorf("match case: %d hits, want 1", n)
+	}
+}
+
+// TestFindAllOpts_RegexWholeWordUsesWordRunes: whole word under regex is
+// the literal path's IsWordRune boundary, not RE2's ASCII \b — so "caf"
+// inside "café" is NOT a standalone word.
+func TestFindAllOpts_RegexWholeWordUsesWordRunes(t *testing.T) {
+	buf := NewBuffer("café caf")
+	got := FindAllOpts(buf, `ca.`, FindOptions{Regex: true, WholeWord: true})
+	if len(got) != 1 || got[0].Col != 5 {
+		t.Fatalf("hits = %+v, want only the standalone caf at col 5", got)
+	}
+}
+
+// TestFindAllOpts_RegexDropsZeroWidthHits: a pattern that matches
+// emptily has no cells to paint, so it reports nothing rather than an
+// invisible stop at every column.
+func TestFindAllOpts_RegexDropsZeroWidthHits(t *testing.T) {
+	buf := NewBuffer("abc\ndef")
+	if got := FindAllOpts(buf, `^`, FindOptions{Regex: true}); len(got) != 0 {
+		t.Fatalf("zero-width hits leaked: %+v", got)
+	}
+	if got := FindAllOpts(buf, `x*`, FindOptions{Regex: true}); len(got) != 0 {
+		t.Fatalf("empty-matching pattern leaked hits: %+v", got)
+	}
+}
+
+// TestFindAllOpts_BadRegexFindsNothing: a half-typed pattern is "no
+// hits", never a panic, and FindQueryError names the reason without
+// the parser's preamble. Literal mode never errors on the same text.
+func TestFindAllOpts_BadRegexFindsNothing(t *testing.T) {
+	buf := NewBuffer("(foo")
+	if got := FindAllOpts(buf, `(foo`, FindOptions{Regex: true}); got != nil {
+		t.Fatalf("bad pattern produced hits: %+v", got)
+	}
+	err := FindQueryError(`(foo`, FindOptions{Regex: true})
+	if err == nil || strings.Contains(err.Error(), "error parsing") || !strings.Contains(err.Error(), "missing closing )") {
+		t.Fatalf("FindQueryError = %v", err)
+	}
+	if err := FindQueryError(`(foo`, FindOptions{}); err != nil {
+		t.Fatalf("literal mode errored: %v", err)
+	}
+	if got := FindAllOpts(buf, `(foo`, FindOptions{}); len(got) != 1 {
+		t.Fatalf("literal (foo: %d hits, want 1", len(got))
+	}
+}
+
+// TestMatcher_AtAgreesWithTheScanUnderRegex is the regex twin of
+// TestMatchesAt_AgreesWithTheScanner: every hit answers true at its own
+// (col, width), and a right column with the wrong width does not — a
+// row recorded as "foo12" must read stale once the text is "foo1".
+func TestMatcher_AtAgreesWithTheScanUnderRegex(t *testing.T) {
+	const text = "foo1 xfoo22 foo333"
+	line := []rune(text)
+	for _, opts := range []FindOptions{{Regex: true}, {Regex: true, WholeWord: true}} {
+		mt, err := NewMatcher(`foo\d+`, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hits := map[[2]int]bool{}
+		for _, m := range mt.Line(0, text) {
+			hits[[2]int{m.Col, m.Width}] = true
+		}
+		for col := range line {
+			for width := 1; col+width <= len(line); width++ {
+				if got := mt.At(line, col, width); got != hits[[2]int{col, width}] {
+					t.Errorf("opts %+v (%d,%d): At = %v, scan says %v", opts, col, width, got, !got)
+				}
+			}
+		}
+	}
+}
+
+// TestMatcher_ExpandFillsCapturesOnlyUnderRegex: $1 / ${name} expand
+// against the hit's own captures in regex mode, and a literal replace
+// keeps a typed "$1" as text.
+func TestMatcher_ExpandFillsCapturesOnlyUnderRegex(t *testing.T) {
+	line := []rune("a=1 b=22")
+	mt, _ := NewMatcher(`(?P<k>\w)=(\d+)`, FindOptions{Regex: true})
+	hits := mt.Line(0, string(line))
+	if len(hits) != 2 {
+		t.Fatalf("hits = %+v", hits)
+	}
+	if got := mt.Expand(line, hits[1].Col, hits[1].Width, "$2:${k}"); got != "22:b" {
+		t.Errorf("Expand = %q, want %q", got, "22:b")
+	}
+	lit, _ := NewMatcher("a=1", FindOptions{})
+	if got := lit.Expand(line, 0, 3, "$1"); got != "$1" {
+		t.Errorf("literal Expand = %q, want the template verbatim", got)
+	}
+}
+
+// TestNewMatcher_EmptyQueryIsANilMatcherThatMatchesNothing: the nil
+// Matcher is a valid "no search" value every method tolerates.
+func TestNewMatcher_EmptyQueryIsANilMatcherThatMatchesNothing(t *testing.T) {
+	mt, err := NewMatcher("", FindOptions{Regex: true})
+	if mt != nil || err != nil {
+		t.Fatalf("NewMatcher(\"\") = %v, %v", mt, err)
+	}
+	if mt.All(NewBuffer("x")) != nil || mt.At([]rune("x"), 0, 1) || mt.IsRegex() {
+		t.Fatal("nil Matcher matched something")
 	}
 }

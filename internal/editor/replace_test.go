@@ -172,3 +172,54 @@ func TestReplaceCurrent_ImageTabIsSafe(t *testing.T) {
 		t.Fatalf("image tab replaced %d hits", n)
 	}
 }
+
+// TestReplaceAll_RegexExpandsCapturesPerHit: under regex each hit gets
+// its OWN expansion of the template, in one undo step — and the
+// bottom-up pass keeps the differing widths from corrupting later hits.
+func TestReplaceAll_RegexExpandsCapturesPerHit(t *testing.T) {
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer("get_x get_long_name\nget_y")
+	tab.SetFindOptions(FindOptions{Regex: true, CaseSensitive: true})
+	tab.SetFindQuery(`get_(\w+)`)
+	if n := tab.ReplaceAll("Get(${1})"); n != 3 {
+		t.Fatalf("replaced %d, want 3", n)
+	}
+	want := "Get(x) Get(long_name)\nGet(y)"
+	if got := tab.Buffer.String(); got != want {
+		t.Fatalf("buffer = %q, want %q", got, want)
+	}
+	tab.Undo()
+	if got := tab.Buffer.String(); got != "get_x get_long_name\nget_y" {
+		t.Fatalf("one undo did not restore the buffer: %q", got)
+	}
+}
+
+// TestReplaceCurrent_RegexExpandsTheCurrentHit: the single replace
+// expands against the hit it overwrites, then advances as usual.
+func TestReplaceCurrent_RegexExpandsTheCurrentHit(t *testing.T) {
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer("v1.2 v3.4")
+	tab.SetFindOptions(FindOptions{Regex: true})
+	tab.SetFindQuery(`v(\d)\.(\d)`)
+	if !tab.ReplaceCurrent("$2.$1") {
+		t.Fatal("ReplaceCurrent reported no change")
+	}
+	if got := tab.Buffer.String(); got != "2.1 v3.4" {
+		t.Fatalf("buffer = %q", got)
+	}
+	if len(tab.FindMatches) != 1 || tab.FindIndex != 0 {
+		t.Fatalf("expected to advance to the remaining hit, got %d of %d", tab.FindIndex, len(tab.FindMatches))
+	}
+}
+
+// TestReplaceAll_LiteralKeepsDollarSigns: a "$1" typed into a PLAIN
+// replace is text, not a capture reference.
+func TestReplaceAll_LiteralKeepsDollarSigns(t *testing.T) {
+	tab, _ := NewTab("")
+	tab.Buffer = NewBuffer("price")
+	tab.SetFindQuery("price")
+	tab.ReplaceAll("$1")
+	if got := tab.Buffer.String(); got != "$1" {
+		t.Fatalf("buffer = %q, want the literal $1", got)
+	}
+}

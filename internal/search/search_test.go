@@ -194,3 +194,23 @@ func TestProject_ManyFilesStayOrdered(t *testing.T) {
 		}
 	}
 }
+
+// TestProject_HonoursRegex: the project walk compiles the pattern once
+// and reports each hit's own width; a pattern that doesn't compile finds
+// nothing rather than panicking a worker.
+func TestProject_HonoursRegex(t *testing.T) {
+	root, paths := seedTree(t, map[string]string{
+		"a.txt": "id1 id22\n",
+		"b.txt": "nothing\nID333\n",
+	})
+	hits, _ := Project(root, paths, Options{Query: `id\d+`, FindOptions: editor.FindOptions{Regex: true}})
+	if len(hits) != 3 {
+		t.Fatalf("hits = %+v, want 3", hits)
+	}
+	if hits[1].Width != 4 || hits[2].Width != 5 || hits[2].Line != 1 {
+		t.Errorf("widths/lines wrong: %+v", hits)
+	}
+	if bad, _ := Project(root, paths, Options{Query: `id(`, FindOptions: editor.FindOptions{Regex: true}}); bad != nil {
+		t.Errorf("bad pattern produced hits: %+v", bad)
+	}
+}

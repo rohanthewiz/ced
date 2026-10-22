@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-082**
+**Next ID: N-084**
 
 ## Open
 
@@ -113,6 +113,14 @@ plus the LSP work done in the seeding session itself
   picked. If they go in, fold the git rows (Show change, Blame, Git
   status, New branch) into one "Git…" picker row to keep the popup
   short.
+
+- **N-083** · raised `2026-1021-2124-regex-find` · value low
+  The three text-find prompts (Find all in file, Find in project, Find
+  all in folder) carry only a `[regex: …]` chip (alt+r,
+  `openFindPrompt`). Match case / whole word are still reachable only
+  from the find bar and ≡ Find, which a prompt can't reach. Offered as a
+  follow-up, not picked; two more chips would be a few lines in
+  `openFindPrompt` (watch the prompt width and the "↑ recent" hint).
 
 ## Validate
 
@@ -286,6 +294,15 @@ and `raised`.
   change…, Blame this line…, Git status…, New branch…, Toggle line
   comment, Summarize selection…, Send selection to GoNotes…) appear
   where expected, and a removal revert after a save lands in place.
+
+- **N-082** · raised `2026-1021-2124-regex-find` · value low
+  Regex find ran only under the simulation screen. Hand check in tmux
+  and cats: the bar's `.*` button draws right of `|W|` and toggles on a
+  click, alt+r in the bar arrives through tmux's Esc folding (and does
+  not fire the `Esc r` leader), a half-typed `(foo` shows "regex:
+  missing closing )" in red, `$1` replace (bar Replace / All and the
+  list's "Replace in N") expands, and the `[regex: off]` chip on the
+  find prompts flips with a click and alt+r.
 
 ## Roadmap
 

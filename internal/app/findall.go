@@ -214,6 +214,14 @@ type findAllModal struct {
 	// pinned list is still up. The title names them (findOptionsNote),
 	// since the bar that shows them lit is usually not on screen.
 	opts editor.FindOptions
+	// match is query compiled under opts, built on first use (matcher)
+	// and reused by every stale check and replace expansion — rowStale
+	// runs per visible row per frame, and recompiling a regex there
+	// would be the draw loop's most expensive line. matchKey is the
+	// (query, opts) it was built from, so a producer that ever rewrote
+	// either gets a fresh one instead of a stale answer.
+	match    *editor.Matcher
+	matchKey string
 
 	// scopeDir is the folder a project-mode TEXT search was narrowed to
 	// ("Find all in folder", projectsearch.go); "" = the whole project.
@@ -278,7 +286,7 @@ func (a *App) openFindAll() {
 	// (Argument evaluation order already guarantees this; the local makes
 	// the dependency visible so a later refactor can't quietly break it.)
 	seed := a.findAllPromptSeed()
-	a.openSearchPrompt("Find all in file", "lists every occurrence", seed, history.SearchFind, func(app *App, v string) {
+	a.openFindPrompt("Find all in file", "lists every occurrence", seed, func(app *App, v string) {
 		app.showFindAll(v)
 	})
 }
@@ -317,6 +325,9 @@ func (a *App) openFindAllFromBar() {
 // A multi-line selection is deliberately NOT one of these: FindAll
 // matches within a line, so a blob with newlines in it is not a search
 // term. It falls through to the prompt like every other unclear case.
+//
+// With regex on, the selection comes back QUOTED (findLiteral): it is
+// still "exactly that text", spelled as a pattern.
 func (a *App) findAllSelectionQuery() string {
 	tab := a.activeTabPtr()
 	if tab == nil || tab.Buffer == nil || !tab.HasSelection() {
@@ -326,7 +337,7 @@ func (a *App) findAllSelectionQuery() string {
 	if sel == "" || strings.ContainsRune(sel, '\n') {
 		return ""
 	}
-	return sel
+	return a.findLiteral(sel)
 }
 
 // findAllPromptSeed is what pre-fills the "what am I looking for?"
@@ -347,7 +358,9 @@ func (a *App) findAllPromptSeed() string {
 	}
 	runes := []rune(tab.Buffer.Lines[tab.Cursor.Line])
 	if start, end, ok := editor.WordRange(runes, tab.Cursor.Col); ok {
-		return string(runes[start:end])
+		// The word is pointed-at text, so it is quoted under regex like
+		// a selection is; the find bar's query above is typed, so not.
+		return a.findLiteral(string(runes[start:end]))
 	}
 	return ""
 }
@@ -365,6 +378,13 @@ func (a *App) showFindAll(query string) {
 	// project a moment later (searchhistory.go).
 	a.recordSearch(history.SearchFind, query)
 	opts := a.findOptions()
+	// A pattern that doesn't compile is explained, not reported as a
+	// miss — "no occurrences of `(foo`" would send the user looking for
+	// a problem in the file rather than in the pattern.
+	if err := editor.FindQueryError(query, opts); err != nil {
+		a.flash(fmt.Sprintf("Find all: bad regex %q: %v", query, err))
+		return
+	}
 	matches := editor.FindAllOpts(tab.Buffer, query, opts)
 	if len(matches) == 0 {
 		// The options are named in the miss too: "no occurrences" of a
@@ -381,8 +401,8 @@ func (a *App) showFindAll(query string) {
 		// The filter box opens holding the search expression, caret at the
 		// end, so "/" and another keystroke keeps narrowing the same
 		// question instead of restating it. Inert until edited — see seed.
-		filter:        newTextField(query),
-		seed:          query,
+		filter:        newTextField(findAllFilterSeed(query, opts)),
+		seed:          findAllFilterSeed(query, opts),
 		origin:        tab.Cursor,
 		originAnchor:  tab.Anchor,
 		originScrollY: tab.ScrollY,
@@ -521,6 +541,36 @@ func (m *findAllModal) filterNeedle() string {
 		return ""
 	}
 	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// findAllFilterSeed is what a text search's filter box opens holding:
+// the query, so typing on keeps narrowing the same question (see seed) —
+// except under regex. The box is a plain substring filter, and a pattern
+// is not a substring: `fo+` with one more rune typed would filter for
+// the literal text "fo+x", which no row contains. An empty box can't
+// suggest that the box speaks regex.
+func findAllFilterSeed(query string, opts editor.FindOptions) string {
+	if opts.Regex {
+		return ""
+	}
+	return query
+}
+
+// matcher returns the list's query compiled under its snapshotted
+// options, cached (see match). A pattern that no longer compiles can't
+// happen for a list that opened (it found hits), so an error degrades to
+// the nil Matcher, which matches nothing — every row then reads stale
+// rather than being replaced on a guess.
+func (m *findAllModal) matcher() *editor.Matcher {
+	key := fmt.Sprintf("%t%t%t\x00%s", m.opts.CaseSensitive, m.opts.WholeWord, m.opts.Regex, m.query)
+	// Keyed on the key alone, not on match == nil: an empty query
+	// legitimately compiles to the nil Matcher, and that answer is as
+	// cacheable as any other.
+	if m.matchKey != key {
+		m.match, _ = editor.NewMatcher(m.query, m.opts)
+		m.matchKey = key
+	}
+	return m.match
 }
 
 // viewRow returns the row behind view position vi, or nil.
@@ -1947,7 +1997,7 @@ func (m *findAllModal) rowStale(a *App, r findAllRow) bool {
 	// same bytes as the query": a case-insensitive list legitimately
 	// holds "Count" for "count", and a byte compare dimmed that row as
 	// stale and made replace skip it.
-	return !editor.MatchesAt(tab.Buffer.LineRunes(r.line), r.col, m.query, m.opts)
+	return !m.matcher().At(tab.Buffer.LineRunes(r.line), r.col, r.width)
 }
 
 // confirmReplace is the "Replace in N results" gesture: plan the edit
@@ -1958,7 +2008,10 @@ func (m *findAllModal) rowStale(a *App, r findAllRow) bool {
 // edit gets.
 func (m *findAllModal) confirmReplace(a *App) {
 	replacement := m.replace.String()
-	if replacement == m.query {
+	// Only a LITERAL search can be a no-op this way: under regex the
+	// query is a pattern, and replacing what `a.c` found with the text
+	// "a.c" rewrites "abc" — a real edit.
+	if replacement == m.query && !m.opts.Regex {
 		a.flash("Replace: the replacement is the search text")
 		return
 	}
@@ -2067,14 +2120,18 @@ func (m *findAllModal) buildReplacePlan(a *App, replacement string) (*wsEditPlan
 		if r.line >= 0 && r.line < fe.tab.Buffer.LineCount() {
 			line = fe.tab.Buffer.LineRunes(r.line)
 		}
-		if !editor.MatchesAt(line, r.col, m.query, m.opts) {
+		mt := m.matcher()
+		if !mt.At(line, r.col, r.width) {
 			skipped++
 			continue
 		}
 		fe.edits = append(fe.edits, editor.Edit{
-			Start:   editor.Position{Line: r.line, Col: r.col},
-			End:     editor.Position{Line: r.line, Col: r.col + r.width},
-			NewText: replacement,
+			Start: editor.Position{Line: r.line, Col: r.col},
+			End:   editor.Position{Line: r.line, Col: r.col + r.width},
+			// A regex replacement is a template ($1); expanded here,
+			// against the buffer that is about to be edited, before
+			// any edit in the plan lands.
+			NewText: mt.Expand(line, r.col, r.width, replacement),
 		})
 	}
 

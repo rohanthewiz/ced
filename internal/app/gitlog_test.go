@@ -513,3 +513,96 @@ func TestGitLogToolbar_DrawAndClickAgree(t *testing.T) {
 		t.Fatalf("▼: cur=%d flash=%q", a.gitLog.pane.cur, a.statusMsg)
 	}
 }
+
+// gitLogSelFixture is a git log with one commit and a small detail
+// loaded, drawn once so the panel's geometry is settled — the shared
+// setup for the detail-selection tests.
+func gitLogSelFixture(t *testing.T) *App {
+	t.Helper()
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	a.gitLog.open = true
+	a.gitLog.commits = []gitLogCommit{{Hash: "h1", Short: "h1", Subject: "s"}}
+	a.gitLog.detailHash = "h1"
+	a.gitLog.detailLines = []string{"commit h1", "Author: A", "", "    update bi jobs", "@@ -1 +1 @@", "-a", "+b"}
+	a.draw()
+	return a
+}
+
+// TestGitLogSelection_DragCopiesOnRelease drives the real mouse path:
+// a press on the detail text, a held-button motion, then the release —
+// which copies the dragged text to the clipboard and keeps the
+// highlight up. The panel captures the mouse, so without this the
+// detail could not be copied at all (the reported bug).
+func TestGitLogSelection_DragCopiesOnRelease(t *testing.T) {
+	a := gitLogSelFixture(t)
+	d := a.gitLogDetailPaint()
+	a.handleMouse(tcell.NewEventMouse(d.x+4, d.y+3, tcell.Button1, tcell.ModNone)) // "update…"
+	if a.dragMode != "gitlogsel" {
+		t.Fatalf("press on the detail started drag %q, want gitlogsel", a.dragMode)
+	}
+	a.handleMouse(tcell.NewEventMouse(d.x+2, d.y+5, tcell.Button1, tcell.ModNone)) // "-a", whole
+	a.handleMouse(tcell.NewEventMouse(d.x+2, d.y+5, tcell.ButtonNone, tcell.ModNone))
+	if want := "update bi jobs\n@@ -1 +1 @@\n-a"; a.clipBuf != want {
+		t.Fatalf("clipboard = %q, want %q", a.clipBuf, want)
+	}
+	if a.statusMsg != "3 lines copied" {
+		t.Errorf("flash = %q, want \"3 lines copied\"", a.statusMsg)
+	}
+	if !a.gitLogHasSelection() {
+		t.Error("the highlight did not survive the release")
+	}
+}
+
+// TestGitLogSelection_PlainClickCopiesNothing: an ordinary click in the
+// detail (press + release, no drag) must not touch the clipboard or
+// flash — copy-on-release only fires for a real selection.
+func TestGitLogSelection_PlainClickCopiesNothing(t *testing.T) {
+	a := gitLogSelFixture(t)
+	a.clipBuf = "keep"
+	d := a.gitLogDetailPaint()
+	a.handleMouse(tcell.NewEventMouse(d.x+4, d.y+3, tcell.Button1, tcell.ModNone))
+	a.handleMouse(tcell.NewEventMouse(d.x+4, d.y+3, tcell.ButtonNone, tcell.ModNone))
+	if a.clipBuf != "keep" || a.statusMsg != "" {
+		t.Fatalf("plain click: clipboard %q, flash %q", a.clipBuf, a.statusMsg)
+	}
+}
+
+// TestGitLogSelection_EscAndOutsidePressClear: the highlight goes with
+// Esc (a side effect — the key still reaches the leader) and with a
+// press outside the panel, so a later ⌘C answers for the editor.
+func TestGitLogSelection_EscAndOutsidePressClear(t *testing.T) {
+	a := gitLogSelFixture(t)
+	d := a.gitLogDetailPaint()
+	sel := func() {
+		a.gitLogSelStart(d.x, d.y)
+		a.gitLogSelDrag(d.x+4, d.y)
+	}
+	sel()
+	a.handleKey(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+	if a.gitLogHasSelection() {
+		t.Error("Esc kept the selection")
+	}
+	sel()
+	_, py, _, _ := a.gitLogRect()
+	a.handleMouse(tcell.NewEventMouse(a.width/2, py-3, tcell.Button1, tcell.ModNone))
+	a.handleMouse(tcell.NewEventMouse(a.width/2, py-3, tcell.ButtonNone, tcell.ModNone))
+	if a.gitLogHasSelection() {
+		t.Error("a press outside the panel kept the selection")
+	}
+}
+
+// TestGitLogSelection_CmdCCopiesTheSelection: ⌘C with a live detail
+// selection copies IT — falling through to cmdCopy would replace the
+// text the release just copied with the active file's path.
+func TestGitLogSelection_CmdCCopiesTheSelection(t *testing.T) {
+	a := gitLogSelFixture(t)
+	d := a.gitLogDetailPaint()
+	a.gitLogSelStart(d.x, d.y)
+	a.gitLogSelDrag(d.x+6, d.y) // "commit"
+	a.clipBuf = ""
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModMeta))
+	if a.clipBuf != "commit" {
+		t.Fatalf("⌘C copied %q, want \"commit\"", a.clipBuf)
+	}
+}

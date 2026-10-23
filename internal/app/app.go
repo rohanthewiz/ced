@@ -3011,6 +3011,8 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// universal "drop that" gesture, and a stale highlight sitting
 		// in the panel has no other way out.
 		a.chatClearSelection()
+		// …and for the git log detail's highlight, same reasoning.
+		a.gitLog.pane.clearSel()
 		// …and for an armed compare panel: Esc is the universal "drop
 		// that", and a mode still claiming the next paste is exactly the
 		// thing a user reaches for Esc to get out of.
@@ -3206,6 +3208,14 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 			if ev.Rune() == 'v' {
 				a.termPasteClip()
 			}
+			return
+		}
+		// A live git log detail selection owns Cmd+C: the release already
+		// copied it, and falling through to cmdCopy would replace that
+		// text with the active file's path — the reflexive ⌘C after a
+		// drag must not undo the drag.
+		if ev.Rune() == 'c' && a.gitLogHasSelection() {
+			a.gitLogCopySelection(true)
 			return
 		}
 		switch ev.Rune() {
@@ -3749,6 +3759,12 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		a.dragGitLogDivTo(x)
 		return
 	}
+	// Git log detail drag-select — the chat transcript's gesture, for the
+	// same reason: the panel captures the mouse (diffselect.go).
+	if leftDown && a.dragMode == "gitlogsel" {
+		a.gitLogSelDrag(x, y)
+		return
+	}
 
 	// Compare panel resize drag — same gesture, other bottom panel.
 	if leftDown && a.dragMode == "comparepanel" {
@@ -3797,6 +3813,12 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// editor would silently type the user's code into a search box.
 		if a.gitLog.filter.focused && !a.gitLogContains(x, y) {
 			a.gitLog.filter.focused = false
+		}
+		// …and its detail highlight goes with a press elsewhere, so ⌘C
+		// after selecting in the editor copies the EDITOR's text, not a
+		// stale log selection the user has moved on from.
+		if !a.gitLogContains(x, y) {
+			a.gitLog.pane.clearSel()
 		}
 		// The tree follows the same click-where-you-want-to-type rule:
 		// a press outside the sidebar hands the keyboard back; a press
@@ -3959,6 +3981,10 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	// per gesture, at the moment the gesture is finished.
 	if _, wasDock := dockForDragMode(a.dragMode); wasDock {
 		a.saveToolLayout()
+	}
+	// A git log detail drag copies on release (gitLogSelFinish says why).
+	if a.dragMode == "gitlogsel" {
+		a.gitLogSelFinish()
 	}
 	a.dragMode, a.dragSplitOffset = "", 0
 	a.stopAutoScroll()

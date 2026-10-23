@@ -792,6 +792,16 @@ cherry-pick dialog's preview: `alt+n` / `alt+p` step, `alt+v` flips side
 by side. The change view (click a change bar's popup) has its own
 **◂ Prev / Next ▸ / Side by side** row (`alt+p` / `alt+n` / `alt+s`).
 
+**Copying from the git log.** ced owns the mouse, so the terminal's own
+drag-select can't reach the panels. In the git log's commit detail,
+**drag across the text** to select it; releasing **copies** it (to ced's
+clipboard and, via OSC 52, the system's) and the status bar says how
+many lines went. Rows clipped at the pane's edge copy whole; drag onto
+the `…` to take the rest of a long line. In side-by-side mode the
+selection stays on the side you started on and leaves out the `+`/`-`
+prefixes and line numbers — the clean way to lift code. `Esc` or a
+click elsewhere drops the highlight; `⌘C` re-copies it.
+
 Not everywhere: the change-bar hover popup is too small for any of it
 (click it for the change view, which has them), the cherry-pick preview
 doesn't ignore whitespace (it shows exactly what a pick would apply), and

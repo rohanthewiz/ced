@@ -924,6 +924,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sheds ws → split → the pair; tips in buttonTips), ≡ View rows (act on
   `lastDiffSurf`), git walk `]`/`[`, cherry-pick alt+n/p/v, change view
   alt+p/n/s (its own nav row; not -w — the gutter's -U0 hunk).
+- Drag-select (diffselect.go): `diffPane.sel` in DISPLAY-row space,
+  cleared by the layout rebuild; ONE side per drag in split (holes
+  skipped, full rows whole); text = display form, clipped rows whole
+  (… = to EOL); geometry only via `diffSelTextRect`; painted as an
+  overlay at the end of `drawDiffRows`. Armed only by the git log detail
+  (`"gitlogsel"`): COPY ON RELEASE (⌘C rarely crosses tmux), Esc / an
+  outside press clear, ⌘C with a live selection copies it, not cmdCopy.
 - Compare revert: `[↺]` per hunk only when the new side is a whole OPEN
   buffer (not selection/conflict — `compareRevertBlocked` says why);
   buffer edit, one undo step, unsaved, no confirm; "+" side VERIFIED

@@ -679,7 +679,71 @@ func (a *App) gitLogPress(x, y int) (dragMode string) {
 		return "gitlogdiv"
 	}
 	a.gitLogClick(x, y)
+	// A press on the detail text also arms a drag-select (diffselect.go)
+	// — AFTER the click, so the double-click jump keeps working: the
+	// second press of a jump arms an empty selection, which its release
+	// copies nothing from.
+	if a.gitLogSelStart(x, y) {
+		return "gitlogsel"
+	}
 	return ""
+}
+
+// gitLogSelStart arms a fresh selection when (x, y) is on the commit
+// detail's rows, reporting whether it did. A plain click therefore
+// clears the previous highlight: the new anchor selects nothing.
+func (a *App) gitLogSelStart(x, y int) bool {
+	rows := a.gitLogDetailRows()
+	return a.gitLog.pane.diffSelStart(a.gitLog.detailLines, rows, a.gitLogDetailPaint(), x, y)
+}
+
+// gitLogSelDrag extends the detail selection to the pointer — the
+// "gitlogsel" drag continuation, so it also runs outside the panel
+// (diffSelPosAt clamps to the visible rows).
+func (a *App) gitLogSelDrag(x, y int) {
+	rows := a.gitLogDetailRows()
+	a.gitLog.pane.diffSelExtend(a.gitLog.detailLines, rows, a.gitLogDetailPaint(), x, y)
+}
+
+// gitLogSelFinish is the release of a detail drag: COPY ON RELEASE,
+// tmux copy-mode's habit. The panel captures the mouse, and the
+// keyboard door the chat relies on (⌘C) only arrives through the kitty
+// protocol — which tmux, the editor's home, usually doesn't forward —
+// so the release is the one gesture every host delivers. The highlight
+// stays up to show what was taken; Esc, the next press, or new detail
+// text clears it. An empty selection (a plain click) copies nothing.
+func (a *App) gitLogSelFinish() {
+	a.gitLogCopySelection(false)
+}
+
+// gitLogCopySelection copies the detail selection to both clipboards,
+// flashing how many lines went. With nothing selected, hint says how to
+// select instead — the ⌘C door wants that; the release doesn't (a plain
+// click must not flash a lesson every time).
+func (a *App) gitLogCopySelection(hint bool) {
+	text := a.gitLog.pane.diffSelText(a.gitLog.detailLines, a.gitLogDetailRows())
+	if text == "" {
+		if hint {
+			a.flash("Drag across the commit detail to select text — it copies on release")
+		}
+		return
+	}
+	// chatCopy is the shared "text onto both clipboards + flash" path:
+	// the internal buffer (so ⌘V / Esc p work without a cooperating
+	// terminal) and OSC 52 through the copilotCopyCode seam that keeps
+	// tests off the developer's clipboard.
+	n := strings.Count(text, "\n") + 1
+	a.chatCopy(text, plural(n, "line", "lines"))
+}
+
+// gitLogHasSelection reports a non-empty detail selection — the ⌘C
+// branch's test for whether the log, not the editor, owns the copy.
+func (a *App) gitLogHasSelection() bool {
+	if !a.gitLog.open {
+		return false
+	}
+	_, _, ok := a.gitLog.pane.diffSelRange()
+	return ok
 }
 
 // gitLogClick routes a body click: a commit row selects it and fetches
@@ -944,7 +1008,7 @@ func (a *App) drawGitLog() {
 			a.screen.SetContent(cx, ry, ' ', nil, detailBG)
 		}
 	}
-	a.drawGitLogDetail(px+listW+2, bodyTop, pw-listW-3, a.gitLogBodyRows())
+	a.drawGitLogDetail()
 }
 
 // drawGitLogListRow paints one commit row: a ● marker on ref-decorated
@@ -1023,16 +1087,25 @@ func (a *App) drawGitLogListRow(row, px, ry, listW int) {
 // side by side (diffview.go) — truncated to the pane width, the changes
 // panel's no-horizontal-scroll tradeoff. Full rows keep the log's own
 // palette (commit header, metadata keys) through gitLogDetailStyle.
-func (a *App) drawGitLogDetail(x, y, w, n int) {
-	if w <= 0 {
-		return
-	}
+func (a *App) drawGitLogDetail() {
+	a.drawDiffRows(a.gitLog.detailLines, &a.gitLog.pane, a.gitLogDetailRows(), a.gitLogDetailPaint())
+}
+
+// gitLogDetailPaint is the detail pane's paint geometry — the ONE
+// source for the painter and the selection hit-test, so a drag lands on
+// the cell it was drawn in. The text starts two columns right of the
+// divider (the gap carries the ▸ change marker) and stops one short of
+// the panel's edge.
+func (a *App) gitLogDetailPaint() diffPaint {
+	px, _, pw, _ := a.gitLogRect()
+	listW := a.gitLogListW(pw)
 	th := a.theme
-	a.drawDiffRows(a.gitLog.detailLines, &a.gitLog.pane, a.gitLogDetailRows(), diffPaint{
-		x: x, y: y, w: w, n: n, scroll: a.gitLog.detailScroll,
-		style: func(line string) tcell.Style { return gitLogDetailStyle(line, th) },
-		bg:    th.BG,
-	})
+	return diffPaint{
+		x: px + listW + 2, y: a.gitLogBodyTop(), w: pw - listW - 3, n: a.gitLogBodyRows(),
+		scroll: a.gitLog.detailScroll,
+		style:  func(line string) tcell.Style { return gitLogDetailStyle(line, th) },
+		bg:     th.BG,
+	}
 }
 
 // gitLogDetailStyle colors one `git show` line: the commit header line

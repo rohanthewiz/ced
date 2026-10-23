@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-086**
+**Next ID: N-088**
 
 ## Open
 
@@ -113,6 +113,17 @@ plus the LSP work done in the seeding session itself
   picked. If they go in, fold the git rows (Show change, Blame, Git
   status, New branch) into one "Git…" picker row to keep the popup
   short.
+
+- **N-087** · raised `2026-1023-1213-gitlog-detail-select-copy` · value low
+  Drag-select lives on the shared `diffPane` layer, but only the git
+  log's detail arms it (`"gitlogsel"`). The compare panel, the git
+  panel's diff pane and the cherry-pick preview capture the mouse the
+  same way and still can't be copied from. Each needs a press/drag/
+  release wired to `diffSelStart`/`diffSelExtend`/`diffSelText` and a
+  paint-geometry helper shared with its draw (the `gitLogDetailPaint`
+  pattern). Watch the git panel's hunk chips and compare `[↺]`, which
+  must keep winning their presses. Copied text is the DISPLAY form
+  (tabs expanded) — revisit if lifting tab-indented code bites.
 
 ## Validate
 
@@ -306,6 +317,15 @@ and `raised`.
   buffer, the git walk's `]`/`[`, the cherry-pick preview's
   alt+n/p/v and the change view's alt+p/n/s through tmux's Esc folding,
   and the change view's ◂ Prev / Next ▸ / Side by side buttons.
+
+- **N-086** · raised `2026-1023-1213-gitlog-detail-select-copy` · value medium
+  Git log detail drag-select (diffselect.go) ran in the real binary only
+  through run-ced's PTY (scripted SGR press/motion/release → "4 lines
+  copied", highlight painted). Hand check in tmux and cats: the drag
+  highlights live, the release lands on the SYSTEM clipboard via OSC 52
+  through tmux passthrough (paste it outside ced), split mode stays on
+  the pressed side, dragging onto a clipped row's … takes the line's
+  tail, and Esc / a click elsewhere drops the highlight.
 
 ## Roadmap
 

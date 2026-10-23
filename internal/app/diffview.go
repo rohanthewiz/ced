@@ -340,6 +340,9 @@ type diffPane struct {
 	// switch recomputes, since -w changes what counts as a difference.
 	emph   []diffEmph
 	emphWS bool
+	// sel is the drag selection (diffselect.go), in display-row space;
+	// reset with the rows, so new text never inherits an old highlight.
+	sel diffSel
 }
 
 // diffEmph is one row's emphasis: the changed spans on each side in
@@ -371,6 +374,7 @@ func (p *diffPane) layout(lines []string, split bool) []diffRow {
 	p.numW = diffNumWidth(p.rows)
 	p.cur = -1
 	p.emph = nil
+	p.clearSel()
 	return p.rows
 }
 
@@ -983,6 +987,7 @@ func (a *App) drawDiffRows(lines []string, p *diffPane, rows []diffRow, d diffPa
 			tcell.StyleDefault.Background(d.bg).Foreground(a.theme.Subtle))
 		a.drawDiffSide(lines, r.right, r.newNo, p.numW, d.x+lw+1, ry, d.w-lw-1, d.bg, emR)
 	}
+	a.paintDiffSelection(lines, p, rows, d)
 }
 
 // drawDiffSide paints one half of a paired row: the line number in a

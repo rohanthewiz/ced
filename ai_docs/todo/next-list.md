@@ -114,14 +114,6 @@ plus the LSP work done in the seeding session itself
   status, New branch) into one "Git…" picker row to keep the popup
   short.
 
-- **N-085** · raised `2026-1022-1932-diff-views-split-ws-steppers` · value low
-  Side-by-side diffs pair removed and added lines positionally with no
-  intra-line emphasis, so a one-word change in a long line still reads
-  as two whole lines. Word-level highlighting of the differing span
-  (both sides) would need a token differ per pair — deliberately left
-  out of diffview.go's first cut ("a cleverer pairing would be a second
-  differ to get wrong").
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -386,6 +378,17 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-22, `2026-1022-1954-n085-word-diff-emphasis` —
+  **N-085** side-by-side diffs now emphasise the changed words of each
+  paired row on both sides. `diff.Words` (internal/diff/words.go) runs
+  the package's own patience differ over word tokens — no second
+  algorithm; pairs sharing less than half the longer line are left
+  plain, spans separated only by whitespace merge, and under ignore
+  whitespace a spacing-only token is never lit. Lazy per row, cached on
+  the `diffPane`; fill = the side's colour at 35% over the background,
+  text lifted to 4.5:1, checked on every builtin. The change view
+  (hunkview.go) has its own painter and is not covered.
 
 - closed 2026-10-22, `2026-1022-1207-n083-find-prompt-chips` —
   **N-083** the three text-find prompts now carry `[case: …]` (alt+c)

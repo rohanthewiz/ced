@@ -900,7 +900,16 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   mapping goes through `diffRow.line()` / `diffPane.lineAt`, never
   `scroll + y`. Headers/@@/markers/metadata stay full rows (chips ride
   on them in both layouts); combined diffs never split. Pairing is
-  positional per -/+ run, no intra-line matching.
+  positional per -/+ run.
+- Intra-line emphasis (split only): a paired row goes through
+  `diff.Words` (internal/diff/words.go) — the SAME patience differ over
+  word tokens, never a second algorithm. Compared RAW (after the
+  prefix), spans mapped to display runes (`diffSpansToDisplay`); lazy
+  per row, cached on the pane (`emphasisAt`, keyed by `diffIgnoreWS`;
+  `diffRow` stays comparable — no slices on it). Pairs sharing < half
+  the longer line's non-blank runes get NOTHING. Fill = the side's
+  colour at `diffEmphasisMix` over bg, text `liftToContrast`ed
+  (`TestDiffEmphasisStyle_VisibleOnEveryBuiltin`); no RGB → reverse.
 - `diffPane` caches by slice IDENTITY + mode — surfaces REPLACE their
   lines slice, never edit it in place; new text resets the change cursor.
   `setDiffSplit` remaps every pane's scroll + cursor (`switchMode`).

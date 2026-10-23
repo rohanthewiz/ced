@@ -761,8 +761,11 @@ at the right of its header:
   rather than wrap.
 - **split** — side by side: the old text on the left, the new on the
   right, each with its own line numbers. Removed and added lines are
-  paired up in order; the longer run sits against a blank. File and hunk
-  headers stay full width. Lit while on. One setting for every diff
+  paired up in order; the longer run sits against a blank. Within a
+  pair, the words that changed get a tinted background on both sides, so
+  a one-word edit in a long line is found at a glance (two lines that
+  share too little are left plain rather than lit end to end). File and
+  hunk headers stay full width. Lit while on. One setting for every diff
   panel, remembered across sessions (`"diffview": "split"` in
   config.json).
 - **ws** — ignore whitespace (git's `-w`): re-indents and re-spaced

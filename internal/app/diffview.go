@@ -38,8 +38,22 @@
 //   - PAIRING IS POSITIONAL WITHIN A RUN. A run of "-" lines followed by
 //     a run of "+" lines is zipped row by row (the first removed line
 //     beside the first added one); the longer run's tail sits against a
-//     blank. No intra-line matching: the panes are review strips, and a
-//     cleverer pairing would be a second differ to get wrong.
+//     blank. No cleverer line matching: the panes are review strips, and
+//     a smarter pairing would be a second differ to get wrong.
+//   - WITHIN A PAIR, THE CHANGED WORDS ARE EMPHASISED (N-085). A paired
+//     row's two lines go through diff.Words — internal/diff's own
+//     patience differ run over word tokens, not a second algorithm — and
+//     the spans that differ get a tinted background on each side:
+//
+//	    12 if err := open(path); err != nil {│12 if err := read(path); err != nil {
+//	                 ▀▀▀▀                     │             ▀▀▀▀
+//
+//     Computed LAZILY per row on first paint and cached on the pane
+//     (diffPane.emphasisAt) — a 5,000-line commit costs only the rows
+//     scrolled past. Pairs that share too little (Words' threshold) get
+//     no emphasis: two unrelated lines zipped side by side would light
+//     up end to end. Split mode only; the unified painter keeps each
+//     surface's own palette untouched.
 //   - HEADERS STAY FULL WIDTH. File headers, "@@" lines, the git panel's
 //     staged/unstaged markers and a commit's metadata are drawn across
 //     the whole pane in both modes — which is also what keeps the hunk
@@ -68,6 +82,7 @@ import (
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/diff"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
@@ -75,6 +90,10 @@ import (
 // with above it: enough to see what it follows, not so many that a
 // short pane spends itself on lines that didn't change.
 const diffNavMargin = 2
+
+// diffEmphasisMix is how much of a side's colour tints the fill behind
+// its changed words (diffEmphasisStyle).
+const diffEmphasisMix = 0.35
 
 // -----------------------------------------------------------------------------
 // Layout
@@ -315,6 +334,20 @@ type diffPane struct {
 	// cur is the index into starts of the change the stepper last landed
 	// on; -1 for none.
 	cur int
+	// emph is the per-row intra-line emphasis, filled lazily by
+	// emphasisAt (parallel to rows; reset with them). emphWS is the
+	// ignore-whitespace setting it was computed under — flipping the
+	// switch recomputes, since -w changes what counts as a difference.
+	emph   []diffEmph
+	emphWS bool
+}
+
+// diffEmph is one row's emphasis: the changed spans on each side in
+// DISPLAY runes (prefix dropped, tabs expanded — what drawDiffSide
+// paints). done separates "computed, nothing to show" from "not yet".
+type diffEmph struct {
+	done        bool
+	left, right []diff.Span
 }
 
 // sameSlice reports whether two slices are the same backing array and
@@ -337,7 +370,84 @@ func (p *diffPane) layout(lines []string, split bool) []diffRow {
 	p.starts = diffChangeStarts(p.rows)
 	p.numW = diffNumWidth(p.rows)
 	p.cur = -1
+	p.emph = nil
 	return p.rows
+}
+
+// emphasisAt returns the changed-word spans of display row k for both
+// sides, computing and caching them on first ask. Only a paired row with
+// a line on BOTH sides has any; everything else answers nil.
+func (p *diffPane) emphasisAt(lines []string, k int, ws bool) (left, right []diff.Span) {
+	if k < 0 || k >= len(p.rows) {
+		return nil, nil
+	}
+	r := p.rows[k]
+	if r.full || r.left < 0 || r.right < 0 || r.left == r.right {
+		return nil, nil // headers, context and one-sided rows
+	}
+	if len(p.emph) != len(p.rows) || p.emphWS != ws {
+		p.emph, p.emphWS = make([]diffEmph, len(p.rows)), ws
+	}
+	e := &p.emph[k]
+	if !e.done {
+		e.done = true
+		e.left, e.right = diffPairEmphasis(lines[r.left], lines[r.right], ws)
+	}
+	return e.left, e.right
+}
+
+// diffPairEmphasis compares a removed and an added unified line and
+// returns the changed spans in display runes. The comparison runs on the
+// RAW text after the +/- prefix — a tab turned into spaces is a real
+// change, and comparing the tab-expanded forms would hide it — and the
+// spans are then mapped through the same tab expansion the painter uses.
+func diffPairEmphasis(del, add string, ws bool) (left, right []diff.Span) {
+	rawL := diffBodyText(del)
+	rawR := diffBodyText(add)
+	ls, rs := diff.Words(rawL, rawR, diff.Options{IgnoreWhitespace: ws})
+	if ls == nil && rs == nil {
+		return nil, nil
+	}
+	return diffSpansToDisplay(rawL, ls), diffSpansToDisplay(rawR, rs)
+}
+
+// diffBodyText is a hunk body line without its one-byte prefix and any
+// trailing CR — the text diffDisplayLine expands for the painter.
+func diffBodyText(line string) string {
+	line = strings.TrimRight(line, "\r")
+	if line == "" {
+		return ""
+	}
+	return line[1:]
+}
+
+// diffSpansToDisplay maps rune spans over raw body text to rune spans
+// over its display form, where each tab became the spaces up to the next
+// hunkTipTabWidth stop (diffDisplayLineCols with one prefix column — the
+// stops count from the cell after the prefix, i.e. from 0 here). A span
+// covering a tab covers every cell the tab expanded to.
+func diffSpansToDisplay(raw string, spans []diff.Span) []diff.Span {
+	if len(spans) == 0 || !strings.ContainsRune(raw, '\t') {
+		return spans // no tabs: raw runes ARE display runes
+	}
+	// col[i] is the display column of raw rune i; col[len] is the end.
+	rs := []rune(raw)
+	col := make([]int, len(rs)+1)
+	c := 0
+	for i, r := range rs {
+		col[i] = c
+		if r == '\t' {
+			c += hunkTipTabWidth - c%hunkTipTabWidth
+		} else {
+			c++
+		}
+	}
+	col[len(rs)] = c
+	out := make([]diff.Span, len(spans))
+	for i, sp := range spans {
+		out[i] = diff.Span{From: col[sp.From], To: col[sp.To]}
+	}
+	return out
 }
 
 // switchMode re-lays lines in the other mode and returns the scroll
@@ -867,18 +977,21 @@ func (a *App) drawDiffRows(lines []string, p *diffPane, rows []diffRow, d diffPa
 			continue
 		}
 		lw := (d.w - 1) / 2
-		a.drawDiffSide(lines, r.left, r.oldNo, p.numW, d.x, ry, lw, d.bg)
+		emL, emR := p.emphasisAt(lines, i, a.diffIgnoreWS)
+		a.drawDiffSide(lines, r.left, r.oldNo, p.numW, d.x, ry, lw, d.bg, emL)
 		a.screen.SetContent(d.x+lw, ry, '│', nil,
 			tcell.StyleDefault.Background(d.bg).Foreground(a.theme.Subtle))
-		a.drawDiffSide(lines, r.right, r.newNo, p.numW, d.x+lw+1, ry, d.w-lw-1, d.bg)
+		a.drawDiffSide(lines, r.right, r.newNo, p.numW, d.x+lw+1, ry, d.w-lw-1, d.bg, emR)
 	}
 }
 
 // drawDiffSide paints one half of a paired row: the line number in a
 // muted gutter, then the text without its +/-/space prefix, colored by
 // that prefix. A blank side is filled with the sidebar tone so "no line
-// here" reads as a hole rather than as an empty line of the file.
-func (a *App) drawDiffSide(lines []string, idx, no, numW, x, y, w int, bg tcell.Color) {
+// here" reads as a hole rather than as an empty line of the file. The
+// runes inside emph (display offsets, from emphasisAt) are painted with
+// diffEmphasisStyle — the changed words of a paired row.
+func (a *App) drawDiffSide(lines []string, idx, no, numW, x, y, w int, bg tcell.Color, emph []diff.Span) {
 	if w <= 0 {
 		return
 	}
@@ -908,5 +1021,44 @@ func (a *App) drawDiffSide(lines []string, idx, no, numW, x, y, w int, bg tcell.
 		x += numW + 1
 		w -= numW + 1
 	}
-	drawAt(a.screen, x, y, clipRunes(line, w), text)
+	if len(emph) == 0 {
+		drawAt(a.screen, x, y, clipRunes(line, w), text)
+		return
+	}
+	// Rune by rune so each cell can take the emphasis. Cells line up with
+	// display runes one to one (drawAt's rule), so a span's offsets ARE
+	// cell offsets from x; a clip's trailing … inherits whatever its cell
+	// would have had.
+	em := diffEmphasisStyle(bg, fg)
+	k := 0 // index into emph, advanced as the walk passes each span
+	col := 0
+	for _, ch := range clipRunes(line, w) {
+		for k < len(emph) && col >= emph[k].To {
+			k++
+		}
+		st := text
+		if k < len(emph) && col >= emph[k].From {
+			st = em
+		}
+		a.screen.SetContent(x+col, y, ch, nil, st)
+		col++
+	}
+}
+
+// diffEmphasisStyle is the changed-word style on a side whose text is fg
+// (GitDeleted / GitAdded) over bg: the side's own colour mixed
+// diffEmphasisMix into the background as a fill, with the text lifted to
+// 4.5:1 against that fill. Tinting by the side's colour keeps "removed"
+// and "added" reading as such inside the emphasis; 35% is strong enough
+// to find at a glance on the dark and light builtins alike (30% left
+// solarized-dark's red fill at 1.19:1 to its background; pinned by
+// TestDiffEmphasisStyle_VisibleOnEveryBuiltin) without the fill drowning
+// the word it marks. A theme with no RGB background can't be tinted, so
+// it falls back to reverse video — never to an invisible emphasis.
+func diffEmphasisStyle(bg, fg tcell.Color) tcell.Style {
+	fill := blendColor(bg, fg, diffEmphasisMix)
+	if fill == bg {
+		return tcell.StyleDefault.Background(bg).Foreground(fg).Reverse(true)
+	}
+	return tcell.StyleDefault.Background(fill).Foreground(liftToContrast(fg, fill))
 }

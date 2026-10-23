@@ -10,10 +10,13 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/diff"
+	"github.com/rohanthewiz/ced/internal/theme"
 )
 
 // diffViewSample is the header comment's example: one hunk where two
@@ -387,5 +390,135 @@ func TestDiffSplitLabels(t *testing.T) {
 	a.diffSplit, a.diffIgnoreWS = true, true
 	if a.diffSplitToggleLabel() != "Diff view: unified" || a.diffIgnoreWSToggleLabel() != "Diff view: show whitespace changes" {
 		t.Fatalf("labels = %q / %q", a.diffSplitToggleLabel(), a.diffIgnoreWSToggleLabel())
+	}
+}
+
+// TestDiffPairEmphasis_MapsTabsToDisplay: the words are compared on the
+// raw text, and the spans come back in display runes — after the prefix
+// is dropped and each tab is expanded to its stop.
+func TestDiffPairEmphasis_MapsTabsToDisplay(t *testing.T) {
+	left, right := diffPairEmphasis("-\tx := open(p)", "+\tx := read(p)", false)
+	// "\t" expands to hunkTipTabWidth cells, so "open"/"read" start there.
+	want := []diff.Span{{From: hunkTipTabWidth + 5, To: hunkTipTabWidth + 9}}
+	if !reflect.DeepEqual(left, want) || !reflect.DeepEqual(right, want) {
+		t.Fatalf("spans = %v / %v, want %v", left, right, want)
+	}
+	// A tab turned into spaces is a real change: compared raw, it shows.
+	_, right = diffPairEmphasis("-\tkeep this line", "+    keep this line", false)
+	if len(right) == 0 {
+		t.Fatal("a tab → spaces change shows no emphasis")
+	}
+}
+
+// TestDiffPane_EmphasisOnlyOnPairs: only a paired row with a line on
+// both sides is emphasised; context, one-sided and full rows answer
+// nil, and flipping ignore-whitespace recomputes rather than reusing.
+func TestDiffPane_EmphasisOnlyOnPairs(t *testing.T) {
+	lines := []string{
+		"@@ -1,3 +1,3 @@", " ctx", "-x = a+b + c", "-gone", "+x = a + b + c",
+	}
+	var p diffPane
+	rows := p.layout(lines, true)
+	paired := -1
+	for k, r := range rows {
+		l, rr := p.emphasisAt(lines, k, false)
+		if r.full || r.left < 0 || r.right < 0 || r.left == r.right {
+			if l != nil || rr != nil {
+				t.Fatalf("row %d (%+v) emphasised", k, r)
+			}
+			continue
+		}
+		paired = k
+		if len(rr) == 0 {
+			t.Fatalf("paired row %d shows no spacing change", k)
+		}
+	}
+	if paired < 0 {
+		t.Fatal("no paired row in the layout")
+	}
+	if l, r := p.emphasisAt(lines, paired, true); l != nil || r != nil {
+		t.Fatalf("under -w a spacing-only pair is emphasised: %v / %v", l, r)
+	}
+	p.layout(append([]string(nil), lines...), true) // new text resets the cache
+	if len(p.emph) != 0 {
+		t.Fatal("a new layout kept the old emphasis")
+	}
+}
+
+// TestDrawDiffRows_SplitEmphasisesChangedWord: side by side, the
+// changed word of a paired row is painted on the emphasis fill and the
+// rest of the line on the pane background — on both sides.
+func TestDrawDiffRows_SplitEmphasisesChangedWord(t *testing.T) {
+	a := seedCompareApp(t, map[string]string{
+		"mine.txt":  "first\nreturn readConfig(path)\nlast\n",
+		"other.txt": "first\nreturn openConfig(path)\nlast\n",
+	}, "mine.txt")
+	a.compareWithFile(filepath.Join(a.rootDir, "other.txt"))
+	a.diffSplit = true
+	a.draw()
+	th := a.theme
+	px, py, pw, ph := a.comparePanelRect()
+	// at is the screen column of sub's first rune at or after rune from.
+	at := func(row []rune, sub string, from int) int {
+		k := strings.Index(string(row[from:]), sub)
+		if k < 0 {
+			t.Fatalf("%q not in %q", sub, string(row[from:]))
+		}
+		return px + from + len([]rune(string(row[from:])[:k]))
+	}
+	bgAt := func(x, y int) tcell.Color {
+		_, _, st, _ := a.screen.GetContent(x, y)
+		_, bg, _ := st.Decompose()
+		return bg
+	}
+	for y := py + 1; y < py+ph; y++ {
+		row := []rune(screenRow(t, a, y, px, pw))
+		if !strings.Contains(string(row), "openConfig") {
+			continue
+		}
+		mid := strings.IndexRune(string(row), '│')
+		mid = len([]rune(string(row)[:mid])) + 1
+		sides := []struct {
+			word string
+			from int
+			fg   tcell.Color
+		}{{"open", 0, th.GitDeleted}, {"read", mid, th.GitAdded}}
+		for _, sd := range sides {
+			if got := bgAt(at(row, sd.word, sd.from), y); got != blendColor(th.BG, sd.fg, diffEmphasisMix) {
+				t.Fatalf("%q not on the emphasis fill", sd.word)
+			}
+			if got := bgAt(at(row, "return", sd.from), y); got != th.BG {
+				t.Fatalf("unchanged text beside %q is emphasised", sd.word)
+			}
+		}
+		return
+	}
+	t.Fatal("no row shows openConfig beside readConfig")
+}
+
+// TestDiffEmphasisStyle_VisibleOnEveryBuiltin: on every builtin theme
+// the fill stands off the pane background and the emphasised text reads
+// at 4.5:1 on it, for both sides — an emphasis nobody can see, or text
+// the fill drowns, is worse than none.
+func TestDiffEmphasisStyle_VisibleOnEveryBuiltin(t *testing.T) {
+	for _, sp := range theme.Builtins() {
+		th, err := sp.Resolve()
+		if err != nil {
+			t.Fatalf("%s: %v", sp.Name, err)
+		}
+		for _, fg := range []tcell.Color{th.GitDeleted, th.GitAdded} {
+			st := diffEmphasisStyle(th.BG, fg)
+			sfg, sbg, _ := st.Decompose()
+			if c := contrastRatio(sbg, th.BG); c < 1.2 {
+				t.Errorf("%s: fill %.2f:1 to the background", sp.Name, c)
+			}
+			if c := contrastRatio(sfg, sbg); c < 4.5 {
+				t.Errorf("%s: text %.2f:1 on the fill", sp.Name, c)
+			}
+		}
+	}
+	// No RGB to tint with → reverse video, never an invisible style.
+	if _, _, attr := diffEmphasisStyle(tcell.ColorDefault, tcell.ColorRed).Decompose(); attr&tcell.AttrReverse == 0 {
+		t.Fatal("a default background got no visible emphasis")
 	}
 }

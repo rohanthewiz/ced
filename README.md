@@ -66,7 +66,13 @@ The goals, in order:
   ≡ Git → *Show change at caret…*) for the change view: the diff, the
   original lines in place, and **Revert change** (`alt+r`), which puts
   the original back as one `Undo`-able edit without saving.
-  `Esc h` / `Esc H` jump between changes.
+  **◂ Prev** / **Next ▸** (`alt+p` / `alt+n`) walk the file's changes
+  without leaving the view, and **Side by side** (`alt+s`) puts git's
+  lines beside the file's. `Esc h` / `Esc H` jump between changes.
+- **Diff views: side by side, ignore whitespace, next/previous change** —
+  the compare panel, the git panel, the git log and the cherry-pick
+  preview all switch between unified and side-by-side, and step change by
+  change. See [Diff views](#diff-views).
 - **Cherry-picking and merge conflicts** — pick several commits from
   another branch in one dialog (already-applied ones marked, likely
   conflicts flagged `⚠`). When a cherry-pick, merge, revert or rebase
@@ -734,6 +740,60 @@ the find tint are already saying it, against the code itself.
 Nothing gates the markers: they cost no layout, and a viewport that
 silently runs on past its last row is the one thing an editor must never
 do.
+
+### Diff views
+
+Every panel that shows a diff — the **compare panel**, the **git panel**'s
+diff pane, the **git log**'s commit detail — carries the same four buttons
+at the right of its header:
+
+```
+─ Compare · other.go ↔ main.go ────────────── +3 −2 ─ ▲ ─ ▼ ─ split ─ ws ─ ⟳ ─ ✕ ─
+  @@ -9,4 +9,5 @@ func run()                                             [↺]
+   9 x := 1                       │ 9 x := 10
+  10 y := 2                       │10 y := 2
+                                  │11 z := 3
+```
+
+- **▲ / ▼** — previous / next change. A change is a run of changed lines,
+  so a hunk with two separate edits is two stops. The change you're on is
+  marked `▸`, the status bar says *Change 3 of 7*, and the ends stop
+  rather than wrap.
+- **split** — side by side: the old text on the left, the new on the
+  right, each with its own line numbers. Removed and added lines are
+  paired up in order; the longer run sits against a blank. File and hunk
+  headers stay full width. Lit while on. One setting for every diff
+  panel, remembered across sessions (`"diffview": "split"` in
+  config.json).
+- **ws** — ignore whitespace (git's `-w`): re-indents and re-spaced
+  lines stop being differences. Lit while on; for this session only.
+  The git panel's per-hunk **stage/revert** chips stand down while it's
+  on — a whitespace-blind hunk doesn't apply cleanly — and the hunk
+  picker says so.
+
+**Reverting hunks.** The git panel's hunks keep their `[+]` stage /
+`[↺]` revert chips in both layouts. The compare panel now has a `[↺]` on
+every hunk too, whenever the new side is an open file (compare with a
+file, the saved copy, the clipboard or pasted text): it puts that hunk's
+old lines back into the **buffer** — one `Undo` step, not saved, no
+confirm — and re-runs the comparison. A buffer you've typed in since the
+diff is refused (⟳ re-diffs it) rather than patched in the wrong place.
+≡ File → Compare → *Revert a change in the compare view…* is the
+keyboard route.
+
+**Keyboard.** ≡ View has *Diff view: side by side*, *Diff view: ignore
+whitespace*, *Diff view: next change* and *Diff view: previous change*;
+the steppers act on the diff panel you last clicked or scrolled. During
+the git panel's review survey, `]` / `[` step changes. In the
+cherry-pick dialog's preview: `alt+n` / `alt+p` step, `alt+v` flips side
+by side. The change view (click a change bar's popup) has its own
+**◂ Prev / Next ▸ / Side by side** row (`alt+p` / `alt+n` / `alt+s`).
+
+Not everywhere: the change-bar hover popup is too small for any of it
+(click it for the change view, which has them), the cherry-pick preview
+doesn't ignore whitespace (it shows exactly what a pick would apply), and
+the git log offers no hunk revert (reverting history is the commit's
+*Revert* action).
 
 ### Button labels
 

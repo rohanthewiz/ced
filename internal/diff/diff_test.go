@@ -250,3 +250,39 @@ func TestDiff_LongCommonSuffixIsLinear(t *testing.T) {
 		t.Fatalf("stats = +%d -%d, want +1 -0", added, removed)
 	}
 }
+
+// TestDiffWith_IgnoreWhitespaceHidesReindent: a re-indented line and a
+// re-spaced one are equal under -w, while a real change still shows —
+// and the equal lines carry the NEW side's spelling.
+func TestDiffWith_IgnoreWhitespaceHidesReindent(t *testing.T) {
+	a := []string{"func f() {", "\treturn x", "a  +  b", "old"}
+	b := []string{"func f() {", "    return x", "a + b", "new"}
+	got := script(DiffWith(a, b, Options{IgnoreWhitespace: true}))
+	want := "=func f() { =    return x =a + b -old +new"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	// Without the option the whitespace edits are real changes.
+	if plain := script(DiffWith(a, b, Options{})); plain == want {
+		t.Fatalf("plain diff hid the whitespace edits: %q", plain)
+	}
+}
+
+// TestDiffWith_LineNumbersSurviveTheKeys: normalising for the match must
+// not disturb the line numbers the hunk headers are counted from.
+func TestDiffWith_LineNumbersSurviveTheKeys(t *testing.T) {
+	a := []string{" x", "y"}
+	b := []string{"x", "z", "y "}
+	for _, e := range DiffWith(a, b, Options{IgnoreWhitespace: true}) {
+		switch e.Op {
+		case OpEqual:
+			if a[e.OldLine-1] == "" || b[e.NewLine-1] != e.Text {
+				t.Fatalf("equal edit %+v: text is not the new side's line", e)
+			}
+		case OpInsert:
+			if b[e.NewLine-1] != e.Text {
+				t.Fatalf("insert %+v: text mismatch", e)
+			}
+		}
+	}
+}

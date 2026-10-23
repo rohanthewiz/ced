@@ -103,9 +103,14 @@ type gitLogState struct {
 	// detailHash is the commit detailLines belong to. It lags selection
 	// while a `git show` is in flight and is what makes stale async
 	// results detectable (see handleGitLogShow).
-	detailHash   string
-	detailLines  []string
+	detailHash  string
+	detailLines []string
+	// detailScroll counts DISPLAY rows (diffview.go): lines when
+	// unified, fewer when the patch is laid out side by side.
 	detailScroll int
+	// pane is diffview.go's layout cache and change cursor for the
+	// detail pane.
+	pane diffPane
 	// filter is the history-search bar (gitlogfilter.go). Zero value is
 	// "closed", so the panel behaves exactly as it did before the bar
 	// existed until something opens it.
@@ -123,6 +128,8 @@ type gitLogShowEvent struct {
 	when  time.Time
 	hash  string
 	lines []string
+	// ws says the show was asked for whitespace-blind (-w).
+	ws bool
 }
 
 // When satisfies the tcell.Event interface.
@@ -328,9 +335,10 @@ func (a *App) requestGitLogDetail(c gitLogCommit) {
 	}
 	scr := a.screen
 	root := a.rootDir
+	ws := a.diffIgnoreWS
 	go func() {
-		lines := loadGitLogDetail(root, c.Hash)
-		_ = scr.PostEvent(&gitLogShowEvent{when: time.Now(), hash: c.Hash, lines: lines})
+		lines := loadGitLogDetail(root, c.Hash, ws)
+		_ = scr.PostEvent(&gitLogShowEvent{when: time.Now(), hash: c.Hash, lines: lines, ws: ws})
 	}()
 }
 
@@ -339,9 +347,18 @@ func (a *App) requestGitLogDetail(c gitLogCommit) {
 // history browser is for), ref decorations, the per-file stat, and the
 // patch. One command so metadata, changed files, and the diff arrive as
 // a single scrollable document, the way JetBrains stacks them.
-func loadGitLogDetail(rootDir, hash string) []string {
-	out, err := exec.Command("git", "-C", rootDir, "show", "--decorate",
-		"--pretty=fuller", "--stat", "--patch", "--no-color", hash).Output()
+//
+// ws adds -w (diffview.go's ignore-whitespace switch): the patch then
+// leaves out whitespace-only edits, and the stat still counts them —
+// git's own behaviour, and the stat is the honest "what the commit
+// touched".
+func loadGitLogDetail(rootDir, hash string, ws bool) []string {
+	args := []string{"-C", rootDir, "show", "--decorate",
+		"--pretty=fuller", "--stat", "--patch", "--no-color"}
+	if ws {
+		args = append(args, "-w")
+	}
+	out, err := exec.Command("git", append(args, hash)...).Output()
 	if err != nil {
 		return []string{"(unable to load commit " + hash + ")"}
 	}
@@ -357,6 +374,11 @@ func (a *App) handleGitLogShow(e *gitLogShowEvent) {
 	}
 	c, ok := a.gitLogSelectedCommit()
 	if !ok || c.Hash != e.hash {
+		return
+	}
+	// Asked under the other whitespace setting: the newer request,
+	// sent when the switch flipped, is the one to keep.
+	if e.ws != a.diffIgnoreWS {
 		return
 	}
 	if a.gitLog.detailHash != e.hash {
@@ -581,7 +603,21 @@ func (a *App) gitLogClampScrolls() {
 		return scroll
 	}
 	a.gitLog.listScroll = clamp(a.gitLog.listScroll, len(a.gitLog.commits))
-	a.gitLog.detailScroll = clamp(a.gitLog.detailScroll, len(a.gitLog.detailLines))
+	a.gitLog.detailScroll = clamp(a.gitLog.detailScroll, len(a.gitLogDetailRows()))
+}
+
+// gitLogDetailRows is the detail pane's display rows in the current
+// layout (diffview.go).
+func (a *App) gitLogDetailRows() []diffRow {
+	return a.gitLog.pane.layout(a.gitLog.detailLines, a.diffSplit)
+}
+
+// gitLogToolbar lays out the shared diff toolbar (▲ ▼ split ws) on the
+// header's right-hand chain, left of ⧉ hash, and never over the
+// left-hand chain (Actions, push, search). The title yields to it.
+func (a *App) gitLogToolbar() []diffToolBtn {
+	search := a.gitLogSearchRect()
+	return diffToolbar(search.x+search.w+1, a.gitLogCopyRect().x-1, search.y)
 }
 
 // gitLogEnsureSelectedVisible snaps the list scroll so the selected row
@@ -608,8 +644,10 @@ func (a *App) gitLogEnsureSelectedVisible() {
 // everything else is a plain click.
 func (a *App) gitLogPress(x, y int) (dragMode string) {
 	_, py, _, _ := a.gitLogRect()
+	a.noteDiffSurface(diffSurfLog)
 	if y == py {
 		switch {
+		case a.diffToolbarPress(diffSurfLog, a.gitLogToolbar(), x, y):
 		case a.gitLogActionsRect().contains(x, y):
 			a.openGitLogActions()
 		case a.gitLogPushRect().contains(x, y):
@@ -658,7 +696,11 @@ func (a *App) gitLogClick(x, y int) {
 		now := time.Now()
 		if a.lastClick.x == x && a.lastClick.y == y && now.Sub(a.lastClick.when) < doubleClickMs {
 			a.lastClick = clickRecord{}
-			a.gitLogJumpToDetailRow(a.gitLog.detailScroll + row)
+			// A display row; the mapper wants the unified line behind it.
+			a.gitLogDetailRows()
+			if line := a.gitLog.pane.lineAt(a.gitLog.detailScroll + row); line >= 0 {
+				a.gitLogJumpToDetailRow(line)
+			}
 			return
 		}
 		a.lastClick = clickRecord{x: x, y: y, when: now}
@@ -786,6 +828,7 @@ func (a *App) gitLogScroll(x, _, delta int) {
 	if x < px+a.gitLogListW(pw) {
 		a.gitLog.listScroll += delta
 	} else {
+		a.noteDiffSurface(diffSurfLog)
 		a.gitLog.detailScroll += delta
 	}
 	a.gitLogClampScrolls()
@@ -848,6 +891,8 @@ func (a *App) drawGitLog() {
 		searchSt = btnSt
 	}
 	drawAt(a.screen, searchBtn.x, searchBtn.y, gitLogSearchLabel, searchSt)
+	toolbar := a.gitLogToolbar()
+	a.drawDiffToolbar(toolbar)
 
 	// "commits" becomes "matches" while a search is applied: the number
 	// is the size of the RESULT, and a title reading "12 commits" over a
@@ -874,7 +919,7 @@ func (a *App) drawGitLog() {
 	if n := len(a.gitLog.ticked); n > 0 {
 		title += "· " + itoa(n) + " ticked "
 	}
-	if tx := searchBtn.x + searchBtn.w; tx+runeLen(title) <= copyBtn.x {
+	if tx := searchBtn.x + searchBtn.w; tx+runeLen(title) <= diffToolbarLeft(toolbar, copyBtn.x) {
 		drawAt(a.screen, tx, py, title, titleSt)
 	}
 
@@ -898,8 +943,8 @@ func (a *App) drawGitLog() {
 		for cx := px + listW + 1; cx < px+pw; cx++ {
 			a.screen.SetContent(cx, ry, ' ', nil, detailBG)
 		}
-		a.drawGitLogDetailRow(row, px+listW+2, ry, pw-listW-3)
 	}
+	a.drawGitLogDetail(px+listW+2, bodyTop, pw-listW-3, a.gitLogBodyRows())
 }
 
 // drawGitLogListRow paints one commit row: a ● marker on ref-decorated
@@ -974,29 +1019,20 @@ func (a *App) drawGitLogListRow(row, px, ry, listW int) {
 	drawAt(a.screen, subjX, ry, subj, textSt)
 }
 
-// drawGitLogDetailRow paints one detail line, truncated to the pane
-// width — same no-horizontal-scroll tradeoff as the changes panel.
-func (a *App) drawGitLogDetailRow(row, x, ry, w int) {
+// drawGitLogDetail paints the detail pane's visible rows — unified or
+// side by side (diffview.go) — truncated to the pane width, the changes
+// panel's no-horizontal-scroll tradeoff. Full rows keep the log's own
+// palette (commit header, metadata keys) through gitLogDetailStyle.
+func (a *App) drawGitLogDetail(x, y, w, n int) {
 	if w <= 0 {
 		return
 	}
-	idx := a.gitLog.detailScroll + row
-	if idx < 0 || idx >= len(a.gitLog.detailLines) {
-		return
-	}
-	line := a.gitLog.detailLines[idx]
-	st := gitLogDetailStyle(line, a.theme)
-	// Tabs expanded before the clip, which counts cells — at the hunk's
-	// own prefix width: `git show` of a merge commit is a combined diff.
-	if strings.ContainsRune(line, '\t') {
-		line = diffDisplayLineCols(line, diffPrefixColsAt(a.gitLog.detailLines, idx))
-	} else {
-		line = diffDisplayLine(line)
-	}
-	if runeLen(line) > w {
-		line = string([]rune(line)[:w-1]) + "…"
-	}
-	drawAt(a.screen, x, ry, line, st)
+	th := a.theme
+	a.drawDiffRows(a.gitLog.detailLines, &a.gitLog.pane, a.gitLogDetailRows(), diffPaint{
+		x: x, y: y, w: w, n: n, scroll: a.gitLog.detailScroll,
+		style: func(line string) tcell.Style { return gitLogDetailStyle(line, th) },
+		bg:    th.BG,
+	})
 }
 
 // gitLogDetailStyle colors one `git show` line: the commit header line

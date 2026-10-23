@@ -419,3 +419,22 @@ func TestMenuGitPanelReview(t *testing.T) {
 		t.Fatalf("open = %v walk = %v, want both", a.gitPanel.open, a.gitPanel.walk)
 	}
 }
+
+// TestGitPanelWalk_BracketsStepChanges: inside the survey, ] and [ step
+// change by change through the file's diff, the header ▼ / ▲'s twins.
+func TestGitPanelWalk_BracketsStepChanges(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanel.open = true
+	a.gitPanel.walk = true
+	a.gitPanel.files = []gitPanelFile{{Path: "/p/f.txt", Rel: "f.txt", Code: " M"}}
+	a.gitPanel.diffLines = []string{"@@ -1,5 +1,5 @@", "-a", "+A", " b", " c", "-d", "+D"}
+	a.handleGitPanelWalkKey(tcell.NewEventKey(tcell.KeyRune, ']', 0))
+	a.handleGitPanelWalkKey(tcell.NewEventKey(tcell.KeyRune, ']', 0))
+	if a.gitPanel.pane.cur != 1 || a.statusMsg != "Change 2 of 2" {
+		t.Fatalf("cur=%d flash=%q", a.gitPanel.pane.cur, a.statusMsg)
+	}
+	a.handleGitPanelWalkKey(tcell.NewEventKey(tcell.KeyRune, '[', 0))
+	if a.gitPanel.pane.cur != 0 {
+		t.Fatalf("[ did not step back: cur=%d", a.gitPanel.pane.cur)
+	}
+}

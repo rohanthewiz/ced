@@ -171,6 +171,16 @@ const (
 	FindAllDockRight FindAllDock = "right"
 )
 
+// DiffView is how the diff panes lay a diff out: git's unified text, or
+// the old and new sides in two columns. One setting for every pane
+// (internal/app/diffview.go).
+type DiffView string
+
+const (
+	DiffViewUnified DiffView = "unified"
+	DiffViewSplit   DiffView = "split"
+)
+
 // BlameStyle is how the blame column draws itself. Two because they
 // answer the "where does authorship change?" question two ways: bands
 // mark the boundary with COLOR and so can afford to label every line
@@ -270,6 +280,10 @@ type Config struct {
 
 	// BlameStyle is the blame column's look. Defaults to bands.
 	BlameStyle BlameStyle
+
+	// DiffView is the diff panes' layout. Defaults to unified. Persisted
+	// by each pane's split toggle and the ≡ View row.
+	DiffView DiffView
 
 	// ExecMarks controls whether the file tree appends an ls -F style
 	// '*' to executable regular files. Defaults to on. Persisted by the
@@ -441,7 +455,7 @@ const (
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, DiagNote: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true, Terminal: TerminalAuto, UnderlineColor: UnderlineColorAuto}
+	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, DiffView: DiffViewUnified, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, DiagNote: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true, Terminal: TerminalAuto, UnderlineColor: UnderlineColorAuto}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -461,6 +475,7 @@ type fileFormat struct {
 	TermDock      string `json:"termdock,omitempty"`
 	FindAllDock   string `json:"findalldock,omitempty"`
 	BlameStyle    string `json:"blamestyle,omitempty"`
+	DiffView      string `json:"diffview,omitempty"`
 	ExecMarks     string `json:"execmarks,omitempty"`
 	TreeAutoFit   string `json:"treeautofit,omitempty"`
 	WordHL        string `json:"wordhl,omitempty"`
@@ -708,6 +723,20 @@ func Load(path string) (Config, error) {
 		return Defaults(), fmt.Errorf(
 			"%s: findalldock must be %q or %q (got %q)",
 			path, FindAllDockTop, FindAllDockRight, ff.FindAllDock,
+		)
+	}
+
+	switch DiffView(strings.ToLower(strings.TrimSpace(ff.DiffView))) {
+	case "":
+		// field omitted — keep default
+	case DiffViewUnified:
+		cfg.DiffView = DiffViewUnified
+	case DiffViewSplit:
+		cfg.DiffView = DiffViewSplit
+	default:
+		return Defaults(), fmt.Errorf(
+			"%s: diffview must be %q or %q (got %q)",
+			path, DiffViewUnified, DiffViewSplit, ff.DiffView,
 		)
 	}
 
@@ -990,6 +1019,12 @@ func SaveTermDock(path string, dock TermDock) error {
 // file at path. See saveKey for the round-trip guarantees.
 func SaveFindAllDock(path string, dock FindAllDock) error {
 	return saveKey(path, "findalldock", string(dock))
+}
+
+// SaveDiffView persists the diff panes' layout into the config file at
+// path. See saveKey for the round-trip guarantees.
+func SaveDiffView(path string, view DiffView) error {
+	return saveKey(path, "diffview", string(view))
 }
 
 // SaveBlameStyle persists the blame column's look into the config file

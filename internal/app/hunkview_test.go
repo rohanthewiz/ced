@@ -424,3 +424,75 @@ func screenSpan(a *App, x, y, w int) string {
 	}
 	return b.String()
 }
+
+// TestHunkView_PrevNextWalkTheFile: alt+n / alt+p re-target the view at
+// the neighbouring change, the caret follows, and the ends flash instead
+// of wrapping.
+func TestHunkView_PrevNextWalkTheFile(t *testing.T) {
+	a, tab, path := hunkViewTestApp(t)
+	a.fileDiffs[path] = []diffHunk{
+		{Start: 0, End: 0, Kind: diffModified, Body: []string{"-x", "+a"}},
+		{Start: 1, End: 1, Kind: diffModified, Body: []string{"-b", "+B"}},
+		{Start: 2, End: 2, Kind: diffAdded, Body: []string{"+c"}},
+	}
+	a.openHunkView(tab, a.fileDiffs[path][1])
+	m := a.modal.(*hunkViewModal)
+	alt := func(r rune) { m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, r, tcell.ModAlt)) }
+
+	alt('n')
+	if m.hunk.Start != 2 || tab.Cursor.Line != 2 {
+		t.Fatalf("next: hunk %d, caret %d", m.hunk.Start, tab.Cursor.Line)
+	}
+	if k, n := m.position(a); k != 3 || n != 3 {
+		t.Fatalf("position = %d of %d", k, n)
+	}
+	alt('n')
+	if m.hunk.Start != 2 || !strings.Contains(a.statusMsg, "No next change") {
+		t.Fatalf("past the end: hunk %d flash %q", m.hunk.Start, a.statusMsg)
+	}
+	alt('p')
+	alt('p')
+	if m.hunk.Start != 0 {
+		t.Fatalf("prev twice: hunk %d", m.hunk.Start)
+	}
+}
+
+// TestHunkView_SideBySide: alt+s lays the Diff section out as git's lines
+// beside the file's, flips the shared switch, and the nav buttons are
+// painted where the click router finds them.
+func TestHunkView_SideBySide(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a, tab, path := hunkViewTestApp(t)
+	a.openHunkView(tab, a.fileDiffs[path][0])
+	m := a.modal.(*hunkViewModal)
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 's', tcell.ModAlt))
+	if !a.diffSplit {
+		t.Fatal("alt+s did not flip the shared layout")
+	}
+	if m.rows[1].kind != hunkRowPair || m.rows[1].text != "b" || m.rows[1].right != "B" {
+		t.Fatalf("first diff row = %+v, want b │ B", m.rows[1])
+	}
+	a.draw()
+	prev, next, split := m.navButtons(a)
+	for _, b := range []struct {
+		r     btnRect
+		label string
+	}{{prev, hunkViewPrevLabel}, {next, hunkViewNextLabel}, {split, hunkViewUnifiedLabel}} {
+		if got := screenRow(t, a, b.r.y, b.r.x, b.r.w); got != b.label {
+			t.Fatalf("drawn %q, want %q", got, b.label)
+		}
+	}
+	m.handleMouse(a, split.x+1, split.y, tcell.Button1)
+	if a.diffSplit || m.rows[1].kind == hunkRowPair {
+		t.Fatal("clicking Unified did not switch back")
+	}
+}
+
+// TestHunkViewPairRows zips removals beside additions and keeps notes
+// as full rows.
+func TestHunkViewPairRows(t *testing.T) {
+	rows := hunkViewPairRows([]string{"-a", "-b", "+A", `\ No newline at end of file`})
+	if len(rows) != 4 || !rows[1].hasRight || rows[2].hasRight || rows[3].kind != hunkRowMeta {
+		t.Fatalf("rows = %+v", rows)
+	}
+}

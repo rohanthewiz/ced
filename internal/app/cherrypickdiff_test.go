@@ -194,3 +194,45 @@ func TestHandleCherryPickDiff_LandsInItsOwnDialog(t *testing.T) {
 		t.Errorf("cache=%v pending=%v", m.diff.cache, m.diff.pending)
 	}
 }
+
+// TestCherryPickDiff_ChordsStepAndSplit: inside the dialog (which owns
+// the keyboard) alt+n / alt+p step the preview's changes and alt+v flips
+// the shared side-by-side layout, which the pane then paints.
+func TestCherryPickDiff_ChordsStepAndSplit(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	a := newTestApp(t, t.TempDir())
+	a.width, a.height = 120, 40
+	lines := []string{"subject", "", "@@ -1,4 +1,4 @@", "-a", "+A", " b", " c", "-d", "+D"}
+	m := diffTestModal(a, 1, lines)
+	m.diff.open = true
+	alt := func(r rune) { m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, r, tcell.ModAlt)) }
+
+	a.draw()
+	alt('n')
+	alt('n')
+	if m.diff.pane.cur != 1 || a.statusMsg != "Change 2 of 2" {
+		t.Fatalf("alt+n twice: cur=%d flash=%q", m.diff.pane.cur, a.statusMsg)
+	}
+	alt('p')
+	if m.diff.pane.cur != 0 {
+		t.Fatalf("alt+p: cur=%d", m.diff.pane.cur)
+	}
+
+	alt('v')
+	if !a.diffSplit {
+		t.Fatal("alt+v did not switch to side by side")
+	}
+	a.draw()
+	mx, _, mw, _ := m.rect(a)
+	_, top, n := m.diffPaneRows(a)
+	var paired bool
+	for y := top; y < top+n; y++ {
+		row := screenRow(t, a, y, mx, mw)
+		if strings.Contains(row, "1 a") && strings.Contains(row, "1 A") {
+			paired = true
+		}
+	}
+	if !paired {
+		t.Fatal("the preview did not lay a beside A")
+	}
+}

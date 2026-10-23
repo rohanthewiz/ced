@@ -350,3 +350,16 @@ func TestCompareTexts_ResetsTheSource(t *testing.T) {
 		t.Errorf("refresh replaced a sourceless diff:\n%s", got)
 	}
 }
+
+// TestCompareRediff_LeavesAnArmedPasteAlone: flipping ignore-whitespace
+// while the panel waits for a paste must not resurrect the comparison
+// the user already moved on from.
+func TestCompareRediff_LeavesAnArmedPasteAlone(t *testing.T) {
+	a := seedCompareApp(t, map[string]string{"a.txt": "x\n", "b.txt": "y\n"}, "a.txt")
+	a.compareWithFile(filepath.Join(a.rootDir, "b.txt"))
+	a.menuComparePaste()
+	a.setDiffIgnoreWS(true)
+	if len(a.compare.lines) != 0 || !a.compare.awaitPaste {
+		t.Fatalf("armed paste disturbed: lines=%d await=%v", len(a.compare.lines), a.compare.awaitPaste)
+	}
+}

@@ -40,6 +40,20 @@
 //     sources here are buffers, so shelling out would mean temp files,
 //     and neither git nor the repository it wants is guaranteed to be
 //     there. Same argument the project search made against ripgrep.
+//   - BOTH SIDES ARE KEPT (sideOld / sideNew), so the shared switches
+//     (diffview.go) re-diff without re-reading anything: ignore
+//     whitespace is a different QUESTION about the same two texts, and
+//     side by side a different layout of the same answer.
+//   - A HUNK CAN BE REVERTED when the "+" side is a whole open buffer
+//     (every file and paste source; not a selection snapshot or a
+//     conflict's sides). The [↺] chip on the hunk's "@@" row — and the ≡
+//     "Revert a change in the compare view…" picker for the keyboard —
+//     puts the old side's lines back into the BUFFER as one undo step,
+//     unsaved, no confirm: hunkview.go's contract, for the same reason
+//     (Undo is the way back). The buffer is VERIFIED against the hunk's
+//     "+" lines first, so a buffer edited since the diff is refused
+//     rather than patched in the wrong place, and the comparison re-runs
+//     afterwards so every other hunk's numbers are fresh.
 //
 // State lives on App.compare and is mutated only on the main loop.
 
@@ -113,10 +127,22 @@ type compareState struct {
 	// source.
 	conflict *compareConflict
 
-	lines  []string
+	// sideOld / sideNew are the two texts lines was computed from, kept
+	// so a switch of the whitespace option re-diffs exactly what was
+	// compared — even a paste or a selection snapshot, which nothing
+	// could read again.
+	sideOld []string
+	sideNew []string
+
+	lines []string
+	// scroll counts DISPLAY rows (diffview.go): equal to lines in the
+	// unified layout, fewer when side by side pairs them up.
 	scroll int
 	added  int
 	remove int
+	// pane is the layout cache and change cursor diffview.go keeps for
+	// this surface.
+	pane diffPane
 
 	// identical records that the comparison RAN and found no
 	// differences. Distinct from an empty lines slice, which is also
@@ -304,9 +330,6 @@ func (a *App) runCompare(oldLabel, oldPath string, oldLines []string) {
 // and one that doesn't gets a comparison ⟳ and double-click leave
 // alone, never one that inherits the previous comparison's file.
 func (a *App) compareTexts(oldLabel string, oldLines []string, newLabel string, newLines []string) {
-	edits := diff.Diff(oldLines, newLines)
-	added, removed := diff.Stats(edits)
-
 	a.compare.awaitPaste = false
 	a.compare.selPending = nil // any ordinary compare supersedes an armed selection
 	a.compare.oldLabel = oldLabel
@@ -316,14 +339,47 @@ func (a *App) compareTexts(oldLabel string, oldLines []string, newLabel string, 
 	a.compare.newPath = ""
 	a.compare.newLineBase = 0
 	a.compare.conflict = nil
-	a.compare.lines = diff.Unified(edits, oldLabel, newLabel, compareContext)
-	a.compare.identical = len(a.compare.lines) == 0
-	a.compare.added, a.compare.remove = added, removed
+	a.compareInstall(oldLines, newLines)
 	a.compare.scroll = 0
 	a.openComparePanel()
 	if a.compare.identical {
-		a.flash("No differences")
+		a.flash(a.compareIdenticalText())
 	}
+}
+
+// compareInstall diffs two texts under the current whitespace option and
+// installs the result — lines, stats, the identical flag and the sides
+// themselves. Shared by compareTexts (a new comparison) and
+// compareRediff (the same comparison, asked again).
+func (a *App) compareInstall(oldLines, newLines []string) {
+	edits := diff.DiffWith(oldLines, newLines, diff.Options{IgnoreWhitespace: a.diffIgnoreWS})
+	a.compare.sideOld, a.compare.sideNew = oldLines, newLines
+	a.compare.lines = diff.Unified(edits, a.compare.oldLabel, a.compare.newLabel, compareContext)
+	a.compare.identical = len(a.compare.lines) == 0
+	a.compare.added, a.compare.remove = diff.Stats(edits)
+}
+
+// compareRediff re-runs the comparison on the texts it already holds —
+// the whitespace switch's answer. Source fields, labels and (clamped)
+// scroll all stay: it is the same comparison, asked differently.
+func (a *App) compareRediff() {
+	// An armed paste has dropped the last result on purpose (the panel
+	// is showing the instruction); re-diffing the held sides would bring
+	// back a comparison the user has already moved on from.
+	if a.compare.awaitPaste || (a.compare.sideOld == nil && a.compare.sideNew == nil) {
+		return
+	}
+	a.compareInstall(a.compare.sideOld, a.compare.sideNew)
+	a.compareClampScroll()
+}
+
+// compareIdenticalText is the "nothing differs" sentence, which has to
+// admit when whitespace was part of why.
+func (a *App) compareIdenticalText() string {
+	if a.diffIgnoreWS {
+		return "No differences (ignoring whitespace)"
+	}
+	return "No differences"
 }
 
 // compareNewLabel names the buffer side: its project-relative path, or
@@ -563,21 +619,17 @@ func (a *App) compareRefreshRect() btnRect {
 // overscroll — it's a viewer, same as the git panels.
 func (a *App) compareClampScroll() {
 	_, _, _, ph := a.comparePanelRect()
-	visible := ph - 1 // header row
-	max := len(a.compare.lines) - visible
-	if max < 0 {
-		max = 0
-	}
-	if a.compare.scroll > max {
-		a.compare.scroll = max
-	}
-	if a.compare.scroll < 0 {
-		a.compare.scroll = 0
-	}
+	a.compare.scroll = clampDiffScroll(a.compare.scroll, len(a.compareRows()), ph-1)
+}
+
+// compareRows is the panel's display rows in the current layout.
+func (a *App) compareRows() []diffRow {
+	return a.compare.pane.layout(a.compare.lines, a.diffSplit)
 }
 
 // comparePanelScroll wheels the diff text.
 func (a *App) comparePanelScroll(delta int) {
+	a.noteDiffSurface(diffSurfCompare)
 	a.compare.scroll += delta
 	a.compareClampScroll()
 }
@@ -591,6 +643,7 @@ func (a *App) comparePanelScroll(delta int) {
 // handle; a double-click on a diff row jumps the editor to that line.
 func (a *App) comparePanelPress(x, y int) (dragMode string) {
 	_, py, _, _ := a.comparePanelRect()
+	a.noteDiffSurface(diffSurfCompare)
 	if y == py {
 		if a.compareCloseRect().contains(x, y) {
 			a.closeComparePanel()
@@ -600,14 +653,27 @@ func (a *App) comparePanelPress(x, y int) (dragMode string) {
 			a.compareRefresh()
 			return ""
 		}
+		if a.diffToolbarPress(diffSurfCompare, a.compareToolbar(), x, y) {
+			return ""
+		}
 		return "comparepanel"
+	}
+	row := a.compare.scroll + (y - py - 1)
+	// A revert chip claims its press before the double-click record
+	// sees it, so a verb click never doubles as half a jump.
+	if chip, ok := a.compareRevertChipAt(row); ok && chip.contains(x, y) {
+		a.compareRevertHunk(a.compare.pane.lineAt(row))
+		return ""
 	}
 	// Body: single clicks are inert, a double-click jumps — the same
 	// gesture (and the same lastClick record) as the git panel's diff.
 	now := time.Now()
 	if a.lastClick.x == x && a.lastClick.y == y && now.Sub(a.lastClick.when) < doubleClickMs {
 		a.lastClick = clickRecord{}
-		a.compareJumpToRow(a.compare.scroll + (y - py - 1))
+		a.compareRows()
+		if line := a.compare.pane.lineAt(row); line >= 0 {
+			a.compareJumpToRow(line)
+		}
 		return ""
 	}
 	a.lastClick = clickRecord{x: x, y: y, when: now}
@@ -683,12 +749,16 @@ func (a *App) drawComparePanel() {
 	drawAt(a.screen, closeBtn.x, closeBtn.y, " ✕ ", titleSt)
 	refresh := a.compareRefreshRect()
 	drawAt(a.screen, refresh.x, refresh.y, " ⟳ ", titleSt)
+	toolbar := a.compareToolbar()
+	a.drawDiffToolbar(toolbar)
 
 	// Header: "Compare · old ↔ new" then the +/− counts, dropped in that
 	// order when the panel is too narrow — the labels are what identify
 	// the comparison, the counts are a summary of what's already drawn.
+	// Both sit left of the diff toolbar, which is a control and so wins
+	// the room (it sheds its own buttons first; see diffToolbar).
 	title := " Compare · " + a.compare.oldLabel + " ↔ " + a.compare.newLabel + " "
-	rightEdge := refresh.x
+	rightEdge := diffToolbarLeft(toolbar, refresh.x)
 	if a.compare.added > 0 || a.compare.remove > 0 {
 		stats := "+" + itoa(a.compare.added) + " −" + itoa(a.compare.remove) + " "
 		if cx := rightEdge - runeLen(stats) - 1; cx > px+runeLen(title) {
@@ -713,20 +783,27 @@ func (a *App) drawComparePanel() {
 			tcell.StyleDefault.Background(th.BG).Foreground(th.Muted))
 		return
 	}
+	// The rows — unified or side by side, one painter for every pane —
+	// then the revert chips over the right end of each hunk header.
+	rows := a.compareRows()
+	a.drawDiffRows(a.compare.lines, &a.compare.pane, rows, diffPaint{
+		x: px + 2, y: py + 1, w: pw - 3, n: ph - 1, scroll: a.compare.scroll,
+		style: func(line string) tcell.Style { return gitPanelDiffStyle(line, th) },
+		bg:    th.BG,
+	})
 	for row := 0; row < ph-1; row++ {
-		idx := a.compare.scroll + row
-		if idx < 0 || idx >= len(a.compare.lines) {
-			break
+		if chip, ok := a.compareRevertChipAt(a.compare.scroll + row); ok {
+			drawAt(a.screen, chip.x, chip.y, gitHunkChipLabel(hunkRevert), a.compareRevertChipStyle())
 		}
-		line := a.compare.lines[idx]
-		st := gitPanelDiffStyle(line, th)
-		// Tabs expanded before the clip, which counts cells.
-		line = diffDisplayLine(line)
-		if runeLen(line) > pw-3 {
-			line = string([]rune(line)[:pw-4]) + "…"
-		}
-		drawAt(a.screen, px+2, py+1+row, line, st)
 	}
+}
+
+// compareToolbar lays out the shared diff toolbar (▲ ▼ split ws) in the
+// header, right-aligned against ⟳. It may start no further left than the
+// header's first cell; the title yields to it.
+func (a *App) compareToolbar() []diffToolBtn {
+	px, py, _, _ := a.comparePanelRect()
+	return diffToolbar(px+1, a.compareRefreshRect().x-1, py)
 }
 
 // compareEmptyMessage is what the body says when there's no diff to
@@ -740,7 +817,7 @@ func (a *App) compareEmptyMessage() string {
 		return "Paste now to compare against " + a.compare.newLabel +
 			"  (⌘V, or your terminal's paste) · Esc cancels"
 	case a.compare.identical:
-		return "No differences"
+		return a.compareIdenticalText()
 	default:
 		return "Nothing compared yet — use ≡ → Compare"
 	}

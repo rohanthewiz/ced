@@ -146,7 +146,7 @@ func TestLoadGitPanelDiff_ModifiedAndUntracked(t *testing.T) {
 	repo, file := panelRepo(t)
 	writeFileT(t, file, "one\nCHANGED\n")
 
-	lines, side := loadGitPanelDiff(repo, gitPanelFile{Path: file, Rel: "f.txt", Code: " M"})
+	lines, side := loadGitPanelDiff(repo, gitPanelFile{Path: file, Rel: "f.txt", Code: " M"}, false)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "-two") || !strings.Contains(joined, "+CHANGED") {
 		t.Fatalf("diff missing change lines:\n%s", joined)
@@ -162,7 +162,7 @@ func TestLoadGitPanelDiff_ModifiedAndUntracked(t *testing.T) {
 
 	newFile := filepath.Join(repo, "fresh.txt")
 	writeFileT(t, newFile, "alpha\nbeta\n")
-	lines, side = loadGitPanelDiff(repo, gitPanelFile{Path: newFile, Rel: "fresh.txt", Code: "??"})
+	lines, side = loadGitPanelDiff(repo, gitPanelFile{Path: newFile, Rel: "fresh.txt", Code: "??"}, false)
 	joined = strings.Join(lines, "\n")
 	if side != sideNone {
 		t.Fatalf("untracked side = %v, want sideNone (nothing to apply against)", side)
@@ -653,9 +653,11 @@ func TestDrawGitPanel_HandlesBrightenWhileDragging(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.gitPanel.open = true
 	a.gitPanel.files = []gitPanelFile{{Path: "/p/main.go", Rel: "main.go", Code: " M"}}
-	px, py, pw, _ := a.gitPanelRect()
+	_, py, _, _ := a.gitPanelRect()
 	divX := a.gitPanelDividerX()
-	ruleX := px + pw - 8 // plain header rule, clear of the title and ✕
+	// Plain header rule: the one-cell gap between the diff toolbar and
+	// the ✕, clear of every label and button.
+	ruleX := a.gitPanelCloseRect().x - 1
 
 	handleFgs := func(mode string) (divFg, ruleFg tcell.Color) {
 		a.dragMode = mode
@@ -1043,5 +1045,77 @@ func TestDiffDisplayLineCols_CombinedDiff(t *testing.T) {
 	// A header line keeps no prefix even when cols says 2.
 	if got := diffDisplayLineCols("x\ty", 2); got != "x   y" {
 		t.Errorf("non-prefixed line = %q", got)
+	}
+}
+
+// TestLoadGitPanelDiff_IgnoreWhitespace: with ws set, a whitespace-only
+// edit leaves no hunk to read, while the same edit shows without it.
+func TestLoadGitPanelDiff_IgnoreWhitespace(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	repo, file := panelRepo(t)
+	writeFileT(t, file, "one\n  two\n")
+	f := gitPanelFile{Path: file, Rel: "f.txt", Code: " M"}
+	plain, _ := loadGitPanelDiff(repo, f, false)
+	if !strings.Contains(strings.Join(plain, "\n"), "+  two") {
+		t.Fatalf("plain diff should show the re-indent:\n%s", strings.Join(plain, "\n"))
+	}
+	blind, _ := loadGitPanelDiff(repo, f, true)
+	for _, ln := range blind {
+		if strings.HasPrefix(ln, "@@") {
+			t.Fatalf("ws diff still has a hunk:\n%s", strings.Join(blind, "\n"))
+		}
+	}
+}
+
+// TestHandleGitPanelDiff_WhitespaceStalenessAndVerbs: an answer asked
+// under the other whitespace setting is dropped, and a -w diff on screen
+// carries no hunk verbs (its hunks don't apply) — the picker says why.
+func TestHandleGitPanelDiff_WhitespaceStalenessAndVerbs(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanel.open = true
+	a.gitPanel.files = []gitPanelFile{{Path: "/p/f.txt", Rel: "f.txt", Code: " M"}}
+	lines := []string{"diff --git a/f.txt b/f.txt", "--- a/f.txt", "+++ b/f.txt", "@@ -1 +1 @@", "-a", "+b"}
+
+	a.diffIgnoreWS = true
+	a.handleGitPanelDiff(&gitPanelDiffEvent{when: time.Now(), path: "/p/f.txt", lines: lines, side: sideUnstaged, ws: false})
+	if a.gitPanel.diffLines != nil {
+		t.Fatal("an answer for the other whitespace setting was installed")
+	}
+	a.handleGitPanelDiff(&gitPanelDiffEvent{when: time.Now(), path: "/p/f.txt", lines: lines, side: sideUnstaged, ws: true})
+	if !a.gitPanel.diffWS || len(a.gitPanel.diffLines) != len(lines) {
+		t.Fatalf("ws answer not installed: ws=%v lines=%d", a.gitPanel.diffWS, len(a.gitPanel.diffLines))
+	}
+	if chips := a.gitPanelHunkChipsAt(3); len(chips) != 0 {
+		t.Fatalf("chips on a -w diff: %+v", chips)
+	}
+	a.openGitPanelHunks()
+	if !strings.Contains(a.statusMsg, "whitespace is hidden") {
+		t.Fatalf("flash = %q", a.statusMsg)
+	}
+}
+
+// TestGitPanelHunkChips_FollowTheHeaderSideBySide: side by side, the hunk
+// header is still a full row of its own, and its chips ride on it — the
+// display row, not the line index, is what the chips are keyed by.
+func TestGitPanelHunkChips_FollowTheHeaderSideBySide(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanel.open = true
+	a.gitPanel.files = []gitPanelFile{{Path: "/p/f.txt", Rel: "f.txt", Code: " M"}}
+	a.gitPanel.diffLines = []string{
+		"diff --git a/f.txt b/f.txt", "--- a/f.txt", "+++ b/f.txt",
+		"@@ -1,2 +1,2 @@", "-a", "+A", " b",
+		"@@ -9 +9 @@", "-x", "+y",
+	}
+	a.gitPanel.diffSide = sideUnstaged
+	a.diffSplit = true
+	// Rows: 3 headers, @@, (a│A), (b│b), @@, (x│y) — the second header is
+	// display row 6, though it is line 7.
+	if chips := a.gitPanelHunkChipsAt(6); len(chips) != 2 || chips[0].span.header != 7 {
+		t.Fatalf("chips at row 6 = %+v", chips)
+	}
+	if chips := a.gitPanelHunkChipsAt(7); len(chips) != 0 {
+		t.Fatalf("a paired body row carries chips: %+v", chips)
 	}
 }

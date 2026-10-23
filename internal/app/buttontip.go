@@ -536,6 +536,7 @@ func (a *App) toolButtonTips() []buttonTip {
 			buttonTip{rect: a.gitPanelActionsRect(), text: []string{"Git actions on the ticked files", "(or the highlighted one)"}},
 			buttonTip{rect: a.gitPanelReviewRect(), text: []string{"Review the changes one file at a time"}},
 		)
+		tips = append(tips, a.diffToolbarTips(a.gitPanelToolbar())...)
 	}
 	if a.toolOpen(toolGitLog) {
 		tips = append(tips,
@@ -546,6 +547,7 @@ func (a *App) toolButtonTips() []buttonTip {
 			buttonTip{rect: a.gitLogPushRect(), text: []string{"Push the current branch…"}, keyFn: (*App).menuGitPush},
 			buttonTip{rect: a.gitLogSearchRect(), text: []string{"Search the history"}, keyFn: (*App).menuGitLogSearch},
 		)
+		tips = append(tips, a.diffToolbarTips(a.gitLogToolbar())...)
 		if a.gitLogFilterRows() > 0 {
 			for i, c := range gitLogModeChips {
 				text := gitLogChipTip(c.mode)
@@ -592,6 +594,8 @@ func (a *App) toolButtonTips() []buttonTip {
 			buttonTip{rect: a.compareCloseRect(), text: []string{"Close the compare view"}},
 			buttonTip{rect: a.compareRefreshRect(), text: []string{"Diff again against the buffer as it is now"}},
 		)
+		tips = append(tips, a.diffToolbarTips(a.compareToolbar())...)
+		tips = append(tips, a.compareRevertChipTips()...)
 	}
 	if a.toolOpen(toolTerminal) {
 		tips = append(tips, buttonTip{rect: a.termCloseRect(), text: []string{"Close the terminal"},

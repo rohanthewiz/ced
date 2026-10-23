@@ -1066,6 +1066,15 @@ func (m *cherryPickModal) handleKey(a *App, ev *tcell.EventKey) {
 			m.changeSource(a)
 		case 'd':
 			m.toggleDiff(a)
+		case 'v':
+			// Side by side is one switch for every pane; flipping it here
+			// flips it everywhere, and setDiffSplit keeps this pane's
+			// top line in view.
+			a.setDiffSplit(!a.diffSplit)
+		case 'n':
+			m.stepDiff(a, 1)
+		case 'p':
+			m.stepDiff(a, -1)
 		}
 		return
 	}

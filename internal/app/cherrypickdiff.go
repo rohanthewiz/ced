@@ -61,12 +61,18 @@
 //   - CAPPED AND SAID SO. A diff longer than cherryPickDiffMaxLines ends
 //     with a line naming the cut: a silently short diff reads as the
 //     whole change.
+//   - SIDE BY SIDE AND CHANGE STEPPING come from the shared diff layer
+//     (diffview.go): the pane honours the global side-by-side switch,
+//     and since the dialog owns the keyboard (the ≡ menu can't reach
+//     in) the doors are chords — alt+v flips the layout for every pane,
+//     alt+n / alt+p step to the next / previous change. Ignore
+//     whitespace is NOT offered here: the cache is keyed by hash, and a
+//     preview of what a pick applies should show everything it applies.
 
 package app
 
 import (
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -96,9 +102,13 @@ type cherryPickDiffState struct {
 	pending map[string]bool
 
 	// hash is the commit scroll belongs to: when the highlight moves to
-	// another commit the scroll starts again from the top.
+	// another commit the scroll starts again from the top. scroll counts
+	// DISPLAY rows (diffview.go).
 	hash   string
 	scroll int
+
+	// pane is diffview.go's layout cache and change cursor.
+	pane diffPane
 }
 
 // cherryPickDiffEvent carries one loaded diff to the main loop, addressed
@@ -259,9 +269,48 @@ func (m *cherryPickModal) syncDiffScroll(a *App) {
 	if c.hash != m.diff.hash {
 		m.diff.hash, m.diff.scroll = c.hash, 0
 	}
-	lines, _ := m.diffLines()
 	_, _, n := m.diffPaneRows(a)
-	m.diff.scroll = min(max(m.diff.scroll, 0), max(len(lines)-n, 0))
+	m.diff.scroll = clampDiffScroll(m.diff.scroll, len(m.diffRows(a)), n)
+}
+
+// diffRows is the highlighted commit's diff laid out in the current mode
+// (diffview.go); nil until it has loaded.
+func (m *cherryPickModal) diffRows(a *App) []diffRow {
+	lines, ok := m.diffLines()
+	if !ok {
+		return nil
+	}
+	return m.diff.pane.layout(lines, a.diffSplit)
+}
+
+// stepDiff moves the pane to the next (dir > 0) or previous change —
+// the alt+n / alt+p chords. The diffStep twin for a pane that isn't a
+// tool window: same landing margin, same "k of n" and end-of-list words.
+func (m *cherryPickModal) stepDiff(a *App, dir int) {
+	if !m.diff.open {
+		a.flash("Open the diff first — alt+d")
+		return
+	}
+	m.syncDiffScroll(a)
+	rows := m.diffRows(a)
+	p := &m.diff.pane
+	_, _, n := m.diffPaneRows(a)
+	if len(p.starts) == 0 {
+		a.flash("No changes here")
+		return
+	}
+	k := p.nextChange(dir, m.diff.scroll, n)
+	if k < 0 {
+		if dir > 0 {
+			a.flash("No next change")
+		} else {
+			a.flash("No previous change")
+		}
+		return
+	}
+	p.cur = k
+	m.diff.scroll = clampDiffScroll(p.starts[k]-min(diffNavMargin, n/4), len(rows), n)
+	a.flash("Change " + itoa(k+1) + " of " + itoa(len(p.starts)))
 }
 
 // scrollDiffBy moves the pane's scroll by delta lines, clamped.
@@ -325,10 +374,19 @@ func (m *cherryPickModal) drawDiffPane(a *App) {
 		}
 		drawAt(a.screen, mx+2, hy, left, c.title)
 		if loaded && len(lines) > 0 {
-			right := " " + itoa(m.diff.scroll+1) + "–" + itoa(min(m.diff.scroll+n, len(lines))) +
-				" of " + itoa(len(lines))
-			if len(lines) > n {
+			// Counted in display rows — what the pane scrolls by, side by
+			// side or not. The chord hints go as far as the width allows,
+			// most useful first.
+			total := len(m.diffRows(a))
+			right := " " + itoa(m.diff.scroll+1) + "–" + itoa(min(m.diff.scroll+n, total)) +
+				" of " + itoa(total)
+			if total > n {
 				right += " · alt+↑↓"
+			}
+			for _, hint := range []string{" · alt+n/p change", " · alt+v split"} {
+				if runeLen(left)+runeLen(right+hint)+6 < mw {
+					right += hint
+				}
 			}
 			right += " "
 			if rx := mx + mw - 3 - runeLen(right); rx > mx+2+runeLen(left) {
@@ -348,21 +406,12 @@ func (m *cherryPickModal) drawDiffPane(a *App) {
 		drawAt(a.screen, mx+2, top, "Loading diff…", well.Foreground(th.Muted))
 		return
 	}
-	for row := 0; row < n; row++ {
-		idx := m.diff.scroll + row
-		if idx >= len(lines) {
-			break
-		}
-		line := lines[idx]
-		st := gitPanelDiffStyle(line, th)
-		// Tabs expanded before the clip, at the hunk's own prefix width
-		// (the git log detail's rule — a combined diff from old git has
-		// one prefix column per parent).
-		if strings.ContainsRune(line, '\t') {
-			line = diffDisplayLineCols(line, diffPrefixColsAt(lines, idx))
-		} else {
-			line = diffDisplayLine(line)
-		}
-		drawAt(a.screen, mx+2, top+row, clipRunes(line, w), st)
-	}
+	// One painter for every diff pane (diffview.go): tabs expanded at
+	// the hunk's own prefix width (a combined diff from old git has one
+	// prefix column per parent), side by side when that's on.
+	a.drawDiffRows(lines, &m.diff.pane, m.diffRows(a), diffPaint{
+		x: mx + 2, y: top, w: w, n: n, scroll: m.diff.scroll,
+		style: func(line string) tcell.Style { return gitPanelDiffStyle(line, th) },
+		bg:    th.BG,
+	})
 }

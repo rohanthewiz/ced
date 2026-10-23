@@ -396,6 +396,11 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Compare with clipboard", action: (*App).menuCatsCompareClipboard, enabled: (*App).hasComparable},
 			{label: "Compare with pasted text", action: (*App).menuComparePaste, enabled: (*App).hasComparable},
 			{action: (*App).menuToggleCompare, enabled: (*App).hasCompareResult, labelFor: (*App).compareToggleLabel},
+			// The keyboard's door to the panel's per-hunk [↺] chips
+			// (comparerevert.go). Enabled with any result; a comparison
+			// that can't take a revert (a selection snapshot, conflict
+			// sides) says why instead of dimming.
+			{label: "Revert a change in the compare view…", action: (*App).menuCompareRevertPick, enabled: (*App).hasCompareResult},
 		}},
 		{title: "Edit", collapsible: true, items: []menuItemDef{
 			// Undo / redo head Edit, the menu-bar convention (the old History
@@ -495,6 +500,18 @@ func builtinMenuGroups() []menuGroup {
 			// setting while the list itself is open (a modal owns the
 			// keyboard, so the menu is unreachable from inside it).
 			{action: (*App).menuToggleFindAllDock, enabled: alwaysTrue, labelFor: (*App).findAllDockToggleLabel},
+			// The diff panes' shared switches and stepper (diffview.go) —
+			// the ≡ twins of the ▲ ▼ split ws toolbar every diff panel
+			// carries in its header, for the terminal that eats clicks.
+			// In View, beside the Find-all dock, because they change how
+			// something is DRAWN, and they cover the compare panel, the git
+			// panel and the git log alike, so no one panel's section owns
+			// them. The steppers act on the pane last touched and explain
+			// themselves when none is open.
+			{action: (*App).menuToggleDiffSplit, enabled: alwaysTrue, labelFor: (*App).diffSplitToggleLabel},
+			{action: (*App).menuToggleDiffIgnoreWS, enabled: alwaysTrue, labelFor: (*App).diffIgnoreWSToggleLabel},
+			{label: "Diff view: next change", action: (*App).menuDiffNextChange, enabled: alwaysTrue},
+			{label: "Diff view: previous change", action: (*App).menuDiffPrevChange, enabled: alwaysTrue},
 			// Color themes (theme.go). They live in View rather than in a
 			// group of their own for the same above-the-fold reason the
 			// terminal rows do: the menu scrolls on short windows, and a
@@ -1708,6 +1725,14 @@ type App struct {
 	// detail fetches post gitLogShowEvents. See gitlog.go.
 	gitLog gitLogState
 
+	// diffSplit / diffIgnoreWS are the diff panes' two shared switches
+	// (diffview.go): side by side (persisted as "diffview") and
+	// whitespace-blind (session only). lastDiffSurf is the pane the user
+	// last touched — the one the ≡ Next/Previous change rows step.
+	diffSplit    bool
+	diffIgnoreWS bool
+	lastDiffSurf diffSurface
+
 	// term is the embedded grsh terminal panel. It shares the bottom
 	// strip with the git panel (exactly one may be open) and is the
 	// only surface besides modals that takes the keyboard — via its
@@ -2046,6 +2071,7 @@ func (a *App) loadUserConfig() {
 	a.applyWordHighlight() // no-op at startup; matters when the config is re-read
 	a.findAllDockRight = cfg.FindAllDock == userconfig.FindAllDockRight
 	a.blameBands = cfg.BlameStyle != userconfig.BlameStyleCompact
+	a.diffSplit = cfg.DiffView == userconfig.DiffViewSplit
 	a.copilot.enabled = cfg.Copilot
 	a.copilot.suggest = cfg.Suggestions
 	a.chat.modelPref = cfg.ChatModel

@@ -242,7 +242,7 @@ func TestGitPanelHunkVerbs_RealRepo(t *testing.T) {
 	// The file is now half-staged, which is precisely the state the
 	// union `git diff HEAD` could not describe: the panel must show two
 	// labelled sections, and the second hunk must still be stageable.
-	lines, side := loadGitPanelDiff(repo, gitPanelFile{Path: file, Rel: "f.txt", Code: "MM"})
+	lines, side := loadGitPanelDiff(repo, gitPanelFile{Path: file, Rel: "f.txt", Code: "MM"}, false)
 	if side != sideMixed {
 		t.Fatalf("half-staged side = %v, want sideMixed", side)
 	}
@@ -272,7 +272,7 @@ func TestGitPanelHunkVerbs_RealRepo(t *testing.T) {
 	// Unstage one of them back out again: the index loses that hunk and
 	// keeps the other, and the work tree is untouched either way — the
 	// difference between `--cached -R` and `--index -R`.
-	lines, side = loadGitPanelDiff(repo, gitPanelFile{Path: file, Rel: "f.txt", Code: "M "})
+	lines, side = loadGitPanelDiff(repo, gitPanelFile{Path: file, Rel: "f.txt", Code: "M "}, false)
 	if side != sideStaged {
 		t.Fatalf("fully-staged side = %v, want sideStaged", side)
 	}

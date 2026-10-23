@@ -21,6 +21,7 @@
 //	│   	return parseAll(src, opts)          ← restored   │
 //	│   }                                    ← context     │
 //	│                                                      │
+//	│ [ ◂ Prev ] [ Next ▸ ]  [ Side by side ]    2 of 5    │
 //	│       [ Revert change ] alt+r   [ Close ]            │
 //	└──────────────────────────────────────────────────────┘
 //
@@ -71,6 +72,18 @@
 //     otherwise push the buttons off the screen.
 //   - **Close is the default button**, as in every confirm: Enter on a
 //     view that just opened should not edit the file.
+//   - **Prev / Next walk the file's changes in place** (alt+p / alt+n):
+//     the view re-targets the neighbouring hunk and the caret behind it
+//     follows (a jump, with context), so closing leaves you on the change
+//     you were last reading. They stop at either end with a flash rather
+//     than wrapping, like the diff panes' steppers (diffview.go).
+//   - **Side by side** (alt+s, or the button) lays the Diff section out
+//     as git's lines on the left and the file's on the right — the diff
+//     panes' one shared switch, so flipping it here flips it there. The
+//     "Original" section is already the old side in place and is the
+//     same in both layouts. Ignore-whitespace is not offered: the hunk
+//     is the gutter's own `-U0` diff, and a revert must restore
+//     whitespace too.
 
 package app
 
@@ -99,8 +112,9 @@ const (
 	hunkViewContext = 2
 
 	// hunkViewChrome is the rows around the body: top border, title,
-	// divider, the blank above the buttons, the button row, bottom border.
-	hunkViewChrome = 6
+	// divider, the blank above the buttons, the navigation row, the
+	// button row, bottom border.
+	hunkViewChrome = 7
 
 	// Button labels. The alt+r hint is drawn beside Revert (not inside
 	// the brackets) so the click target stays the label alone.
@@ -108,6 +122,15 @@ const (
 	hunkViewRevertHint  = " alt+r"
 	hunkViewCloseLabel  = "[ Close ]"
 	hunkViewButtonGap   = 3
+
+	// The navigation row: step to the neighbouring change, flip the
+	// Diff section's layout. The split button names what a click
+	// switches TO.
+	hunkViewPrevLabel    = "[ ◂ Prev ]"
+	hunkViewNextLabel    = "[ Next ▸ ]"
+	hunkViewSplitLabel   = "[ Side by side ]"
+	hunkViewUnifiedLabel = "[ Unified ]"
+	hunkViewNavHint      = "alt+p · alt+n · alt+s"
 )
 
 // hunkRowKind decides how one body row is painted.
@@ -121,12 +144,19 @@ const (
 	hunkRowContext                     // unchanged line around the original
 	hunkRowOriginal                    // a line Revert puts back
 	hunkRowBlank                       // section spacer
+	hunkRowPair                        // side by side: git's line │ the file's line
 )
 
-// hunkViewRow is one painted body row, tabs already expanded.
+// hunkViewRow is one painted body row, tabs already expanded. A pair
+// row (side by side) carries the removed line in text and the added one
+// in right; hasLeft / hasRight say which sides exist, since an empty
+// string is also a real (blank) line.
 type hunkViewRow struct {
 	text string
 	kind hunkRowKind
+
+	right             string
+	hasLeft, hasRight bool
 }
 
 // hunkViewModal is the modal's whole state. It holds the TAB, not a
@@ -430,16 +460,21 @@ func (a *App) dropRevertedHunk(path string, h diffHunk) {
 // the hunk's position checks out — around a stale hunk they would frame
 // the original with the wrong code, so the original is shown bare.
 func (a *App) hunkViewRows(t *editor.Tab, h diffHunk) []hunkViewRow {
-	rows := []hunkViewRow{{text: "Diff", kind: hunkRowHeading}}
-	for _, ln := range hunkTipLines(h) {
-		kind := hunkRowMeta
-		switch {
-		case strings.HasPrefix(ln, "-"):
-			kind = hunkRowRemoved
-		case strings.HasPrefix(ln, "+"):
-			kind = hunkRowAdded
+	var rows []hunkViewRow
+	if a.diffSplit {
+		rows = hunkViewPairRows(hunkTipLines(h))
+	} else {
+		rows = []hunkViewRow{{text: "Diff", kind: hunkRowHeading}}
+		for _, ln := range hunkTipLines(h) {
+			kind := hunkRowMeta
+			switch {
+			case strings.HasPrefix(ln, "-"):
+				kind = hunkRowRemoved
+			case strings.HasPrefix(ln, "+"):
+				kind = hunkRowAdded
+			}
+			rows = append(rows, hunkViewRow{text: ln, kind: kind})
 		}
-		rows = append(rows, hunkViewRow{text: ln, kind: kind})
 	}
 
 	rows = append(rows,
@@ -474,6 +509,45 @@ func (a *App) hunkViewRows(t *editor.Tab, h diffHunk) []hunkViewRow {
 	if !placed {
 		rows = append(rows, hunkViewRow{kind: hunkRowBlank}, hunkViewRow{text: why, kind: hunkRowMeta})
 	}
+	return rows
+}
+
+// hunkViewPairRows lays a hunk's diff lines out side by side: a heading
+// naming the two columns, then the removed and added lines zipped row by
+// row (the diff panes' pairing, diffview.go), prefixes dropped since the
+// column says which side a line is on. "\ No newline" notes stay full
+// rows. A -U0 hunk has no context lines, so every row is a change.
+func hunkViewPairRows(lines []string) []hunkViewRow {
+	rows := []hunkViewRow{{text: "Diff — git has │ the file has", kind: hunkRowHeading}}
+	var dels, adds []string
+	flush := func() {
+		for k := 0; k < max(len(dels), len(adds)); k++ {
+			r := hunkViewRow{kind: hunkRowPair}
+			if k < len(dels) {
+				r.text, r.hasLeft = dels[k], true
+			}
+			if k < len(adds) {
+				r.right, r.hasRight = adds[k], true
+			}
+			rows = append(rows, r)
+		}
+		dels, adds = nil, nil
+	}
+	for _, ln := range lines {
+		switch {
+		case strings.HasPrefix(ln, "-"):
+			if len(adds) > 0 {
+				flush()
+			}
+			dels = append(dels, ln[1:])
+		case strings.HasPrefix(ln, "+"):
+			adds = append(adds, ln[1:])
+		default:
+			flush()
+			rows = append(rows, hunkViewRow{text: ln, kind: hunkRowMeta})
+		}
+	}
+	flush()
 	return rows
 }
 
@@ -512,6 +586,12 @@ func hunkContextRange(t *editor.Tab, h diffHunk) (above, below [2]int) {
 func (m *hunkViewModal) rect(a *App) (x, y, w, h int) {
 	w = max(runeLen(m.title)+10, hunkViewMinWidth)
 	for _, r := range m.rows {
+		if r.kind == hunkRowPair {
+			// Two halves and the divider; each half as wide as the
+			// wider side, so the divider stays put down the column.
+			w = max(w, 2*max(runeLen(r.text), runeLen(r.right))+3+4)
+			continue
+		}
 		w = max(w, runeLen(r.text)+4)
 	}
 	w = min(w, hunkViewMaxWidth, a.width)
@@ -536,6 +616,79 @@ func (m *hunkViewModal) buttons(a *App) (revert, closeBtn btnRect) {
 	return btnRect{x: bx, y: by, w: rw}, btnRect{x: bx + rw + hw + hunkViewButtonGap, y: by, w: cw}
 }
 
+// navButtons returns the Prev, Next and layout-toggle rects on the
+// navigation row, left-aligned under the body: the one geometry draw and
+// hit-testing share.
+func (m *hunkViewModal) navButtons(a *App) (prev, next, split btnRect) {
+	mx, my, _, mh := m.rect(a)
+	y := my + mh - 3
+	prev = btnRect{x: mx + 2, y: y, w: runeLen(hunkViewPrevLabel)}
+	next = btnRect{x: prev.x + prev.w + 1, y: y, w: runeLen(hunkViewNextLabel)}
+	split = btnRect{x: next.x + next.w + 2, y: y, w: runeLen(m.splitLabel(a))}
+	return prev, next, split
+}
+
+// splitLabel names what the layout button switches TO.
+func (m *hunkViewModal) splitLabel(a *App) string {
+	if a.diffSplit {
+		return hunkViewUnifiedLabel
+	}
+	return hunkViewSplitLabel
+}
+
+// position is the hunk's place among the file's changes, 1-based, and
+// how many there are; 0 when the gutter no longer lists it (a disk diff
+// landed meanwhile).
+func (m *hunkViewModal) position(a *App) (k, n int) {
+	hunks := a.fileDiffs[m.tab.Path]
+	for i, h := range hunks {
+		if h.Start == m.hunk.Start && h.End == m.hunk.End && h.Kind == m.hunk.Kind && h.Top == m.hunk.Top {
+			return i + 1, len(hunks)
+		}
+	}
+	return 0, len(hunks)
+}
+
+// step re-targets the view at the neighbouring change in the file: the
+// first hunk below this one for dir > 0, the last above it otherwise.
+// Found by POSITION rather than by index, so a gutter diff that landed
+// while the view was open (and renumbered everything) still steps to the
+// right neighbour. The caret follows, as a jump.
+func (m *hunkViewModal) step(a *App, dir int) {
+	hunks := a.fileDiffs[m.tab.Path]
+	pick := -1
+	for i, h := range hunks {
+		if dir > 0 && h.Start > m.hunk.Start {
+			pick = i
+			break
+		}
+		if dir < 0 && h.Start < m.hunk.Start {
+			pick = i // keep the last one above
+		}
+	}
+	if pick < 0 || len(hunks[pick].Body) == 0 {
+		if dir > 0 {
+			a.flash("No next change in this file")
+		} else {
+			a.flash("No previous change in this file")
+		}
+		return
+	}
+	h := hunks[pick]
+	m.hunk, m.title, m.scroll = h, hunkTipTitle(h), 0
+	m.rows = a.hunkViewRows(m.tab, h)
+	m.tab.MoveCursorTo(editor.Position{Line: h.Start}, false)
+	m.tab.MarkJump()
+}
+
+// toggleSplit flips the shared diff layout and rebuilds this view's rows
+// in it.
+func (m *hunkViewModal) toggleSplit(a *App) {
+	a.setDiffSplit(!a.diffSplit)
+	m.rows = a.hunkViewRows(m.tab, m.hunk)
+	m.scroll = 0
+}
+
 // scrollBy moves the body, clamped to the content.
 func (m *hunkViewModal) scrollBy(a *App, delta int) {
 	m.scroll = clampHunkTipScroll(m.scroll+delta, len(m.rows), m.bodyRows(a))
@@ -557,8 +710,17 @@ func (m *hunkViewModal) revert(a *App) {
 // Tab / ←/→ move the button focus and Enter presses it; the arrows,
 // PgUp/PgDn and Home/End scroll the body.
 func (m *hunkViewModal) handleKey(a *App, ev *tcell.EventKey) {
-	if ev.Key() == tcell.KeyRune && ev.Modifiers()&tcell.ModAlt != 0 && ev.Rune() == 'r' {
-		m.revert(a)
+	if ev.Key() == tcell.KeyRune && ev.Modifiers()&tcell.ModAlt != 0 {
+		switch ev.Rune() {
+		case 'r':
+			m.revert(a)
+		case 'n':
+			m.step(a, 1)
+		case 'p':
+			m.step(a, -1)
+		case 's':
+			m.toggleSplit(a)
+		}
 		return
 	}
 	page := max(m.bodyRows(a)-1, 1)
@@ -617,13 +779,34 @@ func (m *hunkViewModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	if btn&tcell.Button1 == 0 {
 		return
 	}
+	prev, next, split := m.navButtons(a)
 	switch {
 	case !inside:
 		a.closeModal()
+	case prev.contains(x, y):
+		m.step(a, -1)
+	case next.contains(x, y):
+		m.step(a, 1)
+	case split.contains(x, y):
+		m.toggleSplit(a)
 	case revert.contains(x, y):
 		m.revert(a)
 	case closeBtn.contains(x, y):
 		a.closeModal()
+	}
+}
+
+// drawPair paints one side-by-side row: git's line on the left in the
+// removal colour, the file's on the right in the addition colour, a
+// muted divider between. A missing side stays blank.
+func (m *hunkViewModal) drawPair(a *App, c modalChrome, r hunkViewRow, x, y, w int) {
+	lw := (w - 1) / 2
+	if r.hasLeft {
+		drawAt(a.screen, x, y, clipRunes(r.text, lw), a.hunkViewRowStyle(hunkRowRemoved, c))
+	}
+	a.screen.SetContent(x+lw, y, '│', nil, c.muted)
+	if r.hasRight {
+		drawAt(a.screen, x+lw+1, y, clipRunes(r.right, w-lw-1), a.hunkViewRowStyle(hunkRowAdded, c))
 	}
 }
 
@@ -660,6 +843,10 @@ func (m *hunkViewModal) draw(a *App) {
 			break
 		}
 		r := m.rows[idx]
+		if r.kind == hunkRowPair {
+			m.drawPair(a, c, r, mx+2, my+3+i, textW)
+			continue
+		}
 		drawAt(a.screen, mx+2, my+3+i, clipRunes(r.text, textW), a.hunkViewRowStyle(r.kind, c))
 	}
 	if n > body {
@@ -673,6 +860,26 @@ func (m *hunkViewModal) draw(a *App) {
 		if px := mx + mw - 1 - runeLen(pos); px > mx {
 			drawAt(a.screen, px, my+mh-1, pos, c.muted)
 		}
+	}
+
+	// Navigation row: the steppers and the layout switch on the left,
+	// the chords beside them when the width allows, and "k of n" at the
+	// right — the stepper's answer to "how many more?".
+	prev, next, split := m.navButtons(a)
+	drawButton(a.screen, prev.x, prev.y, hunkViewPrevLabel, c.bg, a.theme.Text, false)
+	drawButton(a.screen, next.x, next.y, hunkViewNextLabel, c.bg, a.theme.Text, false)
+	drawButton(a.screen, split.x, split.y, m.splitLabel(a), c.bg, a.theme.Text, false)
+	pos := ""
+	if k, n := m.position(a); k > 0 {
+		pos = itoa(k) + " of " + itoa(n)
+	}
+	posX := mx + mw - 2 - runeLen(pos)
+	hintX := split.x + split.w + 2
+	if hintX+runeLen(hunkViewNavHint)+2 <= posX {
+		drawAt(a.screen, hintX, split.y, hunkViewNavHint, c.muted)
+	}
+	if pos != "" && posX > split.x+split.w {
+		drawAt(a.screen, posX, split.y, pos, c.muted)
 	}
 
 	revert, closeBtn := m.buttons(a)

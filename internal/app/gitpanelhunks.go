@@ -226,20 +226,28 @@ type gitHunkChip struct {
 	span gitHunkSpan
 }
 
-// gitPanelHunkChipsAt returns the chips for display row idx of the diff
-// pane, positioned on screen. Empty when the row is not a hunk header,
-// when the hunk has no verbs, or when the pane is too narrow to carry
-// the chips without eating the hunk header's own text — a control
+// gitPanelHunkChipsAt returns the chips for DISPLAY row row of the diff
+// pane, positioned on screen. A display row is a line index in the
+// unified layout; side by side (diffview.go) it is one of the paired
+// rows, and a hunk header is still a full row of its own, so the chips
+// stay on it in both layouts. Empty when the row is not a hunk header,
+// when the hunk has no verbs, when the diff on screen ignores
+// whitespace (its hunks don't apply), or when the pane is too narrow to
+// carry the chips without eating the hunk header's own text — a control
 // painted over the text it describes is worse than no control, and the
 // picker still reaches the same verbs.
 //
 // Both the drawer and the click router call this, so the chips cannot
 // be painted somewhere they can't be clicked (the btnRect house rule).
-func (a *App) gitPanelHunkChipsAt(idx int) []gitHunkChip {
-	if !a.gitPanel.open {
+func (a *App) gitPanelHunkChipsAt(row int) []gitHunkChip {
+	if !a.gitPanel.open || a.gitPanel.diffWS {
 		return nil
 	}
-	sp, ok := gitPanelHunkAt(a.gitPanelHunkSpans(), idx)
+	rows := a.gitPanelDiffRows()
+	if row < 0 || row >= len(rows) || !rows[row].full {
+		return nil
+	}
+	sp, ok := gitPanelHunkAt(a.gitPanelHunkSpans(), rows[row].left)
 	if !ok {
 		return nil
 	}
@@ -248,8 +256,8 @@ func (a *App) gitPanelHunkChipsAt(idx int) []gitHunkChip {
 		return nil
 	}
 	px, py, pw, ph := a.gitPanelRect()
-	row := idx - a.gitPanel.diffScroll
-	if row < 0 || row >= ph-1 {
+	vis := row - a.gitPanel.diffScroll
+	if vis < 0 || vis >= ph-1 {
 		return nil // scrolled out of the body
 	}
 	listW := a.gitPanelListW(pw)
@@ -266,7 +274,7 @@ func (a *App) gitPanelHunkChipsAt(idx int) []gitHunkChip {
 	chips := make([]gitHunkChip, 0, len(verbs))
 	for _, v := range verbs {
 		chips = append(chips, gitHunkChip{
-			rect: btnRect{x: x, y: py + 1 + row, w: 3},
+			rect: btnRect{x: x, y: py + 1 + vis, w: 3},
 			verb: v,
 			span: sp,
 		})
@@ -444,6 +452,9 @@ func gitPanelHunkName(lines []string, sp gitHunkSpan) string {
 // twin. It is also what makes the verbs discoverable, since three-cell
 // chips can only hint at what they do.
 func (a *App) gitPanelHunkItems() []paletteItem {
+	if a.gitPanel.diffWS {
+		return nil // see gitPanelState.diffWS
+	}
 	spans := a.gitPanelHunkSpans()
 	var items []paletteItem
 	for _, sp := range spans {
@@ -485,6 +496,8 @@ func (a *App) gitPanelHunkWhyNot() string {
 	switch {
 	case len(a.gitPanel.files) == 0:
 		return "nothing changed"
+	case a.gitPanel.diffWS:
+		return "whitespace is hidden (ws) — show it to stage or revert hunks"
 	case a.gitPanel.diffSide == sideNone && len(a.gitPanel.diffLines) > 0:
 		return "this file is new to git; stage it whole"
 	case len(a.gitPanel.diffLines) == 0:

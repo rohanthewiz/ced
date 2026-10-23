@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-084**
+**Next ID: N-086**
 
 ## Open
 
@@ -113,6 +113,14 @@ plus the LSP work done in the seeding session itself
   picked. If they go in, fold the git rows (Show change, Blame, Git
   status, New branch) into one "Git…" picker row to keep the popup
   short.
+
+- **N-085** · raised `2026-1022-1932-diff-views-split-ws-steppers` · value low
+  Side-by-side diffs pair removed and added lines positionally with no
+  intra-line emphasis, so a one-word change in a long line still reads
+  as two whole lines. Word-level highlighting of the differing span
+  (both sides) would need a token differ per pair — deliberately left
+  out of diffview.go's first cut ("a cleverer pairing would be a second
+  differ to get wrong").
 
 ## Validate
 
@@ -295,6 +303,17 @@ and `raised`.
   missing closing )" in red, `$1` replace (bar Replace / All and the
   list's "Replace in N") expands, and the `[regex: off]` chip on the
   find prompts flips with a click and alt+r.
+
+- **N-084** · raised `2026-1022-1932-diff-views-split-ws-steppers` · value low
+  The diff views (diffview.go) ran in the real binary through run-ced
+  only via the command palette (git panel side by side, ws hiding a
+  re-indent, "Change 1 of 2", the compare panel's `[↺]`). Hand check in
+  tmux and cats: CLICKS on the header toolbar (▲ ▼ split ws) in the
+  compare panel, git panel and git log, their hover labels, the toolbar
+  shedding on a narrow header, a compare `[↺]` click reverting the
+  buffer, the git walk's `]`/`[`, the cherry-pick preview's
+  alt+n/p/v and the change view's alt+p/n/s through tmux's Esc folding,
+  and the change view's ◂ Prev / Next ▸ / Side by side buttons.
 
 ## Roadmap
 

@@ -337,7 +337,7 @@ func (a *App) gitPanelWalkPage(dir int) bool {
 // nothing else, so changing file always takes a deliberate extra push.
 func (a *App) gitPanelWalkAtEnd() bool {
 	_, _, _, ph := a.gitPanelRect()
-	max := len(a.gitPanel.diffLines) - (ph - 1)
+	max := len(a.gitPanelDiffRows()) - (ph - 1)
 	if max < 0 {
 		max = 0
 	}
@@ -366,6 +366,7 @@ func (a *App) gitPanelWalkAtTop() bool {
 //	             with the same gesture
 //	↑ ↓ PgUp PgDn scroll this file's diff
 //	Enter        stop here and commit what has been reviewed
+//	] / [        next / previous change in this file's diff
 //	h            hunk actions for this file (the Tier-0 route to the
 //	             chips, which a click-swallowing terminal can't reach)
 //	a            the panel's Actions list, unchanged
@@ -419,6 +420,12 @@ func (a *App) handleGitPanelWalkKey(ev *tcell.EventKey) {
 	case 'q':
 		a.stopGitPanelWalk()
 		a.flash("Survey paused — " + itoa(a.gitPanelReviewedCount()) + " reviewed")
+	case ']':
+		// The header's ▼ / ▲ (diffview.go): step change by change
+		// within the file, where n / p step file by file.
+		a.diffStep(diffSurfGit, 1)
+	case '[':
+		a.diffStep(diffSurfGit, -1)
 	}
 }
 

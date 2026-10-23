@@ -101,6 +101,7 @@ internal/app/
   copilot*.go chatcomposer.go chatagent.go chatarchive.go summarize.go gonotes.go
   mcp.go skills.go plugins.go plugincmd.go plugindeco.go
   git*.go compare.go           Git panel/log/commit/receipt/status; compare panel
+  diffview.go comparerevert.go  Shared diff layer (split/ws/steppers); compare hunk revert
   gitrestore.go               Restore one file to HEAD (tree/tab/≡ Git rows)
   gitconflict.go gitopstate.go  Conflict picker + stop hook; parked-op / unmerged reads
   conflictview.go conflictpanel.go  In-editor conflict washes/lens/verbs; Conflicts tool window
@@ -890,6 +891,36 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (armed paste target). ⟳ re-reads via `compare.oldPath`. Tool window;
   its ≡ show row opens a picker. No leader.
 
+### Diff views (app/diffview.go, comparerevert.go)
+- ONE layer for every diff pane: compare, git panel diff, git log
+  detail, cherry-pick preview. The UNIFIED lines stay the model (hunk
+  spans, patches, `diffTargetLine`, `gitLogDetailTarget` untouched);
+  side by side is a LAYOUT (`diffLayout` → `[]diffRow`), unified being
+  one full row per line. Scrolls count DISPLAY rows; any row → line
+  mapping goes through `diffRow.line()` / `diffPane.lineAt`, never
+  `scroll + y`. Headers/@@/markers/metadata stay full rows (chips ride
+  on them in both layouts); combined diffs never split. Pairing is
+  positional per -/+ run, no intra-line matching.
+- `diffPane` caches by slice IDENTITY + mode — surfaces REPLACE their
+  lines slice, never edit it in place; new text resets the change cursor.
+  `setDiffSplit` remaps every pane's scroll + cursor (`switchMode`).
+- `"diffview"` unified/split is persisted; ignore-ws (`diffIgnoreWS`) is
+  SESSION only. Compare re-diffs held sides (`sideOld/sideNew`,
+  `diff.DiffWith`: equal lines carry the NEW side's text); git panes
+  re-run with `-w`, the event carries `ws` and a mismatch is stale. A
+  `-w` git panel diff (`diffWS`) has NO hunk verbs (they don't apply).
+- Steppers walk CHANGES (runs), not hunks; relative to the current
+  change while on screen, else to the viewport; stop at the ends.
+  Doors: header toolbar ▲ ▼ split ws (`diffToolbar`, right-aligned,
+  sheds ws → split → the pair; tips in buttonTips), ≡ View rows (act on
+  `lastDiffSurf`), git walk `]`/`[`, cherry-pick alt+n/p/v, change view
+  alt+p/n/s (its own nav row; not -w — the gutter's -U0 hunk).
+- Compare revert: `[↺]` per hunk only when the new side is a whole OPEN
+  buffer (not selection/conflict — `compareRevertBlocked` says why);
+  buffer edit, one undo step, unsaved, no confirm; "+" side VERIFIED
+  against the buffer, then the comparison re-runs (scroll kept).
+  ≡ Compare "Revert a change in the compare view…" is the picker twin.
+
 ### Tool windows + layout (app/toolwindow.go, tool*.go, splitter.go)
 - Every panel (tree, git panels, conflicts, problems, compare, terminal, chat) is a
   tool window on one of three edges; ONE visible per edge
@@ -1206,8 +1237,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 183 group
-  actions + 15 headers (200), height 206, dividers `[2, 5, 203]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 188 group
+  actions + 15 headers (205), height 211, dividers `[2, 5, 208]`; also
   the Git fold count in `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.

@@ -242,7 +242,7 @@ func TestLoadGitLogDetail_RealRepo(t *testing.T) {
 		t.Fatalf("setup: %d commits", len(commits))
 	}
 
-	lines := loadGitLogDetail(repo, commits[0].Hash)
+	lines := loadGitLogDetail(repo, commits[0].Hash, false)
 	joined := strings.Join(lines, "\n")
 	for _, want := range []string{"commit ", "Author:", "CommitDate:", "f.txt | 1 +", "+one"} {
 		if !strings.Contains(joined, want) {
@@ -464,5 +464,52 @@ func TestGitLogDividerHit_ThreeColumnGrabZone(t *testing.T) {
 	a.gitLog.open = false
 	if a.gitLogDividerHit(divX) || a.gitLogDividerHit(-1) {
 		t.Error("a closed log panel should own no grab zone")
+	}
+}
+
+// TestHandleGitLogShow_DropsTheOtherWhitespaceSetting: a `git show`
+// asked before the whitespace switch flipped is stale, like one for a
+// commit the user has clicked away from.
+func TestHandleGitLogShow_DropsTheOtherWhitespaceSetting(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitLog.open = true
+	a.gitLog.commits = []gitLogCommit{{Hash: "h1", Short: "h1"}}
+	a.diffIgnoreWS = true
+	a.handleGitLogShow(&gitLogShowEvent{when: time.Now(), hash: "h1", lines: []string{"old"}, ws: false})
+	if a.gitLog.detailLines != nil {
+		t.Fatal("stale whitespace answer installed")
+	}
+	a.handleGitLogShow(&gitLogShowEvent{when: time.Now(), hash: "h1", lines: []string{"new"}, ws: true})
+	if len(a.gitLog.detailLines) != 1 || a.gitLog.detailLines[0] != "new" {
+		t.Fatalf("detail = %v", a.gitLog.detailLines)
+	}
+}
+
+// TestGitLogToolbar_DrawAndClickAgree: the log header carries the diff
+// toolbar between its two button chains, painted where the router finds
+// it; the ▼ button steps the detail pane.
+func TestGitLogToolbar_DrawAndClickAgree(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitLog.open = true
+	a.gitLog.commits = []gitLogCommit{{Hash: "h1", Short: "h1"}}
+	a.gitLog.detailLines = []string{"commit h1", "", "@@ -1 +1 @@", "-a", "+b"}
+	a.draw()
+	btns := a.gitLogToolbar()
+	if len(btns) == 0 {
+		t.Fatal("no toolbar on a 120-column log")
+	}
+	search := a.gitLogSearchRect()
+	if btns[0].rect.x <= search.x+search.w || btns[len(btns)-1].rect.x >= a.gitLogCopyRect().x {
+		t.Fatalf("toolbar %+v overlaps the header chains", btns)
+	}
+	for _, b := range btns {
+		if got := screenRow(t, a, b.rect.y, b.rect.x, b.rect.w); got != diffToolLabel(b.kind) {
+			t.Fatalf("drawn %q, want %q", got, diffToolLabel(b.kind))
+		}
+	}
+	next := btns[1]
+	a.gitLogPress(next.rect.x, next.rect.y)
+	if a.gitLog.pane.cur != 0 || a.statusMsg != "Change 1 of 1" {
+		t.Fatalf("▼: cur=%d flash=%q", a.gitLog.pane.cur, a.statusMsg)
 	}
 }

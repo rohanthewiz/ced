@@ -47,6 +47,7 @@ package diff
 import (
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Op names what happened to one line.
@@ -85,6 +86,57 @@ func Diff(a, b []string) []Edit {
 	var out []Edit
 	emit := func(e Edit) { out = append(out, e) }
 	diffRange(a, b, 0, len(a), 0, len(b), emit)
+	return out
+}
+
+// Options tunes how two lines are judged equal.
+type Options struct {
+	// IgnoreWhitespace compares lines with every whitespace rune
+	// removed — git's `-w`, the strongest of its three whitespace
+	// options. The weaker two (`-b`, amount of space; `--ignore-space-
+	// at-eol`) are not offered: a reviewer reaching for the switch wants
+	// a re-indent or a re-wrap to stop shouting, and only `-w` silences
+	// both.
+	IgnoreWhitespace bool
+}
+
+// DiffWith is Diff under Options. Matching runs on normalised KEYS, but
+// every emitted Edit carries the ORIGINAL text of the side it came from
+// — a deletion the old line, an insertion the new one, and an equal
+// line the NEW side's spelling. That last choice is what lets a caller
+// treat the "+" side of the rendered diff as text that exists in the
+// buffer verbatim (the compare panel verifies a hunk against the buffer
+// before reverting it), even where the two sides differ in whitespace
+// the comparison chose not to see.
+func DiffWith(a, b []string, opt Options) []Edit {
+	if !opt.IgnoreWhitespace {
+		return Diff(a, b)
+	}
+	edits := Diff(stripSpaceAll(a), stripSpaceAll(b))
+	for i := range edits {
+		e := &edits[i]
+		switch e.Op {
+		case OpDelete:
+			e.Text = a[e.OldLine-1]
+		default: // OpEqual and OpInsert both exist on the new side
+			e.Text = b[e.NewLine-1]
+		}
+	}
+	return edits
+}
+
+// stripSpaceAll returns each line with every whitespace rune removed —
+// the comparison key for Options.IgnoreWhitespace.
+func stripSpaceAll(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, ln := range lines {
+		out[i] = strings.Map(func(r rune) rune {
+			if unicode.IsSpace(r) {
+				return -1
+			}
+			return r
+		}, ln)
+	}
 	return out
 }
 

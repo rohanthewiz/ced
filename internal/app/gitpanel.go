@@ -178,10 +178,21 @@ type gitPanelState struct {
 	// git's two diffs the lines came from, which is what decides
 	// whether a hunk can be staged, unstaged, or reverted — see
 	// gitpanelhunks.go.
-	diffPath   string
-	diffLines  []string
-	diffSide   diffSide
+	diffPath  string
+	diffLines []string
+	diffSide  diffSide
+	// diffScroll counts DISPLAY rows (diffview.go) — the same as lines
+	// in the unified layout, fewer when side by side pairs them.
 	diffScroll int
+	// diffWS records that diffLines came from `git diff -w`. Such a
+	// diff's hunks do not apply (git checks the whitespace the diff
+	// left out), so the hunk verbs stand down while it is on screen —
+	// keyed on what was LOADED, not on the switch, so the interval
+	// between flipping it and the new diff arriving can't stage a hunk
+	// of the wrong kind.
+	diffWS bool
+	// pane is diffview.go's layout cache and change cursor.
+	pane diffPane
 }
 
 // gitPanelDiffEvent carries one file's freshly-fetched diff text from
@@ -195,6 +206,8 @@ type gitPanelDiffEvent struct {
 	path  string
 	lines []string
 	side  diffSide
+	// ws says the diff was asked for whitespace-blind (git diff -w).
+	ws bool
 }
 
 // When satisfies the tcell.Event interface.
@@ -407,9 +420,10 @@ func (a *App) requestGitPanelDiff(f gitPanelFile) {
 	}
 	scr := a.screen
 	root := a.rootDir
+	ws := a.diffIgnoreWS
 	go func() {
-		lines, side := loadGitPanelDiff(root, f)
-		_ = scr.PostEvent(&gitPanelDiffEvent{when: time.Now(), path: f.Path, lines: lines, side: side})
+		lines, side := loadGitPanelDiff(root, f, ws)
+		_ = scr.PostEvent(&gitPanelDiffEvent{when: time.Now(), path: f.Path, lines: lines, side: side, ws: ws})
 	}()
 }
 
@@ -440,9 +454,17 @@ func (a *App) requestGitPanelDiff(f gitPanelFile) {
 // The union survives as a FALLBACK for the shapes neither question
 // claimed — and the untracked synthesis behind that, unchanged. Both
 // report sideNone: their hunks are real to read and unsafe to apply.
-func loadGitPanelDiff(rootDir string, f gitPanelFile) ([]string, diffSide) {
+//
+// ws asks every one of git's questions with -w (diffview.go's ignore
+// whitespace switch). The untracked synthesis has no whitespace to
+// ignore and is unchanged.
+func loadGitPanelDiff(rootDir string, f gitPanelFile, ws bool) ([]string, diffSide) {
 	gitDiff := func(args ...string) []string {
-		full := append([]string{"-C", rootDir, "diff", "--no-color"}, args...)
+		full := []string{"-C", rootDir, "diff", "--no-color"}
+		if ws {
+			full = append(full, "-w")
+		}
+		full = append(full, args...)
 		full = append(full, "--", f.Path)
 		out, err := exec.Command("git", full...).Output()
 		if err != nil {
@@ -472,7 +494,11 @@ func loadGitPanelDiff(rootDir string, f gitPanelFile) ([]string, diffSide) {
 	// Neither question had an answer. `diff HEAD` is the fallback for
 	// anything the pair missed (a shape git reports only against the
 	// commit, not against the index).
-	if out, err := exec.Command("git", "-C", rootDir, "diff", "HEAD", "--no-color", "--", f.Path).Output(); err == nil {
+	head := []string{"-C", rootDir, "diff", "HEAD", "--no-color"}
+	if ws {
+		head = append(head, "-w")
+	}
+	if out, err := exec.Command("git", append(head, "--", f.Path)...).Output(); err == nil {
 		if lines := splitDiffLines(out); len(lines) > 0 {
 			return lines, sideNone
 		}
@@ -516,12 +542,19 @@ func (a *App) handleGitPanelDiff(e *gitPanelDiffEvent) {
 	if !ok || f.Path != e.path {
 		return
 	}
+	// A diff asked for under the other whitespace setting is as stale as
+	// one for another file: the switch flipped while it was in flight,
+	// and the newer request is on its way.
+	if e.ws != a.diffIgnoreWS {
+		return
+	}
 	if a.gitPanel.diffPath != e.path {
 		a.gitPanel.diffScroll = 0
 	}
 	a.gitPanel.diffPath = e.path
 	a.gitPanel.diffLines = e.lines
 	a.gitPanel.diffSide = e.side
+	a.gitPanel.diffWS = e.ws
 	a.gitPanelClampScrolls()
 }
 
@@ -708,7 +741,26 @@ func (a *App) gitPanelClampScrolls() {
 		return scroll
 	}
 	a.gitPanel.listScroll = clamp(a.gitPanel.listScroll, len(a.gitPanel.files))
-	a.gitPanel.diffScroll = clamp(a.gitPanel.diffScroll, len(a.gitPanel.diffLines))
+	a.gitPanel.diffScroll = clamp(a.gitPanel.diffScroll, len(a.gitPanelDiffRows()))
+}
+
+// gitPanelDiffRows is the diff pane's display rows in the current
+// layout (diffview.go).
+func (a *App) gitPanelDiffRows() []diffRow {
+	return a.gitPanel.pane.layout(a.gitPanel.diffLines, a.diffSplit)
+}
+
+// gitPanelToolbar lays out the shared diff toolbar (▲ ▼ split ws) in
+// the header, right-aligned against the ✕. It never starts left of the
+// header's own left-hand buttons; the title and the tick count yield
+// to it, being labels rather than controls.
+func (a *App) gitPanelToolbar() []diffToolBtn {
+	actions := a.gitPanelActionsRect()
+	minX := actions.x + actions.w + 1
+	if review := a.gitPanelReviewRect(); review.w > 0 {
+		minX = review.x + review.w + 1
+	}
+	return diffToolbar(minX, a.gitPanelCloseRect().x-1, actions.y)
 }
 
 // gitPanelEnsureSelectedVisible snaps the list scroll so the selected
@@ -740,9 +792,13 @@ func (a *App) gitPanelEnsureSelectedVisible() {
 // is a plain click.
 func (a *App) gitPanelPress(x, y int) (dragMode string) {
 	_, py, _, _ := a.gitPanelRect()
+	a.noteDiffSurface(diffSurfGit)
 	if y == py {
 		if a.gitPanelActionsRect().contains(x, y) {
 			a.openGitPanelActions()
+			return ""
+		}
+		if a.diffToolbarPress(diffSurfGit, a.gitPanelToolbar(), x, y) {
 			return ""
 		}
 		// The survey button is the mouse's `n`: it starts the walk, or
@@ -797,7 +853,12 @@ func (a *App) gitPanelClick(x, y int) {
 		now := time.Now()
 		if a.lastClick.x == x && a.lastClick.y == y && now.Sub(a.lastClick.when) < doubleClickMs {
 			a.lastClick = clickRecord{}
-			a.gitPanelJumpToDiffRow(a.gitPanel.diffScroll + (y - py - 1))
+			// The row is a DISPLAY row; the jump wants the unified
+			// line behind it (the new side's, when side by side).
+			a.gitPanelDiffRows()
+			if line := a.gitPanel.pane.lineAt(a.gitPanel.diffScroll + (y - py - 1)); line >= 0 {
+				a.gitPanelJumpToDiffRow(line)
+			}
 			return
 		}
 		a.lastClick = clickRecord{x: x, y: y, when: now}
@@ -932,6 +993,7 @@ func (a *App) gitPanelScroll(x, _, delta int) {
 		a.gitPanelClampScrolls()
 		return
 	}
+	a.noteDiffSurface(diffSurfGit)
 	// During a survey the wheel reads the whole change set as one
 	// document: at the end of a file's diff, one more notch moves to the
 	// next file. The detent is free — the notch that REACHES the edge
@@ -1010,12 +1072,17 @@ func (a *App) drawGitPanel() {
 		drawAt(a.screen, review.x, review.y, a.gitPanelReviewLabel(), st)
 	}
 
-	// The tick count sits immediately left of the ✕ so it reads as the
-	// set the Actions button will operate on.
-	rightEdge := closeBtn.x
+	// The diff toolbar rides the right end, against the ✕ — above the
+	// pane it drives. Labels to its left stop where it starts.
+	toolbar := a.gitPanelToolbar()
+	a.drawDiffToolbar(toolbar)
+
+	// The tick count sits immediately left of the toolbar so it reads as
+	// the set the Actions button will operate on.
+	rightEdge := diffToolbarLeft(toolbar, closeBtn.x)
 	if n := a.gitPanelCheckedCount(); n > 0 {
 		count := " " + itoa(n) + " selected "
-		if cx := closeBtn.x - runeLen(count); cx > actions.x+actions.w {
+		if cx := rightEdge - runeLen(count); cx > actions.x+actions.w {
 			drawAt(a.screen, cx, py, count,
 				tcell.StyleDefault.Background(th.SidebarBG).Foreground(th.Accent))
 			rightEdge = cx
@@ -1059,11 +1126,30 @@ func (a *App) drawGitPanel() {
 			glyph, st = splitterGrip, gripSt
 		}
 		a.screen.SetContent(px+listW, ry, glyph, nil, st)
-		// Diff cell fill, then diff text.
+		// Diff cell fill; the text goes on after the loop, all rows at
+		// once, through the shared painter.
 		for cx := px + listW + 1; cx < px+pw; cx++ {
 			a.screen.SetContent(cx, ry, ' ', nil, diffBG)
 		}
-		a.drawGitPanelDiffRow(row, px+listW+2, ry, pw-listW-3)
+	}
+	a.drawGitPanelDiff(px+listW+2, py+1, pw-listW-3, ph-1)
+}
+
+// drawGitPanelDiff paints the diff pane's visible rows — unified or side
+// by side (diffview.go) — then the hunk chips over the right end of
+// each visible hunk header.
+func (a *App) drawGitPanelDiff(x, y, w, n int) {
+	if w <= 0 {
+		return
+	}
+	th := a.theme
+	a.drawDiffRows(a.gitPanel.diffLines, &a.gitPanel.pane, a.gitPanelDiffRows(), diffPaint{
+		x: x, y: y, w: w, n: n, scroll: a.gitPanel.diffScroll,
+		style: func(line string) tcell.Style { return gitPanelDiffStyle(line, th) },
+		bg:    th.BG,
+	})
+	for row := 0; row < n; row++ {
+		a.drawGitPanelHunkChips(a.gitPanel.diffScroll + row)
 	}
 }
 
@@ -1153,37 +1239,13 @@ func (a *App) gitPanelReviewMark(idx int, f gitPanelFile) (rune, tcell.Color) {
 	return gitPanelReviewBlank, a.theme.Muted
 }
 
-// drawGitPanelDiffRow paints one diff line with unified-diff coloring,
-// truncating to the pane width — horizontal scroll isn't worth its
-// complexity for a review strip (long lines still show their prefix
-// and most of their content).
-func (a *App) drawGitPanelDiffRow(row, x, ry, w int) {
-	if w <= 0 {
-		return
-	}
-	idx := a.gitPanel.diffScroll + row
-	if idx < 0 || idx >= len(a.gitPanel.diffLines) {
-		return
-	}
-	line := a.gitPanel.diffLines[idx]
-	st := gitPanelDiffStyle(line, a.theme)
-	// Tabs expanded before the clip, which counts cells — at the hunk's
-	// own prefix width, since an unmerged file's diff is a combined one.
-	if strings.ContainsRune(line, '\t') {
-		line = diffDisplayLineCols(line, diffPrefixColsAt(a.gitPanel.diffLines, idx))
-	} else {
-		line = diffDisplayLine(line)
-	}
-	if runeLen(line) > w {
-		line = string([]rune(line)[:w-1]) + "…"
-	}
-	drawAt(a.screen, x, ry, line, st)
-	// Hunk verbs ride at the right edge of the hunk header, painted
-	// over whatever the header text ran into. gitPanelHunkChipsAt is
-	// the same call the click router makes, so a chip can never be
-	// drawn where it can't be clicked, and it withholds the strip
-	// entirely on a pane too narrow to carry it.
-	for _, chip := range a.gitPanelHunkChipsAt(idx) {
+// drawGitPanelHunkChips paints the hunk verbs riding at the right edge
+// of the hunk header on display row row, over whatever the header text
+// ran into. gitPanelHunkChipsAt is the same call the click router makes,
+// so a chip can never be drawn where it can't be clicked, and it
+// withholds the strip entirely on a pane too narrow to carry it.
+func (a *App) drawGitPanelHunkChips(row int) {
+	for _, chip := range a.gitPanelHunkChipsAt(row) {
 		drawAt(a.screen, chip.rect.x, chip.rect.y, gitHunkChipLabel(chip.verb),
 			tcell.StyleDefault.Background(a.theme.Selection).
 				Foreground(gitHunkChipColor(chip.verb, a.theme)).Bold(true))

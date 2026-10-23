@@ -1749,3 +1749,64 @@ func TestLoadUnderlineColorValues(t *testing.T) {
 		t.Error("invalid underlinecolor value should error")
 	}
 }
+
+// TestLoad_DiffView covers the diff-layout key: absent keeps unified,
+// either spelling selects its layout (case and padding forgiven), and an
+// unknown value is an error like every other enumerated key.
+func TestLoad_DiffView(t *testing.T) {
+	cases := []struct {
+		name    string
+		json    string
+		want    DiffView
+		wantErr bool
+	}{
+		{"absent", `{}`, DiffViewUnified, false},
+		{"unified", `{"diffview": "unified"}`, DiffViewUnified, false},
+		{"split", `{"diffview": "split"}`, DiffViewSplit, false},
+		{"cased", `{"diffview": " Split "}`, DiffViewSplit, false},
+		{"bogus", `{"diffview": "sideways"}`, DiffViewUnified, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(c.json), 0644); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			cfg, err := Load(path)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, c.wantErr)
+			}
+			if cfg.DiffView != c.want {
+				t.Errorf("DiffView = %q, want %q", cfg.DiffView, c.want)
+			}
+		})
+	}
+}
+
+// TestSaveDiffView_RoundTripsUnknownKeys pins the saveKey contract for
+// the diff-layout key: hand-set keys survive, and the value reloads.
+func TestSaveDiffView_RoundTripsUnknownKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"icons": "off", "somethingnew": "keep me"}`), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveDiffView(path, DiffViewSplit); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	for _, want := range []string{`"diffview": "split"`, `"somethingnew": "keep me"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("config = %s, want it to contain %s", data, want)
+		}
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if cfg.DiffView != DiffViewSplit {
+		t.Errorf("DiffView = %q after reload, want split", cfg.DiffView)
+	}
+}

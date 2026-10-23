@@ -500,7 +500,9 @@ func (a *App) overflowMarkers() []overflowMarker {
 		px, py, pw, ph := a.gitPanelRect()
 		visible := ph - 1 // the header rule
 		if pw > 0 && visible > 0 {
-			pane(px+pw-1, py+1, visible, a.gitPanel.diffScroll, len(a.gitPanel.diffLines), "line")
+			// Counted in DISPLAY rows — the diff pane's scroll unit, which
+			// side by side (diffview.go) is fewer than its lines.
+			pane(px+pw-1, py+1, visible, a.gitPanel.diffScroll, len(a.gitPanelDiffRows()), "line")
 			// Counted in FILES, not rows: every row of this list is one,
 			// and "9 files below" is the answer somebody about to commit
 			// is actually asking for.
@@ -527,7 +529,7 @@ func (a *App) overflowMarkers() []overflowMarker {
 		px, _, pw, _ := a.gitLogRect()
 		top, visible := a.gitLogBodyTop(), a.gitLogBodyRows()
 		if pw > 0 && visible > 0 {
-			pane(px+pw-1, top, visible, a.gitLog.detailScroll, len(a.gitLog.detailLines), "line")
+			pane(px+pw-1, top, visible, a.gitLog.detailScroll, len(a.gitLogDetailRows()), "line")
 			if listW := a.gitLogListW(pw); listW > 0 {
 				pane(px+listW-1, top, visible, a.gitLog.listScroll, len(a.gitLog.commits), "commit")
 			}
@@ -553,7 +555,7 @@ func (a *App) overflowMarkers() []overflowMarker {
 	if a.compare.open {
 		px, py, pw, ph := a.comparePanelRect()
 		if visible := ph - 1; pw > 0 && visible > 0 {
-			pane(px+pw-1, py+1, visible, a.compare.scroll, len(a.compare.lines), "line")
+			pane(px+pw-1, py+1, visible, a.compare.scroll, len(a.compareRows()), "line")
 		}
 	}
 

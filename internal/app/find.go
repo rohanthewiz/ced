@@ -303,10 +303,13 @@ func (a *App) openFindPrompt(title, hint, initial string, callback func(*App, st
 		// Each key named beside its word; the draw clips the hint at the
 		// border on a prompt too narrow to grow, and the right-aligned
 		// "↑ recent" gives way first.
-		hint:     hint + " · alt+c case · alt+w word · alt+r regex",
+		hint:     hint + " · alt+c case · alt+w word · alt+r regex · alt+x clear",
 		field:    newTextField(initial),
 		callback: callback,
 		histKind: history.SearchFind,
+		// A pre-fill (the bar's query, a caret word, a selection) is a
+		// guess; × / Alt+x drops it in one gesture.
+		clearable: true,
 		extras: []promptExtra{{
 			label: func(app *App) string { return "[regex: " + onOff(app.findRegex) + "]" },
 			width: findPromptRegexChipWidth,

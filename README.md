@@ -937,8 +937,10 @@ stays open while you edit: a filter box (`/`) narrows the rows, `Delete`
 or a row's `✕` strikes one off, `⟳` (or `a`) re-runs the search, and a
 replace box rewrites the rows that are left as one undo step. Opening it
 with a single-line selection searches for that; otherwise it asks,
-pre-filled — and the question is live from the start: while you type (and
-on the pre-fill before you do), the editor lights every match, the cursor
+pre-filled with the find bar's text if it's open (never the word the
+cursor happens to be in — select it to search for it) — and the question
+is live from the start: while you type (and on the pre-fill before you
+do), the editor lights every match, the cursor
 previews the one the list would open on, and the prompt counts them
 (`3 of 12`). `Enter` opens the list; `Esc` puts everything back.
 
@@ -964,7 +966,8 @@ are set when they run — the title says "(match case)" / "(whole word)" /
 prompts carry the same three as chips — `[case: off]` (`Alt+c`),
 `[word: off]` (`Alt+w`) and `[regex: off]` (`Alt+r`), the bar's own
 keys — so you can change how the search matches without leaving the
-prompt; a regex list's filter box opens
+prompt, and a `×` at the end of the field (or `Alt+x`) clears a
+pre-fill you don't want; a regex list's filter box opens
 empty (it filters by plain text), and its replace box takes `$1` too.
 `Esc j` (or
 `≡` → **Go to line…**, or `⌘L`) jumps to a line, and accepts

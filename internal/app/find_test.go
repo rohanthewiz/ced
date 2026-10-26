@@ -738,7 +738,7 @@ func TestMenuToggleFindRegex(t *testing.T) {
 // leak into the field, and the labels report the new state.
 func TestFindPrompt_CaseAndWordChips(t *testing.T) {
 	a := seedFindApp(t, "foo")
-	a.openFindPrompt("Find all in file", "lists every occurrence", "foo", nil)
+	a.openFindPrompt("Find all in file", "lists every match", "foo", nil)
 	m, ok := a.modal.(*promptModal)
 	if !ok {
 		t.Fatalf("modal = %T, want the prompt", a.modal)
@@ -794,7 +794,7 @@ func TestFindPrompt_AllChipsFitEightyColumns(t *testing.T) {
 	a := seedFindApp(t, "foo")
 	a.screen.SetSize(80, 24)
 	a.width, a.height = 80, 24
-	a.openFindPrompt("Find all in file", "lists every occurrence", "", nil)
+	a.openFindPrompt("Find all in file", "lists every match", "", nil)
 	m := a.modal.(*promptModal)
 	rects := m.extraRects(a)
 	if len(rects) != 3 {

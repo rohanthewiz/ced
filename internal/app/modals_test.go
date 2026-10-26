@@ -1298,3 +1298,51 @@ func TestPromptLive_BottomAnchorsOnTheEditor(t *testing.T) {
 		t.Fatal("status line not drawn")
 	}
 }
+
+// TestPromptClear_ButtonAndChordEmptyTheField: a find prompt's × (click)
+// and Alt+x both empty the field and report it as an edit; the × is
+// drawn only while there is text, and a plain prompt has none.
+func TestPromptClear_ButtonAndChordEmptyTheField(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := a.openFindPrompt("Find", "H", "abc", nil)
+	var heard []string
+	m.onEdit = func(_ *App, v string) { heard = append(heard, v) }
+
+	b := m.clearBtnRect(a)
+	if b.w == 0 {
+		t.Fatal("no × on a find prompt holding text")
+	}
+	m.draw(a)
+	a.screen.Show()
+	if got := screenRow(t, a, b.y, b.x, 1); got != "×" {
+		t.Errorf("cell under the × rect = %q, want ×", got)
+	}
+	if _, _, end := m.textSpan(a); end > b.x {
+		t.Errorf("text span ends at %d, past the × at %d", end, b.x)
+	}
+
+	m.handleMouse(a, b.x, b.y, tcell.Button1)
+	if m.field.String() != "" || a.modal != m {
+		t.Fatalf("after × click: field %q, prompt open %v; want empty and still open", m.field.String(), a.modal == m)
+	}
+	if m.clearBtnRect(a).w != 0 {
+		t.Error("× still offered on an empty field")
+	}
+
+	m.handleKey(a, keyEv(tcell.KeyRune, 'q'))
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, promptClearKey, tcell.ModAlt))
+	if m.field.String() != "" {
+		t.Fatalf("after alt+x: field %q, want empty", m.field.String())
+	}
+	// An empty field is left alone: no second re-ask for nothing.
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, promptClearKey, tcell.ModAlt))
+	if want := "," + "q" + ","; strings.Join(heard, ",") != want {
+		t.Errorf("onEdit heard %q, want [\"\" \"q\" \"\"]", heard)
+	}
+
+	a.closeModal()
+	a.openPrompt("T", "H", "abc", nil)
+	if promptOf(a).clearBtnRect(a).w != 0 {
+		t.Error("a plain prompt grew a ×")
+	}
+}

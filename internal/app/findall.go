@@ -295,7 +295,8 @@ func (a *App) menuFindAll() {
 
 // openFindAll resolves a query and shows the list. A single-line
 // selection runs straight away; everything else goes through the
-// prompt, pre-filled with the best guess the context offers. The prompt
+// prompt, pre-filled with the find bar's query if any (never the caret's
+// word, see findAllPromptSeed). The prompt
 // path is why this is split from showFindAll: promptModal closes itself
 // before running its callback, so the callback lands in an empty modal
 // slot.
@@ -318,7 +319,7 @@ func (a *App) openFindAll() {
 	// what it borrowed. The callback restores BEFORE showFindAll so the
 	// list's origin is where the user was, not the prompt's last preview.
 	var live *findAllLive
-	pm := a.openFindPrompt("Find all in file", "lists every occurrence", seed, func(app *App, v string) {
+	pm := a.openFindPrompt("Find all in file", "lists every match", seed, func(app *App, v string) {
 		live.restore(app)
 		app.showFindAll(v)
 	})
@@ -356,7 +357,9 @@ func (a *App) openFindAllFromBar() {
 // Everything else the context merely IMPLIES (what's left in the find
 // bar, the word the cursor happens to be sitting in), and an implication
 // is a guess. Guesses belong in the prompt as a pre-fill
-// (findAllPromptSeed), where Enter accepts one and typing replaces it —
+// (findAllPromptSeed, projectSearchSeed), where Enter accepts one and
+// typing replaces it — though the in-file prompt takes only the bar's
+// query, because it searches its pre-fill at once —
 // a search that silently answers a question the user didn't ask costs
 // more than the key it saved, because the result list is indistinguish-
 // able from a correct answer to the wrong query.
@@ -379,15 +382,31 @@ func (a *App) findAllSelectionQuery() string {
 	return a.findLiteral(sel)
 }
 
-// findAllPromptSeed is what pre-fills the "what am I looking for?"
-// prompt, in priority order: what's in the find bar (the user typed it,
-// so it beats anything inferred), then the word under the cursor. Empty
-// means the prompt opens blank — a cursor in whitespace has nothing to
-// suggest.
+// findAllPromptSeed is what pre-fills the Find all in file prompt: what's
+// in the find bar (the user typed it), else nothing.
+//
+// The word under the caret is deliberately NOT a seed here, though Find
+// in project still offers it (projectSearchSeed). This prompt is LIVE
+// (findalllive.go): its pre-fill is searched the moment it opens, which
+// tints the file and moves the caret to a preview. A word the caret
+// merely happens to sit in was never pointed at, so a search on it is
+// an answer to a question nobody asked, and the caret moves away before
+// the user has typed anything. Only a selection names the text, and a
+// single-line one never reaches this prompt (findAllSelectionQuery runs
+// it silently).
 func (a *App) findAllPromptSeed() string {
 	if a.findOpen && len(a.findField.value) > 0 {
 		return a.findField.String()
 	}
+	return ""
+}
+
+// caretWordSeed is the word the caret sits in (or just after), quoted
+// under regex. Empty when the caret is in whitespace or there is no
+// buffer. It is a GUESS, so only an inert prompt (Find in project) may
+// use it as a pre-fill; see findAllPromptSeed for why the live one
+// doesn't.
+func (a *App) caretWordSeed() string {
 	tab := a.activeTabPtr()
 	if tab == nil || tab.Buffer == nil {
 		return ""
@@ -398,7 +417,7 @@ func (a *App) findAllPromptSeed() string {
 	runes := []rune(tab.Buffer.Lines[tab.Cursor.Line])
 	if start, end, ok := editor.WordRange(runes, tab.Cursor.Col); ok {
 		// The word is pointed-at text, so it is quoted under regex like
-		// a selection is; the find bar's query above is typed, so not.
+		// a selection is; the find bar's query is typed, so not.
 		return a.findLiteral(string(runes[start:end]))
 	}
 	return ""

@@ -45,11 +45,13 @@ func retype(a *App, m *promptModal, s string) {
 func liveStatus(a *App, m *promptModal) string { return m.status(a) }
 
 // TestFindAllLive_SeedSearchesFromTheStart: the prompt answers before a
-// key is pressed — the seed (word under the caret) tints every hit,
+// key is pressed — the seed (the find bar's query) tints every hit,
 // previews the one the list would open on, and the status counts them.
 func TestFindAllLive_SeedSearchesFromTheStart(t *testing.T) {
 	a, tab := seedFindAllApp(t)
-	m := openLiveFindAll(t, a, tab, editor.Position{Line: 2, Col: 5}) // on "count"
+	a.openFind()
+	a.findField = newTextField("count")
+	m := openLiveFindAll(t, a, tab, editor.Position{Line: 2, Col: 5})
 	if m.field.String() != "count" {
 		t.Fatalf("seed = %q, want count", m.field.String())
 	}
@@ -221,5 +223,26 @@ func TestFindAllLive_ProjectPromptStaysInert(t *testing.T) {
 	}
 	if m.onEdit != nil || m.bottom {
 		t.Error("project prompt should stay inert and centered")
+	}
+}
+
+// TestFindAllLive_ClearPutsTheViewBack: the × / Alt+x empties the live
+// prompt, which counts as an edit to "", so the preview returns to the
+// origin and the tint goes, the prompt staying up for a new query.
+func TestFindAllLive_ClearPutsTheViewBack(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	origin := editor.Position{Line: 3, Col: 0}
+	m := openLiveFindAll(t, a, tab, origin)
+
+	retype(a, m, "count")
+	if tab.Cursor == origin {
+		t.Fatal("fixture: typing count didn't move the preview")
+	}
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, promptClearKey, tcell.ModAlt))
+	if m.field.String() != "" || a.modal != m {
+		t.Fatalf("field %q, open %v; want empty and still open", m.field.String(), a.modal == m)
+	}
+	if tab.Cursor != origin || len(tab.FindMatches) != 0 {
+		t.Errorf("cursor %v, %d tinted; want the origin and no tint", tab.Cursor, len(tab.FindMatches))
 	}
 }

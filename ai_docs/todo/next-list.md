@@ -374,7 +374,13 @@ and `raised`.
   Hand check in tmux and cats: typing feels immediate on a large file
   (it re-scans per keystroke like the find bar), a paste into the prompt
   lands sensibly, Alt+c/w/r re-ask, Esc puts the view and the find bar's
-  old tint back, and the box sits right on a short window.
+  old tint back, and the box sits right on a short window. Since
+  `2026-1026-1447-find-all-no-caret-seed-clear-button` the prompt opens
+  BLANK on an unselected caret word (find bar's text only) and the find
+  prompts carry a `×` / Alt+x clear (seen in run-ced's PTY: × drawn left
+  of ▾, Alt+x empties it). Also check: a real click on the ×, and Alt+x
+  arriving through tmux's Esc folding without firing the `Esc x`
+  plugins leader.
 
 ## Roadmap
 

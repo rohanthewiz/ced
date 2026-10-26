@@ -427,6 +427,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   alt+c/w/r like the bar; regex is `extras[0]`, rightmost, last dropped
   when narrow). Chip widths are exact so all three fit 80 columns
   (`TestFindPrompt_AllChipsFitEightyColumns`) — don't add padding.
+  They are `clearable`: a `×` inside the field's right end (left of
+  the ▾, only while there is text, `clearBtnRect`; the text keeps out
+  of it via `textSpan`) + Alt+x empty the field as an EDIT, so the live
+  prompt puts the view back.
 - Bar height: always ask `findBarRows()`. Inputs are `textField`. In-bar
   Alt chords + clickable `Aa` / `|W|` + ≡ rows.
 - Replace = one undo step; ReplaceAll re-scans and goes bottom-up via
@@ -477,7 +481,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (indent trimmed, tabs → one space).
 - Filter box seeded with the query; the seed is INERT until edited.
 - Opening: only a single-line selection searches silently; otherwise
-  prompt pre-filled (`findAllPromptSeed`), seed read BEFORE `openPrompt`.
+  prompt pre-filled (`findAllPromptSeed`: the find bar's query ONLY —
+  never the caret word, since the live prompt searches its seed; Find in
+  project's inert prompt still adds it, `caretWordSeed`), seed read
+  BEFORE `openPrompt`.
 - The in-file prompt is LIVE (findalllive.go): `promptModal.onEdit` /
   `onCancel` / `status` / `bottom` hooks (nil = inert, every other
   prompt). Searches on the seed at open and every edit (chips too),

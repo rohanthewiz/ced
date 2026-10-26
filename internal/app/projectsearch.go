@@ -108,8 +108,10 @@ func (a *App) menuFindInProject() {
 
 // projectSearchSeed is what pre-fills the Find in project prompt, in
 // priority order: a single-line selection (the user named the text),
-// then everything findAllPromptSeed already ranks — the find bar's
-// query, then the word under the cursor. The selection goes through
+// then the find bar's query (findAllPromptSeed), then the word under
+// the cursor (caretWordSeed). The caret word is fine here but not in
+// the in-file prompt: this prompt is inert, so a guess costs nothing
+// until Enter. The selection goes through
 // findAllSelectionQuery rather than a second reading of the tab, so
 // "what counts as a selectable search term" (single line, non-empty)
 // has one spelling across every find verb.
@@ -117,7 +119,10 @@ func (a *App) projectSearchSeed() string {
 	if q := a.findAllSelectionQuery(); q != "" {
 		return q
 	}
-	return a.findAllPromptSeed()
+	if q := a.findAllPromptSeed(); q != "" {
+		return q
+	}
+	return a.caretWordSeed()
 }
 
 // hasProjectSearch gates the menu row: the finder's index is the file

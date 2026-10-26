@@ -133,9 +133,9 @@ func leaderBindings() []leaderBinding {
 		{key: 'f', action: (*App).openFind, label: "Find"},
 		// 'F' lists every occurrence instead of walking them one Enter at
 		// a time — the shifted variant of the same verb, following the
-		// h/H and o/O convention. It seeds itself from the find bar, the
-		// selection, or the word under the cursor, so it's a one-key
-		// gesture from anywhere in the file.
+		// h/H and o/O convention. A single-line selection runs at once;
+		// otherwise it prompts, pre-filled from the find bar only (never
+		// the caret's word: the prompt searches its pre-fill live).
 		{key: 'F', action: (*App).menuFindAll, label: "Find all"},
 		// 'e' for rEplace — the letter the verb's own name offers once
 		// 'r' is spoken for (redo, with 'Z' as its shifted twin). It

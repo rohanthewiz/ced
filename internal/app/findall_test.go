@@ -764,15 +764,16 @@ func TestFindAll_SelectionQueryIsTheOnlySilentSeed(t *testing.T) {
 	}
 }
 
-// TestFindAll_PromptSeedPrefersBarThenWord pins what pre-fills the
-// prompt when there's nothing selected: the find bar's text first (the
-// user typed it), then the word under the cursor.
-func TestFindAll_PromptSeedPrefersBarThenWord(t *testing.T) {
+// TestFindAll_PromptSeedIsTheBarOnly pins what pre-fills the prompt when
+// there's nothing selected: the find bar's text (the user typed it), and
+// NOT the word under the cursor, which the live prompt would otherwise
+// search the moment it opened.
+func TestFindAll_PromptSeedIsTheBarOnly(t *testing.T) {
 	a, tab := seedFindAllApp(t)
 
 	tab.MoveCursorTo(editor.Position{Line: 2, Col: 7}, false) // inside "count"
-	if got := a.findAllPromptSeed(); got != "count" {
-		t.Errorf("prompt seed from cursor = %q, want %q", got, "count")
+	if got := a.findAllPromptSeed(); got != "" {
+		t.Errorf("prompt seed from cursor = %q, want none", got)
 	}
 
 	a.openFind()
@@ -784,19 +785,40 @@ func TestFindAll_PromptSeedPrefersBarThenWord(t *testing.T) {
 
 // TestFindAll_AsksWhenNothingIsSelected covers the headline rule: with
 // no selection, find-all opens a prompt rather than searching for the
-// word the cursor happens to be in — and pre-fills it with that word so
-// accepting the guess is still one key.
+// word the cursor happens to be in — and the prompt opens BLANK, so that
+// word isn't searched (and the caret isn't moved to a preview) either.
 func TestFindAll_AsksWhenNothingIsSelected(t *testing.T) {
 	a, tab := seedFindAllApp(t)
-	tab.MoveCursorTo(editor.Position{Line: 2, Col: 7}, false) // inside "count"
+	origin := editor.Position{Line: 2, Col: 7} // inside "count"
+	tab.MoveCursorTo(origin, false)
 	a.openFindAll()
 
 	m, ok := a.modal.(*promptModal)
 	if !ok {
 		t.Fatalf("modal = %T, want a promptModal asking for the query", a.modal)
 	}
-	if got := m.field.String(); got != "count" {
-		t.Errorf("prompt pre-fill = %q, want the word under the cursor %q", got, "count")
+	if got := m.field.String(); got != "" {
+		t.Errorf("prompt pre-fill = %q, want it blank (the caret word is not selected)", got)
+	}
+	if tab.Cursor != origin || len(tab.FindMatches) != 0 {
+		t.Errorf("cursor %v, %d tinted; want the caret left alone and no tint", tab.Cursor, len(tab.FindMatches))
+	}
+}
+
+// TestFindAll_SelectedWordStillSearches: the same word, once SELECTED,
+// is the query — the list opens on it without a prompt.
+func TestFindAll_SelectedWordStillSearches(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.Anchor = editor.Position{Line: 2, Col: 5}
+	tab.Cursor = editor.Position{Line: 2, Col: 10} // "count" selected
+	a.openFindAll()
+
+	m, ok := a.modal.(*findAllModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the find-all list", a.modal)
+	}
+	if m.query != "count" {
+		t.Errorf("query = %q, want the selection %q", m.query, "count")
 	}
 }
 

@@ -220,7 +220,22 @@ type promptModal struct {
 	onCancel func(*App)
 	status   func(*App) string
 	bottom   bool
+
+	// clearable puts a × at the field's right end (left of the history
+	// ▾) that empties the field, with Alt+x as its keyboard twin — the
+	// modal owns the keyboard, so the ≡ menu can't be the second door.
+	// Set by the find prompts (openFindPrompt), whose pre-fill is a
+	// guess the user may want gone in one gesture rather than a held
+	// Backspace. The × is drawn only while there is text; with an empty
+	// field its two cells are blank field and its rect is zero, so a
+	// click there lands on the field as usual. Clearing is an EDIT
+	// (onEdit hears it), so a live prompt puts the view back on its own.
+	clearable bool
 }
+
+// promptClearKey is the Alt chord twin of a clearable prompt's ×. x for
+// "clear" (the glyph it mirrors); no find-prompt extra uses it (c / w / r).
+const promptClearKey = 'x'
 
 // openSearchPrompt is openPrompt for a prompt that asks for a SEARCH:
 // the field gets a ▾ and Up opens kind's recent entries under it. The
@@ -322,6 +337,13 @@ func (m *promptModal) handleKey(a *App, ev *tcell.EventKey) {
 		m.edited(a)
 		return
 	}
+	// Checked after the extras so a prompt that ever binds x to an extra
+	// keeps it; consumed even on an empty field so the chord never falls
+	// through to the textField as a typed rune.
+	if m.clearable && ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune && ev.Rune() == promptClearKey {
+		m.clear(a)
+		return
+	}
 	switch ev.Key() {
 	case tcell.KeyEsc:
 		m.cancel(a)
@@ -334,6 +356,16 @@ func (m *promptModal) handleKey(a *App, ev *tcell.EventKey) {
 			m.edited(a)
 		}
 	}
+}
+
+// clear empties the field (the × and Alt+x). An already-empty field is
+// left alone so a live prompt isn't re-asked for nothing.
+func (m *promptModal) clear(a *App) {
+	if len(m.field.value) == 0 {
+		return
+	}
+	m.field = newTextField("")
+	m.edited(a)
 }
 
 // fireExtraKey runs the extra bound to r, reporting whether it consumed
@@ -397,6 +429,34 @@ func (m *promptModal) histBtnRect(a *App) btnRect {
 	return btnRect{x: end, y: fy, w: 2}
 }
 
+// clearBtnRect is the × that empties the field: the last two cells
+// INSIDE the field's span (the glyph plus a blank, so it doesn't butt
+// against the ▾), which the text gives up via textSpan. Zero unless the
+// prompt is clearable and the field holds text: an empty field has
+// nothing to clear, and a drawn-but-dead button would lie.
+func (m *promptModal) clearBtnRect(a *App) btnRect {
+	if !m.clearable || len(m.field.value) == 0 {
+		return btnRect{}
+	}
+	fy, _, end := m.fieldSpan(a)
+	return btnRect{x: end - promptClearWidth, y: fy, w: promptClearWidth}
+}
+
+// promptClearWidth is the cells the × reserves at the field's end.
+const promptClearWidth = 2
+
+// textSpan is the part of the field row the TEXT may use: fieldSpan,
+// less the × cells on a clearable prompt. Reserved whether or not the ×
+// is showing, so the text doesn't reflow (and the caret jump) when the
+// first rune makes it appear.
+func (m *promptModal) textSpan(a *App) (y, start, end int) {
+	y, start, end = m.fieldSpan(a)
+	if m.clearable {
+		end -= promptClearWidth
+	}
+	return y, start, end
+}
+
 // histGeom lays the dropdown out under the field — the one geometry
 // draw, keys and the mouse share. It prefers DOWN: a centered prompt
 // has the lower half of the screen free, and the list then reads in the
@@ -448,6 +508,10 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		m.openHist(a)
 		return
 	}
+	if m.clearBtnRect(a).contains(x, y) {
+		m.clear(a)
+		return
+	}
 	cancel, ok := m.buttons(a)
 	switch {
 	case cancel.contains(x, y):
@@ -466,7 +530,7 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 			return
 		}
 	}
-	fy, start, end := m.fieldSpan(a)
+	fy, start, end := m.textSpan(a)
 	if y == fy {
 		m.field.clickAt(start, end, x)
 	}
@@ -527,7 +591,7 @@ func (m *promptModal) width(a *App) int {
 //	1   title — "<title>   esc"
 //	2   divider
 //	3   hint (greyed)
-//	4   input field    [ value ]
+//	4   input field    [ value          × ▾]  (× clearable, ▾ history)
 //	5   blank — or the live status (status), when set
 //	6   buttons        [ Cancel ]   [  OK  ]
 //	7   blank
@@ -545,9 +609,21 @@ func (m *promptModal) draw(a *App) {
 		drawAt(a.screen, mx+2, my+3, clipRunes(m.hint, mw-4), c.muted)
 	}
 
-	fy, start, end := m.fieldSpan(a)
+	fy, start, end := m.textSpan(a)
 	inputStyle := tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Text)
 	m.field.draw(a.screen, fy, start, end, inputStyle, true)
+	if m.clearable {
+		// The reserved cells always get the field's background (the
+		// textField paints only through its own end), so the box reads
+		// as one field with or without the ×.
+		_, _, fend := m.fieldSpan(a)
+		for cx := end; cx < fend; cx++ {
+			a.screen.SetContent(cx, fy, ' ', nil, inputStyle)
+		}
+		if b := m.clearBtnRect(a); b.w > 0 {
+			drawAt(a.screen, b.x, b.y, "×", inputStyle.Foreground(a.theme.Muted))
+		}
+	}
 	if m.histKind != "" {
 		// The ▾ sits on the field's own background so the pair reads as
 		// one combo box, and the hint row names its key — right-aligned,

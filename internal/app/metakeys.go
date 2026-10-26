@@ -145,8 +145,8 @@ func metaAccels() []metaAccel {
 		// one-at-a-time find bar: the list shows every hit at once and
 		// previews as the highlight moves, which is what the chord is
 		// usually reached for. A single-line selection runs silently;
-		// otherwise it prompts, seeded from the bar or the word under the
-		// caret (openFindAll). The find bar keeps Esc-f and its ≡ row —
+		// otherwise it prompts, seeded from the bar's query if any
+		// (openFindAll). The find bar keeps Esc-f and its ≡ row —
 		// and the list is one ↓ away from the bar anyway, so the two stay
 		// a gesture apart in both directions. ⌘⇧F widens the same search
 		// to the project.

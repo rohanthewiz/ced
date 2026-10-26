@@ -15,8 +15,8 @@
 //	  41 │ x := needle(a)                      ← code behind: tinted, the
 //	  42 │ return needle                         current hit previewed
 //	┌ Find all in file ─────────────── esc ┐
-//	│ lists every occurrence · alt+c …     │
-//	│ [ needle                           ] │   ← prompt rests on the
+//	│ lists every match · alt+c …          │
+//	│ [ needle                       × ▾ ] │   ← prompt rests on the
 //	│ 3 of 12 · enter lists them           │     editor's bottom rows;
 //	│ [ Cancel ]  [  OK  ]   [case: off] … │     status row under the field
 //	└──────────────────────────────────────┘

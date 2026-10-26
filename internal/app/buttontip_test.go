@@ -267,6 +267,11 @@ func TestButtonTip_FindAllModalButtonsAreLabelled(t *testing.T) {
 	if tip, ok := a.buttonTipAt(m.rerunRect(a).x, m.rerunRect(a).y); !ok || tip.text[0] != "Run the search again" {
 		t.Errorf("rerun label = %+v", tip)
 	}
+	// ↺ revert loc names its key twin while the list owns the keyboard.
+	if tip, ok := a.buttonTipAt(m.revertRect(a).x, m.revertRect(a).y); !ok ||
+		!strings.HasPrefix(tip.text[0], "Revert location") || tip.keys != "r" {
+		t.Errorf("revert label = %+v", tip)
+	}
 }
 
 // TestButtonTip_FindBarToggleTracksState: the Aa label names the current

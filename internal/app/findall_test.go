@@ -1722,3 +1722,217 @@ func TestFindAll_RegexReplaceWithQueryTextIsAllowed(t *testing.T) {
 		t.Fatalf("regex replace refused as a no-op: %q", a.statusMsg)
 	}
 }
+
+// TestFindAll_EscAfterClickKeepsTheClickedRow pins the click-then-Esc
+// rule: once a row was picked with a single click, Esc closes the list
+// and leaves the cursor on that row instead of restoring the origin.
+func TestFindAll_EscAfterClickKeepsTheClickedRow(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
+	m := openFindAllT(t, a, "count")
+	mx, my, _, _ := m.rect(a)
+
+	m.handleMouse(a, mx+8, my+4+2, tcell.Button1) // third visible row
+	if !m.clicked {
+		t.Fatal("a single click on a row should mark the list clicked")
+	}
+	want := m.rows[2]
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+
+	if a.modal != nil {
+		t.Fatal("Esc should still close the list")
+	}
+	if tab.Cursor.Line != want.line || tab.Cursor.Col != want.col {
+		t.Errorf("cursor = %v after click+Esc, want the clicked line %d col %d", tab.Cursor, want.line, want.col)
+	}
+	if tab.FindQuery == "count" {
+		t.Error("closing should hand back the borrowed find state")
+	}
+}
+
+// TestFindAll_EscAfterClickThenArrowsKeepsTheCurrentRow: the click only
+// switches Esc's meaning; where it lands is wherever the list is NOW,
+// so arrowing on after the click keeps the row walked to.
+func TestFindAll_EscAfterClickThenArrowsKeepsTheCurrentRow(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
+	m := openFindAllT(t, a, "count")
+	mx, my, _, _ := m.rect(a)
+
+	m.handleMouse(a, mx+8, my+4+1, tcell.Button1)
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+	want := m.rows[2]
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+
+	if tab.Cursor.Line != want.line || tab.Cursor.Col != want.col {
+		t.Errorf("cursor = %v, want the walked-to line %d col %d", tab.Cursor, want.line, want.col)
+	}
+}
+
+// TestFindAll_ArrowWalkLeavesEscAsRestore guards the other half: keyboard
+// walking is browsing, not choosing, so it never arms the click rule.
+func TestFindAll_ArrowWalkLeavesEscAsRestore(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 1}, false)
+	origin := tab.Cursor
+	m := openFindAllT(t, a, "count")
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+	if m.clicked {
+		t.Fatal("arrows must not mark the list clicked")
+	}
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+	if tab.Cursor != origin {
+		t.Errorf("cursor = %v after walk+Esc, want the origin %v", tab.Cursor, origin)
+	}
+}
+
+// TestFindAll_ButtonClicksDoNotArmEsc: flipping a control is not picking a
+// row — the dock button leaves Esc as the restore.
+func TestFindAll_ButtonClicksDoNotArmEsc(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	btn := m.dockRect(a)
+	m.handleMouse(a, btn.x+1, btn.y, tcell.Button1)
+	if m.clicked {
+		t.Fatal("a title-button click must not mark the list clicked")
+	}
+}
+
+// TestFindAll_RevertButtonRestoresOriginAndCloses pins ↺ revert loc
+// unpinned: after a click (so Esc would keep the row), the button still
+// puts cursor AND scroll back to the origin and closes the list.
+func TestFindAll_RevertButtonRestoresOriginAndCloses(t *testing.T) {
+	a, tab := seedFindAllLongApp(t)
+	tab.MoveCursorTo(editor.Position{Line: 1, Col: 2}, false)
+	tab.ScrollY = 0
+	origin := tab.Cursor
+
+	m := openFindAllT(t, a, "count")
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyEnd, 0, tcell.ModNone))
+	mx, my, _, _ := m.rect(a)
+	m.handleMouse(a, mx+8, my+4, tcell.Button1) // a row: Esc would now keep it
+	if tab.Cursor == origin {
+		t.Fatal("setup: the click should have moved the cursor")
+	}
+
+	r := m.revertRect(a)
+	m.handleMouse(a, r.x+1, r.y, tcell.Button1)
+
+	if a.modal != nil {
+		t.Fatal("revert loc should close an unpinned list")
+	}
+	if tab.Cursor != origin {
+		t.Errorf("cursor = %v after revert, want the origin %v", tab.Cursor, origin)
+	}
+	if tab.ScrollY != 0 {
+		t.Errorf("ScrollY = %d after revert, want the origin 0", tab.ScrollY)
+	}
+	if tab.FindQuery == "count" {
+		t.Error("revert should hand back the borrowed find state")
+	}
+}
+
+// TestFindAll_RevertKeyIsTheKeyboardTwin: the list owns the keyboard, so
+// the ≡ menu can't reach the button — r must.
+func TestFindAll_RevertKeyIsTheKeyboardTwin(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 1}, false)
+	origin := tab.Cursor
+	m := openFindAllT(t, a, "count")
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModNone))
+	if a.modal != nil {
+		t.Fatal("r should close the list")
+	}
+	if tab.Cursor != origin {
+		t.Errorf("cursor = %v after r, want the origin %v", tab.Cursor, origin)
+	}
+}
+
+// TestFindAll_PinnedRevertStaysOpenAndReturnsToOriginTab: pinned, the
+// panel outlives tab switches, so revert must switch back to the tab the
+// list was opened from, restore its view, and leave the panel up.
+func TestFindAll_PinnedRevertStaysOpenAndReturnsToOriginTab(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 2}, false)
+	origin := tab.Cursor
+	m := openFindAllT(t, a, "count")
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyEnd, 0, tcell.ModNone))
+	m.togglePin(a)
+
+	other := filepath.Join(filepath.Dir(tab.Path), "other.go")
+	if err := os.WriteFile(other, []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a.openFile(other)
+	if a.activeTabPtr() == tab {
+		t.Fatal("setup: a second tab should be active")
+	}
+
+	r := m.revertRect(a)
+	m.handleMouse(a, r.x+1, r.y, tcell.Button1)
+
+	if a.findAllPin != m {
+		t.Fatal("revert must leave a pinned panel up")
+	}
+	if a.activeTabPtr() != tab {
+		t.Fatal("revert should switch back to the tab the list was opened from")
+	}
+	if tab.Cursor != origin {
+		t.Errorf("cursor = %v after revert, want the origin %v", tab.Cursor, origin)
+	}
+}
+
+// TestFindAll_RevertWithClosedOriginTabFlashes: a pinned list can outlive
+// its tab; revert then explains rather than jumping somewhere arbitrary.
+func TestFindAll_RevertWithClosedOriginTabFlashes(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	m.togglePin(a)
+	m.originTab = &editor.Tab{} // stands in for a tab since closed
+
+	m.revertLocation(a)
+	if !strings.Contains(a.statusMsg, "closed") {
+		t.Errorf("flash = %q, want it to say the origin tab is closed", a.statusMsg)
+	}
+}
+
+// TestFindAll_RevertButtonIsDrawnAndShrinksWhenNarrow pins the label: the
+// spelled-out form across the top strip, the bare glyph on a column too
+// narrow to pay for it — and the rect always matches what is drawn.
+func TestFindAll_RevertButtonIsDrawnAndShrinksWhenNarrow(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	a.draw()
+	a.screen.Show()
+	if !strings.Contains(screenText(a), "↺ revert loc") {
+		t.Fatalf("top strip should spell the button out:\n%s", screenText(a))
+	}
+	if r := m.revertRect(a); r.w != runeLen(m.revertLabel(a)) {
+		t.Errorf("revertRect width %d != label width %d", r.w, runeLen(m.revertLabel(a)))
+	}
+
+	a.findAllDockRight = true
+	a.width = 70 // cramped band: the column sits at its floor
+	if _, _, mw, _ := m.rect(a); mw >= findAllRevertFullW {
+		t.Fatalf("setup: column width %d did not narrow below %d", mw, findAllRevertFullW)
+	}
+	if got := m.revertLabel(a); got != " ↺ " {
+		t.Errorf("narrow label = %q, want the bare glyph", got)
+	}
+}
+
+// TestFindAll_FooterHintNamesEscsCurrentMeaning: the hint is the only
+// place the click rule shows, so it must flip from "back" to "stay".
+func TestFindAll_FooterHintNamesEscsCurrentMeaning(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	if h := m.footerHints()[0]; !strings.Contains(h, "esc back") || !strings.Contains(h, "r revert loc") {
+		t.Errorf("hint before a click = %q, want esc back and r revert loc", h)
+	}
+	m.clicked = true
+	if h := m.footerHints()[0]; !strings.Contains(h, "esc stay") {
+		t.Errorf("hint after a click = %q, want esc stay", h)
+	}
+}

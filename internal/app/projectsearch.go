@@ -242,6 +242,8 @@ func (a *App) handleProjectSearch(e *projectSearchEvent) {
 	if e.dir != "" {
 		m.scopeName = a.relativeFolderLabel(e.dir)
 	}
+	// Where ↺ revert loc returns to once clicks have opened other files.
+	m.captureOrigin(a)
 	m.rebuildView()
 	// Same replacement rule as showFindAll: a fresh list supersedes a
 	// pinned survivor from an earlier search.
@@ -606,17 +608,26 @@ func (m *findAllModal) footerHints() []string {
 	}
 	if m.project {
 		return []string{
+			" ↑↓ walk · enter open · del dismiss · / filter · p pin · r revert loc · esc close ",
 			" ↑↓ walk · enter open · del dismiss · / filter · p pin · esc close ",
 			" ↑↓ walk · enter open · / filter · esc close ",
 			" enter open · esc close ",
 			" esc close ",
 		}
 	}
+	// Esc's word follows escape: "back" while the walk is a peek, "stay"
+	// once a click has chosen a row — the hint is the only place the
+	// switch is visible, so it must say which one is live.
+	esc := "esc back"
+	if m.clicked {
+		esc = "esc stay"
+	}
 	return []string{
-		" ↑↓ preview · enter accept · del dismiss · / filter · p pin · d dock · esc back ",
-		" ↑↓ preview · enter accept · / filter · esc back ",
-		" enter accept · esc back ",
-		" esc back ",
+		" ↑↓ preview · enter accept · del dismiss · / filter · p pin · d dock · r revert loc · " + esc + " ",
+		" ↑↓ preview · enter accept · del dismiss · / filter · p pin · d dock · " + esc + " ",
+		" ↑↓ preview · enter accept · / filter · r revert loc · " + esc + " ",
+		" enter accept · " + esc + " ",
+		" " + esc + " ",
 	}
 }
 

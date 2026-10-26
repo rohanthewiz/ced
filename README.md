@@ -924,8 +924,11 @@ with `Get${1}`. With regex off, `$1` is just text.
 **Every match at once.** `Esc F` (or `⌘F`, or `≡` → **Find all in file**, or `↓`
 in the bar) lists each hit as a row — line number, then the line with the
 match lit — in a strip that pushes the editor down rather than covering
-it. Moving the highlight previews that line in the editor; `Enter` keeps
-the position, `Esc` puts the cursor back where it was. `d` (or the title
+it. Moving the highlight previews that line in the editor; `Enter` (or a
+double-click) keeps the position. `Esc` puts the cursor back where it was —
+unless you clicked a row, in which case it closes the list and stays on
+that row. `↺ revert loc` in the title (or `r`) always goes back to where
+you were when the list opened, from either list. `d` (or the title
 button) moves the list to a column on the right, and dragging its bottom
 border resizes it. `p` (or `◇`) **pins** it into a panel that stays open
 while you edit: a filter box (`/`) narrows the rows, `Delete` or a row's

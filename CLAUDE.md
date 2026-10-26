@@ -455,7 +455,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 
 ### Find-all list + project search (app/findall.go, projectsearch.go, internal/search)
 - A PEEK, not a picker: moving the highlight moves the cursor live, Esc
-  restores via `RestoreView`, other dismissals accept.
+  restores via `RestoreView`, other dismissals accept. A single ROW CLICK
+  (`findAllModal.clicked`, in-file only) flips Esc to accept (`escape`);
+  arrows never do. `↺ revert loc` (`revertRect`, key `r`) restores the
+  CAPTURED origin (`captureOrigin`, every producer, tab by pointer) in
+  every mode — closes unpinned, leaves a pinned panel up.
 - Takes rows/columns OUT of the editor (`editorBandRows` → `editorRect`),
   never floats. TOP dock (default) or RIGHT dock (`"findalldock"`,
   switched by title button, `d`, or ≡ View). **No call site may assume

@@ -294,6 +294,8 @@ func (a *App) openLocationsPanel(heading, query string, locs []refLoc, truncated
 		filter: newTextField(query),
 		seed:   query,
 	}
+	// Where ↺ revert loc returns to once clicks have opened other files.
+	m.captureOrigin(a)
 	// The display order is derived, not implied by rows: without this the
 	// panel opens with an empty view and says every row was dismissed.
 	m.rebuildView()

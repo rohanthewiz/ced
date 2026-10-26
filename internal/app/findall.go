@@ -107,6 +107,10 @@ const (
 	// of the number is how a marker ends up painted into a panel that
 	// never drew (overflow.go, the one-enumerator rule).
 	findAllMinDrawWidth = 12
+	// findAllRevertFullW is the narrowest frame that spells the revert
+	// button out in full. At the right dock's default 62 columns the
+	// title still keeps ~25 cells; narrower than this it shrinks to ↺.
+	findAllRevertFullW = 56
 )
 
 // findAllRow is one result: where the hit is in the buffer, plus the
@@ -190,10 +194,18 @@ type findAllModal struct {
 	// none on purpose — it narrows results in hand, it doesn't search.
 	replHist histDrop
 
-	// Origin view state, restored verbatim by abort. Cursor and Anchor
-	// are written back as plain fields (not MoveCursorTo) precisely so
-	// cursorMoved stays clear and Render's EnsureVisible doesn't
-	// second-guess the restored scroll — see the note in abort.
+	// Origin view state, restored verbatim by abort and by the ↺ revert
+	// loc button. Cursor and Anchor are written back as plain fields (not
+	// MoveCursorTo) precisely so cursorMoved stays clear and Render's
+	// EnsureVisible doesn't second-guess the restored scroll — see the
+	// note in abort. Captured by captureOrigin for every producer, project
+	// mode included: a project list's clicks open OTHER files, so going
+	// back means returning to originTab as well as to its view.
+	//
+	// originTab is held by POINTER, not by tabIdx: a pinned list outlives
+	// tab switches, closes and tab-group reordering, and revertLocation
+	// re-finds the tab with tabIndexOf (nil once it is closed).
+	originTab     *editor.Tab
 	origin        editor.Position
 	originAnchor  editor.Position
 	originScrollY int
@@ -235,6 +247,14 @@ type findAllModal struct {
 	// put back if we didn't, and restoring anyway would fight a
 	// background reload that clamped the cursor for a good reason.
 	previewed bool
+
+	// clicked records that the user PICKED a row with a single click
+	// (in-file mode). It flips what Esc means: before any click the list
+	// is a peek and Esc puts the view back; after one, the click was the
+	// answer and Esc keeps it (escape). Keyboard walking never sets it —
+	// arrows are browsing, a click is choosing. ↺ revert loc is the way
+	// back from either state.
+	clicked bool
 
 	// project switches the list from "occurrences in this buffer" to
 	// "occurrences in the project" (projectsearch.go). It changes three
@@ -401,18 +421,17 @@ func (a *App) showFindAll(query string) {
 		// The filter box opens holding the search expression, caret at the
 		// end, so "/" and another keystroke keeps narrowing the same
 		// question instead of restating it. Inert until edited — see seed.
-		filter:        newTextField(findAllFilterSeed(query, opts)),
-		seed:          findAllFilterSeed(query, opts),
-		origin:        tab.Cursor,
-		originAnchor:  tab.Anchor,
-		originScrollY: tab.ScrollY,
-		originScrollX: tab.ScrollX,
-		priorQuery:    tab.FindQuery,
-		priorMatches:  tab.FindMatches,
-		priorIndex:    tab.FindIndex,
-		priorOpts:     tab.FindOpts,
-		opts:          opts,
+		filter:       newTextField(findAllFilterSeed(query, opts)),
+		seed:         findAllFilterSeed(query, opts),
+		priorQuery:   tab.FindQuery,
+		priorMatches: tab.FindMatches,
+		priorIndex:   tab.FindIndex,
+		priorOpts:    tab.FindOpts,
+		opts:         opts,
 	}
+	// Before SetFindQuery below and before the first preview: the origin
+	// is the view the user was looking at, not one the list produced.
+	m.captureOrigin(a)
 	// Borrow the tab's find state so the editor tints every occurrence
 	// while the list is up: the popup and the code behind it then agree
 	// about what "all of them" means, and the previewed row paints as
@@ -696,6 +715,75 @@ func (m *findAllModal) abort(a *App) {
 	}
 	m.restoreFind(a)
 	a.closeModal()
+}
+
+// captureOrigin records where the user was when the list opened — the
+// active tab and its exact view — so ↺ revert loc (and, in-file, Esc
+// before any click) can put it back. Called by every producer before its
+// first preview or jump; a list opened with no tab at all records nil
+// and its revert only closes.
+func (m *findAllModal) captureOrigin(a *App) {
+	tab := a.activeTabPtr()
+	m.originTab = tab
+	if tab == nil {
+		return
+	}
+	m.origin = tab.Cursor
+	m.originAnchor = tab.Anchor
+	m.originScrollY = tab.ScrollY
+	m.originScrollX = tab.ScrollX
+}
+
+// escape is the list's Esc, and it depends on whether a row was CLICKED:
+//
+//	no click yet  →  abort: the walk was a peek, put the view back
+//	clicked a row →  accept: the click was the choice, stay on it
+//
+// Project mode always aborts, which already keeps the user where a click
+// took them — its abort restores nothing (walking previews nothing, and
+// a click's jump is the user's own navigation). Accepting there would be
+// WRONG after arrowing: accept opens the HIGHLIGHTED row's file, which is
+// not the one on screen.
+func (m *findAllModal) escape(a *App) {
+	if m.clicked && !m.project {
+		m.accept(a)
+		return
+	}
+	m.abort(a)
+}
+
+// revertLocation is ↺ revert loc (and the list's r key): back to the tab
+// and view the list was opened from, whatever has happened since —
+// previews, clicks, project-mode jumps into other files.
+//
+// Unpinned it then closes, being the explicit "cancel" now that Esc may
+// keep a clicked row. Pinned it leaves the panel up: the panel is
+// furniture that only ✕ closes, and a worklist the user wants to keep
+// working through shouldn't vanish because they glanced back home.
+//
+// The modal closes BEFORE the switch and the restore so the band the
+// editor is measured against is the full one; RestoreView writes the
+// captured scroll verbatim either way. clicked is cleared so a pinned
+// list that is later unpinned starts again from the peek contract.
+func (m *findAllModal) revertLocation(a *App) {
+	m.clicked = false
+	if !m.pinned {
+		m.restoreFind(a)
+		a.closeModal()
+	}
+	tab := m.originTab
+	if tab == nil {
+		return // opened with no tab: there is no location to go back to
+	}
+	idx := a.tabIndexOf(tab)
+	if idx < 0 {
+		a.flash("Revert location: the tab the list was opened from is closed")
+		return
+	}
+	// switchToTab is the one funnel for tab switches (nav history,
+	// auto-save of the departing tab); it is a no-op on the active tab.
+	a.switchToTab(idx)
+	tab.RestoreView(m.origin, m.originAnchor, m.originScrollY, m.originScrollX)
 }
 
 // restoreFind hands the tab's find state back. The popup only borrowed it
@@ -1039,6 +1127,27 @@ func (m *findAllModal) rerunRect(a *App) btnRect {
 	return btnRect{x: p.x - findAllDockBtnW, y: p.y, w: findAllDockBtnW}
 }
 
+// revertRect is the ↺ revert loc button, left of the re-run button.
+// Spelled out ("revert loc") where the column has room, so it can't be
+// mistaken for its ⟳ neighbour; the bare glyph on a narrow column, where
+// the hover tip still names it. Width is the label's, so draw and the
+// hit-test can't disagree about where it ends.
+func (m *findAllModal) revertRect(a *App) btnRect {
+	r := m.rerunRect(a)
+	w := runeLen(m.revertLabel(a))
+	return btnRect{x: r.x - w, y: r.y, w: w}
+}
+
+// revertLabel is the ↺ button's text for the current column width. The
+// full form costs 14 cells; below findAllRevertFullW the title would be
+// clipped to almost nothing to pay for it, so the glyph alone stands in.
+func (m *findAllModal) revertLabel(a *App) string {
+	if _, _, mw, _ := m.rect(a); mw < findAllRevertFullW {
+		return " ↺ "
+	}
+	return " ↺ revert loc "
+}
+
 // closePinRect is the pinned panel's ✕, drawn over the spot the "esc"
 // hint occupies unpinned — Esc is not how a panel closes, and the cell
 // should say what the truth is.
@@ -1221,7 +1330,8 @@ func rowLabelText(label string, width int) string {
 // pinned (the pinned panel's list is mouse-driven; the editor keeps
 // its keys). List focus:
 //
-//	Esc              abort — put the cursor and viewport back
+//	Esc              abort — put the cursor and viewport back; once a row
+//	                 was CLICKED, accept instead (see escape)
 //	Enter            accept — keep the previewed position
 //	Up/Down          preview the neighbouring hit
 //	PgUp/PgDn        preview a page away
@@ -1229,6 +1339,7 @@ func rowLabelText(label string, width int) string {
 //	Delete           dismiss the highlighted row (the ✕ twin)
 //	d                flip the dock (top strip ⇄ right column)
 //	p                pin / unpin
+//	r                revert loc — back to where the list opened, close
 //	/                jump to the filter box
 //
 // Field focus hands ordinary editing keys to the field; Enter and Esc
@@ -1256,11 +1367,13 @@ func (m *findAllModal) handleKey(a *App, ev *tcell.EventKey) {
 			m.preview(a) // the band it was centered against just changed
 		case 'p', 'P':
 			m.togglePin(a)
+		case 'r', 'R':
+			m.revertLocation(a)
 		case '/':
 			m.focus = findAllFocusFilter
 		}
 	case tcell.KeyEsc:
-		m.abort(a)
+		m.escape(a)
 	case tcell.KeyEnter:
 		m.accept(a)
 	case tcell.KeyDelete, tcell.KeyBackspace, tcell.KeyBackspace2:
@@ -1422,6 +1535,10 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		m.rerun(a)
 		return
 	}
+	if m.revertRect(a).contains(x, y) {
+		m.revertLocation(a)
+		return
+	}
 	if m.pinRect(a).contains(x, y) {
 		m.togglePin(a)
 		return
@@ -1492,6 +1609,11 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		m.accept(a)
 		return
 	}
+	// A single click on a row is a CHOICE, not a walk: from here on Esc
+	// keeps the clicked location rather than putting the old view back
+	// (escape). Pinned, Esc never reaches the list, so this only matters
+	// once it is unpinned again — where the same reading holds.
+	m.clicked = true
 	// In-file, selectRow's preview has already moved the editor onto the
 	// row. Project mode previews nothing on a SELECTION (keyboard walking
 	// must not open a file per row), but a click is one gesture per
@@ -1513,7 +1635,7 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 // Layout (relative to the frame's top-left):
 //
 //	0        top border
-//	1        title — Find all "query"   3/57 ⟳ ◇ ◨ esc|✕
+//	1        title — Find all "query"   3/57 ↺ revert loc ⟳ ◇ ◨ esc|✕
 //	2        fields — ⌕ filter…   ⇄ replace…   [ Replace in N ]
 //	3        divider
 //	4..N     result rows —  123 │ compacted line text          ✕
@@ -1526,11 +1648,12 @@ func (m *findAllModal) draw(a *App) {
 	c := a.chrome()
 
 	rerun := m.rerunRect(a)
+	revert := m.revertRect(a)
 	count := fmt.Sprintf("%d/%d ", m.selected+1, len(m.view))
 	if len(m.view) == 0 {
 		count = "0/0 "
 	}
-	countX := rerun.x - runeLen(count)
+	countX := revert.x - runeLen(count)
 	title := m.titleText()
 	// Clip the title against everything to its right — the count, the
 	// buttons, and drawFrame's "esc" — so a long query on a narrow
@@ -1545,6 +1668,7 @@ func (m *findAllModal) draw(a *App) {
 	// The buttons read as controls, not as chrome — accent, like the
 	// panels' header buttons. Re-run, pin, dock, right to left toward
 	// the corner.
+	drawAt(a.screen, revert.x, revert.y, m.revertLabel(a), c.title)
 	drawAt(a.screen, rerun.x, rerun.y, " ⟳ ", c.title)
 	pin := m.pinRect(a)
 	drawAt(a.screen, pin.x, pin.y, m.pinGlyph(), c.title)

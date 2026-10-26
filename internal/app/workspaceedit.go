@@ -636,6 +636,8 @@ func (a *App) reportWorkspaceEdit(p *wsEditPlan, results map[string][]editor.Edi
 		// text the rows contain, so pre-filling would put a phrase in the
 		// box that narrows to nothing the moment it is touched.
 	}
+	// Where ↺ revert loc returns to once clicks have opened other files.
+	m.captureOrigin(a)
 	// The display order is derived, not implied by rows — see the note in
 	// handleLSPReferences.
 	m.rebuildView()

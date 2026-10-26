@@ -745,3 +745,60 @@ func TestFindInProject_PromptCarriesTheRegexChip(t *testing.T) {
 		t.Fatalf("alt+r leaked into the field: %q → %q", field, m.field.String())
 	}
 }
+
+// TestProjectSearch_RevertLocReturnsToTheOriginTab: a project list's
+// clicks open OTHER files, so ↺ revert loc must switch back to the tab
+// the list was opened from and restore its view — while Esc after the
+// same click keeps the user in the file the click opened.
+func TestProjectSearch_RevertLocReturnsToTheOriginTab(t *testing.T) {
+	a, root := projectSearchApp(t)
+	start := filepath.Join(root, "sub/charlie.txt")
+	a.openFile(start)
+	home := a.activeTabPtr()
+	if home == nil {
+		t.Fatal("setup: origin file did not open")
+	}
+	runProjectSearch(t, a, root, "needle", []string{"alpha.go", "sub/bravo.go", "sub/charlie.txt"})
+	m, ok := a.modal.(*findAllModal)
+	if !ok {
+		t.Fatalf("expected the find-all panel, got %T", a.modal)
+	}
+	if m.originTab != home {
+		t.Fatal("the project list should capture the tab it was opened from")
+	}
+
+	m.selected = 0
+	m.jumpToSelected(a) // what a single click on alpha.go does
+	if a.activeTabPtr() == home {
+		t.Fatal("setup: the jump should have opened another file")
+	}
+	m.revertLocation(a)
+
+	if a.modal != nil {
+		t.Error("revert loc should close an unpinned list")
+	}
+	if a.activeTabPtr() != home {
+		t.Errorf("active tab = %v, want the origin %s", a.activeTabPtr().Path, start)
+	}
+}
+
+// TestProjectSearch_EscAfterAJumpStaysInTheJumpedFile pins project mode's
+// side of the click rule: Esc never drags the user back across files —
+// only ↺ revert loc does.
+func TestProjectSearch_EscAfterAJumpStaysInTheJumpedFile(t *testing.T) {
+	a, root := projectSearchApp(t)
+	a.openFile(filepath.Join(root, "sub/charlie.txt"))
+	runProjectSearch(t, a, root, "needle", []string{"alpha.go", "sub/bravo.go", "sub/charlie.txt"})
+	m := a.modal.(*findAllModal)
+	m.selected = 0
+	m.jumpToSelected(a)
+	m.clicked = true // as a row click would leave it
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+
+	if a.modal != nil {
+		t.Fatal("Esc should close the list")
+	}
+	if tab := a.activeTabPtr(); tab == nil || filepath.Base(tab.Path) != "alpha.go" {
+		t.Errorf("Esc after a jump should stay in alpha.go, active = %v", tab)
+	}
+}

@@ -967,7 +967,8 @@ func (m *findAllModal) height(a *App) int {
 //
 // TOP DOCK ONLY. Docked right the strip is full height by design — a
 // tall column is the point of that mode — and its bottom edge is the
-// band's own, which nothing may drag.
+// band's own, which nothing may drag. That mode resizes sideways instead,
+// on its own seam column (the side seam section below).
 
 // findAllResizeGrip is how many cells of the bottom rule carry the
 // heavier glyph, the horizontal twin of splitter.go's grip segment.
@@ -981,6 +982,101 @@ const findAllDragMode = "findall"
 // findAllGripGlyph is the bottom rule's handle: a heavy horizontal, the
 // rotation of splitter.go's ┃. Single-width per the marker rule.
 const findAllGripGlyph = '━'
+
+// -----------------------------------------------------------------------------
+// The side seam (right dock only)
+// -----------------------------------------------------------------------------
+//
+// Docked right, the list gets a real splitter column between it and the
+// editor, drawn and gripped exactly like the window seams (splitter.go:
+// light rule, heavy ┃ grip on the middle rows, Accent while dragging).
+//
+// Unlike the top dock's bottom border it COSTS a column, on purpose: a
+// column of code running straight into the frame read as one surface,
+// and the editor's last cell carries its own overflow and "›" clip
+// markers, which then sat against the list's border. A row is cheap to
+// hit and a border row was enough there; a one-column border is the
+// coin-flip target splitter.go was written to fix.
+//
+// The grab zone is the seam PLUS the column on its PANEL side — the
+// list's left border, which is chrome, never a control — and never the
+// editor's last column (splitter.go's rule, mirrored for a right-hand
+// panel like dockSplitterHit's right dock). The drag carries the press's
+// offset (dragSplitOffset), so grabbing the border and not moving is a
+// no-op. Width is stored on App.findAllCols, session-only.
+
+// findAllSeamW is the seam's cost in columns, counted inside width().
+const findAllSeamW = 1
+
+// findAllColsDragMode is the App.dragMode the side seam's drag runs
+// under. Continued in the same two places as findAllDragMode: the
+// modal's handleMouse unpinned, the router's drag chain pinned.
+const findAllColsDragMode = "findallcols"
+
+// findAllSeamX is the screen column of the right-docked list's seam, or
+// -1 when there is none (no list, the top dock, or a column too narrow
+// for draw to paint the list beside it — a seam beside nothing would be
+// a handle on an empty band).
+func (a *App) findAllSeamX() int {
+	m := a.findAllVisible()
+	if m == nil || !a.findAllDockRight {
+		return -1
+	}
+	if _, _, mw, mh := m.rect(a); mw < findAllMinDrawWidth || mh < findAllMinHeight {
+		return -1
+	}
+	ex, _, ew, _ := a.editorRect()
+	return ex + ew
+}
+
+// findAllSeamHit reports whether a press at (x, y) grabs the side seam:
+// the seam column or the list's left border, on the list's own rows.
+func (a *App) findAllSeamHit(x, y int) bool {
+	sx := a.findAllSeamX()
+	if sx < 0 {
+		return false
+	}
+	_, my, _, mh := a.findAllVisible().rect(a)
+	if y < my || y >= my+mh {
+		return false
+	}
+	return x >= sx && x <= sx+1
+}
+
+// dragFindAllColsTo re-states the column's width from the pointer: the
+// seam follows x (less the press offset), and everything from it to the
+// band's right edge is the list.
+//
+// Clamped here as well as in width, for dragFindAllTo's reason: a stored
+// number past the editor's reserve would leave dead travel under the
+// pointer before the seam moved again. Same precedence as width — the
+// list's floor wins over the editor's reserve on a cramped band.
+func (a *App) dragFindAllColsTo(x int) {
+	m := a.findAllVisible()
+	if m == nil || !a.findAllDockRight {
+		return
+	}
+	band := a.editorBandCols()
+	w := a.leftBlockW() + band - (x - a.dragSplitOffset)
+	if max := band - findAllMinEditorCols; w > max {
+		w = max
+	}
+	if w < findAllMinWidth {
+		w = findAllMinWidth
+	}
+	a.findAllCols = w
+}
+
+// drawFindAllSeam paints the side seam beside the list's rows (not the
+// tab bar's — the list starts under it), lit while it is being dragged.
+func (a *App) drawFindAllSeam() {
+	sx := a.findAllSeamX()
+	if sx < 0 {
+		return
+	}
+	_, my, _, mh := a.findAllVisible().rect(a)
+	a.drawVSplitterSpan(sx, my, mh, a.dragMode == findAllColsDragMode)
+}
 
 // desiredRows is how many result rows the strip wants: what the user
 // dragged it to, or the shipped default. The clamping against the band
@@ -1057,6 +1153,9 @@ func (m *findAllModal) width(a *App) int {
 		return band
 	}
 	w := findAllRightCols
+	if a.findAllCols > 0 {
+		w = a.findAllCols // dragged on the seam (dragFindAllColsTo)
+	}
 	if max := band - findAllMinEditorCols; w > max {
 		w = max
 	}
@@ -1095,11 +1194,21 @@ func (m *findAllModal) visibleRows(a *App) int {
 //
 // RIGHT: a full-height column at the far end of the editor's band,
 // editor narrowed to its left. `ex + ew` IS that edge, because
-// editorRect has already subtracted the column's width.
+// editorRect has already subtracted the column's width — and that edge
+// is the SEAM's column (findAllSeamX), so the frame starts one further
+// right and is one narrower. width() counts the seam, the way a tool
+// window's width includes its splitter, so editorRect's subtraction
+// stays one number.
+//
+//	editor band ─────────────────────────────────────────────┐
+//	│ editor (ex .. ex+ew-1)        ┃┌ Find all "q" ───────┐ │
+//	│                               ┃│ rows …              │ │
+//	                         ex+ew ─┘└─ rect: x = ex+ew+1,
+//	                                    w = width - 1
 func (m *findAllModal) rect(a *App) (x, y, w, h int) {
 	ex, _, ew, _ := a.editorRect()
 	if a.findAllDockRight {
-		return ex + ew, 1, m.width(a), m.height(a)
+		return ex + ew + findAllSeamW, 1, max(m.width(a)-findAllSeamW, 0), m.height(a)
 	}
 	return ex, 1, ew, m.height(a)
 }
@@ -1473,6 +1582,15 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		}
 		return
 	}
+	// The side seam's drag, the same two-route arrangement.
+	if a.dragMode == findAllColsDragMode {
+		if btn&tcell.Button1 != 0 {
+			a.dragFindAllColsTo(x)
+		} else {
+			a.dragMode, a.dragSplitOffset = "", 0
+		}
+		return
+	}
 	// The replacement dropdown can hang past the frame, so it is asked
 	// before the outside-click-accepts rule below would settle the whole
 	// list for a click on one of its rows. Pinned, the router has already
@@ -1503,6 +1621,14 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		return
 	}
 	if btn&tcell.Button1 == 0 {
+		return
+	}
+	// The side seam sits just OUTSIDE the frame (and its grab zone takes
+	// the frame's left border), so it is claimed before the outside-click
+	// rule below — otherwise seizing it unpinned would accept and close
+	// the very list being resized.
+	if a.findAllSeamHit(x, y) {
+		a.dragMode, a.dragSplitOffset = findAllColsDragMode, x-a.findAllSeamX()
 		return
 	}
 	if x < mx || x >= mx+mw || y < my || y >= my+mh {
@@ -1646,6 +1772,10 @@ func (m *findAllModal) draw(a *App) {
 		return
 	}
 	c := a.chrome()
+	// Right dock: the splitter column between the editor and the frame.
+	// Painted here, by the list, so pinned (body pass) and unpinned
+	// (overlay pass) both get it from the one call.
+	a.drawFindAllSeam()
 
 	rerun := m.rerunRect(a)
 	revert := m.revertRect(a)

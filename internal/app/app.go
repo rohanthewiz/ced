@@ -1285,6 +1285,13 @@ type App struct {
 	// findall.go's resize section.
 	findAllRows int
 
+	// findAllCols is the right-docked Find-all column's width as dragged
+	// on its seam (findall.go), seam included, or 0 for "auto"
+	// (findAllRightCols). The column twin of findAllRows, and session-only
+	// for the same reason: a width is a trade against the code beside it,
+	// re-made per file, where the dock itself is the lasting preference.
+	findAllCols int
+
 	// sidebarWidth is the live width of the file-explorer block (file tree
 	// + 1-cell splitter on its right edge), in screen cells. The user can
 	// drag the splitter to change it within [minSidebarWidth, width-minEditorAfterDrag].
@@ -3804,6 +3811,12 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		a.dragFindAllTo(y)
 		return
 	}
+	// The right-docked column's seam, same split: this branch is the
+	// pinned panel's, findAllModal.handleMouse continues it unpinned.
+	if leftDown && a.dragMode == findAllColsDragMode {
+		a.dragFindAllColsTo(x)
+		return
+	}
 
 	// Terminal panel resize drag — same gesture, other bottom panel.
 	if leftDown && a.dragMode == "termpanel" {
@@ -3870,6 +3883,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 			// stays ahead of every panel hit-test, so the wider zone
 			// really does outrank the neighbour cell it borrows.
 			a.dragMode, a.dragSplitOffset = dragModeForDock(side), x-a.toolSplitterX(side)
+			return
+		}
+		// The pinned right-docked Find-all column's seam sits OUTSIDE the
+		// panel's rect (findAllPinContains never sees it) and inside no
+		// other surface, so it is claimed here, beside the window seams it
+		// mimics, before any panel or editor case can read the press.
+		if a.findAllPin != nil && a.findAllSeamHit(x, y) {
+			a.dragMode, a.dragSplitOffset = findAllColsDragMode, x-a.findAllSeamX()
 			return
 		}
 		switch {

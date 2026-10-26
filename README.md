@@ -930,7 +930,8 @@ unless you clicked a row, in which case it closes the list and stays on
 that row. `↺ revert loc` in the title (or `r`) always goes back to where
 you were when the list opened, from either list. `d` (or the title
 button) moves the list to a column on the right, and dragging its bottom
-border resizes it. `p` (or `◇`) **pins** it into a panel that stays open
+border resizes it — docked right, drag the splitter between it and the
+editor. `p` (or `◇`) **pins** it into a panel that stays open
 while you edit: a filter box (`/`) narrows the rows, `Delete` or a row's
 `✕` strikes one off, `⟳` re-runs the search, and a replace box rewrites
 the rows that are left as one undo step. Opening it with a single-line

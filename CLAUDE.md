@@ -465,7 +465,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   switched by title button, `d`, or ≡ View). **No call site may assume
   the editor starts at row 1 or runs to its band's right edge.**
 - Bottom border is its resize handle; `findAllRows` not persisted;
-  drag continued in two places (`findAllDragMode`).
+  drag continued in two places (`findAllDragMode`). RIGHT dock: a real
+  seam COLUMN left of the frame (`findAllSeamX`, counted in `width()`,
+  `rect` starts past it), painted by `drawVSplitterSpan`; grab zone =
+  seam + the frame's left border, never the editor's column; claimed
+  before the outside-click accept (unpinned) / beside `dockSplitterAt`
+  (pinned); `findAllCols` session-only (`findAllColsDragMode`).
 - Preview CENTERS an off-screen hit, leaves an on-screen one alone.
   Borrowed find state returned on exit. Rows compacted at open
   (indent trimmed, tabs → one space).

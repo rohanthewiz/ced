@@ -93,7 +93,20 @@ func splitterHit(dx, x int) bool {
 // appeared on only two of three would read as a difference in kind
 // between panels that resize identically.
 func (a *App) drawVSplitter(x int, active bool) {
-	if x < 0 {
+	// The status bar owns the bottom row and the bottom tool stripe (when
+	// there is one) the row above it, so the seam runs to whatever those
+	// leave and the grip is centred on THAT extent — not on the window's.
+	a.drawVSplitterSpan(x, 0, a.sideDockRows(), active)
+}
+
+// drawVSplitterSpan is drawVSplitter over an explicit run of rows,
+// [top, top+rows). The window seams run the whole side-dock height; the
+// right-docked Find-all list's seam runs only beside the list (under the
+// tab bar), and shares this so the two kinds of seam can never drift
+// apart in glyph, grip placement or colour. The grip is centred on the
+// span given, not on the window.
+func (a *App) drawVSplitterSpan(x, top, rows int, active bool) {
+	if x < 0 || rows <= 0 {
 		return
 	}
 	fg := a.theme.Subtle
@@ -103,16 +116,12 @@ func (a *App) drawVSplitter(x int, active bool) {
 	style := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(fg)
 	gripStyle := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(a.theme.Muted)
 
-	// The status bar owns the bottom row and the bottom tool stripe (when
-	// there is one) the row above it, so the seam runs to whatever those
-	// leave and the grip is centred on THAT extent — not on the window's.
-	rows := a.sideDockRows()
 	for y := 0; y < rows; y++ {
 		glyph, st := splitterRule, style
 		if !active && splitterIsGrip(y, rows) {
 			glyph, st = splitterGrip, gripStyle
 		}
-		a.screen.SetContent(x, y, glyph, nil, st)
+		a.screen.SetContent(x, top+y, glyph, nil, st)
 	}
 }
 

@@ -512,11 +512,16 @@ func TestFindAll_RightDockTakesColumnsNotRows(t *testing.T) {
 	if ey != 1 {
 		t.Errorf("editor y = %d, want 1 — nothing is pushing it down", ey)
 	}
-	if ew != beforeW-mw {
-		t.Errorf("editor width = %d, want %d (band %d minus column %d)", ew, beforeW-mw, beforeW, mw)
+	// The seam column sits between the two: editor + seam + frame is the
+	// whole band, and the frame starts one past the seam.
+	if ew != beforeW-mw-findAllSeamW {
+		t.Errorf("editor width = %d, want %d (band %d minus seam and column %d)", ew, beforeW-mw-findAllSeamW, beforeW, mw)
 	}
-	if mx != ex+ew {
-		t.Errorf("column x = %d, want %d (the editor's right edge)", mx, ex+ew)
+	if sx := a.findAllSeamX(); sx != ex+ew {
+		t.Errorf("seam x = %d, want %d (the editor's right edge)", sx, ex+ew)
+	}
+	if mx != ex+ew+findAllSeamW {
+		t.Errorf("column x = %d, want %d (just past the seam)", mx, ex+ew+findAllSeamW)
 	}
 	if my != 1 || mh != beforeH {
 		t.Errorf("column = y%d h%d, want the full band y1 h%d", my, mh, beforeH)
@@ -1264,9 +1269,10 @@ func TestFindAllResize_ClampsBothEnds(t *testing.T) {
 	}
 }
 
-// TestFindAllResize_RightDockHasNoHandle pins the one place the seam
+// TestFindAllResize_RightDockHasNoHandle pins the one place the ROW seam
 // does not exist: docked right the strip is full height by design, and
-// its bottom edge is the band's own — draggable by nobody.
+// its bottom edge is the band's own — draggable by nobody. (That mode
+// resizes on its side seam instead — the TestFindAllSeam_* tests.)
 func TestFindAllResize_RightDockHasNoHandle(t *testing.T) {
 	a, _ := seedFindAllLongApp(t)
 	m := openFindAllT(t, a, "count")
@@ -1934,5 +1940,175 @@ func TestFindAll_FooterHintNamesEscsCurrentMeaning(t *testing.T) {
 	m.clicked = true
 	if h := m.footerHints()[0]; !strings.Contains(h, "esc stay") {
 		t.Errorf("hint after a click = %q, want esc stay", h)
+	}
+}
+
+// TestFindAllSeam_OnlyInTheRightDock: the side seam exists beside a
+// right-docked list and nowhere else — the top strip resizes on its
+// bottom rule, and no list means no handle to claim a press.
+func TestFindAllSeam_OnlyInTheRightDock(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	if got := a.findAllSeamX(); got != -1 {
+		t.Fatalf("seam x with no list = %d, want -1", got)
+	}
+	m := openFindAllT(t, a, "count")
+	if got := a.findAllSeamX(); got != -1 {
+		t.Errorf("top-docked seam x = %d, want -1", got)
+	}
+	a.findAllDockRight = true
+	sx := a.findAllSeamX()
+	mx, my, _, mh := m.rect(a)
+	if sx != mx-1 {
+		t.Fatalf("seam x = %d, want %d (just left of the frame)", sx, mx-1)
+	}
+	// The grab zone is the seam and the frame's left border, on the
+	// list's rows — never the editor's last column, never the tab bar.
+	for _, c := range []struct {
+		x, y int
+		want bool
+	}{
+		{sx, my + 3, true},
+		{sx + 1, my + 3, true},
+		{sx - 1, my + 3, false},
+		{sx + 2, my + 3, false},
+		{sx, 0, false},
+		{sx, my + mh - 1, true},
+	} {
+		if got := a.findAllSeamHit(c.x, c.y); got != c.want {
+			t.Errorf("findAllSeamHit(%d, %d) = %v, want %v", c.x, c.y, got, c.want)
+		}
+	}
+}
+
+// TestFindAllSeam_DragResizesTheColumn drives the unpinned gesture end to
+// end through the modal's own mouse handler: press on the seam, move,
+// release. The list must stay open (an outside press would accept it),
+// the column follow the pointer, and the editor take back the slack.
+func TestFindAllSeam_DragResizesTheColumn(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.findAllDockRight = true
+	m := openFindAllT(t, a, "count")
+	sx := a.findAllSeamX()
+	_, my, _, _ := m.rect(a)
+	before := m.width(a)
+	_, _, ewBefore, _ := a.editorRect()
+
+	m.handleMouse(a, sx, my+5, tcell.Button1)
+	if a.dragMode != findAllColsDragMode {
+		t.Fatalf("dragMode = %q after a press on the seam, want %q", a.dragMode, findAllColsDragMode)
+	}
+	if a.modal != m {
+		t.Fatal("seizing the seam must not close the list")
+	}
+	m.handleMouse(a, sx+6, my+5, tcell.Button1)
+	m.handleMouse(a, sx+6, my+5, tcell.ButtonNone)
+
+	if a.dragMode != "" {
+		t.Errorf("dragMode = %q after release, want cleared", a.dragMode)
+	}
+	if got := m.width(a); got != before-6 {
+		t.Errorf("width = %d after dragging the seam 6 right, want %d", got, before-6)
+	}
+	if _, _, ew, _ := a.editorRect(); ew != ewBefore+6 {
+		t.Errorf("editor width = %d, want %d", ew, ewBefore+6)
+	}
+	if got := a.findAllSeamX(); got != sx+6 {
+		t.Errorf("seam x = %d, want it to follow the pointer to %d", got, sx+6)
+	}
+}
+
+// TestFindAllSeam_GrabbingTheBorderIsANoOp pins the carried offset: a
+// press on the borrowed border cell that never moves must not shift the
+// seam by the cell between them.
+func TestFindAllSeam_GrabbingTheBorderIsANoOp(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.findAllDockRight = true
+	m := openFindAllT(t, a, "count")
+	sx := a.findAllSeamX()
+	_, my, _, _ := m.rect(a)
+	before := m.width(a)
+
+	m.handleMouse(a, sx+1, my+2, tcell.Button1)
+	m.handleMouse(a, sx+1, my+2, tcell.Button1) // a motion report, unmoved
+	if got := m.width(a); got != before {
+		t.Errorf("width = %d after an unmoved grab of the border, want %d", got, before)
+	}
+}
+
+// TestFindAllSeam_DragClampsBothEnds: dragged far left the editor keeps
+// its reserve; far right the column keeps its floor — and the stored
+// number is the clamped one, so there is no dead travel coming back.
+func TestFindAllSeam_DragClampsBothEnds(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.findAllDockRight = true
+	m := openFindAllT(t, a, "count")
+
+	a.dragFindAllColsTo(0)
+	if _, _, ew, _ := a.editorRect(); ew != findAllMinEditorCols {
+		t.Errorf("editor width = %d after a drag to the far left, want the reserve %d", ew, findAllMinEditorCols)
+	}
+	if a.findAllCols != a.editorBandCols()-findAllMinEditorCols {
+		t.Errorf("stored width = %d, want the clamped %d", a.findAllCols, a.editorBandCols()-findAllMinEditorCols)
+	}
+	a.dragFindAllColsTo(a.width + 50)
+	if got := m.width(a); got != findAllMinWidth {
+		t.Errorf("width = %d after a drag past the right edge, want the floor %d", got, findAllMinWidth)
+	}
+}
+
+// TestFindAllSeam_PinnedPressRoutesThroughTheApp: pinned, the seam sits
+// outside the panel's rect, so the App's press dispatch must claim it
+// (and its drag chain continue it) or the column could not be resized.
+func TestFindAllSeam_PinnedPressRoutesThroughTheApp(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.findAllDockRight = true
+	m := openFindAllT(t, a, "count")
+	m.togglePin(a)
+	sx := a.findAllSeamX()
+	_, my, _, _ := m.rect(a)
+	before := m.width(a)
+
+	a.handleMouse(tcell.NewEventMouse(sx, my+4, tcell.Button1, tcell.ModNone))
+	if a.dragMode != findAllColsDragMode {
+		t.Fatalf("dragMode = %q after a press on the pinned seam, want %q", a.dragMode, findAllColsDragMode)
+	}
+	// Rightward: the column opens at the editor's reserve on this band,
+	// so only narrowing it is free of the clamp.
+	a.handleMouse(tcell.NewEventMouse(sx+4, my+4, tcell.Button1, tcell.ModNone))
+	a.handleMouse(tcell.NewEventMouse(sx+4, my+4, tcell.ButtonNone, tcell.ModNone))
+
+	if got := m.width(a); got != before-4 {
+		t.Errorf("width = %d after dragging the pinned seam 4 right, want %d", got, before-4)
+	}
+	if a.findAllPin != m {
+		t.Error("the pinned panel must survive its own resize")
+	}
+}
+
+// TestFindAllSeam_DrawsTheGrip pins the affordance: a rule with the heavy
+// ┃ grip on its middle rows, at the seam column — the window seams' look.
+func TestFindAllSeam_DrawsTheGrip(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.findAllDockRight = true
+	m := openFindAllT(t, a, "count")
+	a.draw()
+	a.screen.Show()
+	sx := a.findAllSeamX()
+	_, my, _, mh := m.rect(a)
+
+	grip, rule := 0, 0
+	for y := my; y < my+mh; y++ {
+		r, _, _, _ := a.screen.GetContent(sx, y)
+		switch r {
+		case splitterGrip:
+			grip++
+		case splitterRule:
+			rule++
+		default:
+			t.Errorf("seam cell (%d, %d) = %q, want a rule or grip glyph", sx, y, r)
+		}
+	}
+	if grip != 3 || rule != mh-3 {
+		t.Errorf("seam = %d grip + %d rule cells, want 3 + %d", grip, rule, mh-3)
 	}
 }

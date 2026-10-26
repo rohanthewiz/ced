@@ -660,8 +660,8 @@ func TestGitCurrentBranch(t *testing.T) {
 
 // TestOpenGitPush_EndToEnd raises the real dialog against a real repo:
 // the defaults land on the tracked target, Set upstream stays OFF
-// because one already exists, and the ls-remote goroutine's answer
-// merges in without moving the selection.
+// (with or without an existing upstream — it is opt-in), and the
+// ls-remote goroutine's answer merges in without moving the selection.
 func TestOpenGitPush_EndToEnd(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git not on PATH")
@@ -698,9 +698,10 @@ func TestOpenGitPush_EndToEnd(t *testing.T) {
 		t.Errorf("selection moved to %q when the heads landed", m.targetBranch())
 	}
 
-	// A brand-new branch: no upstream, so Set upstream arrives ticked
-	// and the branch is option zero even though the remote has never
-	// heard of it. This is the case the whole dialog exists for.
+	// A brand-new branch: no upstream, yet Set upstream still arrives
+	// UNticked (tracking is opt-in), and the branch is option zero even
+	// though the remote has never heard of it. This is the case the
+	// whole dialog exists for.
 	gitRun(t, dir, "checkout", "-q", "-b", "feature/x")
 	a.refreshGitStatus()
 	a.openGitPush()
@@ -711,15 +712,15 @@ func TestOpenGitPush_EndToEnd(t *testing.T) {
 	if m.branches[0] != "feature/x" {
 		t.Errorf("unpushed branch not offered first: %v", m.branches)
 	}
-	if !m.setUpstream {
-		t.Error("Set upstream should be pre-checked for an untracked branch")
+	if m.setUpstream {
+		t.Error("Set upstream pre-checked for an untracked branch; it must be opt-in")
 	}
 	drainPushRefs(t, a)
 	if m.branches[0] != "feature/x" {
 		t.Errorf("unpushed branch lost its seat once the heads landed: %v", m.branches)
 	}
 	if strings.Join(m.pushArgs(m.currentRemote(), m.targetBranch()), " ") !=
-		"push --set-upstream origin feature/x:feature/x" {
+		"push origin feature/x:feature/x" {
 		t.Errorf("argv = %v", m.pushArgs(m.currentRemote(), m.targetBranch()))
 	}
 }

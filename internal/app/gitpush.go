@@ -250,10 +250,13 @@ func (a *App) openGitPush() {
 		ahead:    a.gitAhead,
 		behind:   a.gitBehind,
 		remotes:  remotes,
-		// Pre-checked exactly when there is no upstream: that is the one
-		// case where omitting -u leaves the branch untracked and the
-		// user back here next time with the same decision to make.
-		setUpstream: a.gitUpstream == "",
+		// Set upstream always starts UNticked, even for a brand-new
+		// branch with no upstream. Tracking is a standing change to the
+		// branch's config (branch.<name>.remote/merge) that redirects
+		// every later plain `git push` / `git pull`, so it is an opt-in
+		// the user makes with one tick — not a side effect of pushing a
+		// branch somewhere once (a scratch push, a fork, a CI ref).
+		setUpstream: false,
 	}
 	// Default remote: the upstream's, else "origin" if it exists, else
 	// whatever git listed first. "origin" is the convention, but a repo

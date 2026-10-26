@@ -462,7 +462,19 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   restores via `RestoreView`, other dismissals accept. A PICK — a row click or
   a keyboard walk (`findAllModal.picked`, set at the gestures, NOT in
   `selectRow`; in-file only) — flips Esc to accept (`escape`); the open's
-  own preview, ⟳ and dismissals don't pick. `↺ revert loc` (`revertRect`, key `r`) restores the
+  own preview, ⟳ and dismissals don't pick. That pick is the ONE exception
+  to **Esc goes back** on the find surfaces: the live prompt and the find
+  bar (`escapeFind` → `findFrom`, a `viewMark`) always go back.
+  A **click on a line of code** outside the
+  unpinned list or live prompt closes it and lands the caret there
+  (`settleAt` / `findAllLive.clickAway` via `promptModal.onClickAway`,
+  resolved by `editorLineAt` BEFORE the close — the list's band changes;
+  no drag; the prompt keeps the clicked view, only find state restored).
+  Other outside clicks keep the old rules (list accepts, prompt cancels).
+  Find bar: an editor press while it is up ZEROES `findFrom` (Esc then
+  stays); restore only on the same, still-active tab and only if the
+  caret moved. Bar → prompt / ↓ list INHERIT the bar's origin.
+  `↺ revert loc` (`revertRect`, key `r`) restores the
   CAPTURED origin (`captureOrigin`, every producer, tab by pointer) in
   every mode — closes unpinned, leaves a pinned panel up.
 - Takes rows/columns OUT of the editor (`editorBandRows` → `editorRect`),
@@ -491,7 +503,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   tints + previews `FirstMatchAtOrAfter` the ORIGIN (never the last
   preview), counts on the status row; a non-answer puts the view back.
   Every exit restores view + find state first — Enter BEFORE
-  `showFindAll`, so the list's origin is the true one. Box rests on the
+  `showFindAll`, so the list's origin is the true one (a click on code
+  restores find state only). Box rests on the
   editor's BOTTOM (a top box hides early hits no scroll can lift); a hit
   under it counts as off-screen. Project/folder prompts stay inert.
 - Both lists match under the bar's `Aa`/`|W|` (`a.findOptions()`),

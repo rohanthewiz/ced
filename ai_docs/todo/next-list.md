@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-095**
+**Next ID: N-096**
 
 ## Open
 
@@ -140,6 +140,15 @@ plus the LSP work done in the seeding session itself
   and the tint on the tab. Same gap the Find-all list itself has
   (`restoreFind` runs only on its exits); a modal-level "being replaced"
   hook would fix both.
+
+- **N-095** · raised `2026-1026-1545-find-click-to-line-esc-back` · value low
+  The find bar's Esc now goes back to where the bar opened, so there is
+  no KEYBOARD way to close the bar and stay on a hit: the doors are a
+  click on the hit's line (an editor press while the bar is up forgets
+  the origin, `App.findFrom`) or `↓` into the Find-all list and Enter
+  there. ced is mouse-first, so this may never bite; if it does, add a
+  bar chord (Alt+Enter, say) that closes and keeps the caret, plus its
+  hint word.
 
 ## Validate
 
@@ -380,7 +389,13 @@ and `raised`.
   prompts carry a `×` / Alt+x clear (seen in run-ced's PTY: × drawn left
   of ▾, Alt+x empties it). Also check: a real click on the ×, and Alt+x
   arriving through tmux's Esc folding without firing the `Esc x`
-  plugins leader.
+  plugins leader. Since `2026-1026-1545-find-click-to-line-esc-back`: a click on a line of code
+  outside the unpinned list or the live prompt closes it and lands the
+  caret there (seen in run-ced's PTY: list → Ln 39, prompt → Ln 14 with
+  the view kept), and the find bar's Esc goes back to where it opened
+  (an editor click while it is up makes Esc stay). Hand check in tmux
+  and cats: the click lands on the line under the pointer in both docks,
+  and the bar's Esc / click-then-Esc feel right in daily use.
 
 ## Roadmap
 

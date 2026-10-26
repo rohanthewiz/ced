@@ -831,3 +831,129 @@ func TestFindPrompt_NarrowKeepsRegexAndEveryChord(t *testing.T) {
 		t.Fatal("alt+w did nothing once its chip was dropped")
 	}
 }
+
+// typeFind types s into the open find bar, one live re-search per rune.
+func typeFind(a *App, s string) {
+	for _, r := range s {
+		a.handleFindKey(keyEv(tcell.KeyRune, r))
+	}
+}
+
+// TestFindBar_EscGoesBackToWhereItOpened pins Esc as "cancel the search":
+// typing and Enter walk the caret through hits, and Esc closes the bar
+// with the caret and view back where the bar opened.
+func TestFindBar_EscGoesBackToWhereItOpened(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	origin := editor.Position{Line: 2, Col: 3}
+	tab.MoveCursorTo(origin, false)
+	a.openFind()
+	typeFind(a, "line")
+	a.handleFindKey(keyEv(tcell.KeyEnter, 0))
+	if tab.Cursor == origin {
+		t.Fatal("setup: the search should have moved the caret")
+	}
+	a.handleFindKey(keyEv(tcell.KeyEsc, 0))
+	if a.findOpen {
+		t.Fatal("Esc should close the bar")
+	}
+	if tab.Cursor != origin || tab.HasSelection() {
+		t.Errorf("cursor %v (selection %v), want the origin %v", tab.Cursor, tab.HasSelection(), origin)
+	}
+}
+
+// TestFindBar_EscRestoresTheScroll: a hit far down scrolls the view to
+// it; Esc brings back the scroll the bar opened on, not just the caret.
+func TestFindBar_EscRestoresTheScroll(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	a.openFind()
+	typeFind(a, "needle")
+	a.draw() // Render applies the jump's scroll
+	if tab.ScrollY == 0 {
+		t.Fatal("setup: the hit should have scrolled the view")
+	}
+	a.handleFindKey(keyEv(tcell.KeyEsc, 0))
+	if tab.ScrollY != 0 || tab.Cursor != (editor.Position{}) {
+		t.Errorf("scroll %d cursor %v after Esc, want 0 and the file top", tab.ScrollY, tab.Cursor)
+	}
+}
+
+// TestFindBar_EditorClickThenEscStays: a press on the code while the bar
+// is up is the user placing the caret, so Esc closes the bar and leaves
+// it there.
+func TestFindBar_EditorClickThenEscStays(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	a.openFind()
+	typeFind(a, "needle")
+	a.draw()
+	x, y, want := codeClickT(t, a, tab, 1)
+	a.handleMouse(tcell.NewEventMouse(x, y, tcell.Button1, 0))
+	a.handleMouse(tcell.NewEventMouse(x, y, tcell.ButtonNone, 0))
+	if !a.findOpen || tab.Cursor != want {
+		t.Fatalf("setup: bar open %v, cursor %v; want open at %v", a.findOpen, tab.Cursor, want)
+	}
+	a.handleFindKey(keyEv(tcell.KeyEsc, 0))
+	if tab.Cursor != want {
+		t.Errorf("cursor %v after click+Esc, want the clicked %v", tab.Cursor, want)
+	}
+}
+
+// TestFindBar_EscAfterATabSwitchLeavesBothAlone: the origin belongs to
+// the tab the bar opened on; with another tab active Esc restores
+// nothing, in either tab.
+func TestFindBar_EscAfterATabSwitchLeavesBothAlone(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	a.openFind()
+	typeFind(a, "needle")
+	hit := tab.Cursor
+	other := filepath.Join(a.rootDir, "other.txt")
+	if err := os.WriteFile(other, []byte("x\ny\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a.openFile(other)
+	a.findOpen = true // openFile may close the bar; Esc is what's under test
+	a.handleFindKey(keyEv(tcell.KeyEsc, 0))
+	if tab.Cursor != hit {
+		t.Errorf("origin tab cursor %v, want the hit %v left alone", tab.Cursor, hit)
+	}
+}
+
+// TestFindBar_DownListEscGoesBackToTheBarOrigin: ↓ hands the search to
+// the list, and the list's Esc goes back to where the BAR opened — the
+// search started there — while the list itself opens on the bar's hit.
+func TestFindBar_DownListEscGoesBackToTheBarOrigin(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	origin := editor.Position{Line: 4, Col: 1}
+	tab.MoveCursorTo(origin, false)
+	a.openFind()
+	typeFind(a, "needle")
+	a.handleFindKey(keyEv(tcell.KeyDown, 0))
+	m, ok := a.modal.(*findAllModal)
+	if !ok {
+		t.Fatalf("↓ opened %T, want the list", a.modal)
+	}
+	if tab.Cursor.Line != 90 {
+		t.Errorf("the list should open on the bar's hit, cursor %v", tab.Cursor)
+	}
+	m.handleKey(a, keyEv(tcell.KeyEsc, 0))
+	if tab.Cursor != origin {
+		t.Errorf("cursor %v after the list's Esc, want the bar's origin %v", tab.Cursor, origin)
+	}
+}
+
+// TestViewMark_RestoreOnlyWhenTheCaretMoved: a mark whose caret never
+// moved restores nothing — not even a scroll the user wheeled to.
+func TestViewMark_RestoreOnlyWhenTheCaretMoved(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	mark := markView(tab)
+	tab.ScrollY = 30
+	mark.restore(a)
+	if tab.ScrollY != 30 {
+		t.Errorf("scroll %d, want the wheeled-to 30 kept", tab.ScrollY)
+	}
+	tab.MoveCursorTo(editor.Position{Line: 50}, false)
+	mark.restore(a)
+	if tab.Cursor != (editor.Position{}) || tab.ScrollY != 0 {
+		t.Errorf("cursor %v scroll %d, want the mark's", tab.Cursor, tab.ScrollY)
+	}
+	viewMark{}.restore(a) // the zero mark is a no-op, not a panic
+}

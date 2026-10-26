@@ -48,6 +48,9 @@ func (a *App) closeAllModals() {
 	// the same record closeFind makes (see rememberFindBar).
 	a.rememberFindBar()
 	a.findHist = histDrop{}
+	// A modal replacing the bar is not the bar's Esc: the caret stays
+	// where the search left it, as it always has for these closes.
+	a.findFrom = viewMark{}
 	// The pinned find-all panel stays (it is furniture), but its
 	// replacement dropdown is a popup like the bar's and goes with them.
 	if a.findAllPin != nil {
@@ -206,6 +209,12 @@ type promptModal struct {
 	// Cancel, a click outside — so a live prompt can put back what its
 	// onEdit moved. Submit doesn't run it: the callback owns that exit.
 	//
+	// onClickAway hears a left press OUTSIDE the box before it cancels.
+	// Returning true means the hook dismissed the prompt itself and
+	// answered the press (the live prompt goes to the line of code that
+	// was clicked, findAllLive.clickAway); false falls through to the
+	// ordinary cancel, onCancel and all.
+	//
 	// status is drawn muted on the blank row under the field (row 5), the
 	// live prompt's running answer ("3 of 12 · enter lists them").
 	//
@@ -216,10 +225,11 @@ type promptModal struct {
 	// centering can't scroll above line 0 (a hit near the top of a file
 	// would stay under a top box), while the bottom has the overscroll
 	// allowance to lift a late hit clear.
-	onEdit   func(*App, string)
-	onCancel func(*App)
-	status   func(*App) string
-	bottom   bool
+	onEdit      func(*App, string)
+	onCancel    func(*App)
+	onClickAway func(a *App, x, y int) bool
+	status      func(*App) string
+	bottom      bool
 
 	// clearable puts a × at the field's right end (left of the history
 	// ▾) that empties the field, with Alt+x as its keyboard twin — the
@@ -501,6 +511,9 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	}
 	mx, my, mw, mh := m.rect(a)
 	if x < mx || x >= mx+mw || y < my || y >= my+mh {
+		if m.onClickAway != nil && m.onClickAway(a, x, y) {
+			return
+		}
 		m.cancel(a)
 		return
 	}

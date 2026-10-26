@@ -1564,6 +1564,11 @@ type App struct {
 	// over whichever row its kind names: the Find row for find history,
 	// the Repl row for replacements. Closed with the bar.
 	findHist histDrop
+	// findFrom is where the caret and view were when the bar opened —
+	// what its Esc puts back (find.go, viewMark). Forgotten (zeroed) by
+	// a press in the editor while the bar is up: the user placed the
+	// caret themselves, and Esc then leaves it there.
+	findFrom viewMark
 
 	// Search modifiers. The App holds the authoritative copy (the tabs
 	// get a pushed copy via applyFindOptions) because they describe how
@@ -3954,6 +3959,14 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		// a screen with no document; answers nothing while a tab is open.
 		case a.emptyEditorPress(x, y):
 		case y > 0 && y < a.height-1:
+			// A press in the code while the find bar is up is the user
+			// placing the caret themselves, so the bar's Esc no longer
+			// owes them the place it opened on (find.go, findFrom).
+			// Every press here counts — a ⌘+click jump or a gutter verb
+			// moves them just as surely as a plain click.
+			if a.findOpen {
+				a.findFrom = viewMark{}
+			}
 			// ⌘+click goes to the definition of the symbol under the
 			// pointer — or to its usages, when the pointer is already ON
 			// the definition. A mouse report has no ⌘ bit, so cats spells

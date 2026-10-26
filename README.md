@@ -872,7 +872,7 @@ as `"wordhl": "off"` in `~/.config/ced/config.json`.
 bar directly under the editor, above the status bar:
 
 ```
- Find▾ foo█        Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: close   3 of 12   Aa  |W|  .*
+ Find▾ foo█        Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: back    3 of 12   Aa  |W|  .*
 ```
 
 - Type to search — results highlight live as you type. Matching is a
@@ -892,8 +892,9 @@ bar directly under the editor, above the status bar:
   and the counter turns red when nothing matches.
 - A single-line selection seeds the bar: `Esc f` with a word selected
   searches for it straight away.
-- `Esc` closes the bar and clears the highlights — each `Esc f` is a
-  fresh search.
+- `Esc` closes the bar, clears the highlights and puts the cursor back
+  where it was when the bar opened — each `Esc f` is a fresh search. To
+  stay on a match, click its line (then `Esc` leaves the cursor there).
 - `↑` (or a click on the `Find▾` label) drops down your recent searches
   in this project; `Enter` or a click puts one in the box, `Delete` or
   its `×` forgets it. The replace row's `Repl▾` does the same for recent
@@ -910,7 +911,7 @@ bar directly under the editor, above the status bar:
 query) opens a second row under the first:
 
 ```
- Find▾ foo         Enter: replace · alt+a: all · ↑: recent · tab: field · Esc: close   3 of 12   Aa  |W|
+ Find▾ foo         Enter: replace · alt+a: all · ↑: recent · tab: field · Esc: back    3 of 12   Aa  |W|
  Repl▾ bar█                                                                             Replace   All
 ```
 
@@ -925,11 +926,14 @@ with `Get${1}`. With regex off, `$1` is just text.
 in the bar) lists each hit as a row — line number, then the line with the
 match lit — in a strip that pushes the editor down rather than covering
 it. Moving the highlight previews that line in the editor; `Enter` (or a
-double-click) keeps the position. `Esc` puts the cursor back where it was —
-unless you picked a row (clicked one, or moved with the arrow keys), in
-which case it closes the list and stays on that row. `↺ revert loc` in the
-title (or `r`; on a pinned list, `≡` → **Find all: revert location**)
-always goes back to where you were when the list opened, from either list.
+double-click) keeps the position, and clicking a line of code outside the
+list closes it and puts the cursor on that line. `Esc` puts the cursor
+back where it was when you started searching (from `↓` in the bar, that
+is where the bar opened) — unless you picked a row (clicked one, or moved
+with the arrow keys), in which case it closes the list and stays on that
+row. `↺ revert loc` in the title (or `r`; on a pinned list, `≡` → **Find
+all: revert location**) always goes back to where you were when the list
+opened, from either list.
 `d` (or the title button) moves the list to a column on the right, and
 dragging its bottom border resizes it — docked right, drag the splitter
 between it and the editor. `p` (or `◇`) **pins** it into a panel that
@@ -942,7 +946,8 @@ cursor happens to be in — select it to search for it) — and the question
 is live from the start: while you type (and on the pre-fill before you
 do), the editor lights every match, the cursor
 previews the one the list would open on, and the prompt counts them
-(`3 of 12`). `Enter` opens the list; `Esc` puts everything back.
+(`3 of 12`). `Enter` opens the list; `Esc` puts everything back; a click
+on a line of code closes the prompt and puts the cursor on that line.
 
 **Across the project.** `Esc P` (or `≡` → **Find in project**, or `⌘⇧F`)
 searches the contents of every file the project finder indexes — so

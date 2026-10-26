@@ -92,8 +92,13 @@ func (a *App) openFind() {
 	// collapses it onto the match it focuses, so by then it is gone.
 	seed := a.findAllSelectionQuery()
 	selStart, _ := editor.PosOrdered(tab.Anchor, tab.Cursor)
+	// Where Esc goes back to: the view before the seed's search (below)
+	// or any typed query moves the caret. Captured before closeAllModals,
+	// which forgets it.
+	from := markView(tab)
 
 	a.closeAllModals() // a modal would otherwise eat our keystrokes
+	a.findFrom = from
 	a.findOpen = true
 	a.findReplaceOpen = false
 	a.findFocus = findFocusQuery
@@ -140,6 +145,7 @@ func (a *App) openReplace() {
 func (a *App) closeFind() {
 	a.rememberFindBar()
 	a.findHist = histDrop{}
+	a.findFrom = viewMark{}
 	a.findOpen = false
 	a.findReplaceOpen = false
 	a.findFocus = findFocusQuery
@@ -148,6 +154,66 @@ func (a *App) closeFind() {
 	if tab := a.activeTabPtr(); tab != nil {
 		tab.ClearFind()
 	}
+}
+
+// escapeFind is the bar's Esc: close it, then put the caret and view back
+// where the bar found them — the same "Esc goes back" the live Find-all
+// prompt keeps, and the Find-all list until a row is picked there (its
+// one exception, findAllModal.picked). Typing a query and
+// pressing Enter walk the caret through hits the SEARCH chose; none of
+// them is a place the user picked, so cancelling the search cancels the
+// trip.
+//
+// Staying on a hit is a click on its line (that press forgets the origin,
+// see App.findFrom), or ↓ into the list and Enter there. The origin is
+// also passed over silently when there is nothing to undo or nowhere to
+// go: another tab is active now (a switch is the user's own navigation),
+// or the caret never left the origin (restoring would only yank back a
+// scroll the user wheeled to on purpose).
+func (a *App) escapeFind() {
+	from := a.findFrom
+	a.closeFind()
+	from.restore(a)
+}
+
+// viewMark is one tab's caret and view at a moment, held so a cancelled
+// search can put them back. The tab is held by POINTER (the
+// findAllModal.originTab reasoning: tab indexes shift as tabs close and
+// regroup) and re-checked before any write. The zero mark restores
+// nothing.
+type viewMark struct {
+	tab              *editor.Tab
+	cursor, anchor   editor.Position
+	scrollY, scrollX int
+}
+
+// markView captures tab's caret and view; nil gives the zero mark.
+func markView(tab *editor.Tab) viewMark {
+	if tab == nil {
+		return viewMark{}
+	}
+	return viewMark{
+		tab:     tab,
+		cursor:  tab.Cursor,
+		anchor:  tab.Anchor,
+		scrollY: tab.ScrollY,
+		scrollX: tab.ScrollX,
+	}
+}
+
+// restore puts the marked view back, but only on the tab it was taken
+// from, only while that tab is still the ACTIVE one, and only when the
+// caret has actually moved off the mark (see escapeFind for why each).
+// RestoreView rather than MoveCursorTo, so the restored scroll isn't
+// second-guessed by the next Render (findAllModal.abort's reasoning).
+func (v viewMark) restore(a *App) {
+	if v.tab == nil || a.activeTabPtr() != v.tab || v.tab.Buffer == nil {
+		return
+	}
+	if v.tab.Cursor == v.cursor && v.tab.Anchor == v.anchor {
+		return
+	}
+	v.tab.RestoreView(v.cursor, v.anchor, v.scrollY, v.scrollX)
 }
 
 // rememberFindBar records the bar's query in the find history as the bar
@@ -724,7 +790,9 @@ func (a *App) handleFindKey(ev *tcell.EventKey) {
 	}
 	switch ev.Key() {
 	case tcell.KeyEsc:
-		a.closeFind()
+		// Esc is "cancel" on every find surface: the bar closes AND the
+		// caret goes back to where the bar opened (escapeFind).
+		a.escapeFind()
 		return
 	case tcell.KeyEnter:
 		if a.findFocus == findFocusReplace {
@@ -845,7 +913,7 @@ func (a *App) findBarPress(x, y int) bool {
 
 // drawFindBar renders the bar at the bottom of the editor area:
 //
-//	Find: <input>            Aa  |W|  .*   3 of 12   Enter: next · Esc: close
+//	Find: <input>            Aa  |W|  .*   3 of 12   Enter: next · Esc: back
 //	Repl: <input>                            Replace   All
 //
 // The hint on the right is dropped first when the window is too narrow to
@@ -888,9 +956,9 @@ func (a *App) drawFindBar() {
 	// hold it, walking leftwards from the toggles.
 	rightEdge := a.findCaseRect().x
 	counter := a.findCounterText()
-	hint := " Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: close "
+	hint := " Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: back "
 	if a.findReplaceOpen {
-		hint = " Enter: replace · alt+a: all · ↑: recent · tab: field · Esc: close "
+		hint = " Enter: replace · alt+a: all · ↑: recent · tab: field · Esc: back "
 	}
 	inputStart := bx + runeLen(findBarLabel(findFocusQuery))
 	if counter != "" && rightEdge-runeLen(counter)-2 > inputStart+8 {

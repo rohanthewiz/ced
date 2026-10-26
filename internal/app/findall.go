@@ -21,8 +21,9 @@
 //     is a no-op.
 //   - A click PREVIEWS instead of dismissing. That's what "non-modal"
 //     means here: the list keeps the keyboard (Enter accepts, Esc
-//     aborts), but clicking a row leaves it open so you can walk the
-//     hits one by one.
+//     goes back — or stays, once a row was picked), but clicking a row
+//     leaves it open so you can walk the hits one by one. A click on a
+//     line of code OUTSIDE the list closes it and puts the caret there.
 //   - A row is two columns (line number ┃ code), not a label, and the
 //     popup must not cover what it's previewing.
 //
@@ -261,6 +262,11 @@ type findAllModal struct {
 	// the list's OWN moves don't pick — the open's nearest-hit preview,
 	// ⟳'s re-anchor, a dismissal sliding the highlight — which is why
 	// the flag is set at the gestures, not in selectRow.
+	//
+	// This is the ONE exception to "Esc goes back" across the find
+	// surfaces (the find bar and the live prompt always go back): a row
+	// the user picked in the list is an answer they gave, where a hit
+	// the bar or the prompt jumped to is one the search gave them.
 	picked bool
 
 	// project switches the list from "occurrences in this buffer" to
@@ -314,6 +320,13 @@ func (a *App) openFindAll() {
 	// (Argument evaluation order already guarantees this; the local makes
 	// the dependency visible so a later refactor can't quietly break it.)
 	seed := a.findAllPromptSeed()
+	// Opened over the find bar, the search started THERE: the bar's
+	// origin is where Esc should go back to. Read before openModal's
+	// closeAllModals closes the bar.
+	var from viewMark
+	if a.findOpen {
+		from = a.findFrom
+	}
 	// The prompt is LIVE (findalllive.go): it searches from the start —
 	// on the seed now, then on every edit — and every exit hands back
 	// what it borrowed. The callback restores BEFORE showFindAll so the
@@ -324,9 +337,11 @@ func (a *App) openFindAll() {
 		app.showFindAll(v)
 	})
 	live = newFindAllLive(a)
+	live.inherit(from)
 	pm.bottom = true
 	pm.onEdit = live.update
 	pm.onCancel = live.restore
+	pm.onClickAway = live.clickAway
 	pm.status = live.status
 	live.update(a, seed)
 }
@@ -335,11 +350,22 @@ func (a *App) openFindAll() {
 // typed into the full list. The bar closes on the way (openModal's
 // closeAllModals does it), which is why the query is captured first —
 // the list is the same search in another shape, not a second one.
+//
+// Same search, same origin: the list's Esc and ↺ revert loc go back to
+// where the user was when the BAR opened, not to the bar's current hit
+// (a place the search put them, not one they chose). The list still
+// OPENS on that hit — showFindAll starts at the hit at or after the
+// caret — so nothing on screen jumps at the hand-over.
 func (a *App) openFindAllFromBar() {
 	if len(a.findField.value) == 0 {
 		return
 	}
+	from := a.findFrom
 	a.showFindAll(a.findField.String())
+	if m, ok := a.modal.(*findAllModal); ok && from.tab != nil && from.tab == m.originTab {
+		m.origin, m.originAnchor = from.cursor, from.anchor
+		m.originScrollY, m.originScrollX = from.scrollY, from.scrollX
+	}
 }
 
 // findAllSelectionQuery is the ONE thing a find verb searches for
@@ -724,11 +750,12 @@ func (m *findAllModal) preview(a *App) {
 	m.ensureRowVisible(a)
 }
 
-// accept settles where the preview left the cursor and closes. Every
-// dismissal except Esc lands here — a click in the editor, like an Enter,
-// reads as "this is the place I wanted". A PINNED list commits the jump
-// but stays put: it is a worklist, and accepting one item doesn't
-// finish the list.
+// accept settles where the preview left the cursor and closes. Enter, a
+// double-click on a row, and a click outside that lands on no line of
+// code (the tree, the tab bar) all come here — "this is the place I
+// wanted". A click ON a line of code goes there instead (settleAt), and
+// Esc goes back unless a row was picked (escape). A PINNED list commits the jump but stays put:
+// it is a worklist, and accepting one item doesn't finish the list.
 func (m *findAllModal) accept(a *App) {
 	if m.project {
 		m.openSelected(a)
@@ -757,7 +784,7 @@ func (m *findAllModal) abort(a *App) {
 
 // captureOrigin records where the user was when the list opened — the
 // active tab and its exact view — so ↺ revert loc (and, in-file, Esc
-// before any click) can put it back. Called by every producer before its
+// before any pick) can put it back. Called by every producer before its
 // first preview or jump; a list opened with no tab at all records nil
 // and its revert only closes.
 func (m *findAllModal) captureOrigin(a *App) {
@@ -783,12 +810,58 @@ func (m *findAllModal) captureOrigin(a *App) {
 // a click's jump is the user's own navigation). Accepting there would be
 // WRONG after arrowing: accept opens the HIGHLIGHTED row's file, which is
 // not the one on screen.
+//
+// Staying without a pick has its own gestures: Enter or a double-click
+// on a row (accept), or a click on a line of code outside the list,
+// which goes to THAT line (settleAt).
 func (m *findAllModal) escape(a *App) {
 	if m.picked && !m.project {
 		m.accept(a)
 		return
 	}
 	m.abort(a)
+}
+
+// settleAt is a press OUTSIDE the unpinned list that lands on a line of
+// code: close the list (handing back the borrowed tint, like accept) and
+// put the caret on the line clicked. Reports false — the caller then
+// accepts as before — when the press hit no line (tree, tab bar, status
+// bar, below the last line).
+//
+// The position is resolved BEFORE the list closes, against the layout
+// the user aimed at: the list took its rows (or columns) out of the
+// editor band, and once it goes the same screen row shows a different
+// line. ScrollY is a line index, so the clicked line stays in view in
+// the taller band and MoveCursorTo's minimal reveal is a no-op. No drag
+// is started for the same reason — motion after the close would be
+// measured against the new band, a list's height off from the press.
+func (m *findAllModal) settleAt(a *App, x, y int) bool {
+	pos, ok := a.editorLineAt(x, y)
+	if !ok {
+		return false
+	}
+	tab := a.activeTabPtr()
+	m.restoreFind(a)
+	a.closeModal()
+	tab.MoveCursorTo(pos, false)
+	return true
+}
+
+// editorLineAt resolves a press to the buffer position it lands on in the
+// active editor, measured against the layout on screen NOW. ok=false off
+// the editor's text area, past the last line, or on a tab with no caret
+// to place (an image, a markdown preview). Shared by the Find-all list's
+// and the live prompt's click-away (findalllive.go).
+func (a *App) editorLineAt(x, y int) (editor.Position, bool) {
+	tab := a.activeTabPtr()
+	if tab == nil || tab.Buffer == nil || tab.IsImage() || tab.IsMarkdownView() {
+		return editor.Position{}, false
+	}
+	ex, ey, ew, eh := a.editorRect()
+	if x < ex || x >= ex+ew || y < ey || y >= ey+eh {
+		return editor.Position{}, false
+	}
+	return tab.HitTest(x-ex, y-ey, ew, eh)
 }
 
 // revertLocation is ↺ revert loc (and the list's r key): back to the tab
@@ -829,7 +902,7 @@ func (m *findAllModal) revertLocation(a *App) {
 // keyboard door to ↺ for a PINNED panel, whose list no longer holds the
 // keyboard (the editor does), so its `r` can't be typed. Unpinned the
 // list owns the keyboard and r is the door; the ≡ menu can't open over
-// it anyway (a click outside accepts the list). With no list up the row
+// it anyway (a click outside settles the list). With no list up the row
 // stays clickable and says why, the house rule for unavailable rows.
 func (a *App) menuFindAllRevert() {
 	a.closeMenu()
@@ -1698,13 +1771,17 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	if x < mx || x >= mx+mw || y < my || y >= my+mh {
 		// Pinned, the panel is furniture: an outside click belongs to
 		// whatever it landed on (the router only sends the panel its
-		// own clicks, but belt and braces). Unpinned keeps the original
-		// contract — the click landed where the user wants to work.
+		// own clicks, but belt and braces). Unpinned, the click landed
+		// where the user wants to work: on a line of code that is the
+		// line to go to (settleAt), anywhere else it settles where the
+		// preview left the caret (accept).
 		if m.pinned {
 			m.focus = findAllFocusList
 			return
 		}
-		m.accept(a)
+		if !m.settleAt(a, x, y) {
+			m.accept(a)
+		}
 		return
 	}
 	// The bottom rule is the resize handle (see the seam section). It

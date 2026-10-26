@@ -10,7 +10,8 @@
 // edit, so the editor behind it tints every occurrence, the caret previews
 // the hit the list would open on, and the row under the field counts them
 // ("3 of 12 · enter lists them"). Enter still opens the full list; Esc
-// puts the view back exactly as it was.
+// puts the view back exactly as it was; a click on a line of code
+// outside the box closes the prompt and puts the caret on that line.
 //
 //	  41 │ x := needle(a)                      ← code behind: tinted, the
 //	  42 │ return needle                         current hit previewed
@@ -41,12 +42,18 @@
 //   - Same starting row. The preview picks FirstMatchAtOrAfter the ORIGIN
 //     cursor — never the previewed one, or each keystroke would walk the
 //     caret further down the file — which is showFindAll's own rule.
-//   - Nothing borrowed survives the prompt. Every exit restores the view
-//     and the tab's find state first: Esc / Cancel / outside click via
-//     onCancel, Enter in the submit callback BEFORE showFindAll, so the
-//     list captures the true origin (its ↺ revert loc and Esc go back to
-//     where the user was, not to the prompt's last preview) and the find
-//     state the tab really had.
+//   - Nothing borrowed survives the prompt. Every exit restores the
+//     tab's find state, and every exit but one the view too: Esc /
+//     Cancel / a click outside on no line of code via onCancel, Enter in
+//     the submit callback BEFORE showFindAll, so the list captures the
+//     true origin (its ↺ revert loc and Esc go back to where the user
+//     was, not to the prompt's last preview) and the find state the tab
+//     really had. The one exception is a click ON a line of code
+//     (clickAway): that line is where the user chose to be, so the view
+//     they clicked in is kept and only the caret moves.
+//   - A prompt opened over the find bar inherits the BAR's origin
+//     (openFindAll), so its Esc goes back to where the user was before
+//     the search started, not to the bar's last hit.
 //
 // The prompt rests on the BOTTOM of the editor (promptModal.bottom), where
 // the find bar sits: a centered box covers the middle of the window, which
@@ -211,9 +218,8 @@ func (l *findAllLive) restoreView(tab *editor.Tab) {
 }
 
 // restore undoes everything the live prompt borrowed: the view, and the
-// tab's find state verbatim (plain fields, as findAllModal.restoreFind
-// does — the setter would re-scan a list produced under priorOpts). The
-// onCancel hook, and the first thing the submit callback does.
+// tab's find state. The onCancel hook, and the first thing the submit
+// callback does.
 func (l *findAllLive) restore(a *App) {
 	l.note = ""
 	tab := l.liveTab(a)
@@ -221,10 +227,59 @@ func (l *findAllLive) restore(a *App) {
 		return
 	}
 	l.restoreView(tab)
+	l.restoreFind(tab)
+}
+
+// restoreFind hands back the tab's find state verbatim (plain fields, as
+// findAllModal.restoreFind does — the setter would re-scan a list
+// produced under priorOpts).
+func (l *findAllLive) restoreFind(tab *editor.Tab) {
 	tab.FindQuery = l.priorQuery
 	tab.FindMatches = l.priorMatches
 	tab.FindIndex = l.priorIndex
 	tab.FindOpts = l.priorOpts
+}
+
+// clickAway is the promptModal.onClickAway hook: a press outside the box
+// that lands on a line of code closes the prompt and puts the caret on
+// that line. The tint goes (the question was abandoned), but the VIEW
+// the user clicked in stays — restoring the origin's scroll first would
+// slide the line they aimed at out from under the pointer. Any other
+// outside press (tree, tab bar, status bar, past the last line) answers
+// false and gets the ordinary cancel, view and all.
+//
+// The prompt floats over the editor rather than taking rows out of it,
+// so the clicked cell means the same line before and after the close;
+// it is resolved first anyway, while the screen is the one aimed at.
+func (l *findAllLive) clickAway(a *App, x, y int) bool {
+	tab := l.liveTab(a)
+	if tab == nil || a.activeTabPtr() != tab {
+		return false
+	}
+	pos, ok := a.editorLineAt(x, y)
+	if !ok {
+		return false
+	}
+	a.closeModal()
+	l.note = ""
+	l.moved = false
+	l.restoreFind(tab)
+	tab.MoveCursorTo(pos, false)
+	return true
+}
+
+// inherit swaps the captured origin for an earlier one — the find bar's,
+// when the prompt opens over it (openFindAll) — so Esc goes back to where
+// the user was before the search began. moved is set because the caret
+// may already sit away from that origin (on the bar's hit) with no
+// preview of this prompt's own to account for it.
+func (l *findAllLive) inherit(from viewMark) {
+	if l.tab == nil || from.tab != l.tab {
+		return
+	}
+	l.origin, l.originAnchor = from.cursor, from.anchor
+	l.originScrollY, l.originScrollX = from.scrollY, from.scrollX
+	l.moved = true
 }
 
 // status is the prompt's status-row text (promptModal.status).

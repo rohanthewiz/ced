@@ -1346,3 +1346,26 @@ func TestPromptClear_ButtonAndChordEmptyTheField(t *testing.T) {
 		t.Error("a plain prompt grew a ×")
 	}
 }
+
+// TestPromptClickAway_HookAnswersBeforeTheCancel: an outside press asks
+// onClickAway first; true means it dismissed the prompt itself (no
+// onCancel), false falls through to the ordinary cancel.
+func TestPromptClickAway_HookAnswersBeforeTheCancel(t *testing.T) {
+	for _, claim := range []bool{true, false} {
+		a := newTestApp(t, t.TempDir())
+		m := a.openFindPrompt("Find", "H", "abc", nil)
+		cancelled, asked := false, false
+		m.onCancel = func(*App) { cancelled = true }
+		m.onClickAway = func(app *App, x, y int) bool {
+			asked = true
+			if claim {
+				app.closeModal()
+			}
+			return claim
+		}
+		m.handleMouse(a, 0, 0, tcell.Button1)
+		if !asked || a.modal != nil || cancelled == claim {
+			t.Errorf("claim=%v: asked %v, modal %T, cancelled %v", claim, asked, a.modal, cancelled)
+		}
+	}
+}

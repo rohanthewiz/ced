@@ -311,9 +311,10 @@ func TestFindAll_SlowSecondClickIsNotADoubleClick(t *testing.T) {
 	}
 }
 
-// TestFindAll_ClickOutsideAccepts pins the dismissal rule: clicking in
-// the editor settles where the preview left you (Esc is the one gesture
-// that means "put it back").
+// TestFindAll_ClickOutsideAccepts pins the dismissal rule for a click
+// that lands on no line of code (here the file tree): it settles where
+// the preview left you (Esc is the one gesture that means "put it back";
+// a click on the code goes to that line, ClickOnCodeGoesToThatLine).
 func TestFindAll_ClickOutsideAccepts(t *testing.T) {
 	a, tab := seedFindAllApp(t)
 	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
@@ -1866,6 +1867,122 @@ func TestFindAll_ButtonClicksDoNotArmEsc(t *testing.T) {
 	m.handleMouse(a, btn.x+1, btn.y, tcell.Button1)
 	if m.picked {
 		t.Fatal("a title-button click must not mark the list picked")
+	}
+}
+
+// codeClickT returns a screen cell on the code (past the gutter) of the
+// editor row `row` rows into the band, and the position HitTest gives it
+// against the layout on screen now — what a click there aims at.
+func codeClickT(t *testing.T, a *App, tab *editor.Tab, row int) (x, y int, want editor.Position) {
+	t.Helper()
+	ex, ey, ew, eh := a.editorRect()
+	x, y = ex+ew/2, ey+row
+	want, ok := tab.HitTest(x-ex, y-ey, ew, eh)
+	if !ok {
+		t.Fatalf("setup: editor row %d is not on a line", row)
+	}
+	return x, y, want
+}
+
+// TestFindAll_ClickOnCodeGoesToThatLine pins the click-away door: a press
+// outside the list that lands on a line of code closes the list and puts
+// the caret on the line clicked — resolved against the band the user
+// aimed at, with the list still taking its rows, in both docks — and
+// hands the borrowed tint back.
+func TestFindAll_ClickOnCodeGoesToThatLine(t *testing.T) {
+	for _, right := range []bool{false, true} {
+		a, tab := seedFindAllLongApp(t)
+		a.findAllDockRight = right
+		tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
+		m := openFindAllT(t, a, "count")
+		m.handleKey(a, tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+		x, y, want := codeClickT(t, a, tab, 3)
+		if want.Line == tab.Cursor.Line {
+			t.Fatalf("right=%v setup: the clicked line is the previewed one", right)
+		}
+
+		m.handleMouse(a, x, y, tcell.Button1)
+
+		if a.modal != nil {
+			t.Fatalf("right=%v: a click on the code should close the list", right)
+		}
+		if tab.Cursor != want || tab.HasSelection() {
+			t.Errorf("right=%v: cursor = %v (selection %v), want the clicked %v", right, tab.Cursor, tab.HasSelection(), want)
+		}
+		if tab.FindQuery == "count" {
+			t.Errorf("right=%v: closing should hand back the borrowed find state", right)
+		}
+	}
+}
+
+// TestFindAll_ClickOnCodeInProjectModeGoesThere: project mode's
+// click-away lands in whatever file is active (the one a row click
+// opened) and clears the tints the list lit.
+func TestFindAll_ClickOnCodeInProjectModeGoesThere(t *testing.T) {
+	a, root := projectSearchApp(t)
+	runProjectSearch(t, a, root, "needle", []string{"alpha.go", "sub/bravo.go"})
+	m := a.modal.(*findAllModal)
+	m.selected = 0
+	m.jumpToSelected(a)
+	tab := a.activeTabPtr()
+	x, y, want := codeClickT(t, a, tab, 0)
+
+	m.handleMouse(a, x, y, tcell.Button1)
+
+	if a.modal != nil {
+		t.Fatal("a click on the code should close the list")
+	}
+	if a.activeTabPtr() != tab || tab.Cursor != want {
+		t.Errorf("cursor = %v in %s, want %v in the jumped-to file", tab.Cursor, a.activeTabPtr().Path, want)
+	}
+	if tab.FindQuery == "needle" {
+		t.Error("the click-away should clear the list's tint")
+	}
+}
+
+// TestFindAll_ClickPastTheLastLineAccepts: a press in the editor band
+// that hits no line is not "go there" — it settles on the preview, the
+// rule every other outside click keeps.
+func TestFindAll_ClickPastTheLastLineAccepts(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
+	m := openFindAllT(t, a, "count")
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+	previewed := tab.Cursor
+	ex, ey, ew, eh := a.editorRect()
+	y := ey + eh - 1
+	if _, ok := tab.HitTest(ew/2, eh-1, ew, eh); ok {
+		t.Fatal("setup: the band's last row should be past the fixture's end")
+	}
+
+	m.handleMouse(a, ex+ew/2, y, tcell.Button1)
+
+	if a.modal != nil {
+		t.Fatal("an outside click should close the list")
+	}
+	if tab.Cursor != previewed {
+		t.Errorf("cursor = %v, want the previewed %v kept", tab.Cursor, previewed)
+	}
+}
+
+// TestEditorLineAt_RefusesOffTheCode: the click-away helper answers only
+// for a cell on a line of the active editor — not the tree, not the tab
+// bar, not a markdown preview (no caret to place).
+func TestEditorLineAt_RefusesOffTheCode(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	ex, ey, ew, _ := a.editorRect()
+	if pos, ok := a.editorLineAt(ex+ew/2, ey); !ok || pos.Line != tab.ScrollY {
+		t.Errorf("first editor row = %v, %v; want line %d", pos, ok, tab.ScrollY)
+	}
+	if _, ok := a.editorLineAt(2, 2); ok {
+		t.Error("a cell over the file tree answered a line")
+	}
+	if _, ok := a.editorLineAt(ex+ew/2, 0); ok {
+		t.Error("the tab bar answered a line")
+	}
+	tab.SetMarkdownView(true)
+	if _, ok := a.editorLineAt(ex+ew/2, ey); ok {
+		t.Error("a markdown preview answered a line")
 	}
 }
 

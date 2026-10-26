@@ -246,3 +246,93 @@ func TestFindAllLive_ClearPutsTheViewBack(t *testing.T) {
 		t.Errorf("cursor %v, %d tinted; want the origin and no tint", tab.Cursor, len(tab.FindMatches))
 	}
 }
+
+// seedNeedleFarApp opens a file whose one "needle" sits far below the
+// first screen, so previewing it must scroll — the fixture the view
+// assertions below need.
+func seedNeedleFarApp(t *testing.T) (*App, *editor.Tab) {
+	t.Helper()
+	var b strings.Builder
+	for i := 0; i < 120; i++ {
+		if i == 90 {
+			b.WriteString("the needle line\n")
+		} else {
+			b.WriteString("filler line\n")
+		}
+	}
+	a := seedFindApp(t, b.String())
+	return a, a.activeTabPtr()
+}
+
+// TestFindAllLive_ClickOnCodeGoesThere pins the prompt's click-away: a
+// press on a line of code outside the box closes the prompt, puts the
+// caret on the clicked line and KEEPS the view the user clicked in (the
+// preview's scroll), while the borrowed find state is handed back.
+func TestFindAllLive_ClickOnCodeGoesThere(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	tab.SetFindQuery("filler")
+	prior := len(tab.FindMatches)
+	m := openLiveFindAll(t, a, tab, editor.Position{Line: 0, Col: 0})
+	retype(a, m, "needle")
+	if tab.Cursor.Line != 90 || tab.ScrollY == 0 {
+		t.Fatalf("setup: preview on line %d scroll %d, want line 90 scrolled", tab.Cursor.Line, tab.ScrollY)
+	}
+	scrolled := tab.ScrollY
+	x, y, want := codeClickT(t, a, tab, 1)
+
+	m.handleMouse(a, x, y, tcell.Button1)
+
+	if a.modal != nil {
+		t.Fatalf("a click on the code left %T open", a.modal)
+	}
+	if tab.Cursor != want || tab.ScrollY != scrolled {
+		t.Errorf("cursor %v scroll %d, want the clicked %v in the kept scroll %d", tab.Cursor, tab.ScrollY, want, scrolled)
+	}
+	if tab.FindQuery != "filler" || len(tab.FindMatches) != prior {
+		t.Errorf("find state: %q ×%d, want filler ×%d", tab.FindQuery, len(tab.FindMatches), prior)
+	}
+}
+
+// TestFindAllLive_ClickOffTheCodeCancels: a press outside the box that
+// hits no line (the file tree) is the ordinary cancel — the view goes
+// back to the origin, as Esc puts it.
+func TestFindAllLive_ClickOffTheCodeCancels(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	origin := editor.Position{Line: 2, Col: 0}
+	m := openLiveFindAll(t, a, tab, origin)
+	retype(a, m, "needle")
+
+	m.handleMouse(a, 2, 2, tcell.Button1)
+
+	if a.modal != nil {
+		t.Fatalf("an outside click left %T open", a.modal)
+	}
+	if tab.Cursor != origin || tab.ScrollY != 0 {
+		t.Errorf("cursor %v scroll %d, want the origin %v at 0", tab.Cursor, tab.ScrollY, origin)
+	}
+}
+
+// TestFindAllLive_InheritsTheFindBarOrigin: a prompt opened over the find
+// bar starts where the BAR's search started, so its Esc goes back to the
+// place the user was before either of them, not to the bar's last hit.
+func TestFindAllLive_InheritsTheFindBarOrigin(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	origin := editor.Position{Line: 3, Col: 0}
+	tab.MoveCursorTo(origin, false)
+	a.openFind()
+	for _, r := range "needle" {
+		a.handleFindKey(keyEv(tcell.KeyRune, r))
+	}
+	if tab.Cursor.Line != 90 {
+		t.Fatalf("setup: the bar should have moved to the hit, cursor %v", tab.Cursor)
+	}
+	a.openFindAll()
+	m, ok := a.modal.(*promptModal)
+	if !ok || m.field.String() != "needle" {
+		t.Fatalf("modal %T, want the live prompt seeded from the bar", a.modal)
+	}
+	m.handleKey(a, keyEv(tcell.KeyEsc, 0))
+	if tab.Cursor != origin {
+		t.Errorf("cursor %v after Esc, want the bar's origin %v", tab.Cursor, origin)
+	}
+}

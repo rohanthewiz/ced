@@ -132,24 +132,6 @@ plus the LSP work done in the seeding session itself
   that row; nothing pins the row against the set, so it drifts each time
   a chord joins.
 
-- **N-091** · raised `2026-1025-2232-find-all-esc-revert-and-seam` · value low
-  Two Find-all title buttons have no keyboard door. ⟳ (re-run) has no
-  in-list key at all, though the unpinned list owns the keyboard and so
-  can't reach the ≡ menu (CLAUDE.md: such a button needs an in-surface
-  key). ↺ revert loc has `r` unpinned, but pinned the editor owns the
-  keys and there is no ≡ row, so it is click-only there. Candidates: a
-  free list letter for ⟳ (not `r`, now revert), and a ≡ Find row "Revert
-  to where Find all opened" for the pinned panel. The latter would move
-  the `TestMenuLayout_*` pins.
-
-- **N-092** · raised `2026-1025-2232-find-all-esc-revert-and-seam` · value low
-  Decide whether ARROW walking should also flip the Find-all list's Esc
-  to "stay". The backlog ask named only a single click, so today only a
-  row click sets `findAllModal.clicked`, and arrows keep the old peek
-  (Esc restores). If walking with ↑↓ and then pressing Esc wanting to stay
-  turns out to be common, it's a one-line change in `selectRow`'s keyboard
-  callers, plus the footer hint already follows `clicked`.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -448,6 +430,23 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-25, `2026-1025-2252-n092-n091-find-all-picks-and-doors` —
+  **N-092** keyboard walking now counts as choosing a row, the same as a
+  click: ↑↓ / PgUp / PgDn / Home / End set `findAllModal.picked` (renamed
+  from `clicked`) at the gestures, not in `selectRow`, so the open's
+  nearest-hit preview, ⟳ and dismissals don't. Esc after a pick stays;
+  `↺ revert loc` / `r` is the way back. Pinned by
+  `TestFindAll_ArrowWalkPicksTheRow`, `TestFindAll_EscWithoutAPickRestores`,
+  `TestFindAll_RerunAndDismissDoNotPick`.
+- closed 2026-10-25, `2026-1025-2252-n092-n091-find-all-picks-and-doors` —
+  **N-091** ⟳ got the in-list key `a` ("again"; `r` is revert), named in
+  the widest footer hint and its button tip. The pinned panel's ↺ got a
+  ≡ Find row, "Find all: revert location" (`menuFindAllRevert`: restores,
+  leaves the panel up; with no list it flashes why), which the pinned
+  ↺'s tip names. Menu pins moved to 206 rows / height 212 / dividers
+  `[2, 5, 209]`. Pinned ⟳ ◆ ✕ stay mouse-only by design (the pinned
+  panel is mouse-driven).
 
 - closed 2026-10-22, `2026-1022-1954-n085-word-diff-emphasis` —
   **N-085** side-by-side diffs now emphasise the changed words of each

@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-090**
+**Next ID: N-093**
 
 ## Open
 
@@ -131,6 +131,24 @@ plus the LSP work done in the seeding session itself
   are in `CMD_TO_PANE` and forwarded. Noticed while adding ⌘↑ ⌘↓ ⌘L to
   that row; nothing pins the row against the set, so it drifts each time
   a chord joins.
+
+- **N-091** · raised `2026-1025-2232-find-all-esc-revert-and-seam` · value low
+  Two Find-all title buttons have no keyboard door. ⟳ (re-run) has no
+  in-list key at all, though the unpinned list owns the keyboard and so
+  can't reach the ≡ menu (CLAUDE.md: such a button needs an in-surface
+  key). ↺ revert loc has `r` unpinned, but pinned the editor owns the
+  keys and there is no ≡ row, so it is click-only there. Candidates: a
+  free list letter for ⟳ (not `r`, now revert), and a ≡ Find row "Revert
+  to where Find all opened" for the pinned panel. The latter would move
+  the `TestMenuLayout_*` pins.
+
+- **N-092** · raised `2026-1025-2232-find-all-esc-revert-and-seam` · value low
+  Decide whether ARROW walking should also flip the Find-all list's Esc
+  to "stay". The backlog ask named only a single click, so today only a
+  row click sets `findAllModal.clicked`, and arrows keep the old peek
+  (Esc restores). If walking with ↑↓ and then pressing Esc wanting to stay
+  turns out to be common, it's a one-line change in `selectRow`'s keyboard
+  callers, plus the footer hint already follows `clicked`.
 
 ## Validate
 
@@ -346,6 +364,18 @@ and `raised`.
   Chrome may resolve it natively the way it does ⌘E (`ed4962c`). If it
   does, note it in metakeys.go / 20-keys.js like ⌘E; Esc j stays the way
   in.
+
+- **N-090** · raised `2026-1025-2232-find-all-esc-revert-and-seam` · value medium
+  Find-all: Esc after a row CLICK keeps the row, `↺ revert loc` (title,
+  key `r`) returns to the origin tab and view, and the right dock's new
+  ┃ seam resizes the column. Verified by simulation tests and run-ced's
+  PTY (a scripted SGR press/motion/release on the seam widened the list
+  by 20 and it stayed open). Hand check in tmux and in cats with a real
+  mouse: click a row then Esc stays there and the hint reads "esc stay";
+  arrows then Esc still restores; ↺ from Find in project after a click
+  goes back to the starting tab; the seam's grip is visible against the
+  theme, the drag tracks from where it was seized, and a pinned panel's
+  seam drags too.
 
 ## Roadmap
 

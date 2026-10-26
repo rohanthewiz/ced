@@ -192,6 +192,34 @@ type promptModal struct {
 	// exactly what it always was. hist is that dropdown's state.
 	histKind string
 	hist     histDrop
+
+	// The LIVE hooks — all nil on every prompt but Find all in file
+	// (findalllive.go), which is then exactly what it always was.
+	//
+	// onEdit hears the value after every change to it: a keystroke, a
+	// history pick, and also an extra firing, because an extra can change
+	// what the same text MEANS (the find prompts' case / word / regex
+	// chips) without touching a rune of it. It is what lets a prompt
+	// answer while the question is still being typed.
+	//
+	// onCancel runs when the prompt goes away WITHOUT submitting — Esc,
+	// Cancel, a click outside — so a live prompt can put back what its
+	// onEdit moved. Submit doesn't run it: the callback owns that exit.
+	//
+	// status is drawn muted on the blank row under the field (row 5), the
+	// live prompt's running answer ("3 of 12 · enter lists them").
+	//
+	// bottom anchors the box on the editor's last rows instead of the
+	// middle of the window. A live prompt previews hits in the code
+	// behind it, and the middle is exactly where a centered hit lands.
+	// Bottom rather than top — where the find bar sits — because
+	// centering can't scroll above line 0 (a hit near the top of a file
+	// would stay under a top box), while the bottom has the overscroll
+	// allowance to lift a late hit clear.
+	onEdit   func(*App, string)
+	onCancel func(*App)
+	status   func(*App) string
+	bottom   bool
 }
 
 // openSearchPrompt is openPrompt for a prompt that asks for a SEARCH:
@@ -249,6 +277,26 @@ func (m *promptModal) submit(a *App) {
 	}
 }
 
+// cancel dismisses the prompt without submitting — the one exit Esc,
+// Cancel and a click outside share, so a live prompt's onCancel can't be
+// skipped by whichever of them a future edit forgets.
+func (m *promptModal) cancel(a *App) {
+	a.closeModal()
+	if m.onCancel != nil {
+		m.onCancel(a)
+	}
+}
+
+// edited tells a live prompt its value may have changed. Skipped once
+// the prompt is no longer the modal: an extra may close it (the commit
+// prompt's AI draft does), and an answer painted for a prompt that is
+// gone would outlive the question.
+func (m *promptModal) edited(a *App) {
+	if m.onEdit != nil && a.modal == m {
+		m.onEdit(a, m.field.String())
+	}
+}
+
 // handleKey processes keyboard input while the prompt modal is open:
 // Enter submits; Esc cancels; Alt+<key> fires the matching extra;
 // everything else is standard single-line editing handled by the shared
@@ -260,6 +308,7 @@ func (m *promptModal) handleKey(a *App, ev *tcell.EventKey) {
 		consumed, v, picked := a.histDropKey(&m.hist, m.histGeom(a), ev)
 		if picked {
 			m.field = newTextField(v)
+			m.edited(a)
 		}
 		if consumed {
 			return
@@ -270,15 +319,20 @@ func (m *promptModal) handleKey(a *App, ev *tcell.EventKey) {
 		return
 	}
 	if ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune && m.fireExtraKey(a, ev.Rune()) {
+		m.edited(a)
 		return
 	}
 	switch ev.Key() {
 	case tcell.KeyEsc:
-		a.closeModal()
+		m.cancel(a)
 	case tcell.KeyEnter:
 		m.submit(a)
 	default:
-		m.field.handleKey(ev)
+		// Only real edits re-ask: caret motion leaves the question as it
+		// was, and re-running it would re-preview for nothing.
+		if _, ed := m.field.handleKey(ev); ed {
+			m.edited(a)
+		}
 	}
 }
 
@@ -376,6 +430,7 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		consumed, v, picked := a.histDropMouse(&m.hist, m.histGeom(a), m.histBtnRect(a), x, y, btn)
 		if picked {
 			m.field = newTextField(v)
+			m.edited(a)
 		}
 		if consumed {
 			return
@@ -386,7 +441,7 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	}
 	mx, my, mw, mh := m.rect(a)
 	if x < mx || x >= mx+mw || y < my || y >= my+mh {
-		a.closeModal()
+		m.cancel(a)
 		return
 	}
 	if m.histBtnRect(a).contains(x, y) {
@@ -396,7 +451,7 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	cancel, ok := m.buttons(a)
 	switch {
 	case cancel.contains(x, y):
-		a.closeModal()
+		m.cancel(a)
 		return
 	case ok.contains(x, y):
 		m.submit(a)
@@ -407,6 +462,7 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 			if run := m.extras[i].run; run != nil {
 				run(a)
 			}
+			m.edited(a)
 			return
 		}
 	}
@@ -417,9 +473,18 @@ func (m *promptModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 }
 
 // rect returns the on-screen rectangle of the prompt modal, centered in
-// the window.
+// the window — or, for a bottom-anchored (live) prompt, still centered
+// across but resting on the editor's last row (see bottom).
 func (m *promptModal) rect(a *App) (x, y, w, h int) {
-	return a.centeredRect(m.width(a), promptModalHeight)
+	x, y, w, h = a.centeredRect(m.width(a), promptModalHeight)
+	if m.bottom {
+		_, ey, _, eh := a.editorRect()
+		// Never higher than the centered spot: on a window too short for
+		// the editor to end below the middle, the centered box is the
+		// one that still fits.
+		y = max(y, ey+eh-h)
+	}
+	return x, y, w, h
 }
 
 // width is promptModalWidth, GROWN when extras need room past OK — the
@@ -463,7 +528,7 @@ func (m *promptModal) width(a *App) int {
 //	2   divider
 //	3   hint (greyed)
 //	4   input field    [ value ]
-//	5   blank
+//	5   blank — or the live status (status), when set
 //	6   buttons        [ Cancel ]   [  OK  ]
 //	7   blank
 //	8   bottom border
@@ -491,6 +556,11 @@ func (m *promptModal) draw(a *App) {
 		drawAt(a.screen, b.x, b.y, "▾", tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Muted))
 		if tip := "↑ recent"; runeLen(m.hint)+runeLen(tip)+3 <= mw-4 {
 			drawAt(a.screen, mx+mw-2-runeLen(tip), my+3, tip, c.muted)
+		}
+	}
+	if m.status != nil {
+		if s := m.status(a); s != "" {
+			drawAt(a.screen, start, fy+1, clipRunes(s, end-start), c.muted)
 		}
 	}
 

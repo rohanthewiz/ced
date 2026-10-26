@@ -293,8 +293,12 @@ const (
 // means, while case / word only narrow a query that reads the same
 // either way. All three chords work whether or not their chip is drawn
 // (fireExtraKey), so the narrow case loses only the click target.
-func (a *App) openFindPrompt(title, hint, initial string, callback func(*App, string)) {
-	a.openModal(&promptModal{
+//
+// The opened prompt is returned so a caller can make it LIVE (its onEdit
+// / onCancel / status hooks — Find all in file, findalllive.go); the
+// project-wide callers ignore it.
+func (a *App) openFindPrompt(title, hint, initial string, callback func(*App, string)) *promptModal {
+	m := &promptModal{
 		title: title,
 		// Each key named beside its word; the draw clips the hint at the
 		// border on a prompt too narrow to grow, and the right-aligned
@@ -319,7 +323,9 @@ func (a *App) openFindPrompt(title, hint, initial string, callback func(*App, st
 			key:   'c',
 			run:   (*App).toggleFindCase,
 		}},
-	})
+	}
+	a.openModal(m)
+	return m
 }
 
 // toggleFindCase flips case sensitivity and re-runs the search.

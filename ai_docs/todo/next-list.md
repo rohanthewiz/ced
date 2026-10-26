@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-093**
+**Next ID: N-095**
 
 ## Open
 
@@ -131,6 +131,15 @@ plus the LSP work done in the seeding session itself
   are in `CMD_TO_PANE` and forwarded. Noticed while adding ⌘↑ ⌘↓ ⌘L to
   that row; nothing pins the row against the set, so it drifts each time
   a chord joins.
+
+- **N-093** · raised `2026-1026-1159-find-all-live-prompt` · value low
+  The live Find-all prompt restores its borrowed view and tint only on
+  its own exits (Esc / Cancel / outside click / Enter). A prompt REPLACED
+  through `openModal` → `closeAllModals` (an unprompted arrival that
+  doesn't decline the occupied slot) leaves the caret on the last preview
+  and the tint on the tab. Same gap the Find-all list itself has
+  (`restoreFind` runs only on its exits); a modal-level "being replaced"
+  hook would fix both.
 
 ## Validate
 
@@ -358,6 +367,14 @@ and `raised`.
   goes back to the starting tab; the seam's grip is visible against the
   theme, the drag tracks from where it was seized, and a pinned panel's
   seam drags too.
+
+- **N-094** · raised `2026-1026-1159-find-all-live-prompt` · value medium
+  Live Find-all prompt (findalllive.go): seen in run-ced's PTY (the hit
+  centered above the bottom-anchored box, "1 of 1 · enter lists them").
+  Hand check in tmux and cats: typing feels immediate on a large file
+  (it re-scans per keystroke like the find bar), a paste into the prompt
+  lands sensibly, Alt+c/w/r re-ask, Esc puts the view and the find bar's
+  old tint back, and the box sits right on a short window.
 
 ## Roadmap
 

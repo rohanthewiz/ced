@@ -1221,3 +1221,80 @@ func TestContextMenuWidthForLabel_UnmeasuredScreenKeepsTheFloor(t *testing.T) {
 		t.Fatalf("unmeasured, long: width %d, want 36", got)
 	}
 }
+
+// TestPromptLive_OnEditHearsEditsNotCaretMotion pins the onEdit hook's
+// contract: a keystroke that changes the value reports it, one that only
+// moves the caret does not, and an Alt chord that fires an extra re-asks
+// (the extra can change what the same text means).
+func TestPromptLive_OnEditHearsEditsNotCaretMotion(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	var got []string
+	a.openPromptExtras("T", "H", "ab", []promptExtra{{
+		label: func(*App) string { return "[x]" }, width: 3, key: 'x', run: func(*App) {},
+	}}, nil)
+	m := promptOf(a)
+	m.onEdit = func(_ *App, v string) { got = append(got, v) }
+
+	m.handleKey(a, keyEv(tcell.KeyLeft, 0))
+	if len(got) != 0 {
+		t.Fatalf("caret motion reported an edit: %q", got)
+	}
+	m.handleKey(a, keyEv(tcell.KeyRune, 'c'))
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'x', tcell.ModAlt))
+	if want := []string{"acb", "acb"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("onEdit heard %q, want %q", got, want)
+	}
+}
+
+// TestPromptLive_OnCancelRunsOnEveryNonSubmitExit: Esc, the Cancel
+// button and a click outside all run onCancel; a submit does not (its
+// callback owns that exit).
+func TestPromptLive_OnCancelRunsOnEveryNonSubmitExit(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	exits := map[string]func(m *promptModal){
+		"esc":     func(m *promptModal) { m.handleKey(a, keyEv(tcell.KeyEsc, 0)) },
+		"outside": func(m *promptModal) { m.handleMouse(a, 0, 0, tcell.Button1) },
+		"cancel": func(m *promptModal) {
+			c, _ := m.buttons(a)
+			m.handleMouse(a, c.x, c.y, tcell.Button1)
+		},
+	}
+	for name, exit := range exits {
+		cancelled := false
+		a.openPrompt("T", "H", "x", nil)
+		m := promptOf(a)
+		m.onCancel = func(*App) { cancelled = true }
+		exit(m)
+		if !cancelled || promptOf(a) != nil {
+			t.Errorf("%s: cancelled=%v open=%v, want the hook run and the prompt closed", name, cancelled, promptOf(a) != nil)
+		}
+	}
+	cancelled := false
+	a.openPrompt("T", "H", "x", func(*App, string) {})
+	promptOf(a).onCancel = func(*App) { cancelled = true }
+	promptOf(a).handleKey(a, keyEv(tcell.KeyEnter, 0))
+	if cancelled {
+		t.Error("submit ran onCancel")
+	}
+}
+
+// TestPromptLive_BottomAnchorsOnTheEditor: a bottom prompt keeps its
+// centered column but rests on the editor's last row, and its status
+// line is drawn under the field.
+func TestPromptLive_BottomAnchorsOnTheEditor(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openPrompt("T", "H", "", nil)
+	m := promptOf(a)
+	cx, _, _, _ := m.rect(a)
+	m.bottom = true
+	m.status = func(*App) string { return "7 of 9" }
+	x, y, _, h := m.rect(a)
+	if _, ey, _, eh := a.editorRect(); x != cx || y+h != ey+eh {
+		t.Fatalf("bottom prompt at (%d,%d) h %d, want x %d and its last row on %d", x, y, h, cx, ey+eh-1)
+	}
+	m.draw(a)
+	a.screen.Show()
+	if !strings.Contains(screenText(a), "7 of 9") {
+		t.Fatal("status line not drawn")
+	}
+}

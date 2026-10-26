@@ -313,9 +313,21 @@ func (a *App) openFindAll() {
 	// (Argument evaluation order already guarantees this; the local makes
 	// the dependency visible so a later refactor can't quietly break it.)
 	seed := a.findAllPromptSeed()
-	a.openFindPrompt("Find all in file", "lists every occurrence", seed, func(app *App, v string) {
+	// The prompt is LIVE (findalllive.go): it searches from the start —
+	// on the seed now, then on every edit — and every exit hands back
+	// what it borrowed. The callback restores BEFORE showFindAll so the
+	// list's origin is where the user was, not the prompt's last preview.
+	var live *findAllLive
+	pm := a.openFindPrompt("Find all in file", "lists every occurrence", seed, func(app *App, v string) {
+		live.restore(app)
 		app.showFindAll(v)
 	})
+	live = newFindAllLive(a)
+	pm.bottom = true
+	pm.onEdit = live.update
+	pm.onCancel = live.restore
+	pm.status = live.status
+	live.update(a, seed)
 }
 
 // openFindAllFromBar is the find bar's Down-arrow gesture: turn what's

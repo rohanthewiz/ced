@@ -937,7 +937,10 @@ stays open while you edit: a filter box (`/`) narrows the rows, `Delete`
 or a row's `✕` strikes one off, `⟳` (or `a`) re-runs the search, and a
 replace box rewrites the rows that are left as one undo step. Opening it
 with a single-line selection searches for that; otherwise it asks,
-pre-filled.
+pre-filled — and the question is live from the start: while you type (and
+on the pre-fill before you do), the editor lights every match, the cursor
+previews the one the list would open on, and the prompt counts them
+(`3 of 12`). `Enter` opens the list; `Esc` puts everything back.
 
 **Across the project.** `Esc P` (or `≡` → **Find in project**, or `⌘⇧F`)
 searches the contents of every file the project finder indexes — so

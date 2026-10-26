@@ -95,7 +95,7 @@ internal/app/
   undercolor.go               May an underline be coloured (SGR 58): env allowlist
   toolwindow.go tooladapt.go toolheader.go toollayout.go toolmenu.go  Tool windows
   splitter.go treeautofit.go treefilter.go treemarks.go overflow.go
-  find.go findall.go projectsearch.go goto.go bracket.go
+  find.go findall.go findalllive.go projectsearch.go goto.go bracket.go
   markdown.go softwrap.go wordhl.go multicaret.go
   lsp*.go hovermodal.go diagtip.go diagnote.go diagmerge.go
   workspaceedit.go
@@ -478,6 +478,15 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Filter box seeded with the query; the seed is INERT until edited.
 - Opening: only a single-line selection searches silently; otherwise
   prompt pre-filled (`findAllPromptSeed`), seed read BEFORE `openPrompt`.
+- The in-file prompt is LIVE (findalllive.go): `promptModal.onEdit` /
+  `onCancel` / `status` / `bottom` hooks (nil = inert, every other
+  prompt). Searches on the seed at open and every edit (chips too),
+  tints + previews `FirstMatchAtOrAfter` the ORIGIN (never the last
+  preview), counts on the status row; a non-answer puts the view back.
+  Every exit restores view + find state first — Enter BEFORE
+  `showFindAll`, so the list's origin is the true one. Box rests on the
+  editor's BOTTOM (a top box hides early hits no scroll can lift); a hit
+  under it counts as off-screen. Project/folder prompts stay inert.
 - Both lists match under the bar's `Aa`/`|W|` (`a.findOptions()`),
   SNAPSHOTTED on `findAllModal.opts` at open (⟳, stale check, replace
   plan, tints reuse it); non-default options named in the title

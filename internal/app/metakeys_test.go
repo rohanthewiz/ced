@@ -135,6 +135,50 @@ func TestMetaAccelOpensRecentFiles(t *testing.T) {
 	}
 }
 
+// TestMetaAccelGoesToLine pins ⌘L to the Go to line prompt (Esc-j's
+// verb) — the GoLand keycap, which took the verb over from ⌘G.
+func TestMetaAccelGoesToLine(t *testing.T) {
+	armMetaHost(t)
+	a := seedGotoApp(t, 37)
+
+	a.handleKey(metaKeyEv('l', false))
+
+	m, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("Cmd+L opened %T, want the Go to line prompt", a.modal)
+	}
+	if !strings.Contains(m.hint, "37") {
+		t.Fatalf("hint = %q, want Go to line's range hint", m.hint)
+	}
+}
+
+// TestMetaAccelTogglesGitPanel pins ⌘G to Esc-g's verb: the first press
+// shows the git changes panel, the second hides it, and neither opens the
+// Go to line prompt ⌘G used to mean.
+func TestMetaAccelTogglesGitPanel(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	armMetaHost(t)
+	repo, file := panelRepo(t)
+	writeFileT(t, file, "one\nCHANGED\n")
+	a := newTestApp(t, repo)
+	a.refreshGitStatus()
+
+	a.handleKey(metaKeyEv('g', false))
+	if !a.gitPanel.open {
+		t.Fatal("Cmd+G should show the git panel")
+	}
+	if a.modal != nil {
+		t.Fatalf("Cmd+G opened %T — it is no longer Go to line", a.modal)
+	}
+
+	a.handleKey(metaKeyEv('g', false))
+	if a.gitPanel.open {
+		t.Fatal("a second Cmd+G should hide the git panel")
+	}
+}
+
 // TestMetaAccelFindsAllInFile pins ⌘F to Find all in file, not the find
 // bar: a single-line selection opens the list straight away on that
 // text, and with nothing selected the chord asks through the Find-all
@@ -555,5 +599,100 @@ func TestMetaAccelNavIsGated(t *testing.T) {
 
 	if got := a.activeTabPtr().Path; got != paths[1] {
 		t.Fatalf("Cmd+[ navigated on an untrusted host (now on %s)", got)
+	}
+}
+
+// metaFileTab opens a three-line file with the caret mid-file, so that
+// both ⌘↑ and ⌘↓ have somewhere to go in BOTH axes — a chord that only
+// changed the line (keeping the column) would be caught by the column
+// checks.
+func metaFileTab(t *testing.T) *App {
+	t.Helper()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "t.txt")
+	if err := os.WriteFile(target, []byte("first line\nmiddle line\nlast"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(target)
+	a.activeTabPtr().MoveCursorTo(editor.Position{Line: 1, Col: 3}, false)
+	return a
+}
+
+// ⌘↑ is the top of the file and ⌘↓ the end of it — line AND column, the
+// way every Mac text view answers the chord.
+func TestMetaFileMotionArrows(t *testing.T) {
+	armMetaHost(t)
+	a := metaFileTab(t)
+
+	a.handleKey(metaArrowEv(tcell.KeyUp, false))
+	if got := a.activeTabPtr().Cursor; got != (editor.Position{}) {
+		t.Fatalf("Cmd+Up left the caret at %+v, want 0:0 (top of file)", got)
+	}
+
+	a.handleKey(metaArrowEv(tcell.KeyDown, false))
+	if got, want := a.activeTabPtr().Cursor, (editor.Position{Line: 2, Col: 4}); got != want {
+		t.Fatalf("Cmd+Down left the caret at %+v, want %+v (end of file)", got, want)
+	}
+}
+
+// ⌘⇧↑ selects from the caret to the top rather than merely landing there:
+// the anchor stays where the caret was.
+func TestMetaFileMotionExtendsSelection(t *testing.T) {
+	armMetaHost(t)
+	a := metaFileTab(t)
+
+	a.handleKey(metaArrowEv(tcell.KeyUp, true))
+
+	tab := a.activeTabPtr()
+	if tab.Anchor != (editor.Position{Line: 1, Col: 3}) || tab.Cursor != (editor.Position{}) {
+		t.Fatalf("Cmd+Shift+Up selected %+v..%+v, want 1:3..0:0", tab.Anchor, tab.Cursor)
+	}
+}
+
+// The chord is a jump, so secondary carets are dropped — leaving them
+// behind would let the next keystroke edit lines the user scrolled away
+// from.
+func TestMetaFileMotionDropsCarets(t *testing.T) {
+	armMetaHost(t)
+	a := metaFileTab(t)
+	tab := a.activeTabPtr()
+	tab.AddCaretAt(editor.Position{Line: 2, Col: 1})
+
+	a.handleKey(metaArrowEv(tcell.KeyUp, false))
+
+	if len(tab.Carets) != 0 {
+		t.Fatalf("Cmd+Up kept %d secondary carets, want none", len(tab.Carets))
+	}
+}
+
+// On an untrusted host ⌘↑ is not ours and steps one line like a bare Up.
+func TestMetaFileMotionSilentOnUnknownHost(t *testing.T) {
+	disarmMetaHost(t)
+	a := metaFileTab(t)
+
+	a.handleKey(metaArrowEv(tcell.KeyUp, false))
+
+	if got := a.activeTabPtr().Cursor.Line; got != 0 {
+		t.Fatalf("Cmd+Up on an untrusted host landed on line %d, want 0 "+
+			"(a plain one-line step)", got)
+	}
+	if got := a.activeTabPtr().Cursor.Col; got != 3 {
+		t.Fatalf("Cmd+Up on an untrusted host moved to col %d, want 3 "+
+			"(the plain step keeps the column)", got)
+	}
+}
+
+// Alt+Up is move-line and must stay that way on an armed host: the meta
+// branch runs first in that case, and testing for "any modifier" there
+// would swallow the older binding.
+func TestMetaFileMotionDoesNotShadowMoveLine(t *testing.T) {
+	armMetaHost(t)
+	a := metaFileTab(t)
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModAlt))
+
+	if got := a.activeTabPtr().Buffer.Lines[0]; got != "middle line" {
+		t.Fatalf("Alt+Up left line 0 as %q, want the middle line moved up", got)
 	}
 }

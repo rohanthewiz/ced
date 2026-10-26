@@ -77,8 +77,10 @@
 // later (cats ed4962c) — the one row here bound after the gate had
 // already opened, and it needed no change on this side either.
 //
-// What is still the HOST's to decide, per chord: ⌘W ⌘T ⌘L ⌘R ⌘N ⌘Q stay
-// the browser's on purpose. The cats mac app was confirmed by hand on
+// What is still the HOST's to decide, per chord: ⌘W ⌘T ⌘R ⌘N ⌘Q stay
+// the browser's on purpose. ⌘L was on that list until cats handed it
+// down too (2026-10-25): with a kitty-protocol pane focused, Chrome's
+// "focus the address bar" is the price of Go to line. The cats mac app was confirmed by hand on
 // 2026-08-14 to pass this layer through — Cocoa resolves ⌘ menu key
 // equivalents before the WebView, and catapp's menus claim none of these
 // chords, so they reach the same handler the browser front end uses.
@@ -164,7 +166,16 @@ func metaAccels() []metaAccel {
 		// modifier would make ⌘D and Esc-d mean different things.
 		{key: 'd', action: (*App).menuDuplicateLines, label: "Duplicate line"},
 		{key: '/', action: (*App).menuToggleLineComment, label: "Toggle comment"},
-		{key: 'g', action: (*App).menuGoToLine, label: "Go to line"},
+		// ⌘L is Go to line — GoLand's spelling — and ⌘G toggles the git
+		// changes panel (Esc-g's verb, the ≡ Git "Show git panel" row), so
+		// the letter matches the Esc key it is a second door onto. ⌘G was
+		// Go to line until 2026-10-25; it moved because Go to line had
+		// another well-known keycap to go to and the git panel had none.
+		// ⌘L only arrives because cats added KeyL to its CMD_TO_PANE
+		// allowlist the same day — before that the browser kept it for
+		// the address bar (see the file comment's host list).
+		{key: 'l', action: (*App).menuGoToLine, label: "Go to line"},
+		{key: 'g', action: (*App).menuToggleGitPanel, label: "Git panel"},
 		// ⌘E is the recent-files ring (recentfiles.go), added once 3.4
 		// gave it a picker to open — the VS Code / GoLand spelling, where
 		// the gesture people actually perform is ⌘E-Enter to flip back to
@@ -213,10 +224,11 @@ func metaAccels() []metaAccel {
 		//     sensitive (the compare panel, the chat composer and the
 		//     terminal each claim their own paste), which is exactly the
 		//     shape a flat table cannot express.
-		//   ⌘← / ⌘→ — line start / line end. Not runes, so they cannot
-		//     be table rows at all; they are arrow keys carrying
-		//     ModMeta and they dispatch from the editing switch in
-		//     handleKey, beside Alt+Up/Down. See metaLineMotion.
+		//   ⌘← / ⌘→ — line start / line end, and ⌘↑ / ⌘↓ — top / end
+		//     of the file. Not runes, so they cannot be table rows at
+		//     all; they are arrow keys carrying ModMeta and they
+		//     dispatch from the editing switch in handleKey, beside
+		//     Alt+Up/Down. See metaLineMotion.
 		//   everything in metaReserved, below.
 	}
 }
@@ -331,7 +343,14 @@ func (a *App) metaAccelFire(ev *tcell.EventKey) bool {
 }
 
 // metaLineMotion reports whether ev is a Command-modified arrow — the
-// macOS ⌘←/⌘→ line-motion chord — rather than a plain arrow keystroke.
+// macOS ⌘←/⌘→ line-motion chord, or ⌘↑/⌘↓ for the top / end of the
+// file — rather than a plain arrow keystroke. The name predates the
+// vertical pair; the gate is the same for all four.
+//
+// Their guaranteed twins: Home/End for the horizontal pair, and for the
+// vertical one Esc-j (go to line clamps, so 1 is the top and any large
+// number the last line) or PgUp/PgDn held down. In the markdown preview
+// the vertical pair scrolls to the top / bottom, Home/End's twin there.
 //
 // It is NOT an entry in metaAccels, and it can't be: that table is keyed
 // by RUNE and dispatches a global verb, while this is an arrow key whose

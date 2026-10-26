@@ -19,8 +19,9 @@ syntax-highlighted editor, status bar. One static Go binary, no CGO.
 - **`Cmd+` is a BONUS LAYER** (metakeys.go): every ⌘ chord is a second
   door onto a verb the Esc table or ≡ menu already reaches
   (`TestMetaAccelsAreNeverTheOnlyPath`). Arrives only via the kitty
-  protocol as `ModMeta`, gated by `metaAccelArmed`. `⌘←/⌘→` are the one
-  pair dispatched from the editing switch, not the rune table.
+  protocol as `ModMeta`, gated by `metaAccelArmed`. `⌘←/⌘→` and `⌘↑/⌘↓`
+  (line start/end, file top/end) are dispatched from the editing switch,
+  not the rune table.
 - **tmux folds Esc sequences into Alt events**: a fast double-Esc arrives
   as `KeyEsc+ModAlt`, "Esc s" as `Alt+s`. handleKey treats Alt+Esc as the
   menu toggle and Alt+<bound rune> as that leader. Keep those branches.

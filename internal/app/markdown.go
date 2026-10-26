@@ -167,8 +167,20 @@ func (a *App) handleMarkdownKey(t *editor.Tab, ev *tcell.EventKey) bool {
 	}
 	switch ev.Key() {
 	case tcell.KeyUp:
+		// ⌘↑ / ⌘↓ mean top / bottom of the document in the preview as
+		// they do in the source (the editing switch in handleKey), so
+		// the chord doesn't change meaning when Esc-v flips the view.
+		// Same gate: an Option-as-Meta host keeps the plain step.
+		if a.metaLineMotion(ev) {
+			t.MDScroll = 0
+			break
+		}
 		t.MDScrollBy(-mdKeyScrollRows, total, eh)
 	case tcell.KeyDown:
+		if a.metaLineMotion(ev) {
+			t.MDScroll = t.MDMaxScroll(total, eh)
+			break
+		}
 		t.MDScrollBy(mdKeyScrollRows, total, eh)
 	case tcell.KeyPgUp:
 		t.MDScrollBy(-page, total, eh)

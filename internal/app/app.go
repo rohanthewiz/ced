@@ -3357,6 +3357,19 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 
 	switch ev.Key() {
 	case tcell.KeyUp:
+		// ⌘↑ is the macOS "top of the document": line 0, column 0 —
+		// not merely the first line at the current column, which is
+		// what every Mac text view does and so what the hand expects.
+		// It goes through MoveCursorTo because it is a JUMP, not a
+		// motion: secondary carets are dropped (the user pointed at one
+		// place), and ⌘⇧↑ keeps the anchor so it selects to the top.
+		// Checked BEFORE Alt so a host reporting both bits reads as the
+		// Command chord; the gate (metaLineMotion) is what keeps an
+		// Option-as-Meta terminal's Alt+Up on MoveLines.
+		if a.metaLineMotion(ev) {
+			tab.MoveCursorTo(editor.Position{}, extend)
+			return
+		}
 		// Alt+Up drags the current line (or selected block) up a row.
 		// tmux may deliver the gesture as ESC-prefixed arrows, which
 		// tcell folds into ModAlt the same way as the leader keys.
@@ -3366,6 +3379,11 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		}
 		tab.MoveCursor(-1, 0, extend)
 	case tcell.KeyDown:
+		// ⌘↓ is ⌘↑'s pair: the end of the last line.
+		if a.metaLineMotion(ev) {
+			tab.MoveCursorTo(tab.Buffer.EndPos(), extend)
+			return
+		}
 		if ev.Modifiers()&tcell.ModAlt != 0 {
 			tab.MoveLines(1)
 			return

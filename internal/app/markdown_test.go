@@ -99,6 +99,28 @@ func TestMarkdownView_SwallowsEditingKeys(t *testing.T) {
 	}
 }
 
+// TestMarkdownView_MetaArrowsReachTheEnds pins ⌘↑ / ⌘↓ in the preview:
+// top and bottom, the same meaning the chord has in the source view, not
+// the plain arrows' three-row step.
+func TestMarkdownView_MetaArrowsReachTheEnds(t *testing.T) {
+	armMetaHost(t)
+	a := newTestApp(t, t.TempDir())
+	openMD(t, a, "doc.md", strings.Repeat("a paragraph of prose\n\n", 200))
+	a.toggleMarkdownView()
+	tab := a.activeTabPtr()
+	_, _, _, eh := a.editorRect()
+	bottom := tab.MDMaxScroll(len(a.markdownRows(tab)), eh)
+
+	a.handleKey(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModMeta))
+	if tab.MDScroll != bottom {
+		t.Fatalf("Cmd+Down left MDScroll at %d, want %d (bottom)", tab.MDScroll, bottom)
+	}
+	a.handleKey(tcell.NewEventKey(tcell.KeyUp, 0, tcell.ModMeta))
+	if tab.MDScroll != 0 {
+		t.Fatalf("Cmd+Up left MDScroll at %d, want 0 (top)", tab.MDScroll)
+	}
+}
+
 // TestMarkdownView_NavigationKeysScroll pins the carve-out: dropping
 // EVERY key would leave the preview unscrollable from a keyboard, which
 // on a terminal that eats mouse events means unreadable.

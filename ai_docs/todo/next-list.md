@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-088**
+**Next ID: N-090**
 
 ## Open
 
@@ -124,6 +124,13 @@ plus the LSP work done in the seeding session itself
   pattern). Watch the git panel's hunk chips and compare `[↺]`, which
   must keep winning their presses. Copied text is the DISPLAY form
   (tabs expanded) — revisit if lifting tab-indented code bites.
+
+- **N-089** · raised `2026-1025-2017-cmd-up-down-l-g-chords` · value low
+  cats-side: the help overlay's "sent to an editor pane, not the browser"
+  row (`cmd/catway/web/js/32-help.js`) omits ⌘A and ⌘X, both of which
+  are in `CMD_TO_PANE` and forwarded. Noticed while adding ⌘↑ ⌘↓ ⌘L to
+  that row; nothing pins the row against the set, so it drifts each time
+  a chord joins.
 
 ## Validate
 
@@ -326,6 +333,19 @@ and `raised`.
   through tmux passthrough (paste it outside ced), split mode stays on
   the pressed side, dragging onto a clipped row's … takes the line's
   tail, and Esc / a click elsewhere drops the highlight.
+
+- **N-088** · raised `2026-1025-2017-cmd-up-down-l-g-chords` · value medium
+  ⌘↑ / ⌘↓ (top / end of file, ⌘⇧ selecting; the markdown preview's top /
+  bottom), ⌘L (Go to line, moved from ⌘G) and ⌘G (git panel toggle) ran
+  only under the simulation screen. cats `9409f6c` added ArrowUp,
+  ArrowDown and KeyL to `CMD_TO_PANE`; the user first saw ⌘↑ do nothing
+  in cats before that change. Hand check after `make macapp` and a
+  relaunch, in the cats MAC APP and in CHROME: all four chords reach a
+  ced pane, ⌘⇧↑ selects, and a shell pane still gets the browser's ⌘L.
+  ⌘L in Chrome is the doubtful one: Open Location is a menu item, and
+  Chrome may resolve it natively the way it does ⌘E (`ed4962c`). If it
+  does, note it in metakeys.go / 20-keys.js like ⌘E; Esc j stays the way
+  in.
 
 ## Roadmap
 

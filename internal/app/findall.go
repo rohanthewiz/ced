@@ -248,13 +248,20 @@ type findAllModal struct {
 	// background reload that clamped the cursor for a good reason.
 	previewed bool
 
-	// clicked records that the user PICKED a row with a single click
-	// (in-file mode). It flips what Esc means: before any click the list
-	// is a peek and Esc puts the view back; after one, the click was the
-	// answer and Esc keeps it (escape). Keyboard walking never sets it —
-	// arrows are browsing, a click is choosing. ↺ revert loc is the way
+	// picked records that the user CHOSE a row themselves — a single
+	// click on it, or walking the highlight with the keyboard (↑↓, PgUp/
+	// PgDn, Home/End). It flips what Esc means: before any pick the list
+	// is a peek and Esc puts the view back; after one, the row moved to
+	// was the answer and Esc keeps it (escape). ↺ revert loc is the way
 	// back from either state.
-	clicked bool
+	//
+	// Keyboard walking counts too (N-092): the two gestures preview the
+	// same way, so a list where Esc kept a clicked row but threw away an
+	// arrowed-to one would make the same screen mean two things. Only
+	// the list's OWN moves don't pick — the open's nearest-hit preview,
+	// ⟳'s re-anchor, a dismissal sliding the highlight — which is why
+	// the flag is set at the gestures, not in selectRow.
+	picked bool
 
 	// project switches the list from "occurrences in this buffer" to
 	// "occurrences in the project" (projectsearch.go). It changes three
@@ -734,10 +741,11 @@ func (m *findAllModal) captureOrigin(a *App) {
 	m.originScrollX = tab.ScrollX
 }
 
-// escape is the list's Esc, and it depends on whether a row was CLICKED:
+// escape is the list's Esc, and it depends on whether a row was PICKED
+// (clicked, or walked to with the keyboard — see picked):
 //
-//	no click yet  →  abort: the walk was a peek, put the view back
-//	clicked a row →  accept: the click was the choice, stay on it
+//	nothing picked →  abort: only the open's own preview moved, put it back
+//	picked a row   →  accept: that was the choice, stay on it
 //
 // Project mode always aborts, which already keeps the user where a click
 // took them — its abort restores nothing (walking previews nothing, and
@@ -745,7 +753,7 @@ func (m *findAllModal) captureOrigin(a *App) {
 // WRONG after arrowing: accept opens the HIGHLIGHTED row's file, which is
 // not the one on screen.
 func (m *findAllModal) escape(a *App) {
-	if m.clicked && !m.project {
+	if m.picked && !m.project {
 		m.accept(a)
 		return
 	}
@@ -757,16 +765,16 @@ func (m *findAllModal) escape(a *App) {
 // previews, clicks, project-mode jumps into other files.
 //
 // Unpinned it then closes, being the explicit "cancel" now that Esc may
-// keep a clicked row. Pinned it leaves the panel up: the panel is
+// keep a picked row. Pinned it leaves the panel up: the panel is
 // furniture that only ✕ closes, and a worklist the user wants to keep
 // working through shouldn't vanish because they glanced back home.
 //
 // The modal closes BEFORE the switch and the restore so the band the
 // editor is measured against is the full one; RestoreView writes the
-// captured scroll verbatim either way. clicked is cleared so a pinned
+// captured scroll verbatim either way. picked is cleared so a pinned
 // list that is later unpinned starts again from the peek contract.
 func (m *findAllModal) revertLocation(a *App) {
-	m.clicked = false
+	m.picked = false
 	if !m.pinned {
 		m.restoreFind(a)
 		a.closeModal()
@@ -784,6 +792,22 @@ func (m *findAllModal) revertLocation(a *App) {
 	// auto-save of the departing tab); it is a no-op on the active tab.
 	a.switchToTab(idx)
 	tab.RestoreView(m.origin, m.originAnchor, m.originScrollY, m.originScrollX)
+}
+
+// menuFindAllRevert is the ≡ Find row "Find all: revert location" — the
+// keyboard door to ↺ for a PINNED panel, whose list no longer holds the
+// keyboard (the editor does), so its `r` can't be typed. Unpinned the
+// list owns the keyboard and r is the door; the ≡ menu can't open over
+// it anyway (a click outside accepts the list). With no list up the row
+// stays clickable and says why, the house rule for unavailable rows.
+func (a *App) menuFindAllRevert() {
+	a.closeMenu()
+	m := a.findAllVisible()
+	if m == nil {
+		a.flash("Revert location: no Find all list is open")
+		return
+	}
+	m.revertLocation(a)
 }
 
 // restoreFind hands the tab's find state back. The popup only borrowed it
@@ -1440,7 +1464,7 @@ func rowLabelText(label string, width int) string {
 // its keys). List focus:
 //
 //	Esc              abort — put the cursor and viewport back; once a row
-//	                 was CLICKED, accept instead (see escape)
+//	                 was PICKED (clicked or walked to), accept instead
 //	Enter            accept — keep the previewed position
 //	Up/Down          preview the neighbouring hit
 //	PgUp/PgDn        preview a page away
@@ -1449,6 +1473,7 @@ func rowLabelText(label string, width int) string {
 //	d                flip the dock (top strip ⇄ right column)
 //	p                pin / unpin
 //	r                revert loc — back to where the list opened, close
+//	a                ⟳ re-run the search ("again"; r was taken by revert)
 //	/                jump to the filter box
 //
 // Field focus hands ordinary editing keys to the field; Enter and Esc
@@ -1478,6 +1503,8 @@ func (m *findAllModal) handleKey(a *App, ev *tcell.EventKey) {
 			m.togglePin(a)
 		case 'r', 'R':
 			m.revertLocation(a)
+		case 'a', 'A':
+			m.rerun(a)
 		case '/':
 			m.focus = findAllFocusFilter
 		}
@@ -1489,16 +1516,22 @@ func (m *findAllModal) handleKey(a *App, ev *tcell.EventKey) {
 		m.dismissRow(a, m.selected)
 	case tcell.KeyUp:
 		m.moveSelection(a, -1)
+		m.picked = true
 	case tcell.KeyDown:
 		m.moveSelection(a, 1)
+		m.picked = true
 	case tcell.KeyPgUp:
 		m.moveSelection(a, -m.visibleRows(a))
+		m.picked = true
 	case tcell.KeyPgDn:
 		m.moveSelection(a, m.visibleRows(a))
+		m.picked = true
 	case tcell.KeyHome:
 		m.selectRow(a, 0)
+		m.picked = true
 	case tcell.KeyEnd:
 		m.selectRow(a, len(m.view)-1)
+		m.picked = true
 	}
 }
 
@@ -1735,11 +1768,11 @@ func (m *findAllModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		m.accept(a)
 		return
 	}
-	// A single click on a row is a CHOICE, not a walk: from here on Esc
-	// keeps the clicked location rather than putting the old view back
-	// (escape). Pinned, Esc never reaches the list, so this only matters
-	// once it is unpinned again — where the same reading holds.
-	m.clicked = true
+	// A single click on a row is a CHOICE: from here on Esc keeps the
+	// clicked location rather than putting the old view back (escape).
+	// Pinned, Esc never reaches the list, so this only matters once it is
+	// unpinned again — where the same reading holds.
+	m.picked = true
 	// In-file, selectRow's preview has already moved the editor onto the
 	// row. Project mode previews nothing on a SELECTION (keyboard walking
 	// must not open a file per row), but a click is one gesture per

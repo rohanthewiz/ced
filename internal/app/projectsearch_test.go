@@ -792,7 +792,7 @@ func TestProjectSearch_EscAfterAJumpStaysInTheJumpedFile(t *testing.T) {
 	m := a.modal.(*findAllModal)
 	m.selected = 0
 	m.jumpToSelected(a)
-	m.clicked = true // as a row click would leave it
+	m.picked = true // as a row click would leave it
 	m.handleKey(a, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
 
 	if a.modal != nil {

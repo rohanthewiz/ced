@@ -267,10 +267,20 @@ func TestButtonTip_FindAllModalButtonsAreLabelled(t *testing.T) {
 	if tip, ok := a.buttonTipAt(m.rerunRect(a).x, m.rerunRect(a).y); !ok || tip.text[0] != "Run the search again" {
 		t.Errorf("rerun label = %+v", tip)
 	}
-	// ↺ revert loc names its key twin while the list owns the keyboard.
+	// ↺ revert loc and ⟳ name their key twins while the list owns the
+	// keyboard; pinned, revert points at its ≡ row and ⟳ has none.
 	if tip, ok := a.buttonTipAt(m.revertRect(a).x, m.revertRect(a).y); !ok ||
 		!strings.HasPrefix(tip.text[0], "Revert location") || tip.keys != "r" {
 		t.Errorf("revert label = %+v", tip)
+	}
+	if tip, _ := a.buttonTipAt(m.rerunRect(a).x, m.rerunRect(a).y); tip.keys != "a" {
+		t.Errorf("rerun keys = %q, want a", tip.keys)
+	}
+	m.togglePin(a)
+	a.draw()
+	if tip, ok := a.buttonTipAt(m.revertRect(a).x, m.revertRect(a).y); !ok ||
+		!strings.Contains(tip.keys, "Find all: revert location") {
+		t.Errorf("pinned revert label = %+v, want the ≡ row named", tip)
 	}
 }
 

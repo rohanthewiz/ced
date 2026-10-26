@@ -528,6 +528,10 @@ func builtinMenuGroups() []menuGroup {
 		{title: "Find", collapsible: true, items: []menuItemDef{
 			{label: "Find in file", shortcut: "esc f", action: (*App).menuFind, enabled: (*App).hasFindable},
 			{label: "Find all in file", shortcut: "esc F", action: (*App).menuFindAll, enabled: (*App).hasFindAll},
+			// ↺ revert loc for a PINNED list, whose `r` the editor owns
+			// (findall.go, menuFindAllRevert). Always enabled: with no
+			// list up it flashes why rather than dimming.
+			{label: "Find all: revert location", action: (*App).menuFindAllRevert, enabled: alwaysTrue},
 			// Replace opens the same bar with its second row showing —
 			// one surface, two rows, rather than a separate dialog.
 			{label: "Replace in file", shortcut: "esc e", action: (*App).menuReplace, enabled: (*App).hasReplaceable},

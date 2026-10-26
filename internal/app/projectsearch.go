@@ -608,22 +608,22 @@ func (m *findAllModal) footerHints() []string {
 	}
 	if m.project {
 		return []string{
-			" ↑↓ walk · enter open · del dismiss · / filter · p pin · r revert loc · esc close ",
+			" ↑↓ walk · enter open · del dismiss · / filter · p pin · a re-run · r revert loc · esc close ",
 			" ↑↓ walk · enter open · del dismiss · / filter · p pin · esc close ",
 			" ↑↓ walk · enter open · / filter · esc close ",
 			" enter open · esc close ",
 			" esc close ",
 		}
 	}
-	// Esc's word follows escape: "back" while the walk is a peek, "stay"
-	// once a click has chosen a row — the hint is the only place the
+	// Esc's word follows escape: "back" until the user picks a row, "stay"
+	// once a click or a keyboard walk has — the hint is the only place the
 	// switch is visible, so it must say which one is live.
 	esc := "esc back"
-	if m.clicked {
+	if m.picked {
 		esc = "esc stay"
 	}
 	return []string{
-		" ↑↓ preview · enter accept · del dismiss · / filter · p pin · d dock · r revert loc · " + esc + " ",
+		" ↑↓ preview · enter accept · del dismiss · / filter · p pin · d dock · a re-run · r revert loc · " + esc + " ",
 		" ↑↓ preview · enter accept · del dismiss · / filter · p pin · d dock · " + esc + " ",
 		" ↑↓ preview · enter accept · / filter · r revert loc · " + esc + " ",
 		" enter accept · " + esc + " ",

@@ -455,15 +455,16 @@ func (a *App) findAllButtonTips(m *findAllModal) []buttonTip {
 	if a.findAllDockRight {
 		dock = "Dock the list across the top"
 	}
-	// r is the revert button's key twin only while the list holds the
-	// keyboard; pinned, the editor owns the keys and the button is the door.
-	revertKeys := "r"
+	// r / a are the revert and re-run buttons' key twins only while the
+	// list holds the keyboard; pinned, the editor owns the keys, so revert
+	// names its ≡ row instead and re-run is the button alone.
+	revertKeys, rerunKeys := "r", "a"
 	if m.pinned {
-		revertKeys = ""
+		revertKeys, rerunKeys = "≡ Find › Find all: revert location", ""
 	}
 	tips := []buttonTip{
 		{rect: m.revertRect(a), text: []string{"Revert location: back to where the list opened"}, keys: revertKeys},
-		{rect: m.rerunRect(a), text: []string{"Run the search again"}},
+		{rect: m.rerunRect(a), text: []string{"Run the search again"}, keys: rerunKeys},
 		{rect: m.pinRect(a), text: []string{pin}},
 		{rect: m.dockRect(a), text: []string{dock}},
 	}

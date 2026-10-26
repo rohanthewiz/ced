@@ -455,9 +455,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 
 ### Find-all list + project search (app/findall.go, projectsearch.go, internal/search)
 - A PEEK, not a picker: moving the highlight moves the cursor live, Esc
-  restores via `RestoreView`, other dismissals accept. A single ROW CLICK
-  (`findAllModal.clicked`, in-file only) flips Esc to accept (`escape`);
-  arrows never do. `↺ revert loc` (`revertRect`, key `r`) restores the
+  restores via `RestoreView`, other dismissals accept. A PICK — a row click or
+  a keyboard walk (`findAllModal.picked`, set at the gestures, NOT in
+  `selectRow`; in-file only) — flips Esc to accept (`escape`); the open's
+  own preview, ⟳ and dismissals don't pick. `↺ revert loc` (`revertRect`, key `r`) restores the
   CAPTURED origin (`captureOrigin`, every producer, tab by pointer) in
   every mode — closes unpinned, leaves a pinned panel up.
 - Takes rows/columns OUT of the editor (`editorBandRows` → `editorRect`),
@@ -1263,8 +1264,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 188 group
-  actions + 15 headers (205), height 211, dividers `[2, 5, 208]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 189 group
+  actions + 15 headers (206), height 212, dividers `[2, 5, 209]`; also
   the Git fold count in `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.

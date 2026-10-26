@@ -170,10 +170,11 @@ func TestFindAll_OpensOnNearestMatch(t *testing.T) {
 	}
 }
 
-// TestFindAll_ArrowsPreviewAndEscRestores is the feature's core loop:
-// walking the list moves the editor's cursor live, and Esc puts the view
-// back exactly where it started.
-func TestFindAll_ArrowsPreviewAndEscRestores(t *testing.T) {
+// TestFindAll_ArrowsPreviewAndRevertRestores is the feature's core loop:
+// walking the list moves the editor's cursor live, and ↺ revert loc (r)
+// puts the view back exactly where it started. (Esc after a walk STAYS —
+// the walk was a pick; TestFindAll_ArrowWalkPicksTheRow.)
+func TestFindAll_ArrowsPreviewAndRevertRestores(t *testing.T) {
 	a, tab := seedFindAllApp(t)
 	tab.MoveCursorTo(editor.Position{Line: 0, Col: 3}, false)
 	tab.ScrollY = 0
@@ -191,9 +192,9 @@ func TestFindAll_ArrowsPreviewAndEscRestores(t *testing.T) {
 		t.Fatalf("preview cursor = %v, want line %d col %d", tab.Cursor, want.line, want.col)
 	}
 
-	m.handleKey(a, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'r', tcell.ModNone))
 	if a.modal != nil {
-		t.Error("Esc should close the list")
+		t.Error("r should close the list")
 	}
 	if tab.Cursor != origin {
 		t.Errorf("cursor = %v after abort, want the original %v", tab.Cursor, origin)
@@ -213,8 +214,12 @@ func TestFindAll_AbortRestoresScrollWithoutSnapping(t *testing.T) {
 	tab.MoveCursorTo(editor.Position{Line: 0, Col: 0}, false)
 	tab.ScrollY = 40 // wheeled far down, away from the cursor
 
+	// No walk: the open's own preview (centering the hit at line 0) is
+	// the only motion, so Esc is still the abort — a walk would pick.
 	m := openFindAllT(t, a, "count")
-	m.handleKey(a, tcell.NewEventKey(tcell.KeyEnd, 0, tcell.ModNone))
+	if tab.ScrollY == 40 {
+		t.Fatal("setup: the open's preview should have moved the view")
+	}
 	m.handleKey(a, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
 
 	if tab.ScrollY != 40 {
@@ -1739,8 +1744,8 @@ func TestFindAll_EscAfterClickKeepsTheClickedRow(t *testing.T) {
 	mx, my, _, _ := m.rect(a)
 
 	m.handleMouse(a, mx+8, my+4+2, tcell.Button1) // third visible row
-	if !m.clicked {
-		t.Fatal("a single click on a row should mark the list clicked")
+	if !m.picked {
+		t.Fatal("a single click on a row should mark the list picked")
 	}
 	want := m.rows[2]
 	m.handleKey(a, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
@@ -1775,20 +1780,58 @@ func TestFindAll_EscAfterClickThenArrowsKeepsTheCurrentRow(t *testing.T) {
 	}
 }
 
-// TestFindAll_ArrowWalkLeavesEscAsRestore guards the other half: keyboard
-// walking is browsing, not choosing, so it never arms the click rule.
-func TestFindAll_ArrowWalkLeavesEscAsRestore(t *testing.T) {
+// TestFindAll_ArrowWalkPicksTheRow pins N-092: walking the highlight with
+// the keyboard is a pick like a click, so Esc keeps the row walked to —
+// for every walking key, not just the arrows.
+func TestFindAll_ArrowWalkPicksTheRow(t *testing.T) {
+	for _, k := range []tcell.Key{tcell.KeyDown, tcell.KeyUp, tcell.KeyPgDn, tcell.KeyPgUp, tcell.KeyHome, tcell.KeyEnd} {
+		a, tab := seedFindAllApp(t)
+		tab.MoveCursorTo(editor.Position{Line: 0, Col: 1}, false)
+		m := openFindAllT(t, a, "count")
+		m.handleKey(a, tcell.NewEventKey(k, 0, tcell.ModNone))
+		if !m.picked {
+			t.Errorf("%v must mark the list picked", tcell.KeyNames[k])
+			continue
+		}
+		want := m.rows[m.view[m.selected]]
+		m.handleKey(a, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+		if a.modal != nil {
+			t.Errorf("%v then Esc should close the list", tcell.KeyNames[k])
+		}
+		if tab.Cursor.Line != want.line || tab.Cursor.Col != want.col {
+			t.Errorf("%v then Esc: cursor = %v, want the walked-to line %d col %d",
+				tcell.KeyNames[k], tab.Cursor, want.line, want.col)
+		}
+	}
+}
+
+// TestFindAll_EscWithoutAPickRestores: with no click and no walk the only
+// thing that moved the cursor is the open's own nearest-hit preview, and
+// Esc takes that back — the peek contract for "I looked, never mind".
+func TestFindAll_EscWithoutAPickRestores(t *testing.T) {
 	a, tab := seedFindAllApp(t)
-	tab.MoveCursorTo(editor.Position{Line: 0, Col: 1}, false)
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 3}, false)
 	origin := tab.Cursor
 	m := openFindAllT(t, a, "count")
-	m.handleKey(a, tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
-	if m.clicked {
-		t.Fatal("arrows must not mark the list clicked")
+	if tab.Cursor == origin {
+		t.Fatal("setup: opening should preview the nearest hit")
 	}
 	m.handleKey(a, tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
-	if tab.Cursor != origin {
-		t.Errorf("cursor = %v after walk+Esc, want the origin %v", tab.Cursor, origin)
+	if a.modal != nil || tab.Cursor != origin {
+		t.Errorf("Esc with no pick: modal=%v cursor=%v, want closed at %v", a.modal != nil, tab.Cursor, origin)
+	}
+}
+
+// TestFindAll_RerunAndDismissDoNotPick: the list's OWN highlight moves —
+// ⟳ re-anchoring, a dismissal sliding the highlight down — are not the
+// user choosing a row, so Esc is still the restore after them.
+func TestFindAll_RerunAndDismissDoNotPick(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	m.rerun(a)
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyDelete, 0, tcell.ModNone))
+	if m.picked {
+		t.Fatal("⟳ and a dismissal must not mark the list picked")
 	}
 }
 
@@ -1799,8 +1842,8 @@ func TestFindAll_ButtonClicksDoNotArmEsc(t *testing.T) {
 	m := openFindAllT(t, a, "count")
 	btn := m.dockRect(a)
 	m.handleMouse(a, btn.x+1, btn.y, tcell.Button1)
-	if m.clicked {
-		t.Fatal("a title-button click must not mark the list clicked")
+	if m.picked {
+		t.Fatal("a title-button click must not mark the list picked")
 	}
 }
 
@@ -1937,7 +1980,7 @@ func TestFindAll_FooterHintNamesEscsCurrentMeaning(t *testing.T) {
 	if h := m.footerHints()[0]; !strings.Contains(h, "esc back") || !strings.Contains(h, "r revert loc") {
 		t.Errorf("hint before a click = %q, want esc back and r revert loc", h)
 	}
-	m.clicked = true
+	m.picked = true
 	if h := m.footerHints()[0]; !strings.Contains(h, "esc stay") {
 		t.Errorf("hint after a click = %q, want esc stay", h)
 	}
@@ -2110,5 +2153,71 @@ func TestFindAllSeam_DrawsTheGrip(t *testing.T) {
 	}
 	if grip != 3 || rule != mh-3 {
 		t.Errorf("seam = %d grip + %d rule cells, want 3 + %d", grip, rule, mh-3)
+	}
+}
+
+// TestFindAll_RerunKeyIsTheKeyboardTwin pins N-091's first half: the list
+// owns the keyboard, so ⟳ needs a key of its own — `a` ("again"). It
+// re-asks the same question of the buffer as it is now.
+func TestFindAll_RerunKeyIsTheKeyboardTwin(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	m := openFindAllT(t, a, "count")
+	before := len(m.rows)
+	tab.Buffer.Lines = append(tab.Buffer.Lines, "count again")
+	tab.EditRev++
+
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone))
+	if len(m.rows) != before+1 {
+		t.Errorf("rows = %d after a, want %d — the new occurrence", len(m.rows), before+1)
+	}
+	if a.modal != m {
+		t.Error("re-running must keep the list open")
+	}
+	if !strings.Contains(m.footerHints()[0], "a re-run") {
+		t.Errorf("widest hint %q should teach a re-run", m.footerHints()[0])
+	}
+}
+
+// TestFindAll_MenuRevertRowServesThePinnedPanel pins N-091's second half:
+// pinned, the editor owns the keys, so ≡ Find "Find all: revert location"
+// is ↺'s keyboard door — it restores the origin and leaves the panel up.
+func TestFindAll_MenuRevertRowServesThePinnedPanel(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.MoveCursorTo(editor.Position{Line: 0, Col: 2}, false)
+	origin := tab.Cursor
+	m := openFindAllT(t, a, "count")
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyEnd, 0, tcell.ModNone))
+	m.togglePin(a)
+	if tab.Cursor == origin {
+		t.Fatal("setup: the walk should have moved the cursor")
+	}
+
+	a.menuFindAllRevert()
+	if tab.Cursor != origin {
+		t.Errorf("cursor = %v after the ≡ row, want the origin %v", tab.Cursor, origin)
+	}
+	if a.findAllPin != m {
+		t.Error("the ≡ row must leave a pinned panel up, like its ↺ button")
+	}
+}
+
+// TestFindAll_MenuRevertRowExplainsWithNoList: the row is never dimmed;
+// with nothing to revert it says so (the unavailable-row house rule).
+func TestFindAll_MenuRevertRowExplainsWithNoList(t *testing.T) {
+	a, _ := seedFindAllApp(t)
+	a.menuFindAllRevert()
+	if !strings.Contains(a.statusMsg, "no Find all list is open") {
+		t.Errorf("flash = %q, want the reason", a.statusMsg)
+	}
+	found := false
+	for _, g := range builtinMenuGroups() {
+		for _, it := range g.items {
+			if it.label == "Find all: revert location" && g.title == "Find" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("≡ Find should carry the \"Find all: revert location\" row")
 	}
 }

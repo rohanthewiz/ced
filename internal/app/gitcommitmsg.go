@@ -420,11 +420,38 @@ func (a *App) handleGitCommitDiff(e *gitCommitDiffEvent) {
 		a.chatSendPrompt(commitSuggestPrompt(e.files, e.diff))
 	case a.chat.starting:
 		// The handshake is still in flight. Queue like the composer
-		// does — but without a pending request, because the queued
-		// send happens under a generation we can't name yet; the
-		// answer then simply lands in the transcript to copy.
+		// does, and claim the answer exactly as the ready branch does.
+		//
+		// This is the COMMON path, not a corner: the ✦ button starts
+		// the agent (commitDraftBlockedReason) and forks `git diff` in
+		// the same gesture, and the diff is back in milliseconds while
+		// the ACP handshake takes seconds. Queuing without a pending
+		// request meant the first draft after launch only ever landed
+		// in the transcript and the commit prompt never came back.
+		//
+		// The generation IS nameable here: connSeq moves only in
+		// chatDisconnect, and the in-flight start was launched under
+		// the current value (chatEnsureStarted captures it, and
+		// handleChatReady drops a mismatch) — so the queued send that
+		// handleChatReady flushes runs under this same seq. A start
+		// that fails instead goes through chatDisconnect, which drops
+		// the request with the connection.
+		//
+		//   ✦ ──► chatEnsureStarted (starting, seq N)
+		//    └──► git diff ──► here: queue + claim{seq N, mark}
+		//                ready(seq N) ──► queued send ──► turn done(seq N)
+		//                                                └──► prompt reopens
+		//
+		// The mark is taken AFTER the "starting" note so only the
+		// agent's prose is read back as the draft.
 		a.chat.queuedPrompt = commitSuggestPrompt(e.files, e.diff)
 		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: "starting " + a.chatAgent().name + " chat — the request will send shortly"})
+		a.chat.commitSuggest = &commitSuggestReq{
+			files:   e.files,
+			seq:     a.chat.connSeq,
+			mark:    len(a.chat.msgs),
+			trailer: e.trailer,
+		}
 	default:
 		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: a.chatAgent().name + " chat is not running — " + chatAgentRetryHint + " to restart"})
 	}

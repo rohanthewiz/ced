@@ -183,6 +183,68 @@ func TestHandleGitCommitDiff_SendsTurn(t *testing.T) {
 	}
 }
 
+// TestHandleGitCommitDiff_QueuedBehindStartReopensPrompt pins the
+// first-use path: the ✦ button starts the agent and collects the diff in
+// one gesture, so the diff usually arrives while the handshake is still
+// in flight. The request must still be claimed — once the agent is
+// ready the queued turn sends, and its answer reopens the commit prompt
+// pre-filled instead of being stranded in the transcript.
+func TestHandleGitCommitDiff_QueuedBehindStartReopensPrompt(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+	a.chat.starting = true
+	files := []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
+
+	a.handleGitCommitDiff(&gitCommitDiffEvent{when: time.Now(), files: files, diff: "@@ -1 +1 @@\n+new", trailer: true})
+	if a.chat.queuedPrompt == "" {
+		t.Fatal("the ask was not queued behind the start")
+	}
+	if a.chat.commitSuggest == nil {
+		t.Fatal("the queued ask has no pending request; its answer would never reach the prompt")
+	}
+
+	// The handshake lands under the generation the start was launched
+	// with, and flushes the queued ask as a real turn.
+	fake := &fakeCopilotConn{}
+	a.handleChatReady(&chatReadyEvent{when: time.Now(), seq: a.chat.connSeq, client: fake, sessionID: "sess-1"})
+	waitForCopilot(t, "session/prompt", func() bool {
+		return len(fake.paramsFor("session/prompt")) == 1
+	})
+
+	a.chatAppendMsg(chatMsg{role: chatRoleAgent, text: "Add the queued draft"})
+	a.handleChatTurnDone(&chatTurnDoneEvent{when: time.Now(), seq: a.chat.connSeq})
+
+	m, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the commit prompt reopened", a.modal)
+	}
+	if got := m.field.String(); got != "Add the queued draft" {
+		t.Errorf("prefill = %q, want only the agent's answer", got)
+	}
+	if !strings.Contains(m.title, "a.go") {
+		t.Errorf("title = %q, want the target named", m.title)
+	}
+}
+
+// TestHandleGitCommitDiff_QueuedAskDiesWithFailedStart pins the other
+// end of the queued path: a start that fails tears the connection down,
+// and the claim goes with it, so a later agent's first answer is never
+// mistaken for this draft.
+func TestHandleGitCommitDiff_QueuedAskDiesWithFailedStart(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+	a.chat.starting = true
+
+	a.handleGitCommitDiff(&gitCommitDiffEvent{when: time.Now(), diff: "@@ -1 +1 @@\n+new"})
+	a.handleChatExit(&chatExitEvent{when: time.Now(), seq: a.chat.connSeq})
+
+	if a.chat.commitSuggest != nil || a.chat.queuedPrompt != "" {
+		t.Errorf("failed start left request %+v / queued %q", a.chat.commitSuggest, a.chat.queuedPrompt)
+	}
+}
+
 // TestHandleGitCommitDiff_EmptyDiffExplains pins the degenerate case:
 // nothing to describe never spends a request.
 func TestHandleGitCommitDiff_EmptyDiffExplains(t *testing.T) {

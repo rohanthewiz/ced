@@ -361,12 +361,30 @@ func (a *App) noteSuggestTitle(at chatAttach, private bool) {
 		a.chatSendPrompt(prompt)
 	case a.chat.starting:
 		// The handshake is still in flight. Queue like the composer
-		// does — but WITHOUT a pending request, because the queued send
-		// happens under a generation we can't name yet; the suggestion
-		// then simply lands in the transcript to copy.
+		// does, and claim the answer exactly as the ready branch does.
+		//
+		// On first use this is not a race but a certainty: the
+		// chatOpenPanel above is what STARTS the agent, synchronously,
+		// right before this switch. Queuing without a pending request
+		// meant the first ✦ after launch never reopened the prompt —
+		// the title only landed in the transcript.
+		//
+		// The generation IS nameable: connSeq moves only in
+		// chatDisconnect, and the in-flight start runs under the current
+		// value, so the send handleChatReady flushes does too (the same
+		// reasoning as handleGitCommitDiff's queued branch). A failed
+		// start goes through chatDisconnect, which drops the request.
+		// The mark is taken AFTER the "starting" note so only the
+		// agent's prose is read back as the title.
 		a.chat.queuedPrompt = prompt
 		a.chatAppendMsg(chatMsg{role: chatRoleInfo,
 			text: "starting " + a.chatAgent().name + " chat — the request will send shortly"})
+		a.chat.noteTitle = &noteTitleReq{
+			at:      at,
+			seq:     a.chat.connSeq,
+			mark:    len(a.chat.msgs),
+			private: private,
+		}
 	default:
 		a.chatAppendMsg(chatMsg{role: chatRoleInfo,
 			text: a.chatAgent().name + " chat is not running — " + chatAgentRetryHint + " to restart"})

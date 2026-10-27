@@ -324,6 +324,46 @@ func TestNoteSuggestTitle_SendsTheExcerptAndArmsTheRequest(t *testing.T) {
 	}
 }
 
+// TestNoteSuggestTitle_QueuedBehindStartReopensPrompt pins the first-use
+// path: the ✦ ask is what starts the agent, so it always arrives while
+// the handshake is in flight. The request must still be claimed — once
+// the agent is ready the queued turn sends, and its answer reopens the
+// note prompt instead of being stranded in the transcript.
+func TestNoteSuggestTitle_QueuedBehindStartReopensPrompt(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+	a.chat.starting = true
+	seedChatFile(t, a, "main.go", "func Widget() {}\n")
+	at, _ := a.noteTarget()
+
+	a.noteSuggestTitle(at, true)
+	if a.chat.queuedPrompt == "" {
+		t.Fatal("the ask was not queued behind the start")
+	}
+	if a.chat.noteTitle == nil {
+		t.Fatal("the queued ask has no pending request; its answer would never reach the prompt")
+	}
+
+	fake := &fakeCopilotConn{}
+	a.handleChatReady(&chatReadyEvent{when: time.Now(), seq: a.chat.connSeq, client: fake, sessionID: "sess-1"})
+	waitForCopilot(t, "session/prompt call", func() bool { return fake.called("session/prompt") })
+
+	a.chatAppendMsg(chatMsg{role: chatRoleAgent, text: "The widget constructor"})
+	a.handleChatTurnDone(&chatTurnDoneEvent{when: time.Now(), seq: a.chat.connSeq})
+
+	pm, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the note prompt reopened", a.modal)
+	}
+	if got := pm.field.String(); got != "The widget constructor" {
+		t.Errorf("draft = %q, want only the agent's answer", got)
+	}
+	if got := pm.extras[1].label(a); got != "[private: on]" {
+		t.Errorf("chip = %q, want the privacy decision carried through the queue", got)
+	}
+}
+
 // TestNoteSuggestTitle_RefusesMidTurn — one thing at a time, said out
 // loud rather than queued silently.
 func TestNoteSuggestTitle_RefusesMidTurn(t *testing.T) {

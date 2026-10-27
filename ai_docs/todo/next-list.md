@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-096**
+**Next ID: N-098**
 
 ## Open
 
@@ -149,6 +149,16 @@ plus the LSP work done in the seeding session itself
   there. ced is mouse-first, so this may never bite; if it does, add a
   bar chord (Alt+Enter, say) that closes and keeps the caret, plus its
   hint word.
+
+- **N-097** · raised `2026-1027-1312-ai-draft-queued-claim` · value low
+  **An AI-draft ask overwrites a queued composer message.** While the
+  agent's handshake is in flight, `handleGitCommitDiff` and
+  `noteSuggestTitle` set `a.chat.queuedPrompt = prompt` — an assignment,
+  not chatSend's append — so a chat message the user typed during the
+  same handshake (already echoed in the transcript) is silently dropped
+  and never sent. Appending would mix the user's text into the draft's
+  answer, so the likely fix is to refuse the ask with a flash when a
+  composer message is already queued.
 
 ## Validate
 
@@ -396,6 +406,20 @@ and `raised`.
   (an editor click while it is up makes Esc stay). Hand check in tmux
   and cats: the click lands on the line under the pointer in both docks,
   and the bar's Esc / click-then-Esc feel right in daily use.
+
+- **N-096** · raised `2026-1027-1312-ai-draft-queued-claim` · value medium
+  **First-use ✦ drafts with a real agent.** Fixed in `2026-1027-1312-ai-draft-queued-claim`: the commit
+  prompt's ✦ AI and the GoNotes ✦ title asks now claim their answer when
+  they queue behind the agent's start, so the FIRST press after launch
+  reopens the prompt pre-filled instead of leaving the answer only in the
+  chat transcript. Pinned by
+  `TestHandleGitCommitDiff_QueuedBehindStartReopensPrompt` and
+  `TestNoteSuggestTitle_QueuedBehindStartReopensPrompt` (fake connection).
+  Unseen in the real binary: this machine's configured agent
+  (`"chatagent": "claude"`) has no `claude-code-acp` on PATH, so ✦ only
+  flashes the install hint here. Check with an installed agent: launch
+  ced, press ✦ in the commit prompt before the chat has ever started,
+  and confirm the prompt comes back with the draft; same for GoNotes.
 
 ## Roadmap
 

@@ -263,6 +263,12 @@ func builtinMenuGroups() []menuGroup {
 			// gets no leader key: the flat table is out of mnemonic
 			// letters and this is a once-an-hour action, not a once-a-
 			// minute one). See folder.go for why a switch is a restart.
+			// Open a file by typed path, anywhere on disk (openfile.go) —
+			// the one door to a file outside the root that doesn't re-root.
+			// Above Open folder: the File > Open… / Open Folder… pair every
+			// desktop editor teaches. ⌘O's guaranteed twin; no leader (the
+			// flat table is out of letters).
+			{label: "Open file…", action: (*App).menuOpenFileByPath, enabled: alwaysTrue},
 			{label: "Open folder…", action: (*App).menuOpenFolder, enabled: alwaysTrue},
 			{label: "Recent folders…", action: (*App).menuRecentFolders, enabled: (*App).hasRecentFolders},
 			{action: (*App).menuToggleSession, enabled: alwaysTrue, labelFor: (*App).sessionToggleLabel},

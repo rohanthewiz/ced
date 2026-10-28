@@ -586,6 +586,67 @@ func TestPromptDraw_ClipsALongHint(t *testing.T) {
 	}
 }
 
+// TestPromptTab_CompletesAndAnEditClearsTheNote pins the generic Tab
+// hook: the completer's value replaces the field (caret to the end), its
+// note is kept through that replacement, and the next real edit drops
+// the note — candidates for a value that moved on would be wrong.
+func TestPromptTab_CompletesAndAnEditClearsTheNote(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	asked := ""
+	a.openModal(&promptModal{
+		title: "T",
+		field: newTextField("ab"),
+		complete: func(_ *App, v string) (string, string) {
+			asked = v
+			return v + "cd", "2 matches: abcd  abce"
+		},
+	})
+	m := promptOf(a)
+
+	m.handleKey(a, keyEv(tcell.KeyTab, 0))
+	if asked != "ab" || m.field.String() != "abcd" || m.field.cursor != 4 {
+		t.Fatalf("after Tab: asked %q, field %q cur=%d", asked, m.field.String(), m.field.cursor)
+	}
+	if m.completeNote != "2 matches: abcd  abce" {
+		t.Fatalf("note = %q, want the completer's note to survive its own Tab", m.completeNote)
+	}
+
+	m.handleKey(a, keyEv(tcell.KeyRune, 'e'))
+	if m.completeNote != "" {
+		t.Fatalf("an edit should drop the note, got %q", m.completeNote)
+	}
+	// Caret motion is not an edit: a fresh note survives it.
+	m.completeNote = "kept"
+	m.handleKey(a, keyEv(tcell.KeyLeft, 0))
+	if m.completeNote != "kept" {
+		t.Fatal("caret motion dropped the note")
+	}
+}
+
+// TestPromptTab_InertWithoutACompleter: every other prompt is exactly
+// what it was — Tab neither edits the field nor closes the prompt.
+func TestPromptTab_InertWithoutACompleter(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openPrompt("T", "H", "ab", nil)
+	promptOf(a).handleKey(a, keyEv(tcell.KeyTab, 0))
+	if m := promptOf(a); m == nil || m.field.String() != "ab" {
+		t.Fatalf("Tab on a plain prompt changed it: %v", m)
+	}
+}
+
+// TestPromptDraw_ShowsTheCompleteNote: the note is painted on the blank
+// row under the field (row 5), clipped to the field's width.
+func TestPromptDraw_ShowsTheCompleteNote(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openModal(&promptModal{title: "T", field: newTextField(""), completeNote: "no match"})
+	m := promptOf(a)
+	m.draw(a)
+	fy, start, end := m.textSpan(a)
+	if got := screenRow(t, a, fy+1, start, end-start); !strings.HasPrefix(got, "no match") {
+		t.Fatalf("row under the field = %q, want the note", got)
+	}
+}
+
 // TestConfirmModalRect centers the confirm modal and clamps a tiny window.
 func TestConfirmModalRect(t *testing.T) {
 	a := newTestApp(t, t.TempDir())

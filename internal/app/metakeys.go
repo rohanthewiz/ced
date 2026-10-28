@@ -141,6 +141,15 @@ func metaAccels() []metaAccel {
 		// every other editor's user will press first.
 		{key: 'p', action: (*App).openFinder, label: "Find file"},
 		{key: 'p', shift: true, action: (*App).openPalette, label: "Command palette"},
+		// ⌘O opens a file by typed path, anywhere on disk (openfile.go) —
+		// every desktop editor's File > Open keycap. ⌘P stays the fuzzy
+		// finder over the PROJECT; this is the door past its edge. The
+		// twin is ≡ File "Open file…" (no Esc key: the table is out of
+		// letters). Live in kitty, Ghostty and WezTerm. Browser-cats and
+		// the mac app forward ⌘ chords from CMD_TO_PANE (cats' 20-keys.js),
+		// which does not hold KeyO yet — until it does, the host keeps the
+		// chord (Chrome's own File > Open), the road ⌘A is on.
+		{key: 'o', action: (*App).menuOpenFileByPath, label: "Open file"},
 		// ⌘F is Find all in file (Esc-F's verb, the ≡ Find row), not the
 		// one-at-a-time find bar: the list shows every hit at once and
 		// previews as the highlight moves, which is what the chord is

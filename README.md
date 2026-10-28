@@ -475,6 +475,16 @@ the current workspace when the folder has no workspace or it's asleep.
 in the same group turns the tab restore off (folders are still
 remembered, so the recent list keeps working).
 
+To open one file from **anywhere on disk** without switching projects —
+`~/.zshrc`, a config under `/etc`, a README in a sibling repo — use `≡` →
+File → **Open file…** (`⌘O` where `Cmd` arrives). Type a path: absolute,
+`~/…`, or relative to the project root. The field starts on the folder of
+the file you're looking at, and `Tab` completes one segment at a time like
+a shell (several matches are listed under the field; dotfiles appear once
+you type the `.`). A typo or a folder puts the prompt back with your text
+intact and the reason underneath. The file joins **Recent files**, so `⌘E`
+/ `Esc B` brings it back later.
+
 Then:
 
 - Click a file in the tree to open it.
@@ -668,7 +678,7 @@ kitty, Ghostty, WezTerm, or a cats pane — ced also answers the chords
 your hands already know from every other editor: `⌘S` save, `⌘P` find
 file, `⌘⇧P` command palette, `⌘F` find all in file, `⌘⇧F` find in project, `⌘D`
 duplicate line, `⌘/` toggle comment, `⌘L` go to line, `⌘G` git panel, `⌘E` recent files,
-`⌘A` select all,
+`⌘A` select all, `⌘O` open a file by path (anywhere on disk),
 plus `⌘←` / `⌘→` for the start and end of the line and `⌘↑` / `⌘↓` for
 the top and end of the file (hold `Shift` to select there). Every one of them is a second door onto something the
 `Esc` table or the `≡` menu already does, so nothing is lost in a

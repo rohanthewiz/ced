@@ -115,6 +115,7 @@ internal/app/
   autosave.go format.go validate.go syntax.go zipops.go
   copypaste.go copyto.go      File clipboard Copy/Paste; Copy to… a typed folder (one engine)
   folder.go favorites.go favmanage.go recentlocations.go remote.go
+  openfile.go                 Open file… / ⌘O: typed path anywhere on disk, Tab completes
   bookmarks.go                Project-wide bookmarks: park/adopt, verbs, persistence
   cats_glue.go hostident.go theme.go
 ```
@@ -1181,6 +1182,19 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `wireTab`/`announceTab`. Bare `ced` opens cwd; `--last` for the last
   folder. Folder switch owes the unsaved-changes modal. Recent picker
   excludes the current root and prunes gone folders. `"session"` toggle.
+- **Open file… (openfile.go)**: a TYPED path anywhere on disk, the one
+  door to an outside-root file that doesn't re-root. ≡ File row (above
+  Open folder) + `⌘O`; no leader. Spelling = Open folder's (absolute,
+  `~/`, root-relative). Seeded with the active file's folder + `/`.
+  Tab = the prompt's generic `complete` hook (`promptModal.complete`,
+  note on row 5 via `completeNote`, any edit drops it): last segment
+  only (the user's `~`/relative spelling survives), dotfiles only after
+  a `.`, exact case wins over folded, never deletes letters. Opens via
+  `openFile`, but an OUTSIDE-root file keeps the active folder (≡ folder
+  verbs must not arm on e.g. `~`). Non-regular files refused (a fifo
+  read blocks the loop). A refusal re-opens the prompt with the value
+  and the reason; a folder gets its `/`. Not in cats' `CMD_TO_PANE`
+  allowlist yet, so ⌘O is dark in browser-cats / the mac app.
 - **Recent locations (internal/history, recentlocations.go)**:
   `<repo>/.ced/history.bytdb` (gitignored on first write, loading creates
   nothing), relative paths. Written only when `history.Persists(root)`:
@@ -1293,8 +1307,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
 - **Adding a menu row means updating the pins**:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 189 group
-  actions + 15 headers (206), height 212, dividers `[2, 5, 209]`; also
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 190 group
+  actions + 15 headers (207), height 213, dividers `[2, 5, 210]`; also
   the Git fold count in `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.

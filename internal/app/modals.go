@@ -241,6 +241,21 @@ type promptModal struct {
 	// click there lands on the field as usual. Clearing is an EDIT
 	// (onEdit hears it), so a live prompt puts the view back on its own.
 	clearable bool
+
+	// complete is the prompt's Tab key: handed the field's value, it
+	// returns the value to put back and a note for the blank row under
+	// the field (row 5) — the candidates when there are several, "no
+	// match" when there are none. nil on every prompt but Open file
+	// (openfile.go), where Tab then does what it always did: nothing.
+	// It completes the WHOLE value whatever the caret's position — a
+	// path completes at its end, and that is the only completer.
+	//
+	// completeNote is what row 5 shows for it: the last Tab's note, or
+	// a reason the prompt was re-opened with. Any edit drops it (edited),
+	// since candidates listed for a value that has moved on are wrong.
+	// A live prompt's status owns row 5 outright; the two never meet.
+	complete     func(a *App, value string) (next, note string)
+	completeNote string
 }
 
 // promptClearKey is the Alt chord twin of a clearable prompt's ×. x for
@@ -317,6 +332,7 @@ func (m *promptModal) cancel(a *App) {
 // prompt's AI draft does), and an answer painted for a prompt that is
 // gone would outlive the question.
 func (m *promptModal) edited(a *App) {
+	m.completeNote = ""
 	if m.onEdit != nil && a.modal == m {
 		m.onEdit(a, m.field.String())
 	}
@@ -354,6 +370,10 @@ func (m *promptModal) handleKey(a *App, ev *tcell.EventKey) {
 		m.clear(a)
 		return
 	}
+	if ev.Key() == tcell.KeyTab && m.complete != nil {
+		m.tabComplete(a)
+		return
+	}
 	switch ev.Key() {
 	case tcell.KeyEsc:
 		m.cancel(a)
@@ -366,6 +386,20 @@ func (m *promptModal) handleKey(a *App, ev *tcell.EventKey) {
 			m.edited(a)
 		}
 	}
+}
+
+// tabComplete runs the prompt's completer on the field. The field is
+// replaced only when the answer differs (caret to the end, as after
+// typing it), and that counts as an edit; the note is set AFTER edited,
+// which clears it, so the candidates survive the Tab that listed them.
+func (m *promptModal) tabComplete(a *App) {
+	cur := m.field.String()
+	next, note := m.complete(a, cur)
+	if next != cur {
+		m.field = newTextField(next)
+		m.edited(a)
+	}
+	m.completeNote = note
 }
 
 // clear empties the field (the × and Alt+x). An already-empty field is
@@ -605,7 +639,8 @@ func (m *promptModal) width(a *App) int {
 //	2   divider
 //	3   hint (greyed)
 //	4   input field    [ value          × ▾]  (× clearable, ▾ history)
-//	5   blank — or the live status (status), when set
+//	5   blank — or the live status (status), when set, or the Tab
+//	    completer's note (completeNote)
 //	6   buttons        [ Cancel ]   [  OK  ]
 //	7   blank
 //	8   bottom border
@@ -651,6 +686,8 @@ func (m *promptModal) draw(a *App) {
 		if s := m.status(a); s != "" {
 			drawAt(a.screen, start, fy+1, clipRunes(s, end-start), c.muted)
 		}
+	} else if m.completeNote != "" {
+		drawAt(a.screen, start, fy+1, clipRunes(m.completeNote, end-start), c.muted)
 	}
 
 	cancel, ok := m.buttons(a)

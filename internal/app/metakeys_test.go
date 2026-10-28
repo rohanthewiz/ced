@@ -135,6 +135,24 @@ func TestMetaAccelOpensRecentFiles(t *testing.T) {
 	}
 }
 
+// TestMetaAccelOpensFileByPath pins ⌘O to the Open file prompt (the ≡
+// File row's verb), not the fuzzy finder ⌘P already owns: the modal is
+// the path prompt with its Tab completer.
+func TestMetaAccelOpensFileByPath(t *testing.T) {
+	armMetaHost(t)
+	a := newTestApp(t, t.TempDir())
+
+	a.handleKey(metaKeyEv('o', false))
+
+	m, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("Cmd+O opened %T, want the Open file prompt", a.modal)
+	}
+	if m.title != "Open file" || m.complete == nil {
+		t.Fatalf("Cmd+O opened %q (completer %v), want Open file with Tab completion", m.title, m.complete != nil)
+	}
+}
+
 // TestMetaAccelGoesToLine pins ⌘L to the Go to line prompt (Esc-j's
 // verb) — the GoLand keycap, which took the verb over from ⌘G.
 func TestMetaAccelGoesToLine(t *testing.T) {

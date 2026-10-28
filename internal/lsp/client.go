@@ -102,7 +102,8 @@ type Client struct {
 	// rest by returning ErrRequestUnhandled — see that sentinel. ACP
 	// hooks never do; the LSP hook does, because it exists to answer
 	// exactly one request (workspace/applyEdit) and the auto-responder's
-	// workspace/configuration answer is load-bearing.
+	// workspace/configuration answer is load-bearing for any server that
+	// asks (autoRespond says which ones do).
 	onRequest func(method string, params json.RawMessage) (any, error)
 
 	// onExit fires once when the read loop ends (server exited, pipe
@@ -432,7 +433,8 @@ func (c *Client) read() (*message, error) {
 // to answer workspace/applyEdit would otherwise also inherit
 // workspace/configuration, which gopls BLOCKS on while type-checking:
 // answering it with a null (the honest default for a method a handler
-// doesn't know) wedges the server on the first file opened. Declining is
+// doesn't know) wedges the server on the first file opened — whenever it
+// asks, which under today's handshake it does not (autoRespond). Declining is
 // the difference between adding one capability and taking over the whole
 // server-request surface.
 var ErrRequestUnhandled = errors.New("lsp: request not handled")
@@ -476,6 +478,17 @@ func (c *Client) respondToServer(m *message) {
 
 // autoRespond is the built-in answer for a server request nothing else
 // handles: the emptiest payload the spec allows.
+//
+// The workspace/configuration branch is DEFENSIVE today. initialize does
+// not declare workspace.configuration, and the servers that read settings
+// this way only ask once a client does: probed on 2026-10-28, gopls,
+// pyright, basedpyright, pylsp and typescript-language-server sent no
+// such request under ced's handshake. All but pylsp asked for their
+// sections as soon as the capability was declared, and `{}` then left
+// every default in place (gopls kept the hints initializationOptions had
+// switched on). It stays because a server that asks regardless would block
+// on an unanswered request, and `{}` per item is the one answer that
+// cannot switch anything off.
 func (c *Client) autoRespond(m *message) {
 	var result any
 	if m.Method == "workspace/configuration" {

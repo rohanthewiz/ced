@@ -157,7 +157,7 @@ func inlayNote(runes []rune, hints []lsp.InlayHint) string {
 		var part string
 		switch {
 		case h.Kind == lsp.InlayParameter:
-			part = strings.TrimSpace(h.Label + " " + inlayArgAt(runes, col))
+			part = inlayParamPart(h.Label, inlayArgAt(runes, col))
 		case h.Kind == lsp.InlayType || strings.HasPrefix(h.Label, ":"):
 			part = inlayTypePart(inlayWordBefore(runes, col), h.Label)
 		default:
@@ -171,6 +171,20 @@ func inlayNote(runes []rune, hints []lsp.InlayHint) string {
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// inlayParamPart joins a parameter label and the argument it named. The
+// label carries its own separator, and the two spellings servers use
+// want different spacing: `level:` (gopls, clangd, rust-analyzer,
+// typescript-language-server) reads as `level: 3`, while basedpyright's
+// `name=` is a keyword argument, which Python writes with no space —
+// `name="hi"`, not `name= "hi"`. Joining on the label's last rune keeps
+// each server's own idiom instead of normalising one into the other.
+func inlayParamPart(label, arg string) string {
+	if strings.HasSuffix(strings.TrimSpace(label), "=") {
+		return strings.TrimSpace(strings.TrimSpace(label) + arg)
+	}
+	return strings.TrimSpace(label + " " + arg)
 }
 
 // inlayTypePart joins a subject and a type label as `subject: type`.

@@ -1312,6 +1312,8 @@ palette:
   note at the **end** of the line (`» total: float64 · by: 1.5`) rather
   than spliced into it, so your columns never move. Toggle under
   ≡ **View**, or set `"inlayhints": "off"` in `~/.config/ced/config.json`.
+  For Python they come from **basedpyright** (`» name="hi"`); pyright and
+  pylsp don't provide inlay hints at all.
 - **Restart language server** — for a server that crashed, or one you
   installed after ced started. If it still can't be found, the message
   names the binaries it looked for.

@@ -71,6 +71,31 @@ func TestInlayNote_EdgeCases(t *testing.T) {
 	}
 }
 
+// TestInlayNote_KeywordArgumentLabelsTakeNoSpace pins basedpyright's
+// spelling: its parameter labels end in `=` (a keyword argument), and
+// Python writes those against the value. The labels are the ones the
+// real server sent for this line (2026-10-28, basedpyright 1.40.2); the
+// `name:` form beside them keeps its space.
+func TestInlayNote_KeywordArgumentLabelsTakeNoSpace(t *testing.T) {
+	line := []rune(`x = greet("hi", 3)`)
+	got := inlayNote(line, []lsp.InlayHint{
+		hintAt(1, ": LiteralString", lsp.InlayType),
+		hintAt(10, "name=", lsp.InlayParameter),
+		hintAt(16, "times=", lsp.InlayParameter),
+	})
+	if want := `x: LiteralString · name="hi" · times=3`; got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+	if got := inlayParamPart("level:", "3"); got != "level: 3" {
+		t.Errorf("colon label = %q, want %q", got, "level: 3")
+	}
+	// No argument to restate (the hint sat at the end of the line) leaves
+	// the label alone either way.
+	if got := inlayParamPart("name=", ""); got != "name=" {
+		t.Errorf("bare keyword label = %q, want %q", got, "name=")
+	}
+}
+
 // newInlayTestApp opens the Go fixture with hints enabled and the
 // document in sync, which is the state the dispatch tail waits for.
 func newInlayTestApp(t *testing.T) (*App, *fakeLSPConn, string) {

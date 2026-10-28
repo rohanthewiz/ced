@@ -98,6 +98,25 @@ var lspServers = []lspServerDef{
 		}},
 	},
 	{
+		// No initOptions, and no settings to answer workspace/configuration
+		// with: none of the three needs hints switched on. Run against the
+		// real servers on 2026-10-28 —
+		//
+		//   pyright 1.1.414        textDocument/inlayHint is "Unhandled
+		//                          method"; hints are Pylance-only, so no
+		//                          setting could turn them on.
+		//   basedpyright 1.40.2    hints ON by default (variable types,
+		//                          argument names, return types), answered
+		//                          through this handshake as it stands.
+		//   pylsp 1.15.0           "Method Not Found".
+		//
+		// basedpyright DOES read its hint settings through
+		// workspace/configuration (section "basedpyright", key
+		// analysis.inlayHints.*), but only once a client declares
+		// workspace.configuration, which ced's initialize does not, so it
+		// never asks and its defaults stand. Note its npm package installs
+		// a `pyright-langserver` alias too, so the first command below is
+		// often basedpyright in disguise.
 		id: "python",
 		commands: [][]string{
 			{"pyright-langserver", "--stdio"},
@@ -117,6 +136,10 @@ var lspServers = []lspServerDef{
 		exts:     []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"},
 		// Off by default here too. "literals" names only arguments whose
 		// text says nothing (`true`, `3`), not every identifier.
+		// initializationOptions.preferences IS the route that works: with
+		// typescript-language-server 5.3.0 over TypeScript 5.9 this blob
+		// gets five hints on a ten-line file and none without it
+		// (2026-10-28); no didChangeConfiguration push is needed.
 		initOptions: map[string]any{"preferences": map[string]any{
 			"includeInlayParameterNameHints":          "literals",
 			"includeInlayVariableTypeHints":           true,

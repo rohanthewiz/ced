@@ -537,7 +537,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   Hover `contentFormat` is MARKDOWN first; signature help and completion
   docs stay plaintext first (`TestInitialize_PrefersMarkdownHover`).
 - `onRequest` hook is narrow: return `lsp.ErrRequestUnhandled` for
-  methods it doesn't own (gopls blocks on `workspace/configuration`).
+  methods it doesn't own (the auto-responder answers `workspace/configuration`,
+  which gopls blocks on whenever it asks; ced declares no
+  `workspace.configuration`, so today no registered server does).
   `StartWithRequests` installs the hook before the read loop.
 - Go to definition at the declaration flips to references
   (`definitionIsHere`). ⌘+click = definition (`isMetaClick`: cats sends

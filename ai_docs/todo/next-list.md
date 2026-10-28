@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-098**
+**Next ID: N-101**
 
 ## Open
 
@@ -159,6 +159,29 @@ plus the LSP work done in the seeding session itself
   and never sent. Appending would mix the user's text into the draft's
   answer, so the likely fix is to refuse the ask with a flash when a
   composer message is already queued.
+
+- **N-098** · raised `2026-1028-1242-open-file-anywhere-cmd-o` · value medium
+  cats-side: add `"KeyO"` to `CMD_TO_PANE`
+  (`cmd/catway/web/js/20-keys.js`) so ⌘O (ced's Open file…, a typed
+  path anywhere on disk) reaches a ced pane in browser-cats and the mac
+  app. It is live only in kitty / Ghostty / WezTerm today, and the
+  cats help overlay's forwarded-chords row should gain it too (N-089's
+  drift). The cost to weigh first: ⌘O is the browser's own File > Open,
+  and the user loses that only while a kitty-protocol pane has focus.
+  Whether Chrome even dispatches it to the page, or resolves it as a
+  native menu item the way it does ⌘E (`ed4962c`), is the by-hand check
+  (N-100). If it doesn't, note it in metakeys.go / 20-keys.js as ⌘E is.
+
+- **N-099** · raised `2026-1028-1242-open-file-anywhere-cmd-o` · value medium
+  **A go-to-definition into a file outside the root makes that folder
+  ACTIVE.** `openFile` sets `activeFolder` to the opened file's folder
+  for every caller. After an LSP jump into GOROOT / the module cache
+  (e.g. `fmt`), the ≡ folder rows go live on a folder the tree can't
+  show: "Rename folder (fmt)", "Delete folder (fmt)", "Copy folder". New
+  file lands there too. Open file… (openfile.go's `openFileAnywhere`)
+  already keeps the active folder for outside-root files. The likely fix
+  is to move that guard INTO `openFile` (EvalSymlinks on both sides, as
+  `openFileAnywhere` does), which then makes the wrapper redundant.
 
 ## Validate
 
@@ -420,6 +443,16 @@ and `raised`.
   flashes the install hint here. Check with an installed agent: launch
   ced, press ✦ in the commit prompt before the chat has ever started,
   and confirm the prompt comes back with the draft; same for GoNotes.
+
+- **N-100** · raised `2026-1028-1242-open-file-anywhere-cmd-o` · value low
+  **⌘O / Open file… by hand.** The ≡ row, the prompt and Tab completion
+  were seen in run-ced's PTY (Tab listed the root, descended
+  `internal/` → `editor/`, listed `buffer.go  buffer_test.go`; `~/.zsh`
+  Tab + Enter opened `.zshrc`). The ⌘O chord itself ran only under the
+  simulation screen (`TestMetaAccelOpensFileByPath`). Check in a real
+  kitty / Ghostty / WezTerm that ⌘O opens the prompt and that Tab works
+  through tmux. Once N-098 lands, check the cats mac app and Chrome too;
+  Chrome's own File > Open is the doubtful one.
 
 ## Roadmap
 

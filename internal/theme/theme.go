@@ -37,9 +37,14 @@ import "github.com/gdamore/tcell/v2"
 type Theme struct {
 	// --- Surfaces ---
 	BG        tcell.Color // Editor background.
-	SidebarBG tcell.Color // File tree / inactive tab background, slightly darker than BG.
-	StatusBG  tcell.Color // Status bar background.
-	LineHL    tcell.Color // Active line highlight.
+	SidebarBG tcell.Color // File tree / tool window background, slightly darker than BG.
+	// TabBarBG is the tab strip and its inactive tabs: SidebarBG with a
+	// faint err cast (palette.go's "tabbar-bg"). A key of its own rather
+	// than SidebarBG so the strip can be told apart from the tree it sits
+	// beside without moving every tool window header with it.
+	TabBarBG tcell.Color
+	StatusBG tcell.Color // Status bar background.
+	LineHL   tcell.Color // Active line highlight.
 	// MDCodeBG is the slab the markdown viewer paints code blocks and
 	// inline code spans on (editor/markdown.go). A surface of its own
 	// rather than a reuse of LineHL: that one is a few units off BG by
@@ -133,9 +138,11 @@ func Default() Theme {
 		// Surfaces.
 		BG:        tcell.NewRGBColor(0x1a, 0x1b, 0x26),
 		SidebarBG: tcell.NewRGBColor(0x16, 0x16, 0x1e),
-		StatusBG:  tcell.NewRGBColor(0x7a, 0xa2, 0xf7),
-		LineHL:    tcell.NewRGBColor(0x1f, 0x20, 0x2e),
-		MDCodeBG:  tcell.NewRGBColor(0x27, 0x29, 0x3a),
+		// 8% of the error red over the sidebar — see palette.go's tabbar-bg.
+		TabBarBG: tcell.NewRGBColor(0x28, 0x1e, 0x27),
+		StatusBG: tcell.NewRGBColor(0x7a, 0xa2, 0xf7),
+		LineHL:   tcell.NewRGBColor(0x1f, 0x20, 0x2e),
+		MDCodeBG: tcell.NewRGBColor(0x27, 0x29, 0x3a),
 
 		// Foregrounds & accents.
 		Text:       tcell.NewRGBColor(0xc0, 0xca, 0xf5),

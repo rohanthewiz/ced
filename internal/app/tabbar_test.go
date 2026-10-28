@@ -427,3 +427,53 @@ func TestDrawTabBar_UnderlineRunsUnderTheIcon(t *testing.T) {
 	}
 	t.Fatal("b.go not drawn")
 }
+
+// TestDrawTabBar_StripWearsTabBarBG pins the strip's ground: the ✕ and ≡
+// buttons, an inactive tab, and the empty run to the right all sit on
+// TabBarBG (the red-cast surface), so the strip reads as one band apart
+// from the tree, while the active tab keeps the editor's BG.
+func TestDrawTabBar_StripWearsTabBarBG(t *testing.T) {
+	a := tabBarApp(t, 2)
+	if a.theme.TabBarBG == a.theme.SidebarBG {
+		t.Fatal("TabBarBG equals SidebarBG — the strip would carry no tint")
+	}
+	a.draw()
+	_, ty, _, _ := a.tabBarRect()
+	bgAt := func(x int) tcell.Color {
+		_, _, st, _ := a.screen.GetContent(x, ty)
+		_, bg, _ := st.Decompose()
+		return bg
+	}
+	qx, _, _, _ := a.quitButtonRect()
+	mx, _, _, _ := a.menuButtonRect()
+	if got := bgAt(qx); got != a.theme.TabBarBG {
+		t.Errorf("✕ bg = %v, want TabBarBG %v", got, a.theme.TabBarBG)
+	}
+	if got := bgAt(mx); got != a.theme.TabBarBG {
+		t.Errorf("≡ bg = %v, want TabBarBG %v", got, a.theme.TabBarBG)
+	}
+	var sawInactive, sawActive bool
+	end := 0
+	for _, r := range a.lastTabRects {
+		want, name := a.theme.TabBarBG, "TabBarBG"
+		if r.Index == a.activeTab {
+			want, name, sawActive = a.theme.BG, "BG", true
+		} else {
+			sawInactive = true
+		}
+		if got := bgAt(r.X); got != want {
+			t.Errorf("tab %d bg = %v, want %s %v", r.Index, got, name, want)
+		}
+		end = max(end, r.X+r.Width)
+	}
+	if !sawInactive || !sawActive {
+		t.Fatalf("expected one active and one inactive tab drawn, rects %+v", a.lastTabRects)
+	}
+	tx, _, tw, _ := a.tabBarRect()
+	if end >= tx+tw {
+		t.Fatal("tabs fill the strip; no empty cell to check")
+	}
+	if got := bgAt(tx + tw - 1); got != a.theme.TabBarBG {
+		t.Errorf("empty strip cell bg = %v, want TabBarBG %v", got, a.theme.TabBarBG)
+	}
+}

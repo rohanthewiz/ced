@@ -62,11 +62,11 @@ const quitButtonDesat = 0.5
 // tree's own ✕ (hide the panel) is Muted — the red cast is what says this
 // one closes the whole editor. Desaturated so it reads as chrome, not as
 // a diagnostic; liftToContrast is the backstop for a theme whose greyed
-// red lands too close to the sidebar ground.
+// red lands too close to the tab strip's ground (itself red-tinted).
 func (a *App) drawQuitButton() {
 	qx, qy, qw, _ := a.quitButtonRect()
-	fg := liftToContrast(desaturateColor(a.theme.DiagError, quitButtonDesat), a.theme.SidebarBG)
-	style := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(fg).Bold(true)
+	fg := liftToContrast(desaturateColor(a.theme.DiagError, quitButtonDesat), a.theme.TabBarBG)
+	style := tcell.StyleDefault.Background(a.theme.TabBarBG).Foreground(fg).Bold(true)
 	for cx := qx; cx < qx+qw; cx++ {
 		a.screen.SetContent(cx, qy, ' ', nil, style)
 	}

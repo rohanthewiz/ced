@@ -73,6 +73,15 @@ func derivations() []derivation {
 		// the two read as separate panels; the active-line highlight
 		// steps the other way, toward the text.
 		{"sidebar-bg", func(p Palette) string { return shadePanel(p["bg"]) }},
+		// The tab strip is the sidebar's surface with a faint red cast
+		// (the theme's own err, so the cast stays in the palette's hue
+		// family rather than being a fixed #ff0000 that clashes with
+		// solarized or a warm theme). It sits beside the tree's top row
+		// and above the editor, so it has to clear BOTH: tabBarTint is
+		// the strength that stays visibly off sidebar-bg and bg in every
+		// built-in while costing inactive tab labels only ~0.1–0.2 of
+		// contrast — see TestDerive_TabBarBGIsAFaintRedCast.
+		{"tabbar-bg", func(p Palette) string { return mix(p["sidebar-bg"], p["err"], tabBarTint) }},
 		{"line-hl", func(p Palette) string { return mix(p["bg"], p["fg"], 0.06) }},
 		// The markdown viewer's code slab. It is deliberately NOT
 		// line-hl, which is the active-line wash and by design only a
@@ -261,6 +270,7 @@ func ToTheme(p Palette) Theme {
 	return Theme{
 		BG:        c("bg"),
 		SidebarBG: c("sidebar-bg"),
+		TabBarBG:  c("tabbar-bg"),
 		StatusBG:  c("status-bg"),
 		LineHL:    c("line-hl"),
 		MDCodeBG:  c("md-code-bg"),
@@ -384,6 +394,12 @@ func mix(a, b string, t float64) string {
 // needs to read as "the brighter sibling" of another (accent-soft,
 // syn-operator) rather than as a wash over the surface.
 func lighten(c string, t float64) string { return mix(c, "#ffffff", t) }
+
+// tabBarTint is how much err is mixed into sidebar-bg for the tab strip.
+// 8% is "slight" in the literal sense: 12–19 channel units off the tree's
+// surface across the built-ins. Much past ~10% the strip on a dark theme
+// starts to read as an error banner rather than as a tinted panel.
+const tabBarTint = 0.08
 
 // The conflict washes' strengths. conflictWash is what both sides are
 // mixed over the background at; conflictSepWash is the neutral text wash

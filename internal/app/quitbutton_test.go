@@ -157,8 +157,8 @@ func TestDrawQuitButton_RedIsDesaturated(t *testing.T) {
 	if r, g, b := fg.RGB(); r <= g || r <= b {
 		t.Errorf("✕ colour %d,%d,%d lost its red cast", r, g, b)
 	}
-	if contrastRatio(fg, a.theme.SidebarBG) < 4.5 {
-		t.Errorf("✕ contrast %.2f under 4.5:1", contrastRatio(fg, a.theme.SidebarBG))
+	if contrastRatio(fg, a.theme.TabBarBG) < 4.5 {
+		t.Errorf("✕ contrast %.2f under 4.5:1", contrastRatio(fg, a.theme.TabBarBG))
 	}
 }
 

@@ -441,3 +441,52 @@ func TestConflictIncomingHue_PrefersAccentSoft(t *testing.T) {
 		t.Errorf("hue = %s, want accent-soft %s", hue, p["accent-soft"])
 	}
 }
+
+// TestDerive_TabBarBGIsAFaintRedCast pins the tab strip's surface in every
+// built-in: leaning further toward red than the sidebar it is mixed from,
+// visibly off the tree's surface beside it but only slightly (a strong
+// cast reads as an error banner), and still apart from bg, which the
+// active tab and the editor below the strip wear.
+func TestDerive_TabBarBGIsAFaintRedCast(t *testing.T) {
+	// redLean is how far red stands above the mean of the other two
+	// channels — rises when a colour is pushed toward red.
+	redLean := func(hex string) int {
+		r, g, b := rgb(hex)
+		return r - (g+b)/2
+	}
+	for _, spec := range Builtins() {
+		p, _ := Normalize(spec.Colors)
+		sb, tb, bg := p["sidebar-bg"], p["tabbar-bg"], p["bg"]
+		if tb == "" {
+			t.Fatalf("%s: tabbar-bg was not derived", spec.Name)
+		}
+		if redLean(tb) <= redLean(sb) {
+			t.Errorf("%s: tabbar-bg %s is no redder than sidebar-bg %s", spec.Name, tb, sb)
+		}
+		if d := channelDistance(sb, tb); d < 8 || d > 24 {
+			t.Errorf("%s: tabbar-bg %s is %d off sidebar-bg %s, want a slight but visible 8–24",
+				spec.Name, tb, d, sb)
+		}
+		if d := channelDistance(bg, tb); d < 6 {
+			t.Errorf("%s: tabbar-bg %s is only %d off bg %s — the active tab would melt into the strip",
+				spec.Name, tb, d, bg)
+		}
+	}
+}
+
+// TestDerive_TabBarBGStatedValueWins covers the obvious failure of a
+// derived key: a theme that states tabbar-bg must keep its own value.
+func TestDerive_TabBarBGStatedValueWins(t *testing.T) {
+	in := Palette{
+		"bg": "#202020", "fg": "#d0d0d0", "muted": "#808080", "line": "#404040",
+		"accent": "#5588cc", "ok": "#55aa55", "warn": "#ddaa33", "err": "#dd4444",
+		"tabbar-bg": "#123456",
+	}
+	p, err := Normalize(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p["tabbar-bg"] != "#123456" {
+		t.Errorf("tabbar-bg = %s, want the stated #123456", p["tabbar-bg"])
+	}
+}

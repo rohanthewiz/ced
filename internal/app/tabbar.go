@@ -234,7 +234,12 @@ func (a *App) tabOverflowLabel(hidden int) string {
 // menu button (≡), the tabs that fit, and the overflow button.
 func (a *App) drawTabBar() {
 	tx, ty, tw, _ := a.tabBarRect()
-	barStyle := tcell.StyleDefault.Background(a.theme.SidebarBG).Foreground(a.theme.Muted)
+	// TabBarBG, not SidebarBG: the strip carries a faint red cast of its
+	// own (theme/palette.go "tabbar-bg") so it doesn't read as the top
+	// row of the tree beside it. Every cell painted on this row — ✕, ≡,
+	// inactive tabs, +N — must use the same ground or the strip breaks
+	// into patches.
+	barStyle := tcell.StyleDefault.Background(a.theme.TabBarBG).Foreground(a.theme.Muted)
 	for cx := tx; cx < tx+tw; cx++ {
 		a.screen.SetContent(cx, ty, ' ', nil, barStyle)
 	}
@@ -252,7 +257,7 @@ func (a *App) drawTabBar() {
 			continue // folded into a collapsed group
 		}
 		active := r.Index == a.activeTab
-		bg := a.theme.SidebarBG
+		bg := a.theme.TabBarBG
 		fg := a.theme.Muted
 		if active {
 			bg = a.theme.BG
@@ -393,7 +398,7 @@ func (a *App) drawTabOverflow() {
 	if !ok {
 		return
 	}
-	st := tcell.StyleDefault.Background(a.theme.SidebarBG).
+	st := tcell.StyleDefault.Background(a.theme.TabBarBG).
 		Foreground(a.theme.Accent).Bold(true)
 	drawAt(a.screen, x, y, a.tabOverflowLabel(hidden), st)
 }

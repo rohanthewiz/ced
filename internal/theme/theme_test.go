@@ -34,6 +34,7 @@ func TestDefault_AllColorsSet(t *testing.T) {
 	}{
 		{"BG", th.BG},
 		{"SidebarBG", th.SidebarBG},
+		{"TabBarBG", th.TabBarBG},
 		{"StatusBG", th.StatusBG},
 		{"LineHL", th.LineHL},
 		{"Text", th.Text},

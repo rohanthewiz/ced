@@ -5595,7 +5595,7 @@ func (a *App) drawSplitter() {
 // It's deliberately big and accent-coloured so it reads as a button.
 func (a *App) drawMenuButton() {
 	mx, my, mw, _ := a.menuButtonRect()
-	bg := a.theme.SidebarBG
+	bg := a.theme.TabBarBG
 	fg := a.theme.Accent
 	if a.menuOpen {
 		// Visually press the button while the menu is up.

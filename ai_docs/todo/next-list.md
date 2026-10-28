@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-101**
+**Next ID: N-104**
 
 ## Open
 
@@ -67,13 +67,6 @@ plus the LSP work done in the seeding session itself
 - **N-006** · raised `2026-0913-1919-cats-plugin` · value low
   cats-side decision: should a BLOCKED editor count toward the AGENTS
   attention tally? Currently it does not.
-
-- **N-016** · raised `2026-0921-0906-lsp-experience` · value low
-  Inlay hints for servers that take their hint settings through
-  `workspace/configuration` rather than `initializationOptions` (pyright).
-  The auto-responder answers every configuration request with `{}`, so
-  those servers never switch hints on. Contingent on N-013 showing it
-  matters.
 
 - **N-043** · raised `2026-0930-2056-bookmarks` · value medium
   Bookmarks have no keyboard door: the leader table is out of letters,
@@ -183,6 +176,40 @@ plus the LSP work done in the seeding session itself
   is to move that guard INTO `openFile` (EvalSymlinks on both sides, as
   `openFileAnywhere` does), which then makes the wrapper redundant.
 
+- **N-101** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value medium
+  **typescript-language-server is dead over TypeScript 7, silently.**
+  npm's `typescript@latest` is 7.0.2 (the native port), which ships no
+  `lib/tsserver.js`. typescript-language-server 5.3.0 then reports
+  TypeScript "1.0.0, bundled" and answers an inlay request with no hints
+  plus an error `window/showMessage` ("Inlay Hints request failed.
+  Requires TypeScript 4.4+."). In the real binary, a `.ts` file with a
+  type error got NO diagnostic, no hints and no flash, where the same
+  file over TS 5.9 shows both. That's silent degradation working, but it
+  means a fresh `npm i -g typescript-language-server typescript` install
+  gives no TypeScript features. Decide: register TypeScript 7's own
+  language server (command line to be found), document "needs TS ≤ 5.x",
+  or both.
+
+- **N-102** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value low
+  **TypeScript return-type hints lose their subject.** The hint sits
+  after `)`, so `inlayTypePart` finds no word before it and the note
+  reads `» : string` after `function greet(name: string, times:
+  number) {`. basedpyright's `-> Any` and clangd's `-> int` read fine
+  because their labels carry the arrow. Likely fix: a `:` type hint
+  right after `)` becomes `-> T`, or names the function (`greet(): T`).
+
+- **N-103** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value low
+  **pyright is tried before basedpyright, so a machine with both gets no
+  Python hints.** `lspservers.go` orders the Python commands "most
+  capable first". basedpyright is the more capable one: inlay hints,
+  which pyright lacks. But its default `recommended` mode is stricter
+  (`⚠ Return type is unknown (+4 more)` on a 12-line file with no
+  config). Both read `[tool.pyright]` / `pyrightconfig.json`, so a
+  configured project behaves the same either way. Note basedpyright's
+  npm package also installs a `pyright-langserver` alias, so an
+  npm-only machine already runs basedpyright first. Decide whether to
+  swap the order.
+
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -221,9 +248,18 @@ and `raised`.
   offers "Restart language server (rust-analyzer)" as the retry; `Esc d`
   does nothing at all (menuGoToDefinition returns early on
   `!hasLSPActions()` — the same as with no server, by the
-  silent-degradation rule). The TypeScript inlay-hint `preferences` in
-  `initOptions` are the least certain part — typescript-language-server
-  may want them via `workspace/didChangeConfiguration` instead.
+  silent-degradation rule). 2026-10-28 (`2026-1028-1614-n016-python-inlay-hints-premise`):
+  pyright 1.1.414, basedpyright 1.40.2, pylsp 1.15.0 and
+  typescript-language-server 5.3.0 (npm/uv installs in a scratch dir)
+  RAN, through a protocol probe and in the real binary. basedpyright in
+  ced: inlay notes (`» x: LiteralString · name="hi" · times=3`) and
+  diagnostics. pyright and pylsp have no inlay hints at all. TypeScript
+  over TS 5.9 in ced: diagnostics (`✗ Type 'string' is not assignable…`)
+  and inlay notes. The `initOptions.preferences` doubt is settled: they
+  ARE the route (5 hints with, 0 without; no didChangeConfiguration
+  needed). Over TypeScript 7 it is dead (N-101). The rustup stub is BACK
+  at `~/.cargo/bin/rust-analyzer`, still without the component, so
+  rust-analyzer and zls remain unrun.
 
 - **N-026** · raised `2026-0921-0932-next-list-run` · value low
   cats-side: `"KeyA"` is now in `CMD_TO_PANE` (cats `bd18905`,
@@ -525,6 +561,19 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-28, `2026-1028-1614-n016-python-inlay-hints-premise` —
+  **N-016** premise false, nothing to switch on. Run against the real
+  servers: pyright 1.1.414 has no `textDocument/inlayHint` at all
+  (Pylance-only), pylsp 1.15.0 neither, and basedpyright 1.40.2 ships
+  hints ON and answers them through ced's handshake unchanged. The `{}`
+  auto-responder never even comes into play: ced declares no
+  `workspace.configuration`, so none of gopls, pyright, basedpyright,
+  pylsp or typescript-language-server sends that request. The comments
+  claiming "gopls blocks on it" now say the branch is defensive. The run
+  surfaced one defect, fixed: basedpyright's keyword-argument labels
+  rendered as `name= "hi"`, now `name="hi"` (`inlayParamPart`,
+  `TestInlayNote_KeywordArgumentLabelsTakeNoSpace`).
 
 - closed 2026-10-25, `2026-1025-2252-n092-n091-find-all-picks-and-doors` —
   **N-092** keyboard walking now counts as choosing a row, the same as a

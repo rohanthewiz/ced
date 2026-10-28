@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-104**
+**Next ID: N-105**
 
 ## Open
 
@@ -312,6 +312,9 @@ and `raised`.
   never appears there. Hand check inside cats on cats-green and one theme
   that keeps its panel (Tokyo Night): does the darker tree/tab strip sit
   well against cats' own sidebar, and do the folder/file tiers read.
+  Since `2026-1028-1801-tab-bar-red-tint` the tab strip is no longer the
+  tree's surface: it wears `tabbar-bg` (sidebar-bg + 8% err), derived
+  from the host's panel and err too. Check that red cast as well.
 
 - **N-066** · raised `2026-1015-1640-tree-recent-folders-star` · value low
   The tree's recent-folders star has only been seen through run-ced's
@@ -489,6 +492,16 @@ and `raised`.
   kitty / Ghostty / WezTerm that ⌘O opens the prompt and that Tab works
   through tmux. Once N-098 lands, check the cats mac app and Chrome too;
   Chrome's own File > Open is the doubtful one.
+
+- **N-104** · raised `2026-1028-1801-tab-bar-red-tint` · value low
+  **The red-tinted tab strip by eye.** `tabbar-bg` (sidebar-bg + 8% err)
+  was seen only through run-ced's PTY capture on Darcula (`#352929`), and
+  on the other themes only as numbers in tests. Look at it in a real
+  terminal on a dark theme and on both light themes, where it comes out
+  pinkish beige (`#edd9c8` solarized-light, `#efe5e7` corporate): does it
+  read as a tint rather than a stain, and does the active tab still lift
+  out of the strip? If it is wrong, the knob is `tabBarTint` in
+  theme/palette.go.
 
 ## Roadmap
 

@@ -329,10 +329,18 @@ func (r *mdRenderer) codeRows(body []string, srcs []int, lang string) {
 	// would restart it on every row and mis-color every multi-line
 	// construct in the file.
 	grid := HighlightLang(lang, strings.Join(body, "\n"), r.th, r.pal.code)
+	// The grid's colours were tuned for the page background, not the
+	// slab; slabInk restores what the slab took (see its doc comment).
+	// Untokenised cells already carry pal.code, which is lifted.
+	floor := inkFloor(r.th)
+	inks := map[tcell.Color]tcell.Color{}
 	for n, line := range body {
 		var styles []tcell.Style
 		if n < len(grid) {
 			styles = grid[n]
+			for k := range styles {
+				styles[k] = slabInk(r.th, floor, styles[k], inks)
+			}
 		}
 		cells := codeCells(line, styles, r.pal.code)
 		for k, chunk := range hardWrap(cells, r.width-1) {

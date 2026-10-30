@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-105**
+**Next ID: N-106**
 
 ## Open
 
@@ -502,6 +502,18 @@ and `raised`.
   read as a tint rather than a stain, and does the active tab still lift
   out of the strip? If it is wrong, the knob is `tabBarTint` in
   theme/palette.go.
+
+- **N-105** · raised `2026-1030-1649-markdown-preview-contrast` · value low
+  **The lifted markdown preview colours by eye.** Inline code, headings,
+  bullets and quotes are now lifted to 4.5:1 (`mdPaletteFor` → `inkFloor`),
+  and fenced syntax colours get back what the code slab took (`slabInk`).
+  Seen only through run-ced's PTY capture on Darcula (inline code
+  `#9876aa` → `#b79fc3`) and as numbers for the other built-ins. Look at a
+  real document in a real terminal on Darcula, a Solarized and a light
+  theme: does inline code still read as code rather than as washed-out
+  prose, and do fenced comments stay quieter than the code? Lift step
+  granularity (tenths, up to one step of overshoot) is the knob if a
+  colour lands too pale.
 
 ## Roadmap
 

@@ -80,7 +80,8 @@ internal/favorites/           favorites.json: two scopes, walk-up resolver
 internal/filetree/            Lazy tree, identity-preserving refresh, marks; filter.go
 internal/format/              format.json, trust store, builtin ladder, kinds.go,
                               inprocess.go (JSON), validate.go, jsonexplain.go
-internal/theme/               Theme struct, palette derivation, builtins, loader
+internal/theme/               Theme struct, palette derivation, builtins, loader;
+                              contrast.go (WCAG ratio + hue-keeping lift)
 internal/userconfig/          ~/.config/ced/config.json + other config paths
 internal/clipboard/           OSC 52 with tmux passthrough
 internal/icons/               Nerd Font detection + glyphs
@@ -391,6 +392,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Keys swallowed except navigation. Prose word-wraps, code hard-wraps
   with tabs expanded; fences highlighted via one `HighlightLang` pass.
   `md-code-bg` is a derived key (`TestDerive_MDCodeBGIsVisiblyOffTheBackground`).
+- Every TEXT role in `mdPaletteFor` goes through `theme.LiftToContrast`
+  to `inkFloor` (4.5, or the theme's own body-text contrast when LOWER)
+  against the surface it sits on — they borrow colours tuned for other
+  jobs (`TestMDPalette_TextRolesReadOnEveryBuiltin`). Body text and pure
+  decoration (hr, table rules, quote bar) are never lifted. Fenced syntax
+  tokens get `slabInk`: back only what the slab took (target = their
+  page contrast, capped at the floor), so comments stay quieter.
 - No config key. Leader Esc-v; ≡ View row below the terminal rows.
   Each context menu carries only ONE of Preview/Stop Preview (tree:
   keyed by the clicked file via `previewingPath`; previewed editor pane

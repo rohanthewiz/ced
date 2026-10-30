@@ -70,7 +70,6 @@ package app
 
 import (
 	"hash/fnv"
-	"math"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -692,55 +691,24 @@ func blameBandFG(th theme.Theme, band tcell.Color) tcell.Color {
 // paler (or deeper) green — so a colour that MEANS something (the
 // conflict labels' side colours) keeps its meaning while becoming
 // legible. A colour with no RGB form comes back unchanged.
+//
+// The arithmetic lives in theme (contrast.go) so the editor package's
+// markdown preview can use the same lift; this keeps app's short name
+// and its fixed 4.5:1 target.
 func liftToContrast(fg, bg tcell.Color) tcell.Color {
-	if bg == tcell.ColorDefault || contrastRatio(fg, bg) >= 4.5 {
-		return fg
-	}
-	tr, tg, tb := fg.RGB()
-	if tr < 0 {
-		return fg
-	}
-	var target int32 // toward black on a light band…
-	if relLuminance(bg) < 0.5 {
-		target = 255 // …toward white on a dark one.
-	}
-	out := fg
-	for step := 1; step <= 10; step++ {
-		f := float64(step) / 10
-		mix := func(c int32) int32 { return int32(float64(c)*(1-f) + float64(target)*f + 0.5) }
-		out = tcell.NewRGBColor(mix(tr), mix(tg), mix(tb))
-		if contrastRatio(out, bg) >= 4.5 {
-			break
-		}
-	}
-	return out
+	return theme.LiftToContrast(fg, bg, theme.MinTextContrast)
 }
 
 // relLuminance is the WCAG relative luminance of an RGB color, 0..1.
 // Non-RGB colors (palette indexes) count as black: blame only ever asks
 // about colors it blended itself or a theme's hex-defined ones.
 func relLuminance(c tcell.Color) float64 {
-	r, g, b := c.RGB()
-	if r < 0 {
-		return 0
-	}
-	lin := func(v int32) float64 {
-		x := float64(v) / 255
-		if x <= 0.03928 {
-			return x / 12.92
-		}
-		return math.Pow((x+0.055)/1.055, 2.4)
-	}
-	return 0.2126*lin(r) + 0.7152*lin(g) + 0.0722*lin(b)
+	return theme.RelLuminance(c)
 }
 
 // contrastRatio is the WCAG contrast ratio between two colors, 1..21.
 func contrastRatio(a, b tcell.Color) float64 {
-	la, lb := relLuminance(a), relLuminance(b)
-	if la < lb {
-		la, lb = lb, la
-	}
-	return (la + 0.05) / (lb + 0.05)
+	return theme.ContrastRatio(a, b)
 }
 
 // -----------------------------------------------------------------------------

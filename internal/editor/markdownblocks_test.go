@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
+
 	"github.com/rohanthewiz/ced/internal/theme"
 )
 
@@ -373,5 +375,45 @@ func TestMDDelimiterRow(t *testing.T) {
 	}
 	if _, ok := mdDelimiterRow("| a - b | c |"); ok {
 		t.Error("a prose row was accepted as a delimiter row")
+	}
+}
+
+// TestRenderMarkdown_FencedTokensGetBackWhatTheSlabTook pins slabInk's
+// two-sided rule on Darcula, whose #808080 comments read ~3.6:1 on the
+// page but ~2.8:1 on the code slab. Restored, the comment must read on
+// the slab at least as well as it did on the page — yet stay DIMMER
+// than the code beside it, since lifting it to 4.5 would flatten the
+// theme's comment/code hierarchy.
+func TestRenderMarkdown_FencedTokensGetBackWhatTheSlabTook(t *testing.T) {
+	spec, _ := theme.Find(theme.Builtins(), "darcula")
+	th, err := spec.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := RenderMarkdown([]string{"```go", "x := 1 // note", "```"}, 40, th)
+	var comment, code tcell.Style
+	var found bool
+	for _, r := range rows {
+		s := string(r.Runes)
+		if i := strings.Index(s, "// note"); i >= 0 {
+			// Index is a byte offset; the row is ASCII so it is a rune index too.
+			comment, code, found = r.Styles[i+3], r.Styles[strings.Index(s, "x")], true
+		}
+	}
+	if !found {
+		t.Fatalf("code row not rendered in %d rows", len(rows))
+	}
+	cfg, cbg, _ := comment.Decompose()
+	if cbg != th.MDCodeBG {
+		t.Fatalf("comment not on the slab: bg %v", cbg)
+	}
+	page := theme.ContrastRatio(th.SynComment, th.BG)
+	onSlab := theme.ContrastRatio(cfg, th.MDCodeBG)
+	if onSlab < page-0.01 {
+		t.Errorf("comment reads %.2f:1 on the slab, %.2f:1 on the page", onSlab, page)
+	}
+	xfg, _, _ := code.Decompose()
+	if onSlab >= theme.ContrastRatio(xfg, th.MDCodeBG) {
+		t.Errorf("comment (%.2f:1) lifted level with the code; hierarchy flattened", onSlab)
 	}
 }

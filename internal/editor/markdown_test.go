@@ -236,3 +236,74 @@ func simText(scr tcell.Screen, w, h int) string {
 	}
 	return b.String()
 }
+
+// mdBuiltin resolves a built-in theme by name for the palette tests.
+func mdBuiltin(t *testing.T, name string) theme.Theme {
+	t.Helper()
+	spec, ok := theme.Find(theme.Builtins(), name)
+	if !ok {
+		t.Fatalf("no built-in theme %q", name)
+	}
+	th, err := spec.Resolve()
+	if err != nil {
+		t.Fatalf("resolve %s: %v", name, err)
+	}
+	return th
+}
+
+// TestMDPalette_TextRolesReadOnEveryBuiltin is the screenshot bug:
+// Darcula painted inline code at 2.85:1 (syn-constant purple on the
+// code slab), with h3/bullets and quotes under 4.5 across several
+// themes. Every role that paints TEXT must reach inkFloor on the
+// surface it actually sits on, in every built-in.
+func TestMDPalette_TextRolesReadOnEveryBuiltin(t *testing.T) {
+	for _, spec := range theme.Builtins() {
+		th, err := spec.Resolve()
+		if err != nil {
+			t.Fatalf("resolve %s: %v", spec.Name, err)
+		}
+		pal := mdPaletteFor(th)
+		floor := inkFloor(th)
+		roles := map[string]tcell.Style{
+			"inline": pal.inline, "code": pal.code, "h1": pal.h1, "h2": pal.h2,
+			"h3": pal.h3, "quote": pal.quote, "link": pal.link, "image": pal.image,
+			"meta": pal.meta, "tblHead": pal.tblHead, "bullet": pal.bullet,
+		}
+		for name, st := range roles {
+			fg, bg, _ := st.Decompose()
+			// 0.01 slack: the floor is itself a measured ratio, and
+			// float rounding must not fail a colour sitting exactly on it.
+			if c := theme.ContrastRatio(fg, bg); c < floor-0.01 {
+				t.Errorf("%s: %s reads at %.2f:1, floor %.2f", spec.Name, name, c, floor)
+			}
+		}
+	}
+}
+
+// TestMDPalette_ReadableColoursUntouched pins the other half: the lift
+// only touches colours under the floor. Tokyo Night's accent already
+// reads at ~6.8:1, so its headings must keep the theme's exact accent.
+func TestMDPalette_ReadableColoursUntouched(t *testing.T) {
+	th := mdBuiltin(t, "tokyo-night")
+	fg, _, _ := mdPaletteFor(th).h1.Decompose()
+	if fg != th.Accent {
+		t.Errorf("readable accent was altered: %v, want %v", fg, th.Accent)
+	}
+}
+
+// TestInkFloor_FollowsALowContrastTheme pins the Solarized carve-out:
+// when the theme's own body text sits under 4.5:1, the floor drops to
+// match it, so headings and quotes are never lifted past the prose.
+func TestInkFloor_FollowsALowContrastTheme(t *testing.T) {
+	th := mdBuiltin(t, "solarized-light")
+	body := theme.ContrastRatio(th.Text, th.BG)
+	if body >= theme.MinTextContrast {
+		t.Fatalf("fixture premise gone: solarized-light body text is %.2f:1", body)
+	}
+	if f := inkFloor(th); f != body {
+		t.Errorf("floor = %.2f, want body contrast %.2f", f, body)
+	}
+	if f := inkFloor(mdBuiltin(t, "tokyo-night")); f != theme.MinTextContrast {
+		t.Errorf("high-contrast theme floor = %.2f, want %.1f", f, theme.MinTextContrast)
+	}
+}

@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-106**
+**Next ID: N-109**
 
 ## Open
 
@@ -209,6 +209,26 @@ plus the LSP work done in the seeding session itself
   npm package also installs a `pyright-langserver` alias, so an
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
+
+- **N-107** · raised `2026-1031-0200-menu-search-box-splitters` · value medium
+  **Modal frames are invisible on cool-blue.** Its Subtle is exactly its
+  LineHL (`#3b4252`), so every modal's border, title divider and the
+  palette's spacer rule (`chrome().border`, the ≡ menu's `borderStyle`)
+  draw at 1.00:1. On the other built-ins they sit at 1.13–1.49:1. The ≡
+  menu's new splits dodge it by lifting Subtle (`menuSplitColor`); the
+  frames don't. Fix in the theme (cool-blue's `line`, or a derivation
+  floor for Subtle against LineHL) rather than per surface, then pin it
+  with an every-builtin contrast test.
+
+- **N-108** · raised `2026-1031-0200-menu-search-box-splitters` · value low
+  **Right-click menus have no splitters.** The ≡ sections got split
+  rules between runs of related rows (`splitAbove`), but the tree's
+  context menu, the tab menu and the editor's right-click menu are long
+  flat lists too (the tree's runs from Open in $EDITOR through Zip and
+  the copy rows). They share the `ctxScroll` chassis (contextmenu.go),
+  whose row↔screen mapping, hover and keyboard walk would need a
+  separator row kind that is never selected. The user's ask ("go thru
+  all the menus") was read as the ≡ sections.
 
 ## Validate
 
@@ -514,6 +534,19 @@ and `raised`.
   prose, and do fenced comments stay quieter than the code? Lift step
   granularity (tenths, up to one step of overshoot) is the knob if a
   colour lands too pale.
+
+- **N-106** · raised `2026-1031-0200-menu-search-box-splitters` · value low
+  **The ≡ menu's search box and splits by eye.** Seen only through
+  run-ced's PTY capture (Tokyo Night and the cats host theme). In a real
+  terminal, inside tmux and in cats, check three things. First, the
+  terminal caret really shows in the box while the menu is up (`drawMenu`
+  ends with `ShowCursor` now, not `HideCursor`). Second, the field reads
+  as a box: its fill (BG) stands off the menu (LineHL) by only 1.06:1 on
+  Tokyo Night, the same as the palette's input always has. Third, typing
+  turns the menu into the palette without a visible jump. Also look at
+  the dotted splits on both light themes. If the box is too faint, the
+  fill is in `drawMenuSearchBox`; if the splits are too loud or too
+  faint, the knob is `menuSplitContrast`.
 
 ## Roadmap
 

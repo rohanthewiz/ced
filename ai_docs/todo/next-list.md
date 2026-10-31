@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-109**
+**Next ID: N-110**
 
 ## Open
 
@@ -165,17 +165,6 @@ plus the LSP work done in the seeding session itself
   native menu item the way it does ⌘E (`ed4962c`), is the by-hand check
   (N-100). If it doesn't, note it in metakeys.go / 20-keys.js as ⌘E is.
 
-- **N-099** · raised `2026-1028-1242-open-file-anywhere-cmd-o` · value medium
-  **A go-to-definition into a file outside the root makes that folder
-  ACTIVE.** `openFile` sets `activeFolder` to the opened file's folder
-  for every caller. After an LSP jump into GOROOT / the module cache
-  (e.g. `fmt`), the ≡ folder rows go live on a folder the tree can't
-  show: "Rename folder (fmt)", "Delete folder (fmt)", "Copy folder". New
-  file lands there too. Open file… (openfile.go's `openFileAnywhere`)
-  already keeps the active folder for outside-root files. The likely fix
-  is to move that guard INTO `openFile` (EvalSymlinks on both sides, as
-  `openFileAnywhere` does), which then makes the wrapper redundant.
-
 - **N-101** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value medium
   **typescript-language-server is dead over TypeScript 7, silently.**
   npm's `typescript@latest` is 7.0.2 (the native port), which ships no
@@ -229,6 +218,15 @@ plus the LSP work done in the seeding session itself
   whose row↔screen mapping, hover and keyboard walk would need a
   separator row kind that is never selected. The user's ask ("go thru
   all the menus") was read as the ≡ sections.
+
+- **N-109** · raised `2026-1031-1737-n099-outside-root-active-folder` · value low
+  **`pathInside` misreads a child named `..something` as outside.**
+  gitstatus.go's `pathInside` tests `strings.HasPrefix(rel, "..")`, so a
+  folder or file inside the root whose name starts with two dots (`..x`)
+  has `rel == "..x"` and is called outside. Every caller fails safe
+  (confinement refuses, `adoptFileFolder` leaves the active folder
+  alone), so nothing breaks loudly. The precise test is `rel == ".."` or
+  a `".." + separator` prefix. Wants a case in the helper's own test.
 
 ## Validate
 
@@ -619,6 +617,21 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-10-31, `2026-1031-1737-n099-outside-root-active-folder` —
+  **N-099** the guard moved INTO `openFile`: `adoptFileFolder` (app.go)
+  is the one gate for "a file's folder becomes active", and session
+  restore goes through it too (a session ending on a GOROOT tab armed
+  the folder verbs the same way). Inside = lexically under the root
+  first (an in-tree symlinked folder still counts), else EvalSymlinks on
+  both sides with the answer RE-SPELLED under the root
+  (`projectFolderFor`), so a resolved spelling of the root never reads
+  as a subfolder. `openFileAnywhere` deleted; Open file… calls plain
+  `openFile`. Pinned by `TestOpenFile_OutsideRootKeepsActiveFolder`,
+  `TestLSPJumpTo_OutsideRootLeavesFolderVerbsDark`,
+  `TestOpenFile_ResolvedSpellingAdoptsTheTreesSpelling`,
+  `TestProjectFolderFor_Cases`,
+  `TestRestoreSession_OutsideActiveTabKeepsTheRootFolder`.
 
 - closed 2026-10-28, `2026-1028-1614-n016-python-inlay-hints-premise` —
   **N-016** premise false, nothing to switch on. Run against the real

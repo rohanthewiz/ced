@@ -518,6 +518,72 @@ func TestMenuTypingOpensSearch(t *testing.T) {
 	if !found {
 		t.Fatal("search should reach rows inside collapsed sections")
 	}
+	// The box the rune was typed into IS the palette's input: same title
+	// as every other door to it, drawn in the menu's frame.
+	if m.title != paletteMenuLabel || !m.sourced || !m.fromMenu {
+		t.Fatalf("typing opened %q (sourced=%v fromMenu=%v), want the command palette in the menu's frame",
+			m.title, m.sourced, m.fromMenu)
+	}
+}
+
+// TestPaletteFromMenu_KeepsTheMenusFrame pins the in-place takeover: the
+// palette opened from the menu's search box has the menu's column, width
+// and top row, its height is the menu's (so the frame does not jump), and
+// its query field covers the very cells the box did — the typed rune
+// lands where the caret was.
+func TestPaletteFromMenu_KeepsTheMenusFrame(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openMenu()
+	mx, my, mw, mh := a.menuModalRect()
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'g', tcell.ModNone))
+
+	m := paletteOf(a)
+	if m == nil || !m.fromMenu {
+		t.Fatalf("typing should open the palette in the menu's frame, got %T", a.modal)
+	}
+	px, py, pw, ph := m.rect(a)
+	if px != mx || py != my || pw != mw || ph != mh {
+		t.Fatalf("palette rect = (%d,%d,%d,%d), want the menu's (%d,%d,%d,%d)", px, py, pw, ph, mx, my, mw, mh)
+	}
+
+	m.draw(a)
+	a.screen.Show()
+	start, _ := paletteInputSpan(mx, mw)
+	mainc, _, _, _ := a.screen.GetContent(start, my+3)
+	if mainc != 'g' {
+		t.Fatalf("query cell (%d,%d) = %q, want the typed 'g' where the box's caret was", start, my+3, mainc)
+	}
+}
+
+// TestPaletteFromMenu_ShortMenuGetsTheUsualRows: a menu clipped by a
+// short window must not shrink the palette below its usual ten rows, and
+// the frame still fits the window — including after the window shrinks
+// further with the palette up.
+func TestPaletteFromMenu_ShortMenuGetsTheUsualRows(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.setAllMenuSections(true)
+	a.height = 14 // even the folded menu (18 rows) is clipped here
+	a.openMenu()
+	_, _, _, mh := a.menuModalRect()
+	if mh-6 >= paletteResultsVisible {
+		t.Fatalf("setup: the clipped menu (%d rows) should be shorter than the palette", mh)
+	}
+	a.menuCommandPalette()
+	m := paletteOf(a)
+	if m == nil {
+		t.Fatalf("the box should open the palette, got %T", a.modal)
+	}
+	if got := m.wantRows(); got != paletteResultsVisible {
+		t.Fatalf("palette rows = %d, want %d", got, paletteResultsVisible)
+	}
+
+	for _, h := range []int{14, 11} {
+		a.height = h
+		_, py, _, ph := m.rect(a)
+		if py < 0 || py+ph > a.height {
+			t.Fatalf("palette rect y=%d h=%d overflows a %d-row window", py, ph, a.height)
+		}
+	}
 }
 
 // TestMenuTypingIgnoresModifiedRunes keeps Alt/Meta chords out of the

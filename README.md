@@ -91,7 +91,9 @@ The goals, in order:
   editor) and pick **Soft Wrap** to read long lines folded at the pane's
   edge. See [Soft wrap](#soft-wrap).
 - **Action menu** opened with the `≡` icon, right-click, or double-tap
-  `Esc`. Keyboard navigation works too — arrow keys + `Enter`.
+  `Esc`. Keyboard navigation works too — arrow keys + `Enter`. The
+  search box at its top is the command palette: just start typing and
+  the menu filters itself into the matching commands.
 - **Live file tree** — auto-refreshes every 10 seconds so files added
   or removed from disk show up without you doing anything.
 - **External change detection** — if a file on disk changes underneath

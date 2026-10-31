@@ -1307,24 +1307,41 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   wash and the separator grey (`TestDerive_ConflictWashesAreVisibleAndDistinct`).
 
 ### Menu (≡) and leaders
-- Groups in `builtinMenuGroups`; `menuLayout` recomputes geometry every
-  call; scrolled geometry only via `menuItemIndexAt` /
-  `menuScrollOffset`.
+- Groups in `builtinMenuGroups`; `menuGeometry` recomputes geometry every
+  call (`menuLayout` = it minus the splits); row↔screen only via
+  `menuRowY` / `menuRelYAt` (pinned rows ignore the scroll),
+  `menuItemIndexAt`, `menuScrollOffset`.
 - Top level: File · Edit · View · Find · Nav · Code · Git · AI · Tools,
   then headerless Quit. Sub-sections nest ONE level via
   `menuGroup.parent` (children follow the parent,
   `TestBuiltinMenuGroups_ChildrenFollowParent`); Tools stays the last
   parent before Quit. `openMenuAtSection` unfolds the parent first.
-- Pinned top zone: command palette + expand/collapse-all. Sections
+- Pinned top zone (`menuPinnedRows` = 6, never scrolls): the command
+  palette's SEARCH BOX (`menuItemDef.input`, `drawMenuSearchBox`: the
+  palette's own field span `paletteInputSpan`, caret parked in it, never
+  the hover bar) + expand/collapse-all. Typing in the menu or a click /
+  Enter on the box → `openPaletteFromMenu`: the real palette drawn in the
+  MENU's frame (`paletteModal.fromMenu`, height = the menu's, ≥ the usual
+  10 rows), so the query lands in the box's cells. Sections
   collapse by default via `seedMenuFoldDefault` (not in tests); new
   sections follow `menuFoldDefault`. Fold state is session-only.
   Headers are selectable but not the initial highlight.
+- **Splits** (`menuItemDef.splitAbove`): a flag on the first REAL row of
+  a run of related rows, never a separator item (palette/tests keep
+  walking actions only); `menuGeometry` gives it its own row (ignored on
+  a section's first row). Drawn as an inset dotted `┄` from the label
+  column, ink = Subtle lifted to `menuSplitContrast` 1.8:1
+  (`menuSplitColor`; Subtle is 1:1 on cool-blue). No split for a 1-row
+  run — reorder instead; ~3-row sections carry none. A split above the
+  terminal rows spends the above-the-fold budget.
 - **Adding a menu row means updating the pins**:
   `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 190 group
-  actions + 15 headers (207), height 213, dividers `[2, 5, 210]`; also
-  the Git fold count in `TestMenuLayout_CollapseHidesSectionRows`,
+  actions + 15 headers (207), 36 splits, height 249, dividers
+  `[2, 5, 246]`; also the Git fold height (35 rows + 8 splits = 43) in
+  `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
+  Adding a split moves the same pins.
 - Leader namespaces (leader.go): `Esc a` (AI) and `Esc x` (plugins,
   dynamic via `subFor`/`hintFor`). One level only; sub-bindings may
   collide with top-level ones; a miss inside a live chord is swallowed

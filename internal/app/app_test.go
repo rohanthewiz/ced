@@ -400,7 +400,7 @@ func TestMenuModalRect_Centered(t *testing.T) {
 	// The menu (141 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 213
+	a.height = 249
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -2113,26 +2113,30 @@ func TestDrawStatusBar_OmitsBranchWhenEmpty(t *testing.T) {
 
 // TestMenuLayout_NoCustomActions pins down the baseline geometry with
 // every section expanded: the pinned top zone contributes two rows (the
-// command palette + the expand/collapse-all toggle), fifteen collapsible
-// groups each contribute a header row (15) plus their action rows, and
-// Quit renders headerless behind a divider (its 1 row) — 157 total. The
-// height matches the layout total. Catches accidental off-by-one
-// regressions when someone tweaks the layout helper.
+// command palette's search box + the expand/collapse-all toggle), fifteen
+// collapsible groups each contribute a header row (15) plus their action
+// rows, Quit renders headerless behind a divider (its 1 row), and the
+// in-section splits (splitAbove) take one row each. The height matches
+// the layout total. Catches accidental off-by-one regressions when
+// someone tweaks the layout helper.
 func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 213 {
-		t.Errorf("modalHeight = %d, want 213", h)
+	if h != 249 {
+		t.Errorf("modalHeight = %d, want 249 (213 + 36 splits)", h)
+	}
+	if got := len(a.menuGeometry().splits); got != 36 {
+		t.Errorf("splits = %d, want 36", got)
 	}
 	if got := len(items); got != 207 {
 		t.Errorf("row count = %d, want 207 (2 top-zone + 190 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (210) — headers separate the
-	// rest.
-	wantDiv := []int{2, 5, 210}
+	// one setting off the headerless Quit group (246) — headers separate the
+	// sections, and splits (not dividers) the runs inside them.
+	wantDiv := []int{2, 5, 246}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2237,8 +2241,9 @@ func TestMenuLayout_CollapseHidesSectionRows(t *testing.T) {
 	if got := len(before) - len(after); got != 35 {
 		t.Errorf("collapsing Git hid %d rows, want 35", got)
 	}
-	if got := hBefore - hAfter; got != 35 {
-		t.Errorf("height shrank by %d, want 35", got)
+	// The rows plus Git's eight splits, which fold away with them.
+	if got := hBefore - hAfter; got != 43 {
+		t.Errorf("height shrank by %d, want 43", got)
 	}
 	// The Git header itself must survive so the user can unfold.
 	if menuHeaderIndex(after, "Git") < 0 {
@@ -2716,8 +2721,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 216 { // 213 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 216", h)
+	if h != 252 { // 249 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 252", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -3171,7 +3176,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 213
+	a.height = 249
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}
@@ -3255,10 +3260,182 @@ func TestMenuMoveSelection_ScrollsIntoView(t *testing.T) {
 		t.Fatalf("selected row at band offset %d, want within [%d,%d]", relY, menuPinnedRows, mh-2)
 	}
 
-	a.menuMoveSelection(1) // wrap back down to the first enabled row
-	relY = items[a.hoveredMenuRow].relY - a.menuScrollOffset()
-	if relY < menuPinnedRows || relY > mh-2 {
-		t.Fatalf("wrapped selection at band offset %d, want visible", relY)
+	// Wrap back down to the first enabled row: the search box, which is
+	// in the pinned top zone — on screen at any scroll, so the band is
+	// left where it was rather than yanked back to the top.
+	scrolled := a.menuScrollOffset()
+	a.menuMoveSelection(1)
+	if !items[a.hoveredMenuRow].input {
+		t.Fatalf("wrap down landed on %q, want the search box", items[a.hoveredMenuRow].label)
+	}
+	_, my, _, _ := a.menuModalRect()
+	if _, ok := menuRowY(items[a.hoveredMenuRow].relY, my, mh, a.menuScrollOffset()); !ok {
+		t.Fatal("wrapped selection is off screen")
+	}
+	if got := a.menuScrollOffset(); got != scrolled {
+		t.Fatalf("selecting a pinned row moved the scroll %d → %d", scrolled, got)
+	}
+}
+
+// TestMenuRowY_PinnedZoneIgnoresScroll pins the one row↔screen mapping:
+// rows above menuPinnedRows (title, search box, expand-all, their
+// dividers) sit at a fixed offset whatever the scroll, scrolling rows move
+// and clip to the band, and menuRelYAt answers the inverse for both.
+func TestMenuRowY_PinnedZoneIgnoresScroll(t *testing.T) {
+	const my, mh, scroll = 4, 20, 7
+	if cy, ok := menuRowY(3, my, mh, scroll); !ok || cy != my+3 {
+		t.Fatalf("search box row = (%d, %v), want (%d, true) at any scroll", cy, ok, my+3)
+	}
+	if _, ok := menuRowY(menuPinnedRows, my, mh, scroll); ok {
+		t.Fatal("the first scrolling row should be hidden under a scroll of 7")
+	}
+	if cy, ok := menuRowY(menuPinnedRows+scroll, my, mh, scroll); !ok || cy != my+menuPinnedRows {
+		t.Fatalf("row scrolled to the band top = (%d, %v), want (%d, true)", cy, ok, my+menuPinnedRows)
+	}
+	if _, ok := menuRowY(mh-1+scroll, my, mh, scroll); ok {
+		t.Fatal("a row landing on the bottom border must not count as on screen")
+	}
+	for _, relY := range []int{1, 3, 4, menuPinnedRows + scroll, mh - 2 + scroll} {
+		cy, _ := menuRowY(relY, my, mh, scroll)
+		if back, ok := menuRelYAt(cy, my, mh, scroll); !ok || back != relY {
+			t.Errorf("relY %d → screen %d → relY (%d, %v)", relY, cy, back, ok)
+		}
+	}
+	if _, ok := menuRelYAt(my+mh-1, my, mh, scroll); ok {
+		t.Fatal("the bottom border mapped to a row")
+	}
+}
+
+// TestMenuSearchBox_StaysOnScreenWhenScrolled: the search box is pinned,
+// so on a clipped menu scrolled all the way down it is still the row
+// under its cells, and a click there opens the palette in the menu's
+// frame — the box is never something you have to scroll back to.
+func TestMenuSearchBox_StaysOnScreenWhenScrolled(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.height = 30
+	a.openMenu()
+	a.scrollMenu(999)
+	if a.menuScrollOffset() == 0 {
+		t.Fatal("setup: the menu should be scrollable on a 30-row window")
+	}
+	mx, my, _, _ := a.menuModalRect()
+	items, _, _ := a.menuLayout()
+	idx := a.menuItemIndexAt(mx+5, my+3)
+	if idx < 0 || !items[idx].input {
+		t.Fatalf("row under the box = %d, want the search box", idx)
+	}
+
+	a.handleMenuMouse(mx+5, my+3, tcell.Button1)
+	m := paletteOf(a)
+	if m == nil || !m.fromMenu {
+		t.Fatalf("a click on the box should open the palette in the menu's frame, got %T", a.modal)
+	}
+	if m.field.String() != "" {
+		t.Fatalf("a click should open an empty query, got %q", m.field.String())
+	}
+}
+
+// TestDrawMenu_SearchBoxPlaceholderAndCaret paints the menu and reads it
+// back: the placeholder sits in the box row starting at the palette's
+// input column, the shortcut hint is on the same row, and the terminal
+// caret is parked at the start of the field — the "type here" signal.
+func TestDrawMenu_SearchBoxPlaceholderAndCaret(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openMenu()
+	a.drawMenu()
+	a.screen.Show()
+
+	mx, my, mw, _ := a.menuModalRect()
+	start, _ := paletteInputSpan(mx, mw)
+	row := screenRow(t, a, my+3, mx, mw)
+	if !strings.Contains(row, menuSearchPlaceholder) || !strings.Contains(row, "esc k") {
+		t.Fatalf("box row = %q, want the placeholder and its esc k hint", row)
+	}
+	if got := screenRow(t, a, my+3, start, runeLen(menuSearchPlaceholder)); got != menuSearchPlaceholder {
+		t.Fatalf("placeholder starts at %q, want it at the palette's input column", got)
+	}
+	cx, cy, visible := a.screen.(tcell.SimulationScreen).GetCursor()
+	if !visible || cx != start || cy != my+3 {
+		t.Fatalf("caret = (%d,%d,%v), want (%d,%d,true)", cx, cy, visible, start, my+3)
+	}
+}
+
+// TestMenuGeometry_SplitsSitInsideASection pins where a split may land:
+// on its own row directly above a splitAbove item, with an item of the
+// SAME section directly above it — never under a header (the header
+// already divides), never on an item's row, and folded away with its
+// section.
+func TestMenuGeometry_SplitsSitInsideASection(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.customActions = nil
+	g := a.menuGeometry()
+	byRelY := map[int]menuItemDef{}
+	for _, it := range g.items {
+		byRelY[it.relY] = it
+	}
+	for _, sp := range g.splits {
+		if _, clash := byRelY[sp.relY]; clash {
+			t.Fatalf("split at %d shares its row with an item", sp.relY)
+		}
+		below, ok := byRelY[sp.relY+1]
+		if !ok || !below.splitAbove {
+			t.Errorf("split at %d: the row below is not a splitAbove item", sp.relY)
+		}
+		above, ok := byRelY[sp.relY-1]
+		if !ok || above.header || above.depth != sp.depth {
+			t.Errorf("split at %d: the row above is not an item of the same section", sp.relY)
+		}
+	}
+
+	a.setAllMenuSections(true)
+	if n := len(a.menuGeometry().splits); n != 0 {
+		t.Fatalf("all sections folded, %d splits still drawn", n)
+	}
+}
+
+// TestDrawMenu_SplitRuleIsInsetAndDotted: a split paints the dotted rule
+// from the label column to two cells short of the frame, and leaves the
+// frame's own │ on both sides — it must not read as the solid ├──┤ that
+// ends a section.
+func TestDrawMenu_SplitRuleIsInsetAndDotted(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.openMenu() // tests start with every section unfolded: File's first split is near the top
+	a.drawMenu()
+	a.screen.Show()
+
+	mx, my, mw, mh := a.menuModalRect()
+	sp := a.menuGeometry().splits[0]
+	cy, ok := menuRowY(sp.relY, my, mh, a.menuScrollOffset())
+	if !ok {
+		t.Fatalf("setup: the first split (relY %d) is off screen", sp.relY)
+	}
+	row := []rune(screenRow(t, a, cy, mx, mw))
+	if row[0] != '│' || row[mw-1] != '│' {
+		t.Fatalf("split row edges = %q…%q, want the frame's │", row[0], row[mw-1])
+	}
+	if row[3] != ' ' || row[4] != '┄' || row[mw-4] != '┄' || row[mw-3] != ' ' {
+		t.Fatalf("split row = %q, want ┄ from the label column to two cells short of the frame", string(row))
+	}
+}
+
+// TestMenuSplitColor_VisibleOnEveryBuiltin: on every builtin theme the
+// split rule stands off the menu background by menuSplitContrast — the
+// border tone alone is 1:1 on cool-blue — while staying well under the
+// labels it sits between, so it reads as structure, not as a row.
+func TestMenuSplitColor_VisibleOnEveryBuiltin(t *testing.T) {
+	for _, sp := range theme.Builtins() {
+		th, err := sp.Resolve()
+		if err != nil {
+			t.Fatalf("%s: %v", sp.Name, err)
+		}
+		ink := menuSplitColor(th.Subtle, th.LineHL)
+		c := contrastRatio(ink, th.LineHL)
+		if c < menuSplitContrast {
+			t.Errorf("%s: split %.2f:1 on the menu, want ≥ %.1f", sp.Name, c, menuSplitContrast)
+		}
+		if text := contrastRatio(th.Text, th.LineHL); c >= text {
+			t.Errorf("%s: split %.2f:1 is as loud as the labels (%.2f:1)", sp.Name, c, text)
+		}
 	}
 }
 

@@ -534,12 +534,12 @@ func (a *App) catsMenuItems() []menuItemDef {
 		// where they fall back to ced's own terminal panel rather than
 		// refusing — the ladder's rule is that the FEATURE survives the
 		// downgrade, not that the row does.
-		{label: "Terminal in a cats pane", shortcut: "esc C t", action: (*App).menuCatsTerminal, enabled: (*App).hasCatsTerminal},
+		{splitAbove: true, label: "Terminal in a cats pane", shortcut: "esc C t", action: (*App).menuCatsTerminal, enabled: (*App).hasCatsTerminal},
 		{label: "Run file in a cats pane…", shortcut: "esc C x", action: (*App).menuCatsRunFile, enabled: (*App).hasCatsRun},
 		// The sibling agents (catsagents.go). Focus first — it is the row
 		// with no precondition beyond an agent existing, and the one the
 		// status-bar segment's click duplicates.
-		{label: "Focus agent pane…", shortcut: "esc C a", action: (*App).catsFocusAgent, enabled: (*App).hasCatsAgents},
+		{splitAbove: true, label: "Focus agent pane…", shortcut: "esc C a", action: (*App).catsFocusAgent, enabled: (*App).hasCatsAgents},
 		{label: "Send selection to agent…", shortcut: "esc C s", action: (*App).menuCatsSendSelection, enabled: (*App).hasCatsSelectionSend},
 		{label: "Ask cats chat about selection", shortcut: "esc C k", action: (*App).menuCatsAskChat, enabled: (*App).hasCatsSelectionSend},
 		// The last of the agent verbs (catscapture.go): read what a sibling

@@ -224,6 +224,13 @@ type paletteModal struct {
 	// paletteResultsVisible — for a picker whose whole list is meant to
 	// be read at a glance. Still clamped to the window.
 	rows int
+	// fromMenu marks the palette the ≡ menu's search box turned into
+	// (openPaletteFromMenu). It is drawn in the MENU's frame — same
+	// column, width and top row — instead of the upper-third anchor, so
+	// the query appears in the cells the box occupied and the menu reads
+	// as having filtered itself rather than as one popup swapped for
+	// another across the screen.
+	fromMenu bool
 
 	// cancel, when set, runs after the modal is dismissed WITHOUT
 	// running an item — Esc or a click outside. Pickers whose caller
@@ -436,26 +443,51 @@ func (m *paletteModal) collectItems(a *App) {
 	}
 }
 
-// menuCommandPalette is the ≡ menu entry that opens the palette —
-// every action stays reachable from the main menu per the project's
-// mouse-first rule; Esc-a is the shortcut, not the primary surface.
+// menuCommandPalette is the ≡ menu's search box (a click on it, or Enter
+// while it is highlighted) — every action stays reachable from the main
+// menu per the project's mouse-first rule; Esc-k is the shortcut, not
+// the primary surface. The palette opens in the menu's own frame with an
+// empty query, which is what clicking into a search field looks like.
 func (a *App) menuCommandPalette() {
-	a.closeMenu()
-	a.openPalette()
+	a.openPaletteFromMenu("")
 }
 
-// menuSearchFrom is what typing does while the ≡ menu is open: the menu
-// switches into fuzzy-search mode, seeded with the rune that was just
-// typed so the keystroke is never lost. It IS the palette's action
-// source under a different title — every group's rows regardless of
-// fold state, minus the file index, because the user was just LOOKING
-// at the menu and the question being answered is "where did that row
-// go", not "open me a file". The title says how the mode was entered so
-// the discovery teaches itself.
+// menuSearchFrom is what typing does while the ≡ menu is open: the
+// keystroke lands in the menu's search box, which IS the command
+// palette's input — so the menu turns into the palette in place, seeded
+// with the rune that was just typed so the keystroke is never lost. The
+// inventory is the palette's action source — every group's rows
+// regardless of fold state, minus the file index, because the user was
+// just LOOKING at the menu and the question being answered is "where did
+// that row go", not "open me a file".
+//
+// It used to open a picker titled "Search the menu", the title being the
+// only sign the mode existed. Now the box says it before anyone types,
+// and a second name for the same list would only make the two doors look
+// like two features.
 func (a *App) menuSearchFrom(r rune) {
+	a.openPaletteFromMenu(string(r))
+}
+
+// openPaletteFromMenu replaces the open ≡ menu with the command palette,
+// drawn in the menu's frame (fromMenu) and seeded with seed. The menu's
+// height is read BEFORE it closes and becomes the palette's row count, so
+// the frame does not jump: the border, title row and search box stay on
+// the same cells and only the rows below them change. A short menu (the
+// collapsed default) still gets the palette's usual ten rows.
+func (a *App) openPaletteFromMenu(seed string) {
+	_, _, _, mh := a.menuModalRect()
 	a.closeMenu()
-	m := a.openPickerWithCancel("Search the menu", paletteActionItems(a), nil)
-	m.field = newTextField(string(r))
+	m := &paletteModal{
+		title:    paletteMenuLabel,
+		sourced:  true,
+		fromMenu: true,
+		// rect is wantRows()+6 tall; mh-6 makes it exactly the menu's.
+		rows: max(mh-6, paletteResultsVisible),
+	}
+	a.openModal(m)
+	m.field = newTextField(seed)
+	m.collectItems(a)
 	m.refresh()
 }
 
@@ -740,6 +772,9 @@ func (m *paletteModal) runSelected(a *App) {
 // anchor as the finder so switching between the two fuzzy modals
 // doesn't make the eye hunt.
 func (m *paletteModal) rect(a *App) (x, y, w, h int) {
+	if m.fromMenu {
+		return m.menuRect(a)
+	}
 	w = paletteMaxWidth
 	if w > a.width-4 {
 		w = a.width - 4
@@ -761,6 +796,30 @@ func (m *paletteModal) rect(a *App) (x, y, w, h int) {
 		y = 0
 	}
 	return
+}
+
+// menuRect is rect for a palette that took over the ≡ menu: the menu's
+// own x, width and top row, asked of menuModalRect at every call so a
+// resize moves the palette exactly as it would have moved the menu. The
+// height is the palette's (rows was sized from the menu at open); a frame
+// that would run off the bottom slides up rather than being cut, since
+// its last rows are results.
+func (m *paletteModal) menuRect(a *App) (x, y, w, h int) {
+	x, y, w, _ = a.menuModalRect()
+	h = min(m.wantRows()+6, a.height)
+	if y+h > a.height {
+		y = max(a.height-h, 0)
+	}
+	return x, y, w, h
+}
+
+// paletteInputSpan is the query field's cell span [start, end) for a frame
+// at mx, mw wide — shared by the palette's draw and the ≡ menu's search
+// box (drawMenuSearchBox), so the box and the field it becomes cover the
+// same cells. The text starts at mx+2, the column every palette row label
+// starts at; the right side leaves room for the count tail.
+func paletteInputSpan(mx, mw int) (start, end int) {
+	return mx + 2, mx + mw - 10
 }
 
 // wantRows is the row count this palette asks for before the window
@@ -837,7 +896,8 @@ func (m *paletteModal) draw(a *App) {
 	// matches; the field's one-cell inset then lands on mx+1, flush
 	// with the frame like a selected row's highlight.
 	inputStyle := tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Text)
-	m.field.draw(a.screen, my+3, mx+2, mx+mw-10, inputStyle, true)
+	start, end := paletteInputSpan(mx, mw)
+	m.field.draw(a.screen, my+3, start, end, inputStyle, true)
 
 	tail := countLabel(m.countMatches(), countItems(m.items)) + " "
 	drawAt(a.screen, mx+mw-1-runeLen(tail), my+3, tail, c.muted)

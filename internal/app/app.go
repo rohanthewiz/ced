@@ -217,6 +217,19 @@ type menuItemDef struct {
 	// comparing code pointers would merge distinct commands that share
 	// a label.
 	paletteTwin bool
+	// splitAbove draws a light rule above this row, setting it and the
+	// rows after it (up to the next split or the end of the section) off
+	// as a run of related verbs. A flag on a REAL row rather than a
+	// separator row of its own, so every walk over a group's items — the
+	// palette, the tests that look a row up, the section counts — goes on
+	// seeing actions only; menuGeometry alone turns it into a layout row.
+	// Ignored on a section's first row, where the header already divides.
+	splitAbove bool
+	// input marks the pinned command-palette row, which drawMenu paints
+	// as a search box (placeholder + caret) instead of a label: typing
+	// while the menu is up already lands in the palette (menuSearchFrom),
+	// and a box is what says so without a click to find out.
+	input bool
 }
 
 // menuGroup is a titled block of action rows in the ≡ menu. Collapsible
@@ -249,6 +262,12 @@ type menuGroup struct {
 // one-row section you could fold away the exit from reads as a bug, so
 // it renders headerless, set off by a divider. The relY field is left
 // zero here on purpose — it gets stamped at layout time.
+//
+// Inside a section, splitAbove marks where one run of related rows ends
+// and the next begins (a light inset rule, see menuGeometry). A run is
+// "rows a user scans as one question" — open / create / save / close in
+// File, clipboard vs line ops vs carets in Edit. Sections of three rows
+// or so carry none: the header is divider enough.
 func builtinMenuGroups() []menuGroup {
 	return []menuGroup{
 		// Top level reads like a desktop app's menu bar turned on its
@@ -271,6 +290,15 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Open file…", action: (*App).menuOpenFileByPath, enabled: alwaysTrue},
 			{label: "Open folder…", action: (*App).menuOpenFolder, enabled: alwaysTrue},
 			{label: "Recent folders…", action: (*App).menuRecentFolders, enabled: (*App).hasRecentFolders},
+			// Maintaining the favorites file (favmanage.go). A File row
+			// rather than a Nav one: Nav carries "Go to
+			// favorite…", which is about USING one, while this is about
+			// the file behind them — the same split as Open folder
+			// living here and Go back living there. In the workspace run,
+			// under Recent folders, because both are lists of places to
+			// start from; it used to sit alone between the clipboard rows
+			// and the hand-off rows, a one-row run no split could place.
+			{label: "Manage favorites…", action: (*App).menuManageFavorites, enabled: alwaysTrue},
 			{action: (*App).menuToggleSession, enabled: alwaysTrue, labelFor: (*App).sessionToggleLabel},
 			// Whether another pane's `ced --remote` / `ced --wait` can
 			// hand this instance a file (remote.go). A workspace row, not
@@ -278,7 +306,8 @@ func builtinMenuGroups() []menuGroup {
 			// The label doubles as the feature's only status surface —
 			// "unavailable" is how a user learns the socket never bound.
 			{action: (*App).menuToggleRemote, enabled: alwaysTrue, labelFor: (*App).remoteToggleLabel},
-			{shortcut: "esc n", action: (*App).menuNewFile, enabled: alwaysTrue, labelFor: (*App).newFileLabel},
+			// ── Create ──
+			{splitAbove: true, shortcut: "esc n", action: (*App).menuNewFile, enabled: alwaysTrue, labelFor: (*App).newFileLabel},
 			// New folder has no shortcut: the shifted twin of esc-n is
 			// SS2, which the terminal eats before the leader table sees
 			// it (see fileops.go's menuNewFolder).
@@ -287,7 +316,8 @@ func builtinMenuGroups() []menuGroup {
 			// create one — the File > Save / Close / Revert block every
 			// desktop editor has. Auto-save is the preference that governs
 			// the Save row, so it sits under it.
-			{label: "Save", shortcut: "esc s", action: (*App).menuSave, enabled: (*App).hasSavableTab},
+			// ── The file's content: save, format, check, revert ──
+			{splitAbove: true, label: "Save", shortcut: "esc s", action: (*App).menuSave, enabled: (*App).hasSavableTab},
 			// The explicit formatter (format.go). Directly under Save
 			// because only Go formats AS PART of a save; every other
 			// kind — JSON, format.json entries — is formatted here, on
@@ -298,7 +328,14 @@ func builtinMenuGroups() []menuGroup {
 			// parse plus whatever the language server and plugins last
 			// said, on request. The ≡ door of the tab menu's row.
 			{label: "Validate file", action: (*App).menuValidateFile, enabled: (*App).hasSavableTab},
-			{label: "Save & close tab", action: (*App).menuSaveAndClose, enabled: (*App).hasSavableTab},
+			// Revert and the auto-save switch close the content run: Revert
+			// is the save's inverse (reload what is on disk), and auto-save
+			// is the preference that governs Save. They used to sit after the
+			// tab-group rows, splitting the save run from its own setting.
+			{label: "Revert file", action: (*App).menuRevert, enabled: (*App).hasRevert},
+			{action: (*App).menuToggleAutoSave, enabled: alwaysTrue, labelFor: (*App).autoSaveToggleLabel},
+			// ── Tabs: close and group ──
+			{splitAbove: true, label: "Save & close tab", action: (*App).menuSaveAndClose, enabled: (*App).hasSavableTab},
 			{label: "Close tab", shortcut: "esc w", action: (*App).menuClose, enabled: (*App).hasTab},
 			// The ≡ twin of the tab menu's row (tabcontext.go): every
 			// tab but the active one, unsaved tabs kept.
@@ -310,13 +347,13 @@ func builtinMenuGroups() []menuGroup {
 			// make one.
 			{label: "Add tab to group…", action: (*App).menuAddActiveTabToGroup, enabled: (*App).hasTab},
 			{label: "Tab groups…", action: (*App).menuTabGroups, enabled: alwaysTrue},
-			{label: "Revert file", action: (*App).menuRevert, enabled: (*App).hasRevert},
-			{action: (*App).menuToggleAutoSave, enabled: alwaysTrue, labelFor: (*App).autoSaveToggleLabel},
-			{label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
+			// ── Rename / delete, file then folder ──
+			{splitAbove: true, label: "Rename file", action: (*App).menuRename, enabled: (*App).hasFileTab},
 			{label: "Delete file", action: (*App).menuDelete, enabled: (*App).hasFileTab},
 			{action: (*App).menuRenameFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).renameFolderLabel},
 			{action: (*App).menuDeleteFolder, enabled: (*App).hasActiveSubfolder, labelFor: (*App).deleteFolderLabel},
-			{label: "Copy file", action: (*App).menuCopyFile, enabled: (*App).hasFileTab},
+			// ── Copy / paste / zip the file or folder itself ──
+			{splitAbove: true, label: "Copy file", action: (*App).menuCopyFile, enabled: (*App).hasFileTab},
 			// Copy to… (copyto.go): the same copy into a TYPED folder,
 			// anywhere on disk — Paste can only land where the tree
 			// points. Each sits under its clipboard sibling so the pair
@@ -329,7 +366,8 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuPasteItem, enabled: (*App).hasFileClip, labelFor: (*App).pasteItemLabel},
 			{label: "Zip file", action: (*App).menuZipFile, enabled: (*App).hasFileTab},
 			{action: (*App).menuZipFolder, enabled: alwaysTrue, labelFor: (*App).zipFolderLabel},
-			{label: "Copy file name", action: (*App).menuCopyFileName, enabled: (*App).hasFileTab},
+			// ── Its name, paths and text onto the clipboard ──
+			{splitAbove: true, label: "Copy file name", action: (*App).menuCopyFileName, enabled: (*App).hasFileTab},
 			{label: "Copy relative path", action: (*App).menuCopyRelativePath, enabled: (*App).hasFileTab},
 			{label: "Copy absolute path", action: (*App).menuCopyAbsolutePath, enabled: (*App).hasFileTab},
 			// A twin of the ≡ Edit row, for the user who reads "select the
@@ -338,12 +376,7 @@ func builtinMenuGroups() []menuGroup {
 			// under the Copy-path rows because, like them, it exists to feed
 			// the clipboard. paletteTwin keeps the palette to one entry.
 			{label: "Select all", action: (*App).menuSelectAll, enabled: (*App).hasSelectableTab, paletteTwin: true},
-			// Maintaining the favorites file (favmanage.go). A File row
-			// rather than a Nav one: Nav carries "Go to
-			// favorite…", which is about USING one, while this is about
-			// the file behind them — the same split as Open folder
-			// living here and Go back living there.
-			{label: "Manage favorites…", action: (*App).menuManageFavorites, enabled: alwaysTrue},
+			// ── Hand it to something outside ced ──
 			// Hand the active file (or the root) to $VISUAL / $EDITOR
 			// (openineditor.go). The keyboard twin of the tree's row, and
 			// the path that survives a terminal which swallows
@@ -351,7 +384,7 @@ func builtinMenuGroups() []menuGroup {
 			// menuCopilotAuth's reason: the verdict is "you never
 			// exported a variable", which a dimmed row cannot say and a
 			// flash can. The label names the variable in that state.
-			{action: (*App).menuOpenInEditor, enabled: alwaysTrue, labelFor: (*App).openInEditorLabel},
+			{splitAbove: true, action: (*App).menuOpenInEditor, enabled: alwaysTrue, labelFor: (*App).openInEditorLabel},
 			// The other three "hand it to something outside ced" verbs,
 			// twins of the tree's right-click rows and on the same target
 			// (active file, else the root). Always live: each one's
@@ -374,7 +407,8 @@ func builtinMenuGroups() []menuGroup {
 			// picker falls back to the cursor's row, and its refusal
 			// names the gesture that builds a set, which a dimmed row
 			// could not.
-			{action: (*App).menuTreeMarkActions, enabled: alwaysTrue,
+			// ── The tree's marked set, and running the file ──
+			{splitAbove: true, action: (*App).menuTreeMarkActions, enabled: alwaysTrue,
 				labelFor: (*App).treeMarkActionsLabel},
 			// Running the open file in the terminal panel (runexec.go).
 			// A File row rather than a View one — View holds the panel's
@@ -401,7 +435,8 @@ func builtinMenuGroups() []menuGroup {
 			// no way to look at.
 			{label: "Compare with clipboard", action: (*App).menuCatsCompareClipboard, enabled: (*App).hasComparable},
 			{label: "Compare with pasted text", action: (*App).menuComparePaste, enabled: (*App).hasComparable},
-			{action: (*App).menuToggleCompare, enabled: (*App).hasCompareResult, labelFor: (*App).compareToggleLabel},
+			// ── The panel a comparison landed in ──
+			{splitAbove: true, action: (*App).menuToggleCompare, enabled: (*App).hasCompareResult, labelFor: (*App).compareToggleLabel},
 			// The keyboard's door to the panel's per-hunk [↺] chips
 			// (comparerevert.go). Enabled with any result; a comparison
 			// that can't take a revert (a selection snapshot, conflict
@@ -414,7 +449,8 @@ func builtinMenuGroups() []menuGroup {
 			// file lifecycle verb, not an edit.
 			{label: "Undo", shortcut: "esc u", action: (*App).menuUndo, enabled: (*App).hasUndo},
 			{label: "Redo", shortcut: "esc r", action: (*App).menuRedo, enabled: (*App).hasRedo},
-			{label: "Copy selection", shortcut: "cmd+c", action: (*App).menuCopy, enabled: (*App).hasSelection},
+			// ── Clipboard ──
+			{splitAbove: true, label: "Copy selection", shortcut: "cmd+c", action: (*App).menuCopy, enabled: (*App).hasSelection},
 			{label: "Cut selection", action: (*App).menuCut, enabled: (*App).hasSelection},
 			{label: "Paste", shortcut: "cmd+v", action: (*App).menuPaste, enabled: (*App).hasClipboard},
 			// Whole-buffer selection, beside the clipboard verbs it feeds:
@@ -422,7 +458,8 @@ func builtinMenuGroups() []menuGroup {
 			// table is out of mnemonic letters); the row gives the command
 			// palette its entry for free.
 			{label: "Select all", action: (*App).menuSelectAll, enabled: (*App).hasSelectableTab},
-			{label: "Toggle line comment", shortcut: "esc /", action: (*App).menuToggleLineComment, enabled: (*App).hasCommentableTab},
+			// ── Whole-line operations ──
+			{splitAbove: true, label: "Toggle line comment", shortcut: "esc /", action: (*App).menuToggleLineComment, enabled: (*App).hasCommentableTab},
 			{label: "Duplicate line", shortcut: "ctrl+d", action: (*App).menuDuplicateLines, enabled: (*App).hasEditableTab},
 			{label: "Move line up", shortcut: "alt+↑", action: (*App).menuMoveLinesUp, enabled: (*App).hasEditableTab},
 			{label: "Move line down", shortcut: "alt+↓", action: (*App).menuMoveLinesDown, enabled: (*App).hasEditableTab},
@@ -430,7 +467,7 @@ func builtinMenuGroups() []menuGroup {
 			// Alt+click, which has no menu row it could be — these are
 			// the keyboard paths, and the Clear row is the way back for
 			// anyone who got here by accident.
-			{label: "Add caret below", shortcut: "esc m", action: (*App).menuAddCaretBelow, enabled: (*App).hasEditableTab},
+			{splitAbove: true, label: "Add caret below", shortcut: "esc m", action: (*App).menuAddCaretBelow, enabled: (*App).hasEditableTab},
 			{label: "Add caret above", shortcut: "esc M", action: (*App).menuAddCaretAbove, enabled: (*App).hasEditableTab},
 			{label: "Add next occurrence", shortcut: "esc *", action: (*App).menuAddNextOccurrence, enabled: (*App).hasMultiCaretTarget},
 			{label: "Select all occurrences", shortcut: "esc &", action: (*App).menuSelectAllOccurrences, enabled: (*App).hasMultiCaretTarget},
@@ -457,8 +494,12 @@ func builtinMenuGroups() []menuGroup {
 			// session). See treeautofit.go.
 			{action: (*App).menuToggleTreeAutoFit, enabled: alwaysTrue, labelFor: (*App).treeAutoFitToggleLabel},
 			{action: (*App).menuToggleExecMarks, enabled: alwaysTrue, labelFor: (*App).execMarksToggleLabel},
-			{action: (*App).menuToggleWordHighlight, enabled: alwaysTrue, labelFor: (*App).wordHighlightToggleLabel},
-			{shortcut: "esc `", action: (*App).menuToggleTerminal, enabled: alwaysTrue, labelFor: (*App).termToggleLabel},
+			// ── How the window is arranged: terminal, tool windows, docks ──
+			// The split above the terminal row costs one row of the
+			// above-the-fold budget; moving the word-highlight toggle down
+			// to the other "how is code drawn" rows paid for it, so the
+			// terminal rows sit exactly where they did.
+			{splitAbove: true, shortcut: "esc `", action: (*App).menuToggleTerminal, enabled: alwaysTrue, labelFor: (*App).termToggleLabel},
 			{action: (*App).menuToggleTermDock, enabled: alwaysTrue, labelFor: (*App).termDockToggleLabel},
 			// The tool-window rows sit directly under the terminal's,
 			// because the terminal dock row above them is the one-verb
@@ -470,6 +511,15 @@ func builtinMenuGroups() []menuGroup {
 			{action: (*App).menuToolWindows, enabled: alwaysTrue, labelFor: (*App).toolWindowsLabel},
 			{label: "Move tool window…", action: (*App).menuMoveToolWindow, enabled: alwaysTrue},
 			{label: "Reset tool layout", action: (*App).menuResetToolLayout, enabled: alwaysTrue},
+			// The Find-all list's edge. Here rather than in Search
+			// because it's a layout preference like the terminal dock
+			// above it — and because it's the only keyboard path to the
+			// setting while the list itself is open (a modal owns the
+			// keyboard, so the menu is unreachable from inside it). It
+			// closes the arrangement run: the list is docked like a tool
+			// window even though it isn't one.
+			{action: (*App).menuToggleFindAllDock, enabled: alwaysTrue, labelFor: (*App).findAllDockToggleLabel},
+			// ── How the file in front of you is drawn ──
 			// The markdown preview is a VIEW of the active file, so it
 			// sits with the other rows that change how something is
 			// drawn rather than in Tab (which is about which file) or
@@ -480,7 +530,7 @@ func builtinMenuGroups() []menuGroup {
 			// inserted before them spends that budget. It dims on a
 			// non-markdown file — there is nothing to say beyond "this
 			// isn't one", which the filename already says.
-			{shortcut: "esc v", action: (*App).menuToggleMarkdownView,
+			{splitAbove: true, shortcut: "esc v", action: (*App).menuToggleMarkdownView,
 				enabled: (*App).hasMarkdownPreview, labelFor: (*App).markdownToggleLabel},
 			// Soft wrap (softwrap.go) — the other "how is this file drawn"
 			// toggle, so it sits under Preview, below the fold-pinned
@@ -489,32 +539,33 @@ func builtinMenuGroups() []menuGroup {
 			// swallows right-click. Dims with no text tab in front.
 			{action: (*App).menuToggleSoftWrap,
 				enabled: (*App).hasSoftWrapTarget, labelFor: (*App).softWrapToggleLabel},
+			// The ambient word highlight (wordhl.go). It used to sit above
+			// the terminal rows, alone between the tree run and the
+			// arrangement run; here it is with the other ambient marks on
+			// the code, and its old row pays for the split above Show
+			// terminal.
+			{action: (*App).menuToggleWordHighlight, enabled: alwaysTrue, labelFor: (*App).wordHighlightToggleLabel},
 			// Inferred types and parameter names as end-of-line notes
 			// (lspinlay.go): ambient text about the code, with an off switch
-			// for the people who find that noisy. Down here rather than
-			// beside the word-highlight toggle because every row above the
-			// terminal rows spends the above-the-fold budget
-			// TestMenuLayout_TerminalRowsAboveTheFold pins.
+			// for the people who find that noisy. Beside the word-highlight
+			// toggle, below the terminal rows: every row above those spends
+			// the above-the-fold budget TestMenuLayout_TerminalRowsAboveTheFold
+			// pins.
 			{action: (*App).menuToggleInlayHints, enabled: alwaysTrue, labelFor: (*App).inlayHintsToggleLabel},
 			// The caret-line diagnostic note (diagnote.go) shares the
 			// inlay notes' end-of-line slot, so its switch sits beside
 			// theirs, below the fold for the same budget reason.
 			{action: (*App).menuToggleDiagNote, enabled: alwaysTrue, labelFor: (*App).diagNoteToggleLabel},
-			// The Find-all list's edge. Here rather than in Search
-			// because it's a layout preference like the terminal dock
-			// above it — and because it's the only keyboard path to the
-			// setting while the list itself is open (a modal owns the
-			// keyboard, so the menu is unreachable from inside it).
-			{action: (*App).menuToggleFindAllDock, enabled: alwaysTrue, labelFor: (*App).findAllDockToggleLabel},
+			// ── Diff panes ──
 			// The diff panes' shared switches and stepper (diffview.go) —
 			// the ≡ twins of the ▲ ▼ split ws toolbar every diff panel
 			// carries in its header, for the terminal that eats clicks.
-			// In View, beside the Find-all dock, because they change how
-			// something is DRAWN, and they cover the compare panel, the git
-			// panel and the git log alike, so no one panel's section owns
-			// them. The steppers act on the pane last touched and explain
-			// themselves when none is open.
-			{action: (*App).menuToggleDiffSplit, enabled: alwaysTrue, labelFor: (*App).diffSplitToggleLabel},
+			// In View because they change how something is DRAWN, and
+			// they cover the compare panel, the git panel and the git log
+			// alike, so no one panel's section owns them. The steppers act
+			// on the pane last touched and explain themselves when none is
+			// open.
+			{splitAbove: true, action: (*App).menuToggleDiffSplit, enabled: alwaysTrue, labelFor: (*App).diffSplitToggleLabel},
 			{action: (*App).menuToggleDiffIgnoreWS, enabled: alwaysTrue, labelFor: (*App).diffIgnoreWSToggleLabel},
 			{label: "Diff view: next change", action: (*App).menuDiffNextChange, enabled: alwaysTrue},
 			{label: "Diff view: previous change", action: (*App).menuDiffPrevChange, enabled: alwaysTrue},
@@ -524,7 +575,7 @@ func builtinMenuGroups() []menuGroup {
 			// theme picker buried under Git is a theme picker nobody
 			// finds. The label names the theme in force, so this row also
 			// answers "what am I looking at?" without being clicked.
-			{action: (*App).menuTheme, enabled: alwaysTrue, labelFor: (*App).themeMenuLabel},
+			{splitAbove: true, action: (*App).menuTheme, enabled: alwaysTrue, labelFor: (*App).themeMenuLabel},
 			{label: "Customize theme…", action: (*App).menuThemeCustomize, enabled: alwaysTrue},
 			{label: "Reload themes", action: (*App).menuThemeReload, enabled: alwaysTrue},
 		}},
@@ -545,10 +596,11 @@ func builtinMenuGroups() []menuGroup {
 			// the bar OWNS the keyboard while it's open, so these rows are
 			// the only way to set one from the menu — and the only path at
 			// all on a terminal that eats clicks (the macOS-Terminal rule).
-			{action: (*App).menuToggleFindCase, enabled: alwaysTrue, labelFor: (*App).findCaseToggleLabel},
+			{splitAbove: true, action: (*App).menuToggleFindCase, enabled: alwaysTrue, labelFor: (*App).findCaseToggleLabel},
 			{action: (*App).menuToggleFindWord, enabled: alwaysTrue, labelFor: (*App).findWordToggleLabel},
 			{action: (*App).menuToggleFindRegex, enabled: alwaysTrue, labelFor: (*App).findRegexToggleLabel},
-			{label: "Find file in project", shortcut: "esc p", action: (*App).menuFindFile, enabled: (*App).hasFinder},
+			// ── Beyond this file: the project, a folder ──
+			{splitAbove: true, label: "Find file in project", shortcut: "esc p", action: (*App).menuFindFile, enabled: (*App).hasFinder},
 			// Text across the whole tree, listed in the same panel the
 			// in-file list uses (projectsearch.go). Sits under its
 			// filename twin because they answer the same question at two
@@ -577,7 +629,7 @@ func builtinMenuGroups() []menuGroup {
 			// to another open file — the strip is mouse-driven, and on a
 			// narrow window or with a dozen files open the tab you want
 			// may not be drawn at all.
-			{label: "Next tab", shortcut: "esc .", action: (*App).menuNextTab, enabled: (*App).hasMultipleTabs},
+			{splitAbove: true, label: "Next tab", shortcut: "esc .", action: (*App).menuNextTab, enabled: (*App).hasMultipleTabs},
 			{label: "Previous tab", shortcut: "esc ,", action: (*App).menuPrevTab, enabled: (*App).hasMultipleTabs},
 			{label: "Switch tab…", shortcut: "esc b", action: (*App).menuSwitchTab, enabled: (*App).hasMultipleTabs},
 			// "Where is this file?" — the active tab's row selected and
@@ -595,7 +647,8 @@ func builtinMenuGroups() []menuGroup {
 				labelFor: (*App).recentFilesLabel},
 			{action: (*App).menuRecentLocations, enabled: (*App).hasRecentLocationsRow,
 				labelFor: (*App).recentLocationsLabel},
-			{label: "Go to line…", shortcut: "esc j", action: (*App).menuGoToLine, enabled: (*App).hasGoToLine},
+			// ── Fixed places: a line number, a named favorite ──
+			{splitAbove: true, label: "Go to line…", shortcut: "esc j", action: (*App).menuGoToLine, enabled: (*App).hasGoToLine},
 			// Named locations (favorites.go) — the mid-session twin of
 			// `ced fav <name>`. It belongs to this group's question
 			// exactly: the two rows above walk the trail you made, this
@@ -612,7 +665,7 @@ func builtinMenuGroups() []menuGroup {
 			// mouse door is a double-click on a line number and the
 			// editor's right-click menu. Next / Previous / the list stay
 			// clickable with none, to say how to make one.
-			{label: "Toggle bookmark", action: (*App).menuToggleBookmark, enabled: (*App).hasFileTab},
+			{splitAbove: true, label: "Toggle bookmark", action: (*App).menuToggleBookmark, enabled: (*App).hasFileTab},
 			// Naming sits under Toggle: it is the same "this line" verb
 			// with text, and it bookmarks an unmarked line on the way.
 			{label: "Label bookmark…", action: (*App).menuLabelBookmark, enabled: (*App).hasFileTab},
@@ -628,7 +681,7 @@ func builtinMenuGroups() []menuGroup {
 			// menu is open, and "put the cursor on a bracket first" is
 			// a better answer than a dimmed row that can't say it —
 			// the same trade the terminal-locations row makes below.
-			{label: "Go to matching bracket", shortcut: "esc %", action: (*App).menuGoToMatchingBracket, enabled: (*App).hasGoToLine},
+			{splitAbove: true, label: "Go to matching bracket", shortcut: "esc %", action: (*App).menuGoToMatchingBracket, enabled: (*App).hasGoToLine},
 			// Clickable terminal output (termdiag.go). A jump rather than
 			// one of the terminal's View toggles: it answers "take me to
 			// the problem", with `go build` and `grep -n` as the providers
@@ -662,7 +715,8 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Find incoming calls…", action: (*App).menuIncomingCalls, enabled: (*App).hasLSPActions},
 			{label: "Go to implementation", action: (*App).menuGoToImplementation, enabled: (*App).hasLSPActions},
 			{label: "Go to type definition", action: (*App).menuGoToTypeDefinition, enabled: (*App).hasLSPActions},
-			{label: "Hover info", shortcut: "esc i", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},
+			// ── Ask about it: hover, signature, outline ──
+			{splitAbove: true, label: "Hover info", shortcut: "esc i", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},
 			// The same tooltip asked a different question: 'i' says what
 			// the symbol under the cursor IS, 'I' says where you are in
 			// the call you're typing (lspsignature.go). Manual, not
@@ -688,16 +742,9 @@ func builtinMenuGroups() []menuGroup {
 			// "what can you do here?" — and its label says which span it
 			// will ask about, since a selection changes the answer
 			// completely (lspcodeaction.go).
-			{labelFor: (*App).codeActionMenuLabel, shortcut: "esc c", action: (*App).menuCodeActions, enabled: (*App).hasCodeActions},
+			// ── Change it ──
+			{splitAbove: true, labelFor: (*App).codeActionMenuLabel, shortcut: "esc c", action: (*App).menuCodeActions, enabled: (*App).hasCodeActions},
 			{label: "Rename symbol…", shortcut: "esc E", action: (*App).menuRenameSymbol, enabled: (*App).hasLSPActions},
-			// The Problems panel (problems.go) and its keyboard twins.
-			// They sit at the foot of the group because they are about
-			// the whole project rather than the caret, and the toggle
-			// stays enabled with no server so the panel can say WHY it
-			// is empty — a dimmed row never could.
-			{shortcut: "esc !", action: (*App).menuToggleProblems, enabled: alwaysTrue, labelFor: (*App).problemsToggleLabel},
-			{label: "Next problem", action: (*App).menuNextProblem, enabled: (*App).hasAnyDiagnostics},
-			{label: "Previous problem", action: (*App).menuPrevProblem, enabled: (*App).hasAnyDiagnostics},
 			// Undo a server-authored multi-file edit as one gesture
 			// (workspaceedit.go). Plain undo already claims the press when
 			// the cursor is in one of the touched files; this row is the
@@ -707,7 +754,18 @@ func builtinMenuGroups() []menuGroup {
 			// the verb and the file count because this rewrites files that
 			// may not be on screen. No leader key: the flat table is out of
 			// mnemonic letters and plain undo covers the common case.
+			// Directly under the two rows that write, as their comment says
+			// it should be — the Problems rows had come in between.
 			{labelFor: (*App).wsEditUndoLabel, action: (*App).menuUndoWorkspaceEdit, enabled: (*App).wsUndoAvailable},
+			// ── The whole project: problems, and the server itself ──
+			// The Problems panel (problems.go) and its keyboard twins.
+			// They sit at the foot of the group because they are about
+			// the whole project rather than the caret, and the toggle
+			// stays enabled with no server so the panel can say WHY it
+			// is empty — a dimmed row never could.
+			{splitAbove: true, shortcut: "esc !", action: (*App).menuToggleProblems, enabled: alwaysTrue, labelFor: (*App).problemsToggleLabel},
+			{label: "Next problem", action: (*App).menuNextProblem, enabled: (*App).hasAnyDiagnostics},
+			{label: "Previous problem", action: (*App).menuPrevProblem, enabled: (*App).hasAnyDiagnostics},
 			// The LSP's deliberate retry gesture (lsprestart.go), the twin
 			// of re-picking the chat agent. Never dimmed: the file it is
 			// most wanted on is one whose server is dead or missing, and
@@ -729,7 +787,7 @@ func builtinMenuGroups() []menuGroup {
 			// it is the keyboard twin of clicking an annotation, and is
 			// what makes the verb reachable in a terminal that eats
 			// clicks.
-			{shortcut: "esc A", action: (*App).menuToggleBlame, enabled: (*App).hasGitRepo, labelFor: (*App).blameToggleLabel},
+			{splitAbove: true, shortcut: "esc A", action: (*App).menuToggleBlame, enabled: (*App).hasGitRepo, labelFor: (*App).blameToggleLabel},
 			{label: "Blame this line…", action: (*App).menuBlameCommit, enabled: (*App).hasGitRepo},
 			// One file's story, the ≡ doors of the tab menu's rows
 			// (tabcontext.go): its diff in the changes panel, and the git
@@ -747,7 +805,7 @@ func builtinMenuGroups() []menuGroup {
 			// colors, the changes panel and the status bar all drop: what
 			// the sequencer is in the middle of, and what a bare commit
 			// would record.
-			{label: "Git status…", action: (*App).menuGitStatus, enabled: (*App).hasGitStatusReport},
+			{splitAbove: true, label: "Git status…", action: (*App).menuGitStatus, enabled: (*App).hasGitStatusReport},
 			{label: "Stage file", action: (*App).menuGitStageFile, enabled: (*App).hasStageableFile},
 			{label: "Unstage file", action: (*App).menuGitUnstageFile, enabled: (*App).hasUnstageableFile},
 			// The tree's "Git restore…" and the tab menu's Restore row,
@@ -756,7 +814,7 @@ func builtinMenuGroups() []menuGroup {
 			// Gated like the "Show file's…" rows, not on the dirty
 			// snapshot — the verb's flash answers "nothing to restore".
 			{label: "Restore file (discard changes)…", action: (*App).menuGitRestoreFile, enabled: (*App).hasGitFileTab},
-			{label: "Commit staged", action: (*App).menuGitCommit, enabled: (*App).hasGitStaged},
+			{splitAbove: true, label: "Commit staged", action: (*App).menuGitCommit, enabled: (*App).hasGitStaged},
 			// Keyboard twin of the panel's Suggest row — the chat agent
 			// drafts the message for the panel's selection, or for the
 			// index when nothing is ticked.
@@ -779,15 +837,15 @@ func builtinMenuGroups() []menuGroup {
 			// is still wanted after that. Beside Push because it is that
 			// verb's answer; dim until a push has succeeded this session.
 			{label: "Show last push output", action: (*App).menuGitLastPush, enabled: (*App).hasLastPush},
-			{label: "Stash changes", action: (*App).menuGitStash, enabled: (*App).hasGitChanges},
+			{splitAbove: true, label: "Stash changes", action: (*App).menuGitStash, enabled: (*App).hasGitChanges},
 			{label: "Pop stash", action: (*App).menuGitStashPop, enabled: (*App).hasGitStash},
-			{label: "Switch branch", action: (*App).menuGitSwitchBranch, enabled: (*App).hasGitRepo},
+			{splitAbove: true, label: "Switch branch", action: (*App).menuGitSwitchBranch, enabled: (*App).hasGitRepo},
 			{label: "Recent branches", action: (*App).menuGitRecentBranches, enabled: (*App).hasGitRepo},
 			// Creates at HEAD and switches to it (gitcmd.go). Enabled on
 			// any repo — an unborn branch included, where git simply
 			// renames the branch-to-be.
 			{label: "New branch…", action: (*App).menuGitNewBranch, enabled: (*App).hasGitRepo},
-			{shortcut: "esc g", action: (*App).menuToggleGitPanel, enabled: (*App).hasGitRepo, labelFor: (*App).gitPanelToggleLabel},
+			{splitAbove: true, shortcut: "esc g", action: (*App).menuToggleGitPanel, enabled: (*App).hasGitRepo, labelFor: (*App).gitPanelToggleLabel},
 			// The pre-commit survey (gitpanelwalk.go). It opens the panel
 			// on the way in — walking the changes and showing the panel
 			// are one thought, the same argument that lets "Search
@@ -797,7 +855,7 @@ func builtinMenuGroups() []menuGroup {
 			// the panel is mouse-driven by design, but macOS Terminal can
 			// swallow clicks, so its verbs must be menu-reachable too.
 			{label: "Git panel actions", action: (*App).menuGitPanelActions, enabled: (*App).hasGitPanelOpen},
-			{shortcut: "esc L", action: (*App).menuToggleGitLog, enabled: (*App).hasGitRepo, labelFor: (*App).gitLogToggleLabel},
+			{splitAbove: true, shortcut: "esc L", action: (*App).menuToggleGitLog, enabled: (*App).hasGitRepo, labelFor: (*App).gitLogToggleLabel},
 			// Search history opens the log panel itself when it's shut —
 			// it is one thought, not two — so it is enabled on any repo
 			// rather than only while the panel is up.
@@ -809,7 +867,7 @@ func builtinMenuGroups() []menuGroup {
 			// (a `stash pop`, or a rebase run in the terminal beside it).
 			// Dim on a clean repo, which is the overwhelming case, so the
 			// row doubles as a signal that something is parked.
-			{label: "Resolve conflicts…", action: (*App).menuGitResolveConflicts, enabled: (*App).hasGitConflict},
+			{splitAbove: true, label: "Resolve conflicts…", action: (*App).menuGitResolveConflicts, enabled: (*App).hasGitConflict},
 			// The in-editor resolver's keyboard doors (conflictview.go):
 			// the lens's verbs for the block under the caret, and a walk
 			// over every conflict block in every unmerged file.
@@ -859,7 +917,7 @@ func builtinMenuGroups() []menuGroup {
 			// toggle asks about reads (copilot_chat_perm.go): off is
 			// read-only chat, enforced whatever a permission prompt says.
 			{action: (*App).menuToggleChatWrite, enabled: alwaysTrue, labelFor: (*App).chatWriteToggleLabel},
-			{shortcut: "esc a a", action: (*App).menuChatAttachCurrent, enabled: (*App).hasFileTab, labelFor: (*App).chatAttachActionLabel},
+			{splitAbove: true, shortcut: "esc a a", action: (*App).menuChatAttachCurrent, enabled: (*App).hasFileTab, labelFor: (*App).chatAttachActionLabel},
 			{label: "Attach file to chat…", shortcut: "esc a f", action: (*App).menuChatAttachFile, enabled: (*App).hasFinder},
 			{action: (*App).menuChatClearAttachments, enabled: (*App).hasChatAttachments, labelFor: (*App).chatClearAttachLabel},
 			// The one READING verb in a group otherwise made of
@@ -874,7 +932,7 @@ func builtinMenuGroups() []menuGroup {
 			// Keyboard twin of the transcript's trailing ⧉ button, for
 			// the same reason the git panel has one: the panel is
 			// mouse-driven, but macOS Terminal can swallow clicks.
-			{label: "Copy chat transcript", action: (*App).menuChatCopyAll, enabled: (*App).hasChatTranscript},
+			{splitAbove: true, label: "Copy chat transcript", action: (*App).menuChatCopyAll, enabled: (*App).hasChatTranscript},
 			// Conversation lifecycle (chatarchive.go). The two rows sit
 			// directly under Copy because all three are about the
 			// transcript as a THING rather than about the agent
@@ -886,7 +944,7 @@ func builtinMenuGroups() []menuGroup {
 			// dimmed row cannot say one.
 			{action: (*App).menuChatNew, shortcut: "esc a x", enabled: (*App).hasChatTranscript, labelFor: (*App).chatClearLabel},
 			{action: (*App).menuChatRecent, shortcut: "esc a r", enabled: alwaysTrue, labelFor: (*App).chatRecentLabel},
-			{action: (*App).menuToggleSuggestions, enabled: alwaysTrue, labelFor: (*App).suggestionsToggleLabel},
+			{splitAbove: true, action: (*App).menuToggleSuggestions, enabled: alwaysTrue, labelFor: (*App).suggestionsToggleLabel},
 			{action: (*App).menuToggleCopilot, enabled: alwaysTrue, labelFor: (*App).copilotToggleLabel},
 		}},
 		// Model Context Protocol servers (mcp.go). Its own group, not a
@@ -1006,30 +1064,76 @@ func (a *App) visibleMenuGroups() []menuGroup {
 	return append(groups, custom, quit)
 }
 
-// menuLayout flattens the visible menu groups into a single ordered
-// slice of rows with relY positions assigned, plus the divider rows and
-// the modal's total cell height. Each collapsible group contributes a
-// header row (whose action toggles the section) followed by its items —
-// unless the section is collapsed, in which case only the header shows.
-// A non-collapsible group (Quit) gets a leading divider instead of a
-// header. Recomputed on every call so folding a section reflows the
-// whole modal.
+// menuSplit is one in-section rule (splitAbove): the layout row it takes
+// and the depth of the rows it divides, so a sub-section's rule starts
+// at its own, indented, label column.
+type menuSplit struct {
+	relY  int
+	depth int
+}
+
+// menuGeom is the whole ≡ layout: the item rows, the full-width
+// dividers (title, top zone, the headerless Quit), the inset in-section
+// splits, and the modal's total cell height. Splits are kept apart from
+// dividers because they are drawn differently — a divider is the frame's
+// structure, a split is a pause inside one section's list.
+type menuGeom struct {
+	items    []menuItemDef
+	dividers []int
+	splits   []menuSplit
+	height   int
+}
+
+// menuLayout is menuGeometry for the callers that need rows, dividers
+// and height only — everything but the draw, which also wants the splits.
 func (a *App) menuLayout() (items []menuItemDef, dividers []int, modalHeight int) {
+	g := a.menuGeometry()
+	return g.items, g.dividers, g.height
+}
+
+// menuGeometry flattens the visible menu groups into a single ordered
+// slice of rows with relY positions assigned, plus the divider and split
+// rows and the modal's total cell height. Each collapsible group
+// contributes a header row (whose action toggles the section) followed by
+// its items — unless the section is collapsed, in which case only the
+// header shows. A non-collapsible group (Quit) gets a leading divider
+// instead of a header. A row marked splitAbove gets a split row in front
+// of it (not on a group's first row: the header already divides there).
+// Recomputed on every call so folding a section reflows the whole modal.
+//
+//	relY 0  ┌──────────────────────────────────────────────┐
+//	     1  │ Menu                                     esc │
+//	     2  ├──────────────────────────────────────────────┤ ┐
+//	     3  │ Type to search commands…            esc k │ │ pinned
+//	     4  │   Collapse all sections                      │ │ (menuPinnedRows)
+//	     5  ├──────────────────────────────────────────────┤ ┘
+//	     6  │ ▾ File                                       │ ┐
+//	     7  │   Open file…                                 │ │ scrolls
+//	     …  │     ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  │ │ (a split)
+//	        │   New file                             esc n │ ┘
+func (a *App) menuGeometry() menuGeom {
+	var items []menuItemDef
+	var splits []menuSplit
 	// Title at relY 1, divider under it at relY 2, first row at relY 3.
-	dividers = []int{2}
+	dividers := []int{2}
 	y := 3
 
-	// Pinned top zone: the command palette (the menu's headline — a fuzzy
-	// gateway to every action) followed by the expand/collapse-all toggle.
-	// Both sit OUTSIDE the collapsible groups so they stay reachable even
-	// when every section is folded, which is the startup default. A divider
-	// sets the zone off from the (usually folded) section list below it.
+	// Pinned top zone: the command palette's search box (the menu's
+	// headline — a fuzzy gateway to every action, drawn as an input so
+	// "just type" needs no explaining) followed by the expand/collapse-all
+	// toggle. Both sit OUTSIDE the collapsible groups so they stay
+	// reachable even when every section is folded, which is the startup
+	// default, and above menuPinnedRows so they never scroll away: a
+	// search box that leaves the screen when you wheel down is a box you
+	// have to scroll back to before believing typing still works. A
+	// divider sets the zone off from the section list below it.
 	items = append(items, menuItemDef{
 		label:    paletteMenuLabel,
 		shortcut: "esc k",
 		relY:     y,
 		action:   (*App).menuCommandPalette,
 		enabled:  alwaysTrue,
+		input:    true,
 	})
 	y++
 	items = append(items, menuItemDef{
@@ -1073,7 +1177,14 @@ func (a *App) menuLayout() (items []menuItemDef, dividers []int, modalHeight int
 			dividers = append(dividers, y)
 			y++
 		}
-		for _, it := range g.items {
+		for i, it := range g.items {
+			// The split takes a row of its own BEFORE the item, so every
+			// relY below it moves down one — which is what keeps the
+			// row↔screen mapping a plain relY lookup (menuItemIndexAt).
+			if it.splitAbove && i > 0 {
+				splits = append(splits, menuSplit{relY: y, depth: depth})
+				y++
+			}
 			it.relY = y
 			it.depth = depth
 			items = append(items, it)
@@ -1081,8 +1192,7 @@ func (a *App) menuLayout() (items []menuItemDef, dividers []int, modalHeight int
 		}
 	}
 	// y now points at the bottom border row; height is one beyond.
-	modalHeight = y + 1
-	return items, dividers, modalHeight
+	return menuGeom{items: items, dividers: dividers, splits: splits, height: y + 1}
 }
 
 // sectionCollapsed reports whether the named menu section is folded. A
@@ -2835,10 +2945,41 @@ func (a *App) menuButtonRect() (x, y, w, h int) {
 }
 
 // menuPinnedRows is the fixed header of the action modal — top border,
-// title, and the divider under it — that never scrolls. Content rows
-// start at this relY; the scrollable band on screen runs from
-// my+menuPinnedRows to my+mh-2 (the row above the bottom border).
-const menuPinnedRows = 3
+// title, the divider under it, the top zone (search box + expand/
+// collapse-all) and ITS divider — that never scrolls. Scrolling content
+// starts at this relY; the band on screen runs from my+menuPinnedRows to
+// my+mh-2 (the row above the bottom border). The top zone joined the
+// header when its first row became a search box (menuGeometry says why).
+const menuPinnedRows = 6
+
+// menuRowY maps a layout row (relY) to its screen row for a modal at my,
+// mh tall, scrolled by scroll: rows in the pinned header sit at a fixed
+// offset, the rest move with the scroll and are clipped to the band above
+// the bottom border. ok is false for a row that isn't on screen. Pure, so
+// drawMenu and menuItemIndexAt (through menuRelYAt) read ONE mapping
+// without recomputing the layout per row.
+func menuRowY(relY, my, mh, scroll int) (cy int, ok bool) {
+	cy = my + relY
+	if relY >= menuPinnedRows {
+		cy -= scroll
+		if cy < my+menuPinnedRows {
+			return cy, false
+		}
+	}
+	return cy, cy <= my+mh-2
+}
+
+// menuRelYAt is menuRowY's inverse: the layout row drawn on screen row y,
+// or ok=false for the bottom border and anything outside the modal.
+func menuRelYAt(y, my, mh, scroll int) (relY int, ok bool) {
+	if y < my || y > my+mh-2 {
+		return 0, false
+	}
+	if y < my+menuPinnedRows {
+		return y - my, true
+	}
+	return y - my + scroll, true
+}
 
 // menuModalRect returns the on-screen rectangle of the action modal,
 // centered in the window. Height is derived from the current layout
@@ -2909,10 +3050,13 @@ func (a *App) scrollMenu(delta int) {
 // highlight and the click disagree about which row is which.
 func (a *App) menuItemIndexAt(x, y int) int {
 	mx, my, mw, mh := a.menuModalRect()
-	if x < mx || x >= mx+mw || y < my+menuPinnedRows || y > my+mh-2 {
+	if x < mx || x >= mx+mw {
 		return -1
 	}
-	relY := y - my + a.menuScrollOffset()
+	relY, ok := menuRelYAt(y, my, mh, a.menuScrollOffset())
+	if !ok {
+		return -1
+	}
 	items, _, _ := a.menuLayout()
 	for i, item := range items {
 		if item.relY == relY {
@@ -2934,6 +3078,11 @@ func (a *App) menuEnsureHoveredVisible() {
 		return
 	}
 	relY := items[a.hoveredMenuRow].relY
+	if relY < menuPinnedRows {
+		// The top zone never scrolls, so it is on screen already; leave
+		// the band where the user put it.
+		return
+	}
 	_, _, _, mh := a.menuModalRect()
 	scroll := a.menuScrollOffset()
 	if relY-scroll < menuPinnedRows {
@@ -3277,10 +3426,11 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	}
 
 	// While the menu is open: Down/Up move the highlight, Enter
-	// activates, and TYPING switches the menu into fuzzy-search mode
-	// over its whole inventory (palette.go) — the row you can't find in
-	// the folds is one keystroke away, and the keystroke that asked is
-	// the seed. Editing keys stay blocked as before.
+	// activates, and TYPING goes to the search box pinned at the top —
+	// the command palette, opened in the menu's own frame over its whole
+	// inventory (palette.go) — so the row you can't find in the folds is
+	// one keystroke away, and the keystroke that asked is the seed.
+	// Editing keys stay blocked as before.
 	if a.menuOpen {
 		switch ev.Key() {
 		case tcell.KeyDown:
@@ -5683,12 +5833,13 @@ func (a *App) drawTooSmall() {
 }
 
 // drawMenu renders the action modal centered in the window. The
-// item / divider / height layout comes from menuLayout so adding
-// custom actions or new built-in groups doesn't require touching this
-// function.
+// item / divider / split / height layout comes from menuGeometry so
+// adding custom actions or new built-in groups doesn't require touching
+// this function.
 func (a *App) drawMenu() {
 	mx, my, mw, mh := a.menuModalRect()
-	items, dividers, _ := a.menuLayout()
+	geom := a.menuGeometry()
+	items, dividers := geom.items, geom.dividers
 
 	bg := a.theme.LineHL
 	bgStyle := tcell.StyleDefault.Background(bg).Foreground(a.theme.Text)
@@ -5719,23 +5870,37 @@ func (a *App) drawMenu() {
 	}
 
 	// Horizontal dividers between action groups. The dy list comes from
-	// menuLayout — including the always-on row under the title — so it
-	// stays in sync with whatever rows are actually being drawn. The
-	// title divider (dy 2) is part of the pinned header; the rest scroll
+	// menuGeometry — including the always-on rows under the title and
+	// the top zone — so it stays in sync with whatever rows are actually
+	// being drawn. Those two belong to the pinned header; the rest scroll
 	// with the content and are skipped when they land outside the band.
 	scroll := a.menuScrollOffset()
 	for _, dy := range dividers {
-		cy := my + dy
-		if dy >= menuPinnedRows {
-			cy -= scroll
-			if cy < my+menuPinnedRows || cy > my+mh-2 {
-				continue
-			}
+		cy, ok := menuRowY(dy, my, mh, scroll)
+		if !ok {
+			continue
 		}
 		a.screen.SetContent(mx, cy, '├', nil, borderStyle)
 		a.screen.SetContent(mx+mw-1, cy, '┤', nil, borderStyle)
 		for cx := mx + 1; cx < mx+mw-1; cx++ {
 			a.screen.SetContent(cx, cy, '─', nil, borderStyle)
+		}
+	}
+
+	// In-section splits: a dotted rule from the label column to two cells
+	// short of the frame — the palette's spacer look (drawSpacer), the
+	// editor's one spelling of "a pause inside a list". Inset and dotted
+	// so it never reads as the solid ├──┤ that ends a section, and started
+	// at the rows' own label column (indented with a sub-section) so it
+	// visibly belongs to the run it divides.
+	splitStyle := tcell.StyleDefault.Background(bg).Foreground(menuSplitColor(a.theme.Subtle, bg))
+	for _, sp := range geom.splits {
+		cy, ok := menuRowY(sp.relY, my, mh, scroll)
+		if !ok {
+			continue
+		}
+		for cx := mx + 4 + 2*sp.depth; cx < mx+mw-3; cx++ {
+			a.screen.SetContent(cx, cy, '┄', nil, splitStyle)
 		}
 	}
 
@@ -5764,13 +5929,21 @@ func (a *App) drawMenu() {
 	hoverStyle := tcell.StyleDefault.Background(hoverBg).Foreground(a.theme.Text).Bold(true)
 	hoverChevStyle := tcell.StyleDefault.Background(hoverBg).Foreground(a.theme.AccentSoft).Bold(true)
 	headerStyle := tcell.StyleDefault.Background(bg).Foreground(a.theme.Accent).Bold(true)
+	// caretX/caretY place the terminal caret in the search box when it is
+	// on screen; -1 = no box drawn, hide it.
+	caretX, caretY := -1, -1
 	for i, item := range items {
-		cy := my + item.relY - scroll
-		if cy < my+menuPinnedRows || cy > my+mh-2 {
+		cy, ok := menuRowY(item.relY, my, mh, scroll)
+		if !ok {
 			continue // scrolled out of the clamped modal
 		}
 		enabled := item.enabled(a)
 		hovered := enabled && i == a.hoveredMenuRow
+
+		if item.input {
+			caretX, caretY = a.drawMenuSearchBox(mx, cy, mw, item.shortcut)
+			continue
+		}
 
 		var labelStyle, chevStyle tcell.Style
 		switch {
@@ -5837,17 +6010,80 @@ func (a *App) drawMenu() {
 		}
 	}
 
-	// Scroll indicators: ▲ on the pinned title divider when rows are
-	// hidden above, ▼ on the bottom border when rows are hidden below —
-	// without them a clipped menu reads as the whole menu.
+	// Scroll indicators: ▲ on the pinned header's last divider (the one
+	// right above the scrolling band) when rows are hidden above, ▼ on the
+	// bottom border when rows are hidden below — without them a clipped
+	// menu reads as the whole menu.
 	if scroll > 0 {
-		drawAt(a.screen, mx+(mw-3)/2, my+2, " ▲ ", chevronStyle)
+		if cy, ok := menuRowY(menuPinnedRows-1, my, mh, scroll); ok {
+			drawAt(a.screen, mx+(mw-3)/2, cy, " ▲ ", chevronStyle)
+		}
 	}
 	if scroll < a.menuMaxScroll() {
 		drawAt(a.screen, mx+(mw-3)/2, my+mh-1, " ▼ ", chevronStyle)
 	}
 
-	a.screen.HideCursor()
+	// The real caret sits in the search box: typing is what the box is
+	// for, and a blinking caret is how every terminal already says "keys
+	// go here" — while the arrows still walk the highlight below it.
+	if caretX >= 0 {
+		a.screen.ShowCursor(caretX, caretY)
+	} else {
+		a.screen.HideCursor()
+	}
+}
+
+// menuSplitContrast is the least a split rule must stand off the menu's
+// background. The border tone alone (Subtle) measures 1.13–1.49:1 on the
+// builtins — enough for a solid frame line, too faint for a sparse dotted
+// one — and 1.00:1 on cool-blue, where Subtle IS the modal background.
+// 1.8 keeps the rule below the Muted shortcut hints on most themes, so
+// it still reads as structure rather than as text.
+const menuSplitContrast = 1.8
+
+// menuSplitColor is the split rule's ink: the border tone, lifted along
+// its own hue just far enough to reach menuSplitContrast on bg.
+func menuSplitColor(subtle, bg tcell.Color) tcell.Color {
+	return theme.LiftToContrast(subtle, bg, menuSplitContrast)
+}
+
+// menuSearchPlaceholder is the search box's text while nothing is typed.
+// It names the outcome ("commands", what the palette lists) and the
+// gesture ("type"), because the gesture is the whole point: no click is
+// needed to start.
+const menuSearchPlaceholder = "Type to search commands…"
+
+// drawMenuSearchBox paints the top zone's search box on row cy and returns
+// the caret cell. It is the command palette's own input, drawn early: the
+// field spans the same cells the palette's does (paletteInputSpan), and a
+// palette opened from the menu takes over the menu's frame (paletteModal's
+// fromMenu), so the first typed rune appears exactly where the caret was.
+//
+//	│ Type to search commands…            esc k │
+//	 ^start-1 (field inset)       ^end      ^hint, right-aligned
+//
+// The box never wears the row highlight, even while it is the selected
+// row (openMenu selects it, so Enter opens the full list): the caret is
+// its focus mark, and a highlight bar could only paint the cells AROUND
+// the field — a stray chip behind "esc k", tried and dropped. The arrows
+// move the highlight onto the rows below, which is where it reads.
+func (a *App) drawMenuSearchBox(mx, cy, mw int, hint string) (caretX, caretY int) {
+	rowSt := tcell.StyleDefault.Background(a.theme.LineHL).Foreground(a.theme.Muted)
+	for cx := mx + 1; cx < mx+mw-1; cx++ {
+		a.screen.SetContent(cx, cy, ' ', nil, rowSt)
+	}
+	start, end := paletteInputSpan(mx, mw)
+	fieldSt := tcell.StyleDefault.Background(a.theme.BG).Foreground(a.theme.Muted)
+	for cx := start - 1; cx <= end; cx++ {
+		a.screen.SetContent(cx, cy, ' ', nil, fieldSt)
+	}
+	// The placeholder starts AT the caret cell, under it, the way a GUI
+	// search field shows its hint behind the cursor.
+	drawAt(a.screen, start, cy, clipRunes(menuSearchPlaceholder, end-start), fieldSt)
+	if hint != "" {
+		drawAt(a.screen, mx+mw-2-runeLen(hint), cy, hint, rowSt)
+	}
+	return start, cy
 }
 
 // drawStatusText writes s left-aligned into the status bar at (x, y) with a

@@ -235,8 +235,10 @@ func (a *App) restoreSession() {
 	a.touchRecentFile(a.tabs[active].Path)
 	// The active folder drives where "New file" lands, so point it at the
 	// file the user was last looking at rather than leaving it on the
-	// project root.
-	a.setActiveFolder(filepath.Dir(a.tabs[active].Path))
+	// project root — through the same gate as openFile, because a session
+	// can end on a tab OUTSIDE the root (a go-to-definition into GOROOT),
+	// and that folder must not come back armed for the ≡ folder verbs.
+	a.adoptFileFolder(a.tabs[active].Path)
 	// One quiet line, and no advice about turning it off: this fires on
 	// every launch, and a flash that explains itself every time is the
 	// nagging the rest of the editor deliberately avoids.

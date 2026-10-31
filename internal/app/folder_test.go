@@ -678,6 +678,42 @@ func TestRestoreSession_ActiveFileVanished(t *testing.T) {
 	}
 }
 
+// TestRestoreSession_OutsideActiveTabKeepsTheRootFolder: a session that
+// ended on a tab OUTSIDE the root (a go-to-definition into GOROOT) brings
+// the tab back but not its folder — restore goes through the same gate
+// as openFile, so the ≡ folder verbs don't come back armed on it.
+func TestRestoreSession_OutsideActiveTabKeepsTheRootFolder(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "a.txt")
+	outside := filepath.Join(t.TempDir(), "print.go")
+	for _, p := range []string{inside, outside} {
+		if err := os.WriteFile(p, []byte("x\n"), 0644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	store := &session.Store{}
+	store.Record(session.Entry{
+		Root:   root,
+		Active: 1, // the outside tab
+		Tabs:   []session.TabState{{Path: inside}, {Path: outside}},
+	})
+
+	a := newTestApp(t, root)
+	before := a.activeFolder
+	a.sessionStore = store
+	a.restoreSession()
+
+	if tab := a.activeTabPtr(); tab == nil || tab.Path != outside {
+		t.Fatalf("active tab = %v, want the outside file restored and active", tab)
+	}
+	if a.activeFolder != before {
+		t.Fatalf("activeFolder = %q, want it left at %q", a.activeFolder, before)
+	}
+	if a.hasActiveSubfolder() {
+		t.Fatal("hasActiveSubfolder() = true: the ≡ folder verbs armed on a folder outside the project")
+	}
+}
+
 // TestSession_TabGroupsSurviveRecordAndRestore pins the session wiring
 // for tab groups end to end: recordSession writes them beside the tabs,
 // and restoreSession brings them back AFTER the tabs (ad-hoc membership

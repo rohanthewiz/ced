@@ -34,6 +34,7 @@ import (
 	"github.com/rohanthewiz/ced/internal/format"
 	"github.com/rohanthewiz/ced/internal/gonotes"
 	"github.com/rohanthewiz/ced/internal/icons"
+	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/mcp"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
@@ -538,6 +539,155 @@ func TestOpenFile_Basic(t *testing.T) {
 	}
 	if a.activeTab != 0 {
 		t.Fatalf("re-open didn't switch active: got %d", a.activeTab)
+	}
+}
+
+// outsideRootFixture is a project root holding sub/a.go plus a SEPARATE
+// temp dir standing in for GOROOT / the module cache, with fmt/print.go
+// in it — the file a go-to-definition on fmt.Println lands in.
+func outsideRootFixture(t *testing.T) (a *App, root, sub, outside string) {
+	t.Helper()
+	root = t.TempDir()
+	sub = filepath.Join(root, "sub")
+	fmtDir := filepath.Join(t.TempDir(), "fmt")
+	for _, d := range []string{sub, fmtDir} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	outside = filepath.Join(fmtDir, "print.go")
+	for p, body := range map[string]string{
+		filepath.Join(sub, "a.go"): "package sub\n",
+		outside:                    "package fmt\n\nfunc Println() {}\n",
+	} {
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatalf("seed %s: %v", p, err)
+		}
+	}
+	return newTestApp(t, root), root, sub, outside
+}
+
+// TestOpenFile_OutsideRootKeepsActiveFolder is the N-099 regression:
+// openFile on a file outside the root — the path every LSP jump takes —
+// must leave the active folder alone, on the first open AND on a
+// re-open that only switches to the existing tab. Before the guard moved
+// into openFile, the ≡ folder rows armed on GOROOT's `fmt`.
+func TestOpenFile_OutsideRootKeepsActiveFolder(t *testing.T) {
+	a, _, sub, outside := outsideRootFixture(t)
+	a.setActiveFolder(sub)
+
+	a.openFile(outside)
+	if tab := a.activeTabPtr(); tab == nil || tab.Path != outside {
+		t.Fatalf("active tab = %v, want %s open", tab, outside)
+	}
+	if a.activeFolder != sub {
+		t.Fatalf("activeFolder = %q after opening an outside file, want it left at %q", a.activeFolder, sub)
+	}
+	if a.tree.ActiveFolder != sub {
+		t.Fatalf("tree.ActiveFolder = %q, want the mirror left at %q too", a.tree.ActiveFolder, sub)
+	}
+
+	// The switch-to-open-tab path runs the same gate.
+	a.openFile(filepath.Join(sub, "a.go"))
+	a.setActiveFolder(sub)
+	a.openFile(outside)
+	if a.activeFolder != sub {
+		t.Fatalf("activeFolder = %q after re-opening the outside tab, want %q", a.activeFolder, sub)
+	}
+}
+
+// TestLSPJumpTo_OutsideRootLeavesFolderVerbsDark drives the exact door
+// from the bug report: a go-to-definition into GOROOT. The jump lands,
+// and the ≡ folder rows stay unarmed — no "Delete folder (fmt)".
+func TestLSPJumpTo_OutsideRootLeavesFolderVerbsDark(t *testing.T) {
+	a, _, sub, outside := outsideRootFixture(t)
+	from := filepath.Join(sub, "a.go")
+	a.openFile(from)
+	// Clicking the project root in the tree is how a user gets here with
+	// no subfolder active; the jump must not invent one.
+	a.setActiveFolder(a.rootDir)
+
+	if !a.lspJumpTo(from, editor.Position{}, outside, lsp.Position{Line: 2}) {
+		t.Fatal("lspJumpTo refused a jump into an existing outside file")
+	}
+	if a.hasActiveSubfolder() {
+		t.Fatalf("hasActiveSubfolder() = true after a jump outside the root (activeFolder %q)", a.activeFolder)
+	}
+	if label := a.deleteFolderLabel(); strings.Contains(label, "fmt") {
+		t.Fatalf("delete-folder row = %q, armed on the outside folder", label)
+	}
+}
+
+// TestOpenFile_ResolvedSpellingAdoptsTheTreesSpelling: a project opened
+// through a symlink (the root as given) whose files arrive spelled by
+// their REAL path — what a language server tends to answer with. The
+// file is the project's own, so its folder is adopted, but under the
+// root's spelling, which is the one the tree highlight compares against.
+func TestOpenFile_ResolvedSpellingAdoptsTheTreesSpelling(t *testing.T) {
+	real := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(real, "sub"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	target := filepath.Join(real, "sub", "a.go")
+	if err := os.WriteFile(target, []byte("package sub\n"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	a := newTestApp(t, link)
+
+	a.openFile(target)
+	if want := filepath.Join(link, "sub"); a.activeFolder != want {
+		t.Fatalf("activeFolder = %q, want the root's spelling %q", a.activeFolder, want)
+	}
+}
+
+// TestProjectFolderFor_Cases pins the gate's three answers, including
+// the two the lexical test alone would get wrong in opposite directions.
+func TestProjectFolderFor_Cases(t *testing.T) {
+	real := t.TempDir()
+	elsewhere := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	// A symlinked folder INSIDE the project pointing OUTSIDE it: the tree
+	// shows it under the root, so it counts whatever it resolves to.
+	inLink := filepath.Join(link, "vendored")
+	if err := os.Symlink(elsewhere, inLink); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	a := newTestApp(t, link)
+
+	cases := []struct {
+		name   string
+		dir    string
+		want   string
+		inside bool
+	}{
+		{"plain subfolder", filepath.Join(link, "x"), filepath.Join(link, "x"), true},
+		{"symlinked folder inside the root", inLink, inLink, true},
+		{"real spelling of the root itself", real, link, true},
+		{"outside the project", elsewhere, "", false},
+	}
+	for _, c := range cases {
+		got, ok := a.projectFolderFor(c.dir)
+		if ok != c.inside || got != c.want {
+			t.Errorf("%s: projectFolderFor(%q) = (%q, %v), want (%q, %v)",
+				c.name, c.dir, got, ok, c.want, c.inside)
+		}
+	}
+}
+
+// TestEvalSymlinksOr_FallsBackToTheInput: a path that can't be resolved
+// (gone from disk) comes back unchanged rather than empty, which keeps
+// projectFolderFor's comparison meaningful.
+func TestEvalSymlinksOr_FallsBackToTheInput(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "no", "such", "dir")
+	if got := evalSymlinksOr(gone); got != gone {
+		t.Fatalf("evalSymlinksOr(missing) = %q, want the input back", got)
 	}
 }
 

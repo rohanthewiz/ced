@@ -46,11 +46,13 @@
 // WHAT IT OPENS. openFile, the single entry point every other open uses,
 // so the tab is wired, announced to LSP/plugins, recorded in nav history
 // and in the recent-files ring (which stores an outside-root path
-// absolute, so ⌘E brings it back). One difference, for a file OUTSIDE the
-// root: the active folder stays where it was. openFile makes the opened
-// file's folder active so the next New file lands beside it; for a
-// folder the tree cannot show, that would arm the ≡ folder verbs
-// (Rename / Delete / Copy folder) on, say, the home directory.
+// absolute, so ⌘E brings it back). For a file OUTSIDE the root the active
+// folder stays where it was — openFile itself guarantees that for every
+// door (adoptFileFolder, app.go): it makes an opened file's folder active
+// so the next New file lands beside it, and for a folder the tree cannot
+// show that would arm the ≡ folder verbs (Rename / Delete / Copy folder)
+// on, say, the home directory. This door once carried its own wrapper for
+// it; an LSP jump into GOROOT then still armed them on `fmt`.
 //
 // A MISTAKE KEEPS THE TYPING. A missing path, a folder, or a non-regular
 // file re-opens the prompt holding the same value with the reason under
@@ -129,7 +131,10 @@ func (a *App) openPathTyped(value string) {
 		a.promptOpenPath(retry, err.Error())
 		return
 	}
-	a.openFileAnywhere(path)
+	// Plain openFile: it already leaves the active folder alone for a
+	// file outside the root (adoptFileFolder), which is the one thing
+	// this door used to need a wrapper for.
+	a.openFile(path)
 }
 
 // resolveOpenPath turns what the user typed into an absolute path to an
@@ -173,30 +178,6 @@ func (a *App) expandOpenPath(p string) string {
 		p = filepath.Join(a.copyToRoot(), p)
 	}
 	return filepath.Clean(p)
-}
-
-// openFileAnywhere opens path through openFile, keeping the active folder
-// when the file lies outside the project (the file comment's WHAT IT
-// OPENS). The inside test resolves symlinks on BOTH sides — the house
-// confinement rule — so a temp root reached through /var → /private/var
-// still counts its own files as inside.
-func (a *App) openFileAnywhere(path string) {
-	keep := a.activeFolder
-	a.openFile(path)
-	if !pathInside(evalSymlinksOr(path), evalSymlinksOr(a.copyToRoot())) {
-		a.setActiveFolder(keep)
-	}
-}
-
-// evalSymlinksOr resolves p's symlinks, falling back to p itself when it
-// can't (a path that vanished between the open and this check). The
-// fallback errs toward "outside", which only ever leaves the active
-// folder alone — the harmless direction.
-func evalSymlinksOr(p string) string {
-	if r, err := filepath.EvalSymlinks(p); err == nil {
-		return r
-	}
-	return p
 }
 
 // -----------------------------------------------------------------------------

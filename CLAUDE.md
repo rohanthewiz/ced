@@ -1203,8 +1203,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   note on row 5 via `completeNote`, any edit drops it): last segment
   only (the user's `~`/relative spelling survives), dotfiles only after
   a `.`, exact case wins over folded, never deletes letters. Opens via
-  `openFile`, but an OUTSIDE-root file keeps the active folder (≡ folder
-  verbs must not arm on e.g. `~`). Non-regular files refused (a fifo
+  plain `openFile`. **No door adopts an OUTSIDE-root folder**: `openFile`
+  and session restore go through `adoptFileFolder` (lexical inside, else
+  EvalSymlinks both sides, answer re-spelled under the root), so an LSP
+  jump into GOROOT never arms the ≡ folder verbs. Non-regular files refused (a fifo
   read blocks the loop). A refusal re-opens the prompt with the value
   and the reason; a folder gets its `/`. Not in cats' `CMD_TO_PANE`
   allowlist yet, so ⌘O is dark in browser-cats / the mac app.

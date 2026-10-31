@@ -1333,7 +1333,8 @@ type App struct {
 	// activeFolder is the directory the editor is currently "working
 	// in" — the default target for New File from the main menu. It
 	// updates whenever the user clicks a folder in the tree, opens a
-	// file (parent dir wins), or right-clicks a folder. See
+	// file inside the project (parent dir wins; a file outside the root
+	// leaves it alone — adoptFileFolder), or right-clicks a folder. See
 	// setActiveFolder for the single write path so the file tree's
 	// matching highlight stays in sync.
 	activeFolder string
@@ -4440,6 +4441,80 @@ func (a *App) setActiveFolder(path string) {
 	}
 }
 
+// adoptFileFolder makes the folder holding path the active folder, so
+// the next New file lands beside the file just opened — but ONLY when
+// that folder belongs to the project. A file outside the root (an LSP
+// jump into GOROOT or the module cache, Open file… on ~/.zshrc, a
+// session that last ended on such a tab) leaves the active folder where
+// it was: its folder is one the tree cannot show, and adopting it would
+// arm every ≡ folder verb on it — "Delete folder (fmt)", "Rename folder",
+// "Copy folder" — and send New file there.
+//
+// This is the one gate for "a file's folder becomes active"; openFile
+// and restoreSession both go through it rather than each re-deciding.
+func (a *App) adoptFileFolder(path string) {
+	dir, ok := a.projectFolderFor(filepath.Dir(path))
+	if !ok {
+		return
+	}
+	a.setActiveFolder(dir)
+}
+
+// projectFolderFor reports whether dir lies inside the project root and,
+// when it does, returns it SPELLED THE TREE'S WAY (under copyToRoot).
+//
+// Two tests, cheapest first:
+//
+//	dir ── lexically under root? ──yes──▶ dir as given (no syscalls;
+//	 │                                    every tree click lands here)
+//	 no
+//	 ▼
+//	EvalSymlinks(dir) under EvalSymlinks(root)? ──no──▶ outside
+//	 │ yes
+//	 ▼
+//	root + Rel(resolved root, resolved dir)
+//
+// The lexical test runs first so nothing the tree can already name
+// changes behaviour — including a symlinked folder INSIDE the project
+// whose target lives elsewhere: the tree shows it under the root, so it
+// is a project folder whatever it resolves to.
+//
+// The resolved test is the house confinement rule (symlinks resolved on
+// BOTH sides): a language server often answers with the resolved form of
+// a path — /private/var/… for a root opened as /var/…, the real
+// directory behind a symlinked checkout — and those files are still the
+// project's own. Rebuilding the answer under the root's spelling matters
+// as much as the yes/no: the tree's active-row highlight and
+// hasActiveSubfolder compare paths as strings, so a resolved spelling of
+// the root itself would otherwise read as a "subfolder" and arm Delete
+// folder on the project.
+func (a *App) projectFolderFor(dir string) (string, bool) {
+	root := a.copyToRoot()
+	if pathInside(dir, root) {
+		return dir, true
+	}
+	rdir, rroot := evalSymlinksOr(dir), evalSymlinksOr(root)
+	if !pathInside(rdir, rroot) {
+		return "", false
+	}
+	rel, err := filepath.Rel(rroot, rdir)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(root, rel), true
+}
+
+// evalSymlinksOr resolves p's symlinks, falling back to p itself when it
+// can't (a path that vanished between the open and the check). The
+// fallback errs toward "outside", which only ever leaves the active
+// folder alone — the harmless direction.
+func evalSymlinksOr(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
+}
+
 // editorPress handles the initial mouse press inside the editor — placing
 // the caret, optionally selecting a word on double-click. Image tabs
 // have no caret, so the press is dropped.
@@ -4673,8 +4748,10 @@ func (a *App) OpenFile(path string) { a.openFile(path) }
 
 // openFile opens the file at path in a new tab — or switches to it if it is
 // already open in another tab. Errors are surfaced as a flash message.
-// Whatever the path resolves to, its parent becomes the active folder so
-// the next New File from the main menu lands next to it.
+// The file's parent becomes the active folder so the next New File from
+// the main menu lands next to it — when that parent is inside the
+// project. A file outside the root keeps the active folder where it was
+// (adoptFileFolder), whichever door opened it.
 func (a *App) openFile(path string) {
 	// Tabs are keyed by absolute path everywhere downstream — the
 	// LSP diagnostics map, the diff cache, the open-tab dedupe — so
@@ -4692,7 +4769,12 @@ func (a *App) openFile(path string) {
 	// tree) aren't navigation, so they don't record.
 	from, hasFrom := a.currentNavLoc()
 	hasFrom = hasFrom && from.path != path
-	a.setActiveFolder(filepath.Dir(path))
+	// The guard lives HERE, at the single entry point, rather than in
+	// the callers that can reach outside the root: go-to-definition,
+	// implementation, references, workspace symbols, Recent files,
+	// remote opens and Open file… all funnel through openFile, and a
+	// per-door wrapper is a door someone forgets.
+	a.adoptFileFolder(path)
 	for i, t := range a.tabs {
 		if t.Path == path {
 			if hasFrom {

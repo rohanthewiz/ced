@@ -59,7 +59,6 @@ package app
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/session"
@@ -238,7 +237,7 @@ func (a *App) runCommandLine(abs, dir string) string {
 // it. The `./` is load-bearing — a bare name is a PATH lookup.
 func runExecArg(abs, dir string) string {
 	rel, err := filepath.Rel(dir, abs)
-	if err != nil || rel == "" || strings.HasPrefix(rel, "..") {
+	if err != nil || rel == "" || relEscapes(rel) {
 		return shellArg(abs)
 	}
 	return shellArg("./" + filepath.ToSlash(rel))

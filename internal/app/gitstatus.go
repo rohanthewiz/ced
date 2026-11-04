@@ -442,5 +442,17 @@ func pathInside(candidate, root string) bool {
 	if rel == "." {
 		return true
 	}
-	return !strings.HasPrefix(rel, "..")
+	return !relEscapes(rel)
+}
+
+// relEscapes reports whether rel — a filepath.Rel answer — climbs OUT of
+// its base: exactly "..", or a ".." segment followed by a separator.
+//
+// The tempting `strings.HasPrefix(rel, "..")` is wrong for a child whose
+// NAME starts with two dots: "..notes" (or "..notes/a.txt") is inside the
+// base, but the bare prefix test calls it outside. filepath.Rel only ever
+// emits ".." as a whole leading segment, so checking the segment is exact.
+// Every "is this outside?" test on a Rel answer goes through here.
+func relEscapes(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

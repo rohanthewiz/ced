@@ -140,15 +140,6 @@ plus the LSP work done in the seeding session itself
   separator row kind that is never selected. The user's ask ("go thru
   all the menus") was read as the ≡ sections.
 
-- **N-109** · raised `2026-1031-1737-n099-outside-root-active-folder` · value low
-  **`pathInside` misreads a child named `..something` as outside.**
-  gitstatus.go's `pathInside` tests `strings.HasPrefix(rel, "..")`, so a
-  folder or file inside the root whose name starts with two dots (`..x`)
-  has `rel == "..x"` and is called outside. Every caller fails safe
-  (confinement refuses, `adoptFileFolder` leaves the active folder
-  alone), so nothing breaks loudly. The precise test is `rel == ".."` or
-  a `".." + separator` prefix. Wants a case in the helper's own test.
-
 - **N-110** · raised `2026-1103-1906-n003-readme-pins` · value low
   **The README pins stop at the ≡ menu.** N-003's tests pin the hotkey
   tables, every ≡ row, the tool windows and the config.json keys — but
@@ -567,6 +558,16 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-04, `2026-1104-1349-n107-n109-n097-subtle-floor-pathinside-draft-queue` —
+  **N-109** `relEscapes(rel)` (gitstatus.go, beside `pathInside`) is
+  now the one "does this Rel answer leave its base?" test: exactly `..`
+  or a `..` + separator prefix, so a child named `..x` is inside.
+  `pathInside` and the seven other bare `HasPrefix(rel, "..")` sites with
+  the same meaning (runexec, zipops, gitopstate, tabgroups, projectsearch
+  ×2, recentlocations, tabbar, finder) go through it. Cases added to
+  `TestPathInside` (`/foo/..x` inside, `/..foo` not) plus a
+  `TestRelEscapes` table.
 
 - closed 2026-11-04, `2026-1104-1349-n107-n109-n097-subtle-floor-pathinside-draft-queue` —
   **N-107** fixed in the theme, not per surface: `ToTheme` floors

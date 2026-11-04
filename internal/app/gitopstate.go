@@ -338,7 +338,7 @@ func loadConflictMarkerSizes(toplevel string, abs []string) map[string]int {
 	var in bytes.Buffer
 	for _, p := range abs {
 		rel, err := filepath.Rel(toplevel, p)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if err != nil || relEscapes(rel) {
 			return nil // outside the work tree: the caller's paths are wrong
 		}
 		in.WriteString(filepath.ToSlash(rel))

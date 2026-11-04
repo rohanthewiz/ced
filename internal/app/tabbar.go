@@ -558,7 +558,7 @@ func (a *App) tabPickerDir(path string) string {
 		return ""
 	}
 	rel, err := filepath.Rel(a.rootDir, filepath.Dir(path))
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+	if err != nil || rel == "." || relEscapes(rel) {
 		return ""
 	}
 	return rel

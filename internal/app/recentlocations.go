@@ -156,7 +156,7 @@ func (a *App) historyNoSaveMsg() string {
 		return lead + err.Error()
 	}
 	where := displayPath(pe.Path)
-	if rel, rerr := filepath.Rel(a.rootDir, pe.Path); rerr == nil && !strings.HasPrefix(rel, "..") {
+	if rel, rerr := filepath.Rel(a.rootDir, pe.Path); rerr == nil && !relEscapes(rel) {
 		where = rel
 	}
 	return fmt.Sprintf("%scan't %s %s (%v)", lead, pe.Op, where, pe.Err)

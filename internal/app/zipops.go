@@ -170,7 +170,7 @@ func createZipMulti(srcs []string, base, dest string) (err error) {
 // user pointed at.
 func zipEntryName(src, base string) string {
 	rel, err := filepath.Rel(base, src)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+	if err != nil || rel == "." || relEscapes(rel) {
 		return filepath.Base(src)
 	}
 	return filepath.ToSlash(rel)

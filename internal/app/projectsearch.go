@@ -295,7 +295,7 @@ func (a *App) projectSearchVerb(dir string) string {
 // answers nil, which the caller reports as "nothing indexed there".
 func (a *App) scopeSearchPaths(paths []string, dir string) []string {
 	rel, err := filepath.Rel(a.rootDir, dir)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || relEscapes(rel) {
 		return nil
 	}
 	if rel == "." {
@@ -431,7 +431,7 @@ func (a *App) projectSearchRows(hits []search.Hit) []findAllRow {
 // the project root, since every hit shares that prefix and repeating it
 // on every row would push the code off the right edge.
 func (a *App) projectSearchLabel(path string) string {
-	if rel, err := filepath.Rel(a.rootDir, path); err == nil && !strings.HasPrefix(rel, "..") {
+	if rel, err := filepath.Rel(a.rootDir, path); err == nil && !relEscapes(rel) {
 		return rel
 	}
 	return filepath.Base(path)

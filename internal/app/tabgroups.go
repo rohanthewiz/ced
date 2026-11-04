@@ -595,7 +595,7 @@ func (a *App) tabGroupDescribe(g *tabGroup) string {
 // a trailing slash, "./" for the root itself, absolute outside it.
 func (a *App) tabGroupFolderLabel(dir string) string {
 	rel, err := filepath.Rel(a.rootDir, dir)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || relEscapes(rel) {
 		return dir + "/"
 	}
 	if rel == "." {

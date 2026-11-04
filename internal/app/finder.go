@@ -34,7 +34,6 @@ package app
 
 import (
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -122,7 +121,7 @@ func (a *App) openFinderIn(dir string) {
 		return
 	}
 	rel, err := filepath.Rel(a.rootDir, dir)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || rel == "." || relEscapes(rel) {
 		a.flash("Find files in folder: that folder is outside the project")
 		return
 	}

@@ -367,10 +367,41 @@ func TestPathInside(t *testing.T) {
 		{"/foo/bar", "/foo/ba", false}, // string-prefix would lie here
 		{"/sibling", "/foo", false},
 		{"/", "/foo", false},
+		// A child whose NAME starts with two dots is inside (N-109): the
+		// bare HasPrefix(rel, "..") test called "..x" outside.
+		{"/foo/..x", "/foo", true},
+		{"/foo/..x/y", "/foo", true},
+		{"/..foo", "/foo", false}, // a sibling of /foo that merely starts with ..
 	}
 	for _, tc := range cases {
 		if got := pathInside(tc.candidate, tc.root); got != tc.want {
 			t.Errorf("pathInside(%q, %q) = %v, want %v", tc.candidate, tc.root, got, tc.want)
+		}
+	}
+}
+
+// TestRelEscapes pins the one "does this Rel answer leave its base?" test
+// every call site shares: only a whole leading ".." segment escapes; a
+// name that merely starts with two dots stays inside.
+func TestRelEscapes(t *testing.T) {
+	sep := string(filepath.Separator)
+	cases := []struct {
+		rel  string
+		want bool
+	}{
+		{"..", true},
+		{".." + sep + "x", true},
+		{".." + sep + ".." + sep + "x", true},
+		{"..x", false},
+		{"..x" + sep + "y", false},
+		{"...", false},
+		{".", false},
+		{"a" + sep + "..b", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := relEscapes(tc.rel); got != tc.want {
+			t.Errorf("relEscapes(%q) = %v, want %v", tc.rel, got, tc.want)
 		}
 	}
 }

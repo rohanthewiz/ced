@@ -100,14 +100,6 @@ plus the LSP work done in the seeding session itself
   language server (command line to be found), document "needs TS ≤ 5.x",
   or both.
 
-- **N-102** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value low
-  **TypeScript return-type hints lose their subject.** The hint sits
-  after `)`, so `inlayTypePart` finds no word before it and the note
-  reads `» : string` after `function greet(name: string, times:
-  number) {`. basedpyright's `-> Any` and clangd's `-> int` read fine
-  because their labels carry the arrow. Likely fix: a `:` type hint
-  right after `)` becomes `-> T`, or names the function (`greet(): T`).
-
 - **N-103** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value low
   **pyright is tried before basedpyright, so a machine with both gets no
   Python hints.** `lspservers.go` orders the Python commands "most
@@ -548,6 +540,19 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-04, `2026-1104-1442-n102-n093-return-hints-modal-replaced` —
+  **N-102** a type hint anchored just past `)` (spaces skipped,
+  `inlayAfterCloseParen`) is a RETURN type and reads `-> T`
+  (`inlayReturnPart`, lspinlay.go); labels carrying their own arrow
+  (basedpyright, clangd) pass through. Arrow over naming the function:
+  arrow functions have no name beside their `(`, and it is the form two
+  servers already send. Real binary with typescript-language-server
+  5.3.0 + TS 5.9 (scratchpad install): `function greet(name: string,
+  times: number) {  » -> string`, and the arrow function's line ends
+  `· -> string` (was `» : string`). Pinned by
+  `TestInlayNote_ReturnTypeAfterParenReadsAsAnArrow` and
+  `TestInlayAfterCloseParen`.
 
 - closed 2026-11-04, `2026-1104-1349-n107-n109-n097-subtle-floor-pathinside-draft-queue` —
   **N-097** a draft ask no longer overwrites a queued composer message:

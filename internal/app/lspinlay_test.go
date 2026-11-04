@@ -234,3 +234,45 @@ func TestInlay_EndToEndWithRealGopls(t *testing.T) {
 		}
 	}
 }
+
+// TestInlayNote_ReturnTypeAfterParenReadsAsAnArrow pins N-102: a type
+// hint anchored just past `)` is a return type with no subject word, so
+// TypeScript's `: string` must read `-> string`, not `: string`. The line
+// is the one typescript-language-server 5.3.0 was seen hinting on
+// (2026-10-28), anchored at its `)`; labels that already carry an arrow
+// (basedpyright, clangd) pass through, and an ordinary `x: T` hint is
+// untouched. (rust-analyzer's chaining hints also sit after a `)`, at the
+// end of a call; `-> T` reads as "this evaluates to T" there, which is
+// at least as true as the subjectless `: T` they showed before.)
+func TestInlayNote_ReturnTypeAfterParenReadsAsAnArrow(t *testing.T) {
+	line := []rune("function greet(name: string, times: number) {")
+	if got := inlayNote(line, []lsp.InlayHint{hintAt(43, ": string", lsp.InlayType)}); got != "-> string" {
+		t.Errorf("ts return hint = %q, want %q", got, "-> string")
+	}
+	// A space between `)` and the anchor still counts.
+	if got := inlayNote([]rune("const f = (a) => a"), []lsp.InlayHint{hintAt(14, ": number", lsp.InlayType)}); got != "-> number" {
+		t.Errorf("spaced return hint = %q", got)
+	}
+	py := []rune("def f(x):")
+	if got := inlayNote(py, []lsp.InlayHint{hintAt(8, "-> Any", lsp.InlayType)}); got != "-> Any" {
+		t.Errorf("arrow label = %q, want it passed through", got)
+	}
+	if got := inlayNote([]rune("x := f()"), []lsp.InlayHint{hintAt(1, ": int", lsp.InlayType)}); got != "x: int" {
+		t.Errorf("subject hint = %q, want it untouched", got)
+	}
+}
+
+// TestInlayAfterCloseParen covers the anchor test on its own, including
+// the edges a stale hint can name (past the end, column 0).
+func TestInlayAfterCloseParen(t *testing.T) {
+	r := []rune("f(a)  {")
+	cases := []struct {
+		col  int
+		want bool
+	}{{4, true}, {6, true}, {3, false}, {0, false}, {7, false}, {99, false}}
+	for _, tc := range cases {
+		if got := inlayAfterCloseParen(r, tc.col); got != tc.want {
+			t.Errorf("col %d = %v, want %v", tc.col, got, tc.want)
+		}
+	}
+}

@@ -158,6 +158,11 @@ func inlayNote(runes []rune, hints []lsp.InlayHint) string {
 		switch {
 		case h.Kind == lsp.InlayParameter:
 			part = inlayParamPart(h.Label, inlayArgAt(runes, col))
+		case (h.Kind == lsp.InlayType || strings.HasPrefix(h.Label, ":")) && inlayAfterCloseParen(runes, col):
+			// A type written after a parameter list is the RETURN
+			// type, and the word before it is not its subject — there
+			// is no word at all, only `)`.
+			part = inlayReturnPart(h.Label)
 		case h.Kind == lsp.InlayType || strings.HasPrefix(h.Label, ":"):
 			part = inlayTypePart(inlayWordBefore(runes, col), h.Label)
 		default:
@@ -202,6 +207,45 @@ func inlayTypePart(subject, label string) string {
 		return label
 	}
 	return subject + ": " + typ
+}
+
+// inlayAfterCloseParen reports whether col sits just past a `)`, spaces
+// skipped: where a server anchors a function's return-type hint
+// (`function greet(name: string) {` gets typescript-language-server's
+// `: string` at the `)`), and where no subject word can be found.
+func inlayAfterCloseParen(runes []rune, col int) bool {
+	if col > len(runes) {
+		return false
+	}
+	for i := col - 1; i >= 0; i-- {
+		switch runes[i] {
+		case ' ', '\t':
+			continue
+		case ')':
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+// inlayReturnPart spells a return-type hint `-> T`. TypeScript's label is
+// `: string`, which with no subject read `» : string` — a type of
+// nothing. The arrow is the form basedpyright (`-> Any`) and clangd
+// (`-> int`) already send, so return types read the same whatever the
+// server; a label that carries its own arrow passes through untouched.
+// Arrow rather than naming the function (`greet(): string`): an arrow
+// function or a method on a long line has no name next to its `(`, and
+// the note already sits on the function's own line.
+func inlayReturnPart(label string) string {
+	typ := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(label), ":"))
+	if typ == "" {
+		return label
+	}
+	if strings.HasPrefix(typ, "->") {
+		return typ
+	}
+	return "-> " + typ
 }
 
 // inlayWordBefore is the identifier ending at col — the subject a type

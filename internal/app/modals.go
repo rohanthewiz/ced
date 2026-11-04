@@ -1193,11 +1193,19 @@ func (m *dirtyModal) draw(a *App) {
 // contextItem is one row in the tree's right-click context menu. action runs
 // against the node the menu was opened for; enabled gates whether the row is
 // clickable.
+//
+// split marks a separator row between two runs of related rows — the
+// editor chassis's row kind (editorContextItem, contextmenu.go), with the
+// same contract: never hovered, skipped by the arrows, inert on a click.
 type contextItem struct {
 	label   string
 	action  func(*App, *filetree.Node)
 	enabled func(*App, *filetree.Node) bool
+	split   bool
 }
+
+// treeCtxSplit is a separator row for the tree's context menu.
+func treeCtxSplit() contextItem { return contextItem{split: true} }
 
 // contextModal is the small right-click popup over the file tree,
 // anchored at (x, y) and acting on node.
@@ -1219,6 +1227,13 @@ type contextModal struct {
 // openTreeContext opens the context menu near (x, y) for node n. The items
 // shown depend on whether n is a file or a folder. Renaming or deleting the
 // project root is intentionally not allowed.
+//
+// The rows fall into runs, divided by split rows (N-108): make or find
+// things in this place · change the entry · copy it somewhere · copy its
+// name · how it is drawn · collect it (marks, favorites, a tab group) ·
+// take it outside ced. A split goes at every boundary; trimCtxSplits drops
+// the ones a node kind leaves empty (the root has no Rename run, a file no
+// New File run).
 func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	items := []contextItem{}
 	if n.IsDir {
@@ -1240,6 +1255,7 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 		// folder (sub/)".
 		items = append(items, contextItem{label: a.findFilesInFolderContextLabel(n), action: ctxFindFilesInFolder})
 	}
+	items = append(items, treeCtxSplit())
 	if n != a.tree.Root {
 		items = append(items, contextItem{label: "Rename", action: ctxRename})
 		items = append(items, contextItem{label: "Delete", action: ctxDelete})
@@ -1252,6 +1268,7 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 		if !n.IsDir && a.gitIsRepo {
 			items = append(items, contextItem{label: "Git restore…", action: ctxGitRestore})
 		}
+		items = append(items, treeCtxSplit())
 		// Copying the root is gated out with Rename/Delete — every
 		// possible paste destination is inside it, so the copy could
 		// never be used.
@@ -1273,9 +1290,11 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	// Name / rel path / abs path: the three clipboard rows, shortest
 	// string first. The name row is on every node, root included — a
 	// folder's or project's name is as pasteable as a file's.
+	items = append(items, treeCtxSplit())
 	items = append(items, contextItem{label: "Copy name", action: ctxCopyName})
 	items = append(items, contextItem{label: "Copy rel path", action: ctxCopyRelativePath})
 	items = append(items, contextItem{label: "Copy abs path", action: ctxCopyAbsolutePath})
+	items = append(items, treeCtxSplit())
 	// Preview / Stop Preview (markdown.go) — a conditional row like Paste
 	// and Run rather than part of the fixed vocabulary, because it means
 	// nothing on the overwhelming majority of nodes. On a .md file it is
@@ -1323,6 +1342,9 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	// The root is gated out of marking with Rename / Delete and for the
 	// same reason: every verb a mark feeds either refuses the project
 	// root or means nothing applied to it.
+	// Marks, favorites and tab groups share one run: each COLLECTS the
+	// entry into something the user comes back to.
+	items = append(items, treeCtxSplit())
 	if n != a.tree.Root {
 		markLabel := "Select"
 		if a.tree.IsMarked(n) {
@@ -1368,6 +1390,7 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 	// sits above the one row that is still conditional on the node —
 	// which is what keeps Run in terminal… last, where its own rule puts
 	// it.
+	items = append(items, treeCtxSplit())
 	items = append(items, contextItem{label: a.openInEditorLabel(), action: ctxOpenInEditor})
 	// The rest of the "take it outside ced" family, under its first
 	// member and on the same unconditional footing: every node, root
@@ -1397,6 +1420,7 @@ func (a *App) openTreeContext(n *filetree.Node, x, y int) {
 		items = append(items, contextItem{label: "Run in terminal…", action: ctxRunExecutable})
 	}
 
+	items = trimCtxSplits(items, func(it contextItem) bool { return it.split })
 	w := a.contextMenuWidthFor(items)
 	cx, cy := a.placeContextSized(x, y, len(items), w)
 	a.openModal(&contextModal{x: cx, y: cy, w: w, node: n, items: items})
@@ -1477,17 +1501,26 @@ func (m *contextModal) handleKey(a *App, ev *tcell.EventKey) {
 	case tcell.KeyEsc:
 		a.closeModal()
 	case tcell.KeyDown:
-		if m.hover < len(m.items)-1 {
-			m.hover++
-		}
+		m.step(1)
 		m.scroll.reveal(m.hover, len(m.items), mh-2)
 	case tcell.KeyUp:
-		if m.hover > 0 {
-			m.hover--
-		}
+		m.step(-1)
 		m.scroll.reveal(m.hover, len(m.items), mh-2)
 	case tcell.KeyEnter:
 		m.activate(a)
+	}
+}
+
+// step moves the hover one REAL row in dir, passing over split rows and
+// stopping at the ends (no wrap). Every tree row is enabled, so a split
+// is the only thing to skip; a builder never ends on one (trimCtxSplits),
+// so there is always a row to land on.
+func (m *contextModal) step(dir int) {
+	for i := m.hover + dir; i >= 0 && i < len(m.items); i += dir {
+		if !m.items[i].split {
+			m.hover = i
+			return
+		}
 	}
 }
 
@@ -1517,6 +1550,11 @@ func (m *contextModal) activate(a *App) {
 		return
 	}
 	item := m.items[m.hover]
+	// A split row is inert: the popup stays, so a click that fell between
+	// two rows costs nothing.
+	if item.split {
+		return
+	}
 	a.closeModal()
 	if item.action != nil && m.node != nil {
 		item.action(a, m.node)
@@ -1545,6 +1583,10 @@ func (m *contextModal) draw(a *App) {
 	for i := top; i < top+rows && i < len(m.items); i++ {
 		item := m.items[i]
 		cy := my + 1 + (i - top)
+		if item.split {
+			a.drawCtxSplit(mx, mw, cy, bg)
+			continue
+		}
 		hovered := i == m.hover
 		if hovered {
 			for cx := mx + 1; cx < mx+mw-1; cx++ {

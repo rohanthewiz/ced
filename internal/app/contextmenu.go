@@ -54,10 +54,61 @@ import (
 )
 
 // editorContextItem is one row of the editor's context menu.
+//
+// split marks a SEPARATOR row instead: a dotted rule between two runs of
+// related rows (N-108), the right-click twin of the ≡ menu's splits. It
+// is a row KIND here rather than the ≡ menu's splitAbove flag on the next
+// row, on purpose: ctxScroll maps one screen row to one item, and a flag
+// would need a second display-row index threaded through pointer, reveal,
+// offset and every opener's height. A split row is simply never usable —
+// the arrows skip it, the pointer lands on it without highlighting it, a
+// click on it does nothing (the popup stays) — and trimCtxSplits drops the
+// ones a conditional row left leading, trailing or doubled.
 type editorContextItem struct {
 	label   string
 	action  func(*App)
 	enabled func(*App) bool
+	split   bool
+}
+
+// editorCtxSplit is a separator row for an editorContextModal list.
+func editorCtxSplit() editorContextItem { return editorContextItem{split: true} }
+
+// usable reports whether the row can be hovered and run: never a split,
+// else its enabled predicate.
+func (it editorContextItem) usable(a *App) bool {
+	return !it.split && it.enabled != nil && it.enabled(a)
+}
+
+// trimCtxSplits drops the separators a menu builder's conditional rows
+// left meaningless: any before the first real row, after the last, or
+// directly after another split. Builders therefore place a split at every
+// group boundary unconditionally and let this tidy up, rather than each
+// branch asking "is there a group above me?".
+func trimCtxSplits[T any](items []T, isSplit func(T) bool) []T {
+	out := make([]T, 0, len(items))
+	for _, it := range items {
+		if isSplit(it) && (len(out) == 0 || isSplit(out[len(out)-1])) {
+			continue
+		}
+		out = append(out, it)
+	}
+	for len(out) > 0 && isSplit(out[len(out)-1]) {
+		out = out[:len(out)-1]
+	}
+	return out
+}
+
+// drawCtxSplit paints a separator row on screen row cy of a popup at
+// (mx, mw): the ≡ menu's dotted rule (app.go, drawMenu's splits) — inset
+// from the label column to two cells short of the frame, in Subtle lifted
+// to menuSplitContrast, so a pause inside the list never reads as the
+// popup's border. Shared by the tree's menu and this chassis.
+func (a *App) drawCtxSplit(mx, mw, cy int, bg tcell.Color) {
+	st := tcell.StyleDefault.Background(bg).Foreground(menuSplitColor(a.theme.Subtle, bg))
+	for cx := mx + 4; cx < mx+mw-3; cx++ {
+		a.screen.SetContent(cx, cy, '┄', nil, st)
+	}
 }
 
 // editorContextModal is the popup itself: anchor, computed width, rows,
@@ -154,6 +205,12 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 		{label: "Rename symbol…", action: (*App).menuRenameSymbol, enabled: (*App).hasLSPActions},
 		{label: "Hover info", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},
 		{label: "Code actions…", action: (*App).menuCodeActions, enabled: (*App).hasCodeActions},
+		// Splits (N-108) divide the menu into what each run acts ON: the
+		// symbol (LSP), the text (clipboard, compare, comment), where the
+		// file goes (cats splits), who gets the selection (agents, chat,
+		// notes), how the file is drawn, places to come back to, and the
+		// repo. Placed at every boundary; trimCtxSplits drops the empties.
+		editorCtxSplit(),
 		{label: "Copy", action: (*App).copySelection, enabled: (*App).hasSelection},
 		{label: "Cut", action: (*App).cutSelection, enabled: (*App).hasSelection},
 		// Paste stays enabled with an empty internal clipboard —
@@ -182,6 +239,7 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	// permanent place in a popup this small — and inside cats, "put a
 	// second editor beside this one" is exactly what a right-click on the
 	// file is reaching for.
+	items = append(items, editorCtxSplit())
 	if a.hasCatsSplit() {
 		items = append(items,
 			editorContextItem{label: "Open in split →", action: (*App).catsSplitRight, enabled: alwaysTrue},
@@ -191,6 +249,9 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	// Handing the selection to a sibling agent (catsagents.go). Gated on
 	// there being a selection as well as a host, because "send the
 	// selection" with nothing selected is not a row, it is a question.
+	// One run with the chat / GoNotes rows below: all hand the selection
+	// to someone else.
+	items = append(items, editorCtxSplit())
 	if a.hasCatsSelectionSend() {
 		if a.hasCatsAgents() {
 			items = append(items, editorContextItem{
@@ -232,6 +293,7 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	// source file the user right-clicks. The other half of the pair
 	// (Stop Preview) lives in openPreviewContext — inside a preview the
 	// code rows have nothing to aim at, so the two never share a popup.
+	items = append(items, editorCtxSplit())
 	if tab.MarkdownCapable() {
 		items = append(items, editorContextItem{
 			label: "Preview", action: (*App).toggleMarkdownView, enabled: alwaysTrue,
@@ -250,6 +312,9 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	// "Label bookmark…" follows it only on a line that already has one:
 	// naming an unmarked line is the ≡ row's job, and two bookmark rows
 	// on every right-click would crowd a menu that is about the text.
+	// The search row shares their run: both are ways to get back to, or
+	// on to, other places from this word.
+	items = append(items, editorCtxSplit())
 	if tab.Path != "" {
 		items = append(items, editorContextItem{
 			label: bookmarkContextLabel(tab), action: (*App).menuToggleBookmark, enabled: alwaysTrue,
@@ -289,6 +354,7 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	// clicked line is part of a change: it is the same question the
 	// change bar answers, asked of the line rather than of a one-cell
 	// gutter target.
+	items = append(items, editorCtxSplit())
 	if a.hasGitRepo() {
 		if a.hasHunkAtCaret() {
 			items = append(items, editorContextItem{
@@ -311,9 +377,9 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	// room for. Prepended rather than appended: on a conflict, choosing a
 	// side is what the right-click is for.
 	if rows := a.conflictContextItems(); len(rows) > 0 {
-		items = append(rows, items...)
+		items = append(append(rows, editorCtxSplit()), items...)
 	}
-	return items
+	return trimCtxSplits(items, func(it editorContextItem) bool { return it.split })
 }
 
 // contextSearchWord is what the search row would look for: a single-line
@@ -531,7 +597,7 @@ func (m *editorContextModal) handleKey(a *App, ev *tcell.EventKey) {
 // more"), and scrolls a clipped popup to keep the new row in view.
 func (m *editorContextModal) moveHover(a *App, dir int) {
 	for i := m.hover + dir; i >= 0 && i < len(m.items); i += dir {
-		if m.items[i].enabled(a) {
+		if m.items[i].usable(a) {
 			m.hover = i
 			_, _, _, mh := m.rect(a)
 			m.scroll.reveal(i, len(m.items), mh-2)
@@ -566,7 +632,7 @@ func (m *editorContextModal) activate(a *App) {
 		return
 	}
 	item := m.items[m.hover]
-	if !item.enabled(a) {
+	if !item.usable(a) {
 		return
 	}
 	a.closeModal()
@@ -599,7 +665,11 @@ func (m *editorContextModal) draw(a *App) {
 	for i := top; i < top+rows && i < len(m.items); i++ {
 		item := m.items[i]
 		cy := my + 1 + (i - top)
-		enabled := item.enabled(a)
+		if item.split {
+			a.drawCtxSplit(mx, mw, cy, bg)
+			continue
+		}
+		enabled := item.usable(a)
 		switch {
 		case i == m.hover && enabled:
 			for cx := mx + 1; cx < mx+mw-1; cx++ {

@@ -856,3 +856,72 @@ func TestEditorContextSelectionHandOffRows(t *testing.T) {
 		t.Fatalf("modal after the GoNotes row = %T, want the note prompt", a.modal)
 	}
 }
+
+// TestTrimCtxSplits pins the tidy-up every builder relies on: a split is
+// dropped before the first real row, after the last, and after another
+// split, so a builder may place one at every group boundary even when a
+// conditional row left the group empty.
+func TestTrimCtxSplits(t *testing.T) {
+	isSplit := func(s string) bool { return s == "-" }
+	cases := []struct{ in, want string }{
+		{"-a-b-", "a-b"},
+		{"a--b", "a-b"},
+		{"a---", "a"},
+		{"---", ""},
+		{"ab", "ab"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		in := strings.Split(tc.in, "")
+		if tc.in == "" {
+			in = nil
+		}
+		if got := strings.Join(trimCtxSplits(in, isSplit), ""); got != tc.want {
+			t.Errorf("trim(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestEditorContext_SplitRowsAreInert pins N-108's contract on the editor
+// chassis: the menu carries split rows between its runs, the arrows walk
+// over them, the pointer resting on one highlights nothing, a click on
+// one leaves the popup up, and the row is painted as the dotted rule.
+func TestEditorContext_SplitRowsAreInert(t *testing.T) {
+	root := t.TempDir()
+	p := writeStatusTestFile(t, root, "s.go", "package main\n\nfunc hello() {}\n")
+	a := newTestApp(t, root)
+	a.openFile(p)
+	m := openEditorContextAt(t, a, 8, 2)
+
+	split := -1
+	for i, it := range m.items {
+		if it.split {
+			split = i
+			break
+		}
+	}
+	if split <= 0 || m.items[split-1].label != "Code actions…" {
+		t.Fatalf("first split at %d, want right after the LSP run: %v", split, labelsOf(m))
+	}
+
+	// Walk down from the row above: the next enabled row past the split.
+	m.hover = split - 1
+	m.moveHover(a, 1)
+	if m.hover <= split || m.items[m.hover].split {
+		t.Errorf("arrow landed on %d (%q), want past the split at %d", m.hover, m.items[m.hover].label, split)
+	}
+
+	// Press on the split's screen row: hovered, inert, popup stays.
+	mx, my, _, mh := m.rect(a)
+	cy := my + 1 + split - m.scroll.offset(len(m.items), mh-2)
+	m.handleMouse(a, mx+4, cy, tcell.Button1)
+	if a.modal != m {
+		t.Fatalf("a click on a split closed the menu (modal = %T)", a.modal)
+	}
+
+	a.draw()
+	if r, _, _, _ := a.screen.GetContent(mx+5, cy); r != '┄' {
+		t.Errorf("split row paints %q at its label column, want the dotted rule", r)
+	}
+}
+

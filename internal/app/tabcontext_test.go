@@ -98,8 +98,9 @@ func TestTabContext_RightClickOpensTheTabMenu(t *testing.T) {
 	for _, it := range m.items {
 		labels = append(labels, it.label)
 	}
-	want := "Reveal in file tree|Show uncommitted changes|Show git history|Compare with clipboard|" +
-		"Format file|Validate file|Restore (discard changes)…|Add to group…|Zip file|Copy to…|Copy file name|Copy relative path|Copy absolute path|Close tab|Close other tabs"
+	// An empty cell is a split row (N-108): look · change · place · copy · close.
+	want := "Reveal in file tree|Show uncommitted changes|Show git history|Compare with clipboard||" +
+		"Format file|Validate file|Restore (discard changes)…||Add to group…||Zip file|Copy to…|Copy file name|Copy relative path|Copy absolute path||Close tab|Close other tabs"
 	if got := strings.Join(labels, "|"); got != want {
 		t.Errorf("rows = %s, want %s", got, want)
 	}
@@ -232,6 +233,9 @@ func TestTabContext_RowsDimWithoutAPath(t *testing.T) {
 	tab.Path = ""
 	live := map[string]bool{"Close tab": true, "Compare with clipboard": true, "Add to group…": true}
 	for _, it := range a.tabContextItems(tab) {
+		if it.split {
+			continue // a separator has no predicate (N-108)
+		}
 		if on := it.enabled(a); live[it.label] != on {
 			t.Errorf("%q enabled = %v", it.label, on)
 		}

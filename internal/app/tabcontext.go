@@ -130,6 +130,10 @@ func (a *App) tabContextItems(t *editor.Tab) []editorContextItem {
 		{label: "Show git history", action: func(app *App) { app.gitLogShowFile(t.Path) }, enabled: inRepo},
 		{label: "Compare with clipboard", action: onTab(t, (*App).menuCatsCompareClipboard), enabled: isText},
 	}
+	// One split (N-108) between each of the five runs named above —
+	// look · change · place · copy · close — so the grouping the order
+	// already encodes is visible. trimCtxSplits tidies any a conditional
+	// row leaves doubled.
 	// Preview only on a file that has one — the editor menu's rule
 	// (contextmenu.go): a row dead on every source file is noise. Labelled
 	// by what the click does, so a previewed tab offers the way back.
@@ -141,12 +145,14 @@ func (a *App) tabContextItems(t *editor.Tab) []editorContextItem {
 		items = append(items, editorContextItem{label: label, action: onTab(t, (*App).toggleMarkdownView), enabled: alwaysTrue})
 	}
 	items = append(items,
+		editorCtxSplit(),
 		editorContextItem{label: "Format file", action: onTab(t, (*App).formatActiveFile), enabled: isTextFile},
 		editorContextItem{label: "Validate file", action: onTab(t, (*App).validateFile), enabled: isTextFile},
 		// Acts in place: its answer is a confirm, then a reload of
 		// THIS tab's buffer that the user can undo whether or not the
 		// tab is in front (gitrestore.go).
 		editorContextItem{label: "Restore (discard changes)…", action: func(app *App) { app.restoreFile(t.Path) }, enabled: inRepo},
+		editorCtxSplit(),
 	)
 	// The splits (catssplit.go) appear only inside cats, like the ≡ Cats
 	// group that holds their twins: no plain terminal can split, so the
@@ -175,6 +181,7 @@ func (a *App) tabContextItems(t *editor.Tab) []editorContextItem {
 		items = append(items, editorContextItem{label: "Remove from group " + g.name, action: func(app *App) { app.removeTabFromGroup(t) }, enabled: alwaysTrue})
 	}
 	items = append(items,
+		editorCtxSplit(),
 		editorContextItem{label: "Zip file", action: func(app *App) { app.startZip(t.Path) }, enabled: hasPath},
 		// The ≡ File row only reaches the ACTIVE tab; this one copies a
 		// background tab without bringing it forward — the answer is a
@@ -192,10 +199,11 @@ func (a *App) tabContextItems(t *editor.Tab) []editorContextItem {
 		editorContextItem{label: "Copy absolute path", action: func(app *App) {
 			app.copyPathToSystemClipboard(absolutePathFor(t.Path), "absolute path")
 		}, enabled: hasPath},
+		editorCtxSplit(),
 		editorContextItem{label: "Close tab", action: func(app *App) { app.requestCloseTab(app.tabIndexOf(t)) }, enabled: alwaysTrue},
 		editorContextItem{label: "Close other tabs", action: func(app *App) { app.closeOtherTabs(t) }, enabled: (*App).hasMultipleTabs},
 	)
-	return items
+	return trimCtxSplits(items, func(it editorContextItem) bool { return it.split })
 }
 
 // onTab wraps an active-tab verb so it runs on t: switch t to the front

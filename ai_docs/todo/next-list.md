@@ -112,16 +112,6 @@ plus the LSP work done in the seeding session itself
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
 
-- **N-108** · raised `2026-1031-0200-menu-search-box-splitters` · value low
-  **Right-click menus have no splitters.** The ≡ sections got split
-  rules between runs of related rows (`splitAbove`), but the tree's
-  context menu, the tab menu and the editor's right-click menu are long
-  flat lists too (the tree's runs from Open in $EDITOR through Zip and
-  the copy rows). They share the `ctxScroll` chassis (contextmenu.go),
-  whose row↔screen mapping, hover and keyboard walk would need a
-  separator row kind that is never selected. The user's ask ("go thru
-  all the menus") was read as the ≡ sections.
-
 - **N-110** · raised `2026-1103-1906-n003-readme-pins` · value low
   **The README pins stop at the ≡ menu.** N-003's tests pin the hotkey
   tables, every ≡ row, the tool windows and the config.json keys — but
@@ -540,6 +530,25 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-04, `2026-1104-1530-n108-n110-ctx-splits-readme-pins` —
+  **N-108** the tree, tab and editor right-click menus carry dotted
+  splits between their runs. A ROW KIND (`split: true` on
+  `editorContextItem` / `contextItem`), not the ≡ menu's `splitAbove`
+  flag: it keeps `ctxScroll`'s one-screen-row-per-item mapping, so
+  pointer, reveal, offset and every opener's height are untouched. Split
+  rows are never hovered, the arrows skip them (the tree's arrows gained
+  `step`), a click on one leaves the popup up; `drawCtxSplit` paints the
+  ≡ menu's `┄` in `menuSplitColor`. Builders put a split at every run
+  boundary and finish with `trimCtxSplits` (no leading / trailing /
+  doubled split). Runs: tree — make/find here · change the entry · copy
+  · copy its name · how it's drawn · collect it (marks, favorites, tab
+  group) · take it outside; tab — look · change · place · copy · close;
+  editor — conflict · symbol · text · splits · hand the selection off ·
+  drawing · places · repo. Seen in the real binary (run-ced, a right-click
+  on a tree folder). Tests: `TestTrimCtxSplits`,
+  `TestEditorContext_SplitRowsAreInert`, `TestTreeContext_SplitRowsAreInert`;
+  the exact-list pins gained `""` split cells.
 
 - closed 2026-11-04, `2026-1104-1442-n102-n093-return-hints-modal-replaced` —
   **N-093** a modal-level "being replaced" hook: `replacedModal`

@@ -373,8 +373,9 @@ func TestOpenTreeContext_Folder(t *testing.T) {
 	if contextOf(a) == nil {
 		t.Fatal("context should open")
 	}
-	wantLabels := []string{"New File", "New Folder", "Find all in folder…", "Find files in folder…", "Rename", "Delete", "Copy", "Copy to…", "Zip",
-		"Copy name", "Copy rel path", "Copy abs path", "Select", "Add to favorites…", "New tab group…", "Open in $EDITOR",
+	// "" is a split row between two runs (N-108).
+	wantLabels := []string{"New File", "New Folder", "Find all in folder…", "Find files in folder…", "", "Rename", "Delete", "", "Copy", "Copy to…", "Zip", "",
+		"Copy name", "Copy rel path", "Copy abs path", "", "Select", "Add to favorites…", "New tab group…", "", "Open in $EDITOR",
 		fileManagerLabel(), "Open in terminal", "Shell command…", "Refresh"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("folder context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))
@@ -406,8 +407,9 @@ func TestOpenTreeContext_File(t *testing.T) {
 		t.Fatal("file node not in tree")
 	}
 	a.openTreeContext(node, 5, 5)
-	wantLabels := []string{"Rename", "Delete", "Copy", "Copy to…", "Zip", "Copy name", "Copy rel path", "Copy abs path",
-		"Soft Wrap", "Select", "Open in $EDITOR", fileManagerLabel(), "Open in terminal", "Shell command…", "Refresh"}
+	// "" is a split row between two runs (N-108).
+	wantLabels := []string{"Rename", "Delete", "", "Copy", "Copy to…", "Zip", "", "Copy name", "Copy rel path", "Copy abs path", "",
+		"Soft Wrap", "", "Select", "", "Open in $EDITOR", fileManagerLabel(), "Open in terminal", "Shell command…", "Refresh"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("file context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))
 	}
@@ -424,8 +426,10 @@ func TestOpenTreeContext_File(t *testing.T) {
 func TestOpenTreeContext_Root(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.openTreeContext(a.tree.Root, 5, 5)
-	wantLabels := []string{"New File", "New Folder", "Find in project…", "Find file in project…", "Copy to…", "Zip", "Copy name", "Copy rel path", "Copy abs path",
-		"Add to favorites…", "Open in $EDITOR", fileManagerLabel(), "Open in terminal", "Shell command…", "Refresh"}
+	// "" is a split row between two runs (N-108); the root has no
+	// change-the-entry run, so its split is trimmed with it.
+	wantLabels := []string{"New File", "New Folder", "Find in project…", "Find file in project…", "", "Copy to…", "Zip", "", "Copy name", "Copy rel path", "Copy abs path", "",
+		"Add to favorites…", "", "Open in $EDITOR", fileManagerLabel(), "Open in terminal", "Shell command…", "Refresh"}
 	if len(contextOf(a).items) != len(wantLabels) {
 		t.Fatalf("root context should have %d items, got %d", len(wantLabels), len(contextOf(a).items))
 	}
@@ -433,6 +437,48 @@ func TestOpenTreeContext_Root(t *testing.T) {
 		if contextOf(a).items[i].label != w {
 			t.Fatalf("item %d label: got %q, want %q", i, contextOf(a).items[i].label, w)
 		}
+	}
+}
+
+// TestTreeContext_SplitRowsAreInert is N-108 on the tree's own chassis:
+// Down walks over a split row, a click on one keeps the popup up, and the
+// first real row is never a split (so the initial hover is a row).
+func TestTreeContext_SplitRowsAreInert(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeFile(filepath.Join(dir, "f.txt"), "x"); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, dir)
+	var node *filetree.Node
+	for _, c := range a.tree.Root.Children {
+		if c.Name == "f.txt" {
+			node = c
+		}
+	}
+	a.openTreeContext(node, 5, 5)
+	m := contextOf(a)
+	if m.items[0].split {
+		t.Fatal("the popup opens with a split under the initial hover")
+	}
+	split := -1
+	for i, it := range m.items {
+		if it.split {
+			split = i
+			break
+		}
+	}
+	if split < 1 {
+		t.Fatalf("no split row in %d items", len(m.items))
+	}
+	m.hover = split - 1
+	m.handleKey(a, keyEvent(tcell.KeyDown, 0))
+	if m.hover != split+1 {
+		t.Errorf("Down from %d landed on %d, want %d (past the split)", split-1, m.hover, split+1)
+	}
+	m.hover = split
+	m.activate(a)
+	if contextOf(a) != m {
+		t.Error("activating a split row closed the menu")
 	}
 }
 

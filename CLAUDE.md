@@ -205,6 +205,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `contextModal` share `ctxScroll`, contextmenu.go): placed by the
   CLIPPED height, ▲/▼ on the borders, wheel, arrows reveal, a press on
   a marked border pages. Row↔screen mapping only via `ctxScroll.pointer`.
+  Splits here are a ROW KIND (`split: true`, `editorCtxSplit` /
+  `treeCtxSplit`), not the ≡ menu's `splitAbove` flag — keeps rows 1:1
+  with items. Never hovered, skipped by arrows, inert on click; builders
+  place one at every run boundary and end with `trimCtxSplits`. Tree,
+  tab and editor menus carry them (`""` in label pins).
 - After any workspace mutation call `a.workspaceChanged()`.
 - **Read the open tab's BUFFER before disk** whenever text is sent
   somewhere (chat, notes, compare, reference context, workspace edits).

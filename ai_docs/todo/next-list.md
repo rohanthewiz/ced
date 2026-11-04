@@ -96,18 +96,6 @@ plus the LSP work done in the seeding session itself
   answer, so the likely fix is to refuse the ask with a flash when a
   composer message is already queued.
 
-- **N-098** · raised `2026-1028-1242-open-file-anywhere-cmd-o` · value medium
-  cats-side: add `"KeyO"` to `CMD_TO_PANE`
-  (`cmd/catway/web/js/20-keys.js`) so ⌘O (ced's Open file…, a typed
-  path anywhere on disk) reaches a ced pane in browser-cats and the mac
-  app. It is live only in kitty / Ghostty / WezTerm today, and the
-  cats help overlay's forwarded-chords row should gain it too (N-089's
-  drift). The cost to weigh first: ⌘O is the browser's own File > Open,
-  and the user loses that only while a kitty-protocol pane has focus.
-  Whether Chrome even dispatches it to the page, or resolves it as a
-  native menu item the way it does ⌘E (`ed4962c`), is the by-hand check
-  (N-100). If it doesn't, note it in metakeys.go / 20-keys.js as ⌘E is.
-
 - **N-101** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value medium
   **typescript-language-server is dead over TypeScript 7, silently.**
   npm's `typescript@latest` is 7.0.2 (the native port), which ships no
@@ -462,8 +450,11 @@ and `raised`.
   Tab + Enter opened `.zshrc`). The ⌘O chord itself ran only under the
   simulation screen (`TestMetaAccelOpensFileByPath`). Check in a real
   kitty / Ghostty / WezTerm that ⌘O opens the prompt and that Tab works
-  through tmux. Once N-098 lands, check the cats mac app and Chrome too;
-  Chrome's own File > Open is the doubtful one.
+  through tmux. N-098 landed (cats `3f77564`, KeyO in `CMD_TO_PANE`,
+  ⌘O in the help row): check the cats mac app (after `make macapp` and a
+  relaunch) and Chrome too. Chrome's own File > Open is the doubtful
+  one; if Chrome keeps the chord, give ⌘O the help row's `†` and note it
+  in metakeys.go / 20-keys.js as ⌘E is.
 
 - **N-104** · raised `2026-1028-1801-tab-bar-red-tint` · value low
   **The red-tinted tab strip by eye.** `tabbar-bg` (sidebar-bg + 8% err)
@@ -586,6 +577,17 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-04, `2026-1104-1308-n080-n098-n089-label-plural-cmd-o` —
+  **N-098** cats `3f77564`: `"KeyO"` is in `CMD_TO_PANE`, so ⌘O (Open
+  file…) reaches a kitty-protocol pane in browser-cats and the mac app; a
+  shell pane fails the gate and keeps the browser's chord. The cost was
+  weighed in 20-keys.js on ⌘L's precedent: File ▸ Open File, only while a
+  kitty pane has focus; the mac app loses nothing (catapp's menus claim
+  no ⌘O). The help row names ⌘O (cmdhelp.test.mjs, N-089, enforces it);
+  cmdarrows.test.mjs pins both halves of the gate, the encoder test the
+  bytes (CSI 111;9u). metakeys.go and CLAUDE.md no longer call ⌘O dark
+  in cats. Whether Chrome hands the keydown over is N-100's hand check.
 
 - closed 2026-11-04, `2026-1104-1308-n080-n098-n089-label-plural-cmd-o` —
   **N-089** cats `abacc56`: the help overlay's "sent to an editor pane,

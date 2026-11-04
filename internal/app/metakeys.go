@@ -147,8 +147,11 @@ func metaAccels() []metaAccel {
 		// twin is ≡ File "Open file…" (no Esc key: the table is out of
 		// letters). Live in kitty, Ghostty and WezTerm. Browser-cats and
 		// the mac app forward ⌘ chords from CMD_TO_PANE (cats' 20-keys.js),
-		// which does not hold KeyO yet — until it does, the host keeps the
-		// chord (Chrome's own File > Open), the road ⌘A is on.
+		// which holds KeyO since cats 3f77564. The mac app's menus claim
+		// no ⌘O, so it falls through; in Chrome, File > Open is a menu
+		// item, and whether Chrome offers the keydown to the page or keeps
+		// it (the ⌘E trap) is still a hand check — if it keeps it, the
+		// chord is inert there and the ≡ row stays the way in.
 		{key: 'o', action: (*App).menuOpenFileByPath, label: "Open file"},
 		// ⌘F is Find all in file (Esc-F's verb, the ≡ Find row), not the
 		// one-at-a-time find bar: the list shows every hit at once and

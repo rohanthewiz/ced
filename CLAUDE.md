@@ -1222,8 +1222,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   EvalSymlinks both sides, answer re-spelled under the root), so an LSP
   jump into GOROOT never arms the ≡ folder verbs. Non-regular files refused (a fifo
   read blocks the loop). A refusal re-opens the prompt with the value
-  and the reason; a folder gets its `/`. Not in cats' `CMD_TO_PANE`
-  allowlist yet, so ⌘O is dark in browser-cats / the mac app.
+  and the reason; a folder gets its `/`. cats forwards ⌘O since
+  `3f77564` (`CMD_TO_PANE`); whether Chrome hands it over is a hand check.
 - **Recent locations (internal/history, recentlocations.go)**:
   `<repo>/.ced/history.bytdb` (gitignored on first write, loading creates
   nothing), relative paths. Written only when `history.Persists(root)`:

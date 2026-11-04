@@ -68,13 +68,6 @@ plus the LSP work done in the seeding session itself
   must keep winning their presses. Copied text is the DISPLAY form
   (tabs expanded) — revisit if lifting tab-indented code bites.
 
-- **N-089** · raised `2026-1025-2017-cmd-up-down-l-g-chords` · value low
-  cats-side: the help overlay's "sent to an editor pane, not the browser"
-  row (`cmd/catway/web/js/32-help.js`) omits ⌘A and ⌘X, both of which
-  are in `CMD_TO_PANE` and forwarded. Noticed while adding ⌘↑ ⌘↓ ⌘L to
-  that row; nothing pins the row against the set, so it drifts each time
-  a chord joins.
-
 - **N-093** · raised `2026-1026-1159-find-all-live-prompt` · value low
   The live Find-all prompt restores its borrowed view and tint only on
   its own exits (Esc / Cancel / outside click / Enter). A prompt REPLACED
@@ -593,6 +586,15 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-04, `2026-1104-1308-n080-n098-n089-label-plural-cmd-o` —
+  **N-089** cats `abacc56`: the help overlay's "sent to an editor pane,
+  not the browser" row (`32-help.js`) now lists ⌘A and ⌘X, and
+  `cmdhelp.test.mjs` pins it to `CMD_TO_PANE` BOTH ways (every forwarded
+  chord named; every named chord forwarded, ⌘C / ⌘Z excepted as the
+  fall-through pair). The set is lifted with its value, so a new entry
+  fails `make jstest` until the row lists it — the drift can't recur.
+  Seen failing on the old row (⌘A, ⌘X missing), passing on the new.
 
 - closed 2026-11-04, `2026-1104-1308-n080-n098-n089-label-plural-cmd-o` —
   **N-080** `summarizeLabel` counts through `plural`, so a one-line

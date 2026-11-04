@@ -7,7 +7,11 @@
 
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/rohanthewiz/ced/internal/readme"
+)
 
 // TestToolRegistry_WellFormed pins the registry's invariants, all of
 // which are things the rest of the feature silently assumes: ids and
@@ -424,5 +428,59 @@ func TestResizeTargetDock_AimsAtTheFocusedTool(t *testing.T) {
 	a.showTool(toolProject) // evicts the terminal, tree back on the left
 	if got := a.resizeTargetDock(); got != dockLeft {
 		t.Errorf("with the tree focused, target = %q, want left", got)
+	}
+}
+
+// TestREADME_ToolWindowTableListsEveryTool pins the README's tool-window
+// table to toolDefs, both ways: every registered tool has a row naming
+// its title (the word the pickers and the dock header use) and its
+// default edge, and every row names a tool that still exists. A panel
+// that becomes a tool window without its README row is how the
+// "### Tool windows" section went stale before.
+func TestREADME_ToolWindowTableListsEveryTool(t *testing.T) {
+	doc, err := readme.LoadRepo()
+	if err != nil {
+		t.Fatalf("load README: %v", err)
+	}
+	sec, ok := doc.Section(3, "Tool windows")
+	if !ok {
+		t.Fatal(`README has no "### Tool windows" section`)
+	}
+	// The section holds the ≡ View rows table too; the tool table is the
+	// one headed "Tool window".
+	var rows []readme.Row
+	for _, tb := range sec.Tables() {
+		if len(tb.Header) > 0 && tb.Header[0] == "Tool window" {
+			rows = tb.Rows
+		}
+	}
+	if rows == nil {
+		t.Fatal(`README "### Tool windows" has no table headed "Tool window"`)
+	}
+	byTitle := map[string]readme.Row{}
+	for _, r := range rows {
+		names := readme.CodeSpans(r.Cell(0))
+		if len(names) != 1 {
+			t.Errorf("README line %d: Tool window cell %q should be one name in backticks", r.Line, r.Cell(0))
+			continue
+		}
+		byTitle[names[0]] = r
+	}
+	for _, d := range toolDefs {
+		r, ok := byTitle[d.title]
+		if !ok {
+			t.Errorf("README tool-window table has no row for %q", d.title)
+			continue
+		}
+		delete(byTitle, d.title)
+		if got := r.Cell(1); got != string(d.defDock) {
+			t.Errorf("README line %d: %q default edge = %q, want %q", r.Line, d.title, got, d.defDock)
+		}
+		if r.Cell(2) == "" {
+			t.Errorf("README line %d: %q says nothing about how to open it", r.Line, d.title)
+		}
+	}
+	for title, r := range byTitle {
+		t.Errorf("README line %d: tool-window row %q is no registered tool", r.Line, title)
 	}
 }

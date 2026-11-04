@@ -82,6 +82,7 @@ internal/format/              format.json, trust store, builtin ladder, kinds.go
                               inprocess.go (JSON), validate.go, jsonexplain.go
 internal/theme/               Theme struct, palette derivation, builtins, loader;
                               contrast.go (WCAG ratio + hue-keeping lift)
+internal/readme/              README.md as sections/tables/code spans (test-only consumer)
 internal/userconfig/          ~/.config/ced/config.json + other config paths
 internal/clipboard/           OSC 52 with tmux passthrough
 internal/icons/               Nerd Font detection + glyphs
@@ -150,6 +151,15 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - `make test` (race detector) / `make coverage`. CI does NOT actually run
   on this fork: Actions triggers (test.yml) don't fire until enabled in
   the Actions tab. Run tests locally.
+- **The README is pinned, both ways** (missing row / row naming something
+  gone): hotkey tables (`TestREADME_LeaderTableListsEveryBinding`), ≡
+  menu reference `### The ≡ menu, row by row`
+  (`TestREADME_MenuReferenceListsEveryRow`: one `####` table per section,
+  Row cell = label in backticks, `<…>` for the varying part of a labelFor
+  row, Key = the menu's hint verbatim), the `Tool window` table
+  (`TestREADME_ToolWindowTableListsEveryTool`) and the config.json table
+  (`TestREADME_ConfigTableListsEveryKey`, keys from `fileFormat`). All
+  parse through `internal/readme` — don't hand-roll another parser.
 - **newTestApp stubs every host side effect** (LSP/Copilot/chat dead,
   `lspLookPath`/`chatLookPath` never-found, builtin formatters nil,
   plugin/skill/theme/chat-archive/history/session/favorites paths at temp
@@ -1336,7 +1346,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (`menuSplitColor`; Subtle is 1:1 on cool-blue). No split for a 1-row
   run — reorder instead; ~3-row sections carry none. A split above the
   terminal rows spends the above-the-fold budget.
-- **Adding a menu row means updating the pins**:
+- **Adding a menu row means updating the pins** — a README menu-reference
+  row first, then the layout counts:
   `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 190 group
   actions + 15 headers (207), 36 splits, height 249, dividers
   `[2, 5, 246]`; also the Git fold height (35 rows + 8 splits = 43) in

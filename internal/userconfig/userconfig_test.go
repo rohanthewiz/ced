@@ -11,9 +11,12 @@ package userconfig
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rohanthewiz/ced/internal/readme"
 )
 
 // TestDefaults pins the documented default — icons mode "auto" — so a
@@ -1808,5 +1811,63 @@ func TestSaveDiffView_RoundTripsUnknownKeys(t *testing.T) {
 	}
 	if cfg.DiffView != DiffViewSplit {
 		t.Errorf("DiffView = %q after reload, want split", cfg.DiffView)
+	}
+}
+
+// TestREADME_ConfigTableListsEveryKey pins README.md's config.json table
+// to fileFormat, the on-disk shape, both ways: every key the loader reads
+// has a row (first cell `"key"`) with a description, and every row names
+// a key the loader still reads. fileFormat is the source of truth rather
+// than Config because it carries the JSON spelling — and because a key
+// that only PARSES (the retired "termdock") still belongs in the table,
+// marked retired, since a user may find it in their file and wonder.
+// Before this pin a third of the keys were documented nowhere.
+func TestREADME_ConfigTableListsEveryKey(t *testing.T) {
+	doc, err := readme.LoadRepo()
+	if err != nil {
+		t.Fatalf("load README: %v", err)
+	}
+	const title = "Configuration (`config.json`)"
+	sec, ok := doc.Section(2, title)
+	if !ok {
+		t.Fatalf("README has no \"## %s\" section", title)
+	}
+	var rows []readme.Row
+	for _, tb := range sec.Tables() {
+		if len(tb.Header) > 0 && tb.Header[0] == "Key" {
+			rows = tb.Rows
+		}
+	}
+	if rows == nil {
+		t.Fatal("README config section has no table headed \"Key\"")
+	}
+	documented := map[string]readme.Row{}
+	for _, r := range rows {
+		spans := readme.CodeSpans(r.Cell(0))
+		if len(spans) != 1 || !strings.HasPrefix(spans[0], `"`) || !strings.HasSuffix(spans[0], `"`) {
+			t.Errorf("README line %d: Key cell %q should be one quoted key in backticks", r.Line, r.Cell(0))
+			continue
+		}
+		documented[strings.Trim(spans[0], `"`)] = r
+	}
+
+	ft := reflect.TypeOf(fileFormat{})
+	for i := 0; i < ft.NumField(); i++ {
+		key, _, _ := strings.Cut(ft.Field(i).Tag.Get("json"), ",")
+		if key == "" || key == "-" {
+			continue
+		}
+		r, ok := documented[key]
+		if !ok {
+			t.Errorf("README config table has no row for %q (fileFormat.%s)", key, ft.Field(i).Name)
+			continue
+		}
+		delete(documented, key)
+		if strings.TrimSpace(r.Cell(2)) == "" {
+			t.Errorf("README line %d: %q has no description", r.Line, key)
+		}
+	}
+	for key, r := range documented {
+		t.Errorf("README line %d: config table row %q is no key the loader reads", r.Line, key)
 	}
 }

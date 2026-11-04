@@ -256,6 +256,17 @@ window — **left, right, or bottom** — and you can move it to another.
 A fresh project starts with the file tree on the left and the editor
 taking everything else. Nothing else is open.
 
+| Tool window | Default edge | Opens with |
+| --- | --- | --- |
+| `Explorer` | left | `Esc t` · ≡ View → *Show file explorer* |
+| `Git` | bottom | `Esc g` · ≡ Git → *Show git panel* |
+| `Git log` | bottom | `Esc L` · ≡ Git → *Show git log* |
+| `Conflicts` | bottom | ≡ Git → *Show conflicts panel* (and on its own when a merge, rebase or cherry-pick ced runs stops on a conflict) |
+| `Problems` | bottom | `Esc !` · ≡ Code → *Show problems* |
+| `Compare` | bottom | any ≡ File ▸ Compare row |
+| `Terminal` | bottom | `` Esc ` `` · ≡ View → *Show terminal* |
+| `Chat` | right | `Esc a c` · ≡ AI ▸ Copilot → *Show … chat* |
+
 **To move one**, two picks:
 
 ```
@@ -686,6 +697,287 @@ the top and end of the file (hold `Shift` to select there). Every one of them is
 `Esc` table or the `≡` menu already does, so nothing is lost in a
 terminal that keeps `Cmd` for itself — and in that case the chord simply
 does nothing rather than something surprising.
+
+### The ≡ menu, row by row
+
+Every row of the `≡` menu, section by section, in the order the menu
+draws them. **Key** is the hint the menu prints beside the row (empty
+when the verb has no key — the command palette, `Esc k`, still finds it
+by name). A row whose label changes with state lists each form it takes;
+`<…>` stands for the part that varies. The menu's pinned top — the
+palette's search box and **Expand / Collapse all sections** — sits above
+these, and two groups are yours rather than ced's: **Plugin commands**
+(your [plugins](#plugins)) and your
+[custom actions](#custom-actions-open-remote-files-on-your-laptop).
+
+A row that can't act right now is either dimmed (nothing to act on —
+no selection, no second tab) or, when the fix is something you can do,
+still clickable and says why (install a binary, export `$EDITOR`).
+
+#### File
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Open file…` | | Open any file on disk by typed path; `Tab` completes the last segment. Doesn't re-root. Also `⌘O`. |
+| `Open folder…` | | Re-root the editor on another folder (offers to save unsaved tabs first). |
+| `Recent folders…` | | Two-pane picker: this repository's recent locations, and every folder ced has opened. |
+| `Manage favorites…` | | Add, rename, and remove [favorite locations](#favorite-locations), project and global. |
+| `Disable session restore` / `Enable session restore` | | Whether opening a folder reopens its tabs (`"session"`). |
+| `Remote open: on` / `Remote open: off` / `Remote open: unavailable` | | Whether `ced --remote` / `--wait` in another pane can hand this editor a file (`"remote"`). |
+| `New file` / `New file (in <folder>)` | `esc n` | Create a file in the active folder. |
+| `New folder` / `New folder (in <folder>)` | | Create a folder in the active folder. |
+| `Save` | `esc s` | Save the active tab (Go files are formatted as they save). |
+| `Format file` | | Run the file's formatter now — the only way non-Go files are formatted. See [Formatting](#formatting). |
+| `Validate file` | | Check the file now: ced's own JSON / CSV parse plus what the language server and plugins last reported. |
+| `Revert file` | | Put the buffer back to how it was when you opened it (Undo recovers it). |
+| `Disable auto-save` / `Enable auto-save` | | Save dirty tabs after an idle pause (`"autosave"`, `"autosavedelay"`). |
+| `Save & close tab` | | Save, then close. |
+| `Close tab` | `esc w` | Close the active tab (asks about unsaved edits). |
+| `Close other tabs` | | Close every other tab; tabs with unsaved edits are kept. |
+| `Add tab to group…` | | Put the active tab into a tab group (new or existing). |
+| `Tab groups…` | | Every tab group, each with its own menu — plus a new folder group for the active folder. |
+| `Rename file` | | Rename the active file. |
+| `Delete file` | | Delete the active file (asks first). |
+| `Rename folder` / `Rename folder (<folder>)` | | Rename the active folder. |
+| `Delete folder` / `Delete folder (<folder>)` | | Delete the active folder (asks first). |
+| `Copy file` | | Put the active file on ced's file clipboard, for a later **Paste**. |
+| `Copy file to…` | | Copy the active file into a typed folder anywhere on disk. |
+| `Copy folder` / `Copy folder (<folder>)` | | Put the active folder on the file clipboard. |
+| `Copy project folder to…` / `Copy folder (<folder>) to…` | | Copy the active folder (or the whole project) into a typed folder. |
+| `Paste file/folder` / `Paste <name>` | | Paste the file clipboard into the active folder; never overwrites. |
+| `Zip file` | | Zip the active file. |
+| `Zip folder` / `Zip folder (<folder>)` | | Zip the active folder (or the project). |
+| `Copy file name` | | Copy the active file's name to the clipboard. |
+| `Copy relative path` | | Copy its project-relative path. |
+| `Copy absolute path` | | Copy its absolute path. |
+| `Select all` | | Select the whole buffer (the same row as under Edit). |
+| `Open in $EDITOR` | | Open the active file in your own `$VISUAL` / `$EDITOR`; the row names it. See [Open in $EDITOR](#open-in-editor). |
+| `Open in Finder` / `Open file manager` | | Show the active file (or the project) in the host's file manager. |
+| `Open in terminal` | | A terminal in the active file's folder: a cats pane, a tmux split, or ced's panel (`"terminal"`). |
+| `Shell command on file…` / `Shell command on project…` | | Run a shell command template on the active file or the project (`{{DIR_ENTRY}}`, `{{DIR}}`). |
+| `File tree actions…` / `Selected items (<n>)…` | | The tree's verbs as a picker — on the ticked items when you have marked some. |
+| `Run file in terminal…` / `Run <file> in terminal…` | | Stage the active executable file on the terminal's command line. |
+
+#### File ▸ Compare
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Compare with file…` | | Diff the active buffer against a file you pick. |
+| `Compare with saved copy` | | Diff the buffer against what's on disk — your unsaved edits. |
+| `Compare with clipboard` | | Diff against the clipboard: at once inside cats, else the panel waits for `⌘V`. |
+| `Compare with pasted text` | | Open the compare panel waiting for text you paste. |
+| `Show compare panel` / `Hide compare panel` | | Bring the last comparison back, or put it away. |
+| `Revert a change in the compare view…` | | Pick one change from the comparison and undo it in the buffer. |
+
+#### Edit
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Undo` | `esc u` | Undo. |
+| `Redo` | `esc r` | Redo. |
+| `Copy selection` | `cmd+c` | Copy the selection (OSC 52, so it reaches your laptop's clipboard over ssh). |
+| `Cut selection` | | Copy the selection, then delete it. |
+| `Paste` | `cmd+v` | Paste ced's last copy. |
+| `Select all` | | Select the whole buffer. Also `⌘A`. |
+| `Toggle line comment` | `esc /` | Comment or uncomment the selected lines. |
+| `Duplicate line` | `ctrl+d` | Duplicate the line (or the selected lines) below. |
+| `Move line up` | `alt+↑` | Move the line (or selected lines) up. |
+| `Move line down` | `alt+↓` | Move them down. |
+| `Add caret below` | `esc m` | Add a caret on the next line. See [Multi-line editing](#multi-line-editing). |
+| `Add caret above` | `esc M` | Add a caret on the line above. |
+| `Add next occurrence` | `esc *` | Add a caret at the next occurrence of the selection or word. |
+| `Select all occurrences` | `esc &` | A caret at every occurrence in the file. |
+| `Clear extra carets` | `esc` | Back to one caret. |
+
+#### View
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Hide file explorer` / `Show file explorer` | `esc t` | Show or hide the file tree. |
+| `Focus file tree` | `esc T` | Move the keyboard into the file tree. |
+| `Refresh file tree` | | Re-read the tree from disk now. |
+| `Lock file tree width` / `Auto-fit file tree width` | | Whether the tree widens itself to fit its rows (`"treeautofit"`). |
+| `Hide executable marks` / `Show executable marks` | | The `*` after executable files in the tree (`"execmarks"`). |
+| `Show terminal` / `Hide terminal` | `` esc ` `` | The embedded terminal panel. |
+| `Dock terminal left` / `Dock terminal at bottom` | | One-pick preset for the terminal's edge. |
+| `Tool windows… (<n> shown)` | | Every tool window with its state and edge; pick one to show or hide it. See [Tool windows](#tool-windows). |
+| `Move tool window…` | | Pick a tool, then an edge. |
+| `Reset tool layout` | | Everything back to tree left, editor the rest. |
+| `Dock find-all results right` / `Dock find-all results at top` | | Where the Find-all list sits (`"findalldock"`). |
+| `Preview markdown` / `Show markdown source` | `esc v` | Rendered preview of the active markdown file. |
+| `Soft wrap` / `Stop soft wrap` | | Wrap long lines of the active tab at the window edge. See [Soft wrap](#soft-wrap). |
+| `Hide matching word highlight` / `Show matching word highlight` | | The box around other visible uses of the word at the caret (`"wordhl"`). |
+| `Hide inlay hints` / `Show inlay hints` | | Language-server inlay hints at the ends of lines (`"inlayhints"`). |
+| `Hide diagnostic note` / `Show diagnostic note` | | The caret line's worst problem painted after its end (`"diagnote"`). |
+| `Diff view: side by side` / `Diff view: unified` | | Layout of every diff pane (`"diffview"`). See [Diff views](#diff-views). |
+| `Diff view: ignore whitespace` / `Diff view: show whitespace changes` | | Hide whitespace-only changes in diff panes (this session only). |
+| `Diff view: next change` | | Step the last-used diff pane to its next change. |
+| `Diff view: previous change` | | Step it back. |
+| `Theme: <name>…` | | Pick a colour theme; the row names the current one. See [Themes](#themes). |
+| `Customize theme…` | | Write the current theme out as an editable `-custom` file and open it. |
+| `Reload themes` | | Re-read `~/.config/ced/themes/`. |
+
+#### Find
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Find in file` | `esc f` | The find bar. See [Find in file](#find-in-file). |
+| `Find all in file` | `esc F` | Every match in a live list that previews as you move. |
+| `Find all: revert location` | | Put the caret back where the Find-all list started (for a pinned list). |
+| `Replace in file` | `esc e` | The find bar with its replace field. |
+| `Match case: off` / `Match case: on` | | Case-sensitive matching for every find surface. |
+| `Whole word: off` / `Whole word: on` | | Whole-word matching. |
+| `Regex: off` / `Regex: on` | | Treat queries as RE2 regular expressions. |
+| `Find file in project` | `esc p` | Fuzzy file finder. See [Find file in project](#find-file-in-project). |
+| `Find in project` | `esc P` | Search every file's text. |
+| `Find all in folder` / `Find all in folder (<folder>)` | | The same search, inside the active folder. |
+| `Find files in folder` / `Find files in folder (<folder>)` | | The file finder, inside the active folder. |
+
+#### Nav
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Go back` | `esc o / alt+←` | Back to where you were before the last jump. |
+| `Go forward` | `esc O / alt+→` | Forward again. |
+| `Next tab` | `esc .` | Next tab. |
+| `Previous tab` | `esc ,` | Previous tab. |
+| `Switch tab…` | `esc b` | Pick a tab by name. |
+| `Reveal file in tree` | | Expand the tree to the active file and select it. |
+| `Recent files…` / `Recent files… (not saved)` | `esc B` | Files you opened in this repository, most recent first. See [Recent files](#recent-files-and-recent-locations). |
+| `Recent locations…` / `Recent locations… (not saved)` | | The folders you worked in, by recency and by frequency. |
+| `Go to line…` | `esc j` | Jump to a line (`file:line:col` accepted). |
+| `Go to favorite…` | | Jump to a named [favorite location](#favorite-locations). |
+| `Toggle bookmark` | | Bookmark the caret's line, or remove its bookmark. See [Bookmarks](#bookmarks). |
+| `Label bookmark…` | | Name the bookmark on the caret's line (adds one if missing). |
+| `Next bookmark` | | Next bookmark in the project. |
+| `Previous bookmark` | | Previous bookmark. |
+| `Bookmarks…` / `Bookmarks… (not saved)` | | Every bookmark in a picker. |
+| `Go to matching bracket` | `esc %` | Jump to the bracket matching the one at the caret. |
+| `Go to terminal output location…` | `esc ~` | Pick a `file:line` the terminal printed and open it. |
+
+#### Code
+
+Needs a language server for the file — see
+[Code intelligence](#code-intelligence-language-servers).
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Completions` | `esc spc` | Completion list at the caret. |
+| `Go to definition` | `esc d` | Jump to the definition (at the declaration, lists its uses). |
+| `Find references…` | `esc R` | Every reference, in a list. |
+| `Highlight symbol uses` | | Underline every use of the symbol in this file. |
+| `Find incoming calls…` | | Every caller of the function at the caret. |
+| `Go to implementation` | | Jump to (or list) implementations. |
+| `Go to type definition` | | Jump to the type's definition. |
+| `Hover info` | `esc i` | Docs and diagnostics for the caret. |
+| `Signature help` | `esc I` | The call's signature with the current parameter marked. |
+| `Go to symbol in file…` | `esc D` | Pick a symbol in this file. |
+| `Go to symbol in project…` | | Search symbols across the project. |
+| `Code actions…` / `Code actions for selection…` | `esc c` | The server's fixes and refactors for the caret or selection. |
+| `Rename symbol…` | `esc E` | Rename across the project. |
+| `Undo multi-file edit` / `Undo <edit> (<n> files)` | | Undo the last rename or code action that changed several files, as one step. |
+| `Show problems` / `Hide problems` | `esc !` | The problems list. |
+| `Next problem` | | Jump to the next diagnostic. |
+| `Previous problem` | | Jump to the previous one. |
+| `Restart language server` / `Restart language server (<server>)` | | Restart (or retry) the file's language server. |
+
+#### Git
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Next change` | `esc h` | Jump to the next changed block in this file. |
+| `Previous change` | `esc H` | Jump to the previous one. |
+| `Show change at caret…` | | The change view: the block's diff, the original, and **Revert change**. |
+| `Show blame` / `Hide blame` | `esc A` | The blame column. |
+| `Blame this line…` | | The commit that last touched the caret's line. |
+| `Show file's uncommitted changes` | | The git panel, on this file's diff. |
+| `Show file's git history` | | The git log, filtered to this file. |
+| `Blame style: dated bands` / `Blame style: compact` | | Switch the blame column's look (`"blamestyle"`). |
+| `Git status…` | | `git status`, as a report. |
+| `Stage file` | | `git add` the active file. |
+| `Unstage file` | | Take it back out of the index. |
+| `Restore file (discard changes)…` | | Throw away the file's changes back to HEAD (asks first, sized). |
+| `Commit staged` | | Commit what's staged; prompts for the message. |
+| `Suggest commit message` | | Have the chat agent draft a message from the diff; it pre-fills the commit prompt. |
+| `AI commit trailer: on` / `AI commit trailer: off` | | Whether an agent-drafted message gets a `Co-Authored-By` trailer (`"commitmsgtrailer"`). |
+| `Push…` | | Push the current branch; git's output is shown afterwards. |
+| `Show last push output` | | Reopen that output. |
+| `Stash changes` | | `git stash`. |
+| `Pop stash` | | `git stash pop`. |
+| `Switch branch` | | Pick a branch to check out (or start a new one). |
+| `Recent branches` | | Branches in the order you last used them. |
+| `New branch…` | | Create and switch to a branch. |
+| `Show git panel` / `Hide git panel` | `esc g` | Changed files with their diffs. |
+| `Review all changes ▶` | | Walk every changed file's diff in the git panel, one after another. |
+| `Git panel actions` | | The git panel's **Actions ▾** picker. |
+| `Show git log` / `Hide git log` | `esc L` | The commit log. |
+| `Search history…` | `esc S` | Open the git log with its filter box ready. |
+| `Git log actions` | | The git log's **Actions ▾** picker. |
+| `Resolve conflicts…` | | Pick a conflicted file. See [merge conflicts](#cherry-picking-and-merge-conflicts). |
+| `Resolve conflict at caret…` | | Choose a side for the conflict block under the caret. |
+| `Compare conflict sides…` | | Diff the two sides of that block in the compare panel. |
+| `Next conflict` | | Jump to the next conflict block. |
+| `Previous conflict` | | Jump to the previous one. |
+| `Show conflicts panel` / `Hide conflicts panel` | | The conflicts tool window: the operation, its files, Continue / Skip / Abort. |
+| `Cherry-pick from branch…` | | Pick commits from another branch to apply here. |
+
+#### AI ▸ Copilot
+
+See [AI features](#ai-features-chat-agents--copilot-completions).
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Sign in to GitHub` / `Sign out` / `Sign out (<user>)` | | Copilot's device-flow sign-in, or sign out. |
+| `Show <agent> chat` / `Hide <agent> chat` | `esc a c` | The chat panel. |
+| `Chat agent: <agent>` | `esc a b` | Pick the chat backend (Copilot, Claude Code, Gemini). |
+| `Chat model…` / `Chat model: <model>` | `esc a m` | Pick the agent's model. |
+| `Disable auto-attach current file` / `Enable auto-attach current file` | | Whether each prompt carries the active file or selection (`"chatcontext"`). |
+| `Block agent file changes (read-only chat)` / `Allow agent file changes` | | Whether the agent may write files at all (`"chatwrite"`). |
+| `Attach current file to chat` / `Attach selection to chat` | `esc a a` | Attach it to the next prompt. |
+| `Attach file to chat…` | `esc a f` | Pick a file to attach. |
+| `Clear chat attachments` / `Clear chat attachments (<n>)` | | Drop what's attached. |
+| `Summarize with AI…` / `Summarize selection (<n> lines)…` / `Summarize <file>…` | `esc a z` | Ask the agent to summarize the selection or file. |
+| `Copy chat transcript` | | The whole conversation to the clipboard. |
+| `New chat` / `New chat (saves this one)` | `esc a x` | Archive this conversation and start fresh. |
+| `Recent chats…` | `esc a r` | Reopen an archived conversation to read. |
+| `Disable inline suggestions` / `Enable inline suggestions` | | Copilot's ghost-text completions (`"suggestions"`). |
+| `Disable Copilot` / `Enable Copilot` | | Whether ced runs the Copilot sidecar at all (`"copilot"`). |
+
+#### AI ▸ MCP
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `MCP servers… (<status>)` | `esc a t` | The servers in `mcp.json`, each with its actions (setup help when there are none). |
+| `Reload MCP config` | | Re-read `~/.config/ced/mcp.json`. |
+| `Copy last result` / `Copy last result (<tool>)` | | The last tool call's full result to the clipboard. |
+
+#### AI ▸ Skills
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Use skill in chat… (<n>)` | `esc a s` | Send a skill's instructions to the agent. |
+| `Open skill…` | | Open a skill's `SKILL.md` in a tab. |
+| `Reload skills` | | Re-read the skill folders. |
+
+#### Tools ▸ Notes
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Send to GoNotes…` / `Send selection to GoNotes…` / `Send <file> to GoNotes…` | `esc a n` | Save the selection or file as a note. See [Send to GoNotes](#send-to-gonotes). |
+
+#### Tools ▸ Plugins
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Plugins… (<status>)` | | What loaded, what each plugin adds, and what failed. See [Plugins](#plugins). |
+| `Reload plugins` | | Re-read `~/.config/ced/plugins/`. |
+| `Disable plugins` / `Enable plugins` | | The kill switch for every plugin (`"plugins"`). |
+
+#### Quit
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Quit editor` | `esc q` | Quit (asks about unsaved tabs). Same as the red `✕`. |
 
 ### Multi-line editing
 
@@ -2263,7 +2555,7 @@ says so by name and tells you which variables to set.
 ## Themes
 
 ced ships **ten** color themes. Switch with **≡ → Theme** (or type
-"theme" into the command palette, `Esc-a`) — the change is instant, no
+"theme" into the command palette, `Esc k`) — the change is instant, no
 restart, and it's remembered in `~/.config/ced/config.json`.
 
 | Theme | | Theme | |
@@ -2327,6 +2619,54 @@ adding a near-duplicate row next to it. Editing themes from outside ced?
 **≡ → Reload themes**. A broken theme file costs you that theme and
 nothing else: you get one warning, and the rest of the registry loads.
 
+## Configuration (`config.json`)
+
+Preferences live in `~/.config/ced/config.json` (`$XDG_CONFIG_HOME/ced/`
+when that is set). Every key is optional — a missing key, or a missing
+file, means the default — and most are written for you by the ≡ row that
+flips them, so you rarely open the file. On/off keys take the strings
+`"on"` and `"off"`. A key ced doesn't know is kept untouched when a ≡ row
+rewrites the file.
+
+```json
+{ "autosavedelay": "10s", "theme": "darcula", "terminal": "tmux" }
+```
+
+| Key | Values (default first) | What it sets |
+| --- | --- | --- |
+| `"icons"` | `auto` / `on` / `off` | Nerd Font icons in the file tree; `auto` uses them when a Nerd Font is detected. Hand-edited. |
+| `"autosave"` | `on` / `off` | Save dirty tabs after an idle pause. ≡ File → *Disable auto-save*. |
+| `"autosavedelay"` | `"5s"`, or any duration / bare seconds | How long that pause is, clamped to 500ms – 5m. Hand-edited. |
+| `"termdock"` | — | Retired: still parses, ignored. Where each panel docks is per project now (see [Tool windows](#tool-windows)). |
+| `"findalldock"` | `top` / `right` | Where the Find-all list docks. ≡ View, or the list's own dock button. |
+| `"blamestyle"` | `bands` / `compact` | The blame column's look. ≡ Git → *Blame style: …*. |
+| `"diffview"` | `unified` / `split` | Every diff pane's layout. ≡ View → *Diff view: side by side*. |
+| `"execmarks"` | `on` / `off` | The `*` after executable files in the tree. |
+| `"treeautofit"` | `on` / `off` | The tree widens itself to fit its rows; dragging its splitter writes `off`. |
+| `"wordhl"` | `on` / `off` | The box around other visible uses of the word at the caret. |
+| `"inlayhints"` | `on` / `off` | Language-server inlay hints at the ends of lines. |
+| `"diagnote"` | `on` / `off` | The caret line's worst problem, painted after its end. |
+| `"copilot"` | `on` / `off` | Whether ced runs `copilot-language-server` at all (only when installed). |
+| `"suggestions"` | `on` / `off` | Copilot ghost-text completions while you type. |
+| `"chatagent"` | `copilot` / `claude` / `gemini` | The chat backend. ≡ AI → *Chat agent: …*. |
+| `"chatmodel"` | the agent's default / a model id | The chat model. ≡ AI → *Chat model…*. |
+| `"chatcontext"` | `on` / `off` | Each chat prompt carries the active file (or selection). |
+| `"chatwrite"` | `on` / `off` | Whether the chat agent may change files (each change still asks). |
+| `"plugins"` | `on` / `off` | The kill switch for every [plugin](#plugins). |
+| `"remote"` | `on` / `off` | Listen for `ced --remote` / `--wait` from other panes. |
+| `"session"` | `on` / `off` | Reopen a folder's tabs, and where you were in them, when you open it again. |
+| `"theme"` | `tokyo-night` / any theme name | The colour theme. ≡ View → *Theme: …*. See [Themes](#themes). |
+| `"terminal"` | `auto` / `ced` / `cats` / `tmux` / a command line | What *Open in terminal* opens; a command line runs from the folder with `{{DIR}}` replaced. Hand-edited. |
+| `"underlinecolor"` | `auto` / `on` / `off` | Whether tab-group members get a coloured underline (needs a terminal that parses it). Hand-edited. |
+| `"commitmsgtrailer"` | `on` / `off` | `Co-Authored-By` on commit messages the chat agent drafted. ≡ Git → *AI commit trailer: …*. |
+
+Other files beside it each hold one thing ced can't know for you:
+`mcp.json` ([MCP servers](#8-mcp-servers-more-tools-for-your-agent)),
+`favorites.json` ([favorites](#favorite-locations)), `state.json`
+(recent folders, per-project tabs and layout), `themes/`, `skills/`,
+`plugins/`, `chats/`, `actions.json` ([custom actions](#custom-actions-open-remote-files-on-your-laptop))
+and `rc.grsh` (sourced by the terminal panel).
+
 ## Project layout
 
 ```
@@ -2345,6 +2685,7 @@ nothing else: you get one warning, and the rest of the registry loads.
 │   ├── format/               # Format-on-save config + trust store
 │   ├── finder/               # Project file index + fuzzy matcher
 │   ├── theme/                # Named themes: palette derivation + registry
+│   ├── readme/               # Reads this README's tables so tests can pin it to the code
 │   └── version/              # Single-line version constant
 ├── .github/workflows/        # Test workflow (test.yml)
 └── Makefile
@@ -2366,6 +2707,13 @@ make clean        # rm -rf bin + coverage artifacts
 Every push and PR runs `go test ./...` on Linux + macOS via
 [`.github/workflows/test.yml`](.github/workflows/test.yml). New code
 needs a corresponding `_test.go` — see CLAUDE.md for the bar.
+
+This README is pinned to the code by tests, so a feature can't land
+without its row: the hotkey tables (`leader_test.go`), the
+[≡ menu reference](#the--menu-row-by-row) (`app_test.go`), the
+[tool-window table](#tool-windows) (`toolwindow_test.go`) and the
+[config.json table](#configuration-configjson) (`userconfig_test.go`).
+Each fails both ways — a row missing, or a row naming something gone.
 
 ## Releases
 

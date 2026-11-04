@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ import (
 	"github.com/rohanthewiz/ced/internal/icons"
 	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/mcp"
+	"github.com/rohanthewiz/ced/internal/readme"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
 
@@ -3790,5 +3792,211 @@ func TestRefreshTree_PicksUpExternalFiles(t *testing.T) {
 	}
 	if a.menuOpen {
 		t.Fatal("the ≡ row should close the menu")
+	}
+}
+
+// readmeMenuHeading is the README's "####" title for a ≡ group: the
+// group's own title, or "Parent ▸ Child" for a sub-section — the same
+// path a reader follows to unfold it in the menu.
+func readmeMenuHeading(g menuGroup) string {
+	if g.parent == "" {
+		return g.title
+	}
+	return g.parent + " ▸ " + g.title
+}
+
+// readmeLabelPattern compiles one README form of a ≡ label into an
+// anchored matcher. Text is literal except "<…>", which stands for the
+// part a dynamic label fills in (a folder, a count, an agent's name).
+// nil means the form has no placeholder and is compared exactly.
+func readmeLabelPattern(form string) *regexp.Regexp {
+	if !strings.Contains(form, "<") {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("^")
+	rest := form
+	for {
+		open := strings.Index(rest, "<")
+		end := strings.Index(rest[max(open, 0):], ">")
+		if open < 0 || end < 0 {
+			b.WriteString(regexp.QuoteMeta(rest))
+			break
+		}
+		b.WriteString(regexp.QuoteMeta(rest[:open]))
+		b.WriteString(".+")
+		rest = rest[open+end+1:]
+	}
+	b.WriteString("$")
+	return regexp.MustCompile(b.String())
+}
+
+// readmeKeyCell is how a menu shortcut hint is written in the README's
+// Key column: a code span, padded when the hint holds a backtick (the
+// terminal toggle's hint is esc + backtick), empty for a row with no hint.
+func readmeKeyCell(hint string) string {
+	switch {
+	case hint == "":
+		return ""
+	case strings.Contains(hint, "`"):
+		return "`` " + hint + " ``"
+	}
+	return "`" + hint + "`"
+}
+
+// TestREADME_MenuReferenceListsEveryRow pins README.md's "The ≡ menu,
+// row by row" reference to builtinMenuGroups, both ways:
+//
+//   - every built-in row has a table row under its section's "####"
+//     heading, whose Row cell names the label and whose Key cell is the
+//     hint the menu prints (so a rebound key can't leave the table
+//     behind), with a non-empty description;
+//   - every README row and every "####" heading names something the menu
+//     still has, so a renamed or removed row can't linger as a lie.
+//
+// A row whose label is computed (labelFor) is resolved on a fresh test
+// App and must match one of the code spans in its Row cell; "<…>" in a
+// span matches the part that varies. Only the resolved form is checked:
+// the others are documentation of states a fresh App doesn't reach. An
+// exact form beats a placeholder one, so `Open in terminal` and
+// `Open in $EDITOR` can share a section without `<…>` rows swallowing
+// them. Plugin commands and custom actions are the user's own groups and
+// are not part of builtinMenuGroups, so they are not pinned.
+//
+// The README is ced's only documentation, and before this pin about half
+// the menu was missing from it: rows landed with their code and tests
+// but without their sentence, and nothing failed.
+func TestREADME_MenuReferenceListsEveryRow(t *testing.T) {
+	doc, err := readme.LoadRepo()
+	if err != nil {
+		t.Fatalf("load README: %v", err)
+	}
+	const title = "The ≡ menu, row by row"
+	ref, ok := doc.Section(3, title)
+	if !ok {
+		t.Fatalf("README has no \"### %s\" section", title)
+	}
+
+	// One table per "####" heading. The heading is what ties a table to
+	// a group, so a heading with no table (or two) is itself a mistake.
+	type readmeRow struct {
+		row   readme.Row
+		forms []string
+		used  bool
+	}
+	sections := map[string][]*readmeRow{}
+	for _, sub := range ref.Subsections() {
+		tables := sub.Tables()
+		if len(tables) != 1 {
+			t.Errorf("README line %d: \"#### %s\" has %d tables, want 1", sub.Line, sub.Title, len(tables))
+			continue
+		}
+		var rows []*readmeRow
+		for _, r := range tables[0].Rows {
+			forms := readme.CodeSpans(r.Cell(0))
+			if len(forms) == 0 {
+				t.Errorf("README line %d: Row cell %q names no label in backticks", r.Line, r.Cell(0))
+				continue
+			}
+			rows = append(rows, &readmeRow{row: r, forms: forms})
+		}
+		sections[sub.Title] = rows
+	}
+
+	a := newTestApp(t, t.TempDir())
+	seenHeading := map[string]bool{}
+	for _, g := range builtinMenuGroups() {
+		if len(g.items) == 0 {
+			continue // a parent with only sub-sections (AI, Tools)
+		}
+		heading := readmeMenuHeading(g)
+		seenHeading[heading] = true
+		rows, ok := sections[heading]
+		if !ok {
+			t.Errorf("README menu reference has no \"#### %s\" table for the ≡ %s section", heading, g.title)
+			continue
+		}
+		for _, it := range g.items {
+			label := it.label
+			if it.labelFor != nil {
+				label = it.labelFor(a)
+			}
+			// Exact forms first, placeholder forms only when no row
+			// spells the label out.
+			var exact, loose []*readmeRow
+			for _, r := range rows {
+				for _, f := range r.forms {
+					if f == label {
+						exact = append(exact, r)
+						break
+					}
+					if re := readmeLabelPattern(f); re != nil && re.MatchString(label) {
+						loose = append(loose, r)
+						break
+					}
+				}
+			}
+			match := exact
+			if len(match) == 0 {
+				match = loose
+			}
+			switch len(match) {
+			case 0:
+				t.Errorf("≡ %s row %q has no row in the README menu reference (\"#### %s\")", heading, label, heading)
+				continue
+			case 1:
+			default:
+				t.Errorf("≡ %s row %q matches %d README rows; make the forms distinct", heading, label, len(match))
+				continue
+			}
+			r := match[0]
+			r.used = true
+			if got, want := r.row.Cell(1), readmeKeyCell(it.shortcut); got != want {
+				t.Errorf("README line %d: ≡ %s row %q Key = %q, want %q (the menu's hint)", r.row.Line, heading, label, got, want)
+			}
+			if strings.TrimSpace(r.row.Cell(2)) == "" {
+				t.Errorf("README line %d: ≡ %s row %q has no description", r.row.Line, heading, label)
+			}
+		}
+	}
+
+	// The reverse direction: nothing in the reference that the menu no
+	// longer has.
+	for heading, rows := range sections {
+		if !seenHeading[heading] {
+			t.Errorf("README menu reference has \"#### %s\", which is no ≡ section", heading)
+			continue
+		}
+		for _, r := range rows {
+			if !r.used {
+				t.Errorf("README line %d: menu reference row %q matches no ≡ %s row (renamed or removed?)", r.row.Line, r.row.Cell(0), heading)
+			}
+		}
+	}
+}
+
+// TestReadmeLabelPattern pins the placeholder reading the menu reference
+// relies on: "<…>" matches a non-empty run, everything else is literal
+// (a "$" or "(" in a label must not act as regex syntax), and a form
+// with no placeholder is left to the exact comparison.
+func TestReadmeLabelPattern(t *testing.T) {
+	if readmeLabelPattern("Open in $EDITOR") != nil {
+		t.Error("a form with no placeholder should compare exactly")
+	}
+	re := readmeLabelPattern("Tool windows… (<n> shown)")
+	for label, want := range map[string]bool{
+		"Tool windows… (1 shown)":    true,
+		"Tool windows… (none shown)": true,
+		"Tool windows… ( shown)":     false,
+		"Tool windows…":              false,
+		"Tool windows… (1 shown) x":  false,
+	} {
+		if got := re.MatchString(label); got != want {
+			t.Errorf("match %q = %v, want %v", label, got, want)
+		}
+	}
+	two := readmeLabelPattern("Undo <edit> (<n> files)")
+	if !two.MatchString("Undo rename (3 files)") || two.MatchString("Undo rename") {
+		t.Error("two placeholders: want each to stand for one run")
 	}
 }

@@ -37,27 +37,9 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-110**
+**Next ID: N-111**
 
 ## Open
-
-- **N-003** · raised `2026-0910-2016-tool-windows` · value low
-  **The README goes stale and no test catches it.** Known spots for
-  tool-window changes: `### Tool windows`, the Features list, the chat
-  section, the hotkey table. Caught up on 2026-09-21: it had NO language
-  server coverage at all, and now has a `## Code intelligence` section
-  (the server table, every ≡ Code verb, inlay hints, the restart row,
-  the gutter click), a Features bullet, the LSP hotkey rows and Select
-  all. What stays open is the standing problem — nothing fails when a
-  feature lands without its README paragraph. (Value lowered from medium
-  with the backlog cleared.) Since
-  `2026-1011-2142-n054-n036-n052-theme-counts-readme-leaders-conflicted-tabs`
-  the LEADER table is pinned (`TestREADME_LeaderTableListsEveryBinding`:
-  every top-level binding and every static `Esc a` sub-binding needs a
-  row); prose sections and ≡ rows are still unguarded. Hit again in
-  `2026-1021-2049-editor-context-rows-change-view`: the change view (hunkview.go) landed
-  without its README sentence, caught only by this list's re-check and
-  added to the Change bars bullet by hand.
 
 - **N-005** · raised `2026-0913-1919-cats-plugin` · value low
   cats-side decision: should two ced launch paths share ONE sidebar group
@@ -227,6 +209,17 @@ plus the LSP work done in the seeding session itself
   (confinement refuses, `adoptFileFolder` leaves the active folder
   alone), so nothing breaks loudly. The precise test is `rel == ".."` or
   a `".." + separator` prefix. Wants a case in the helper's own test.
+
+- **N-110** · raised `2026-1103-1906-n003-readme-pins` · value low
+  **The README pins stop at the ≡ menu.** N-003's tests pin the hotkey
+  tables, every ≡ row, the tool windows and the config.json keys — but
+  not the right-click menus (tree, tab, editor: `contextmenu.go`,
+  `tabcontext.go`, `editorContextItems`), the `⌘` accelerators
+  (metakeys.go; the README lists them in a prose sentence), or the
+  in-surface Alt chords of modals and the find bar. Those are the
+  remaining enumerable surfaces; a reference table per surface +
+  a both-ways test through `internal/readme` is the same recipe. Prose
+  itself (a feature's explanatory paragraph) stays unpinnable.
 
 ## Validate
 
@@ -617,6 +610,22 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-03, `2026-1103-1906-n003-readme-pins` —
+  **N-003** the README is now pinned to the code, both ways (a row
+  missing, or a row naming something gone), through one parser,
+  `internal/readme` (sections, pipe tables, code spans; fences opaque).
+  New README surfaces, each with its test: `### The ≡ menu, row by row`
+  (`TestREADME_MenuReferenceListsEveryRow`, app_test.go — every
+  builtinMenuGroups row in its section's `####` table, dynamic labels
+  resolved on a test App and matched against `<…>` forms, Key = the
+  menu's hint); the `Tool window` table in `### Tool windows`
+  (`TestREADME_ToolWindowTableListsEveryTool` — title + default edge);
+  `## Configuration (config.json)` (`TestREADME_ConfigTableListsEveryKey`,
+  userconfig_test.go — every `fileFormat` tag). 94 of ~190 ≡ rows and 9
+  of 25 config keys had been documented nowhere. Fixed on the way: the
+  Themes section named the palette `Esc-a` (it is `Esc k`). Context
+  menus and ⌘ chords raised as **N-110**.
 
 - closed 2026-10-31, `2026-1031-1737-n099-outside-root-active-folder` —
   **N-099** the guard moved INTO `openFile`: `adoptFileFolder` (app.go)

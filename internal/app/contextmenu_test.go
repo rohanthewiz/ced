@@ -842,7 +842,7 @@ func TestEditorContextSelectionHandOffRows(t *testing.T) {
 	tab.Anchor = editor.Position{Line: 0, Col: 6}
 	tab.Cursor = editor.Position{Line: 0, Col: 10}
 	m = openEditorContextAt(t, a, localXForCol(t, a, tab, 8), 0)
-	if i := contextRowIndex(m, "Summarize selection (1 lines)"); i < 0 {
+	if i := contextRowIndex(m, "Summarize selection (1 line)"); i < 0 {
 		t.Fatalf("no Summarize selection row: %v", labelsOf(m))
 	}
 	gi := contextRowIndex(m, "Send selection to GoNotes")

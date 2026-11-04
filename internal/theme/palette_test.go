@@ -17,6 +17,8 @@ package theme
 import (
 	"strings"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
 )
 
 // minimal is the smallest legal theme: exactly the eight core keys. Used
@@ -312,7 +314,7 @@ func TestToTheme_MapsEveryField(t *testing.T) {
 		t.Error("ToTheme left a field at the zero color")
 	}
 	if th.Subtle != mustColor(p["line"]) {
-		t.Error("Subtle should come from the \"line\" key")
+		t.Error("Subtle should come from the \"line\" key (it stands off line-hl, so no floor applies)")
 	}
 	if th.Error != mustColor(p["err"]) {
 		t.Error("Error should come from the \"err\" key")
@@ -488,5 +490,72 @@ func TestDerive_TabBarBGStatedValueWins(t *testing.T) {
 	}
 	if p["tabbar-bg"] != "#123456" {
 		t.Errorf("tabbar-bg = %s, want the stated #123456", p["tabbar-bg"])
+	}
+}
+
+// TestToTheme_SubtleStandsOffLineHLOnEveryBuiltin pins the modal frame's
+// ink in every built-in: Subtle (the border and title rule) must clear
+// minSubtleContrast against LineHL, the surface every modal fills with.
+// cool-blue stated `line` == `line-hl` (#3b4252) and drew every frame at
+// 1.00:1 until ToTheme floored it (N-107).
+func TestToTheme_SubtleStandsOffLineHLOnEveryBuiltin(t *testing.T) {
+	for _, spec := range Builtins() {
+		th, err := spec.Resolve()
+		if err != nil {
+			t.Fatalf("%s: %v", spec.Name, err)
+		}
+		if r := ContrastRatio(th.Subtle, th.LineHL); r < minSubtleContrast {
+			t.Errorf("%s: Subtle on LineHL = %.2f:1, want ≥ %.2f — modal frames vanish",
+				spec.Name, r, minSubtleContrast)
+		}
+	}
+}
+
+// TestToTheme_SubtleFloorLeavesReadableThemesAlone is the other half: the
+// floor only catches the collapsed case. Every built-in other than
+// cool-blue already cleared it, so its Subtle must be its stated `line`
+// exactly — a floor that nudged them would re-tune themes that were
+// looked at and approved.
+func TestToTheme_SubtleFloorLeavesReadableThemesAlone(t *testing.T) {
+	for _, spec := range Builtins() {
+		p, err := Normalize(spec.Colors)
+		if err != nil {
+			t.Fatalf("%s: %v", spec.Name, err)
+		}
+		th := ToTheme(p)
+		stated := mustColor(p["line"])
+		if spec.Name == "cool-blue" {
+			if th.Subtle == stated {
+				t.Errorf("cool-blue: Subtle is still the stated line %s, which equals line-hl", p["line"])
+			}
+			continue
+		}
+		if th.Subtle != stated {
+			t.Errorf("%s: Subtle moved off the stated line %s", spec.Name, p["line"])
+		}
+	}
+}
+
+// TestSubtleInk_LiftsACollapsedLineOnLightAndDark covers user themes,
+// which the built-in tests can't: a `line` equal to `line-hl` is lifted
+// AWAY from it — lighter on a dark surface, darker on a light one — and
+// keeps enough of its hue to stay a grey of the same family.
+func TestSubtleInk_LiftsACollapsedLineOnLightAndDark(t *testing.T) {
+	cases := []struct {
+		name    string
+		line    tcell.Color
+		lighter bool
+	}{
+		{"dark", tcell.NewRGBColor(0x3b, 0x42, 0x52), true},
+		{"light", tcell.NewRGBColor(0xe5, 0xe9, 0xf0), false},
+	}
+	for _, tc := range cases {
+		got := subtleInk(tc.line, tc.line)
+		if r := ContrastRatio(got, tc.line); r < minSubtleContrast {
+			t.Errorf("%s: lifted Subtle at %.2f:1, want ≥ %.2f", tc.name, r, minSubtleContrast)
+		}
+		if lighter := RelLuminance(got) > RelLuminance(tc.line); lighter != tc.lighter {
+			t.Errorf("%s: lifted the wrong way (lighter=%v)", tc.name, lighter)
+		}
 	}
 }

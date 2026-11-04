@@ -48,12 +48,6 @@ plus the LSP work done in the seeding session itself
   function body stays as written. Revisit only if someone hits it; any
   change must keep the re-lex token check (`sameSQLTokens`).
 
-- **N-080** · raised `2026-1021-2049-editor-context-rows-change-view` · value medium
-  `summarizeLabel` (summarize.go) says "Summarize selection (1 lines)…"
-  for a one-line selection — visible in the ≡ AI row and, since this
-  session, the editor right-click row. Use `plural` like the other
-  counted labels.
-
 - **N-081** · raised `2026-1021-2049-editor-context-rows-change-view` · value low
   The editor right-click menu carries six LSP verbs; "Go to
   implementation", "Go to type definition" and "Highlight symbol uses"
@@ -599,6 +593,12 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-04, `2026-1104-1308-n080-n098-n089-label-plural-cmd-o` —
+  **N-080** `summarizeLabel` counts through `plural`, so a one-line
+  selection reads "Summarize selection (1 line)…" on the ≡ AI row and
+  the editor right-click row alike (one label function). Pinned by a
+  one-line case in `TestSummarizeLabel_NamesWhatItCovers`.
 
 - closed 2026-11-03, `2026-1103-1952-n068-pgsql-live-validation` —
   **N-068** `.pgsql` / `.psql` files are now validated live (◇ + caret

@@ -95,7 +95,8 @@ func (a *App) summarizeLabel() string {
 		return "Summarize with AI…"
 	}
 	if at.ranged() {
-		return fmt.Sprintf("Summarize selection (%d lines)…", at.lineTo-at.lineFrom+1)
+		// plural, not a bare %d: a one-line selection read "(1 lines)".
+		return "Summarize selection (" + plural(at.lineTo-at.lineFrom+1, "line", "lines") + ")…"
 	}
 	return "Summarize " + a.relativePathFor(at.path) + "…"
 }

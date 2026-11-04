@@ -74,6 +74,13 @@ func TestSummarizeLabel_NamesWhatItCovers(t *testing.T) {
 	if got := a.summarizeLabel(); got != "Summarize selection (3 lines)…" {
 		t.Errorf("selection label = %q", got)
 	}
+
+	// A one-line selection says "1 line", not "1 lines" (N-080).
+	tab.Anchor = editor.Position{Line: 2, Col: 0}
+	tab.Cursor = editor.Position{Line: 2, Col: 3}
+	if got := a.summarizeLabel(); got != "Summarize selection (1 line)…" {
+		t.Errorf("one-line selection label = %q", got)
+	}
 }
 
 // TestMenuSummarize_SendsTheTurnCarryingTheText is the whole feature end

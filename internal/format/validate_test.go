@@ -132,6 +132,9 @@ func TestValidate_IgnoresFilesItDoesNotOwn(t *testing.T) {
 		"/proj/tsconfig.json",
 		"/proj/.vscode/settings.json",
 		"/proj/data.jsonc",
+		// A brace is a lex error in PostgreSQL too, but .sql is shared
+		// with other dialects: formatted on request, never underlined.
+		"/proj/schema.sql",
 	} {
 		if got := Validate(p, broken); got != nil {
 			t.Errorf("Validate(%q) = %v, want nil", p, got)
@@ -148,6 +151,9 @@ func TestValidates_MatchesValidate(t *testing.T) {
 	for _, p := range []string{
 		"/proj/data.json", "/proj/main.go", "/proj/notes.txt",
 		"/proj/tsconfig.json", "/proj/data.jsonc",
+		// "{,}" is broken PostgreSQL as well (a brace is template
+		// syntax), so it exercises both halves of the SQL split.
+		"/proj/schema.sql", "/proj/fn.pgsql", "/proj/setup.psql",
 	} {
 		claimed := Validates(p)
 		actual := Validate(p, broken) != nil
@@ -169,5 +175,20 @@ func TestValidates_MatchesValidate(t *testing.T) {
 func TestValidate_GoIsLeftToGopls(t *testing.T) {
 	if Validates("/proj/main.go") {
 		t.Error("Validates(main.go) = true; Go syntax belongs to gopls")
+	}
+}
+
+// TestNotValidatedReason_ExplainsOnlySQL pins the explanation the
+// Validate verb flashes: a .sql file, which ced formats but will not
+// underline, is told why and where the door is; every other file gets
+// "" and the generic line.
+func TestNotValidatedReason_ExplainsOnlySQL(t *testing.T) {
+	if got := NotValidatedReason("/proj/schema.sql"); !strings.Contains(got, ".pgsql") {
+		t.Errorf("NotValidatedReason(schema.sql) = %q, want it to name .pgsql", got)
+	}
+	for _, p := range []string{"/proj/fn.pgsql", "/proj/data.json", "/proj/notes.txt", "/proj/main.go"} {
+		if got := NotValidatedReason(p); got != "" {
+			t.Errorf("NotValidatedReason(%q) = %q, want \"\"", p, got)
+		}
 	}
 }

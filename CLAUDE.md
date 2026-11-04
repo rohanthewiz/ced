@@ -696,9 +696,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   mark MOVES to the mistake (trailing comma → the comma; missing comma
   → end of the previous value; EOF → the unclosed opener). Unrecognised
   shapes keep the parser's wording and position.
-- PostgreSQL (`kindSQL`: .sql/.pgsql/.psql) is FORMATTED, never
-  validated live (other dialects share .sql; the formatter's refusals,
-  positioned, are the answer). Builtin: repo-local sql-formatter →
+- PostgreSQL (`kindSQL`: .sql/.pgsql/.psql) is FORMATTED; only
+  .pgsql/.psql are also VALIDATED live (`sqlDialectKnown` — other
+  dialects share .sql, whose answer stays the formatter's positioned
+  refusal). ONE kind, the dialect asked only by the validator. The
+  check (sqlvalidate.go) is formatSQL's front half — `lexSQL` +
+  `matchSQLParens`, nothing more — so the underline and Format's refusal
+  agree (`TestValidateSQL_AgreesWithTheFormatter`). Builtin: repo-local sql-formatter →
   pg_format → global sql-formatter; root `.pg_format` /
   `.sql-formatter.json` handed over with `-c` (tools search their CWD),
   else the file's style as flags (`sampleSQLStyle`). In-process

@@ -170,8 +170,9 @@ func TestKindFor_AgreesWithTheThreeVerbs(t *testing.T) {
 		t.Error("FormatsInProcess(data.csv) = true, want false")
 	}
 
-	// A SQL file: formatted by both rungs, but not validated live — the
-	// formatter's own refusals say what is wrong (see kinds.go).
+	// A .sql file: formatted by both rungs, but not validated live — the
+	// extension is shared with other dialects, so the formatter's own
+	// refusals are the answer (see kinds.go).
 	const sqlPath = "/proj/schema.sql"
 	if Validates(sqlPath) {
 		t.Error("Validates(schema.sql) = true, want false")
@@ -184,6 +185,51 @@ func TestKindFor_AgreesWithTheThreeVerbs(t *testing.T) {
 	}
 	if !BuiltinHandles(sqlPath) {
 		t.Error("BuiltinHandles(schema.sql) = false, want true")
+	}
+
+	// .pgsql / .psql: the same kind on every formatting rung as .sql —
+	// the dialect question changes ONLY the validator — and validated,
+	// with a validator that agrees with the formatter: what one marks,
+	// the other refuses.
+	for _, p := range []string{"/proj/fn.pgsql", "/proj/setup.psql", "/proj/FN.PGSQL"} {
+		if !Validates(p) {
+			t.Errorf("Validates(%s) = false, want true", p)
+		}
+		if _, ok, _ := InProcessFormat(p, []byte("select 1;")); !ok {
+			t.Errorf("InProcessFormat(%s) ok = false, want true", p)
+		}
+		if !FormatsInProcess(p) || !BuiltinHandles(p) {
+			t.Errorf("%s: FormatsInProcess/BuiltinHandles = false, want true", p)
+		}
+		if got, want := len(BuiltinCommandsFor("/proj", p)), len(BuiltinCommandsFor("/proj", sqlPath)); got != want {
+			t.Errorf("BuiltinCommandsFor(%s) has %d rungs, .sql has %d — the dialect must not change the ladder", p, got, want)
+		}
+		broken := []byte("select 'oops;\n")
+		_, _, ferr := InProcessFormat(p, broken)
+		if (Validate(p, broken) != nil) != (ferr != nil) {
+			t.Errorf("%s: validator and formatter disagree on %q", p, broken)
+		}
+	}
+}
+
+// TestSQLDialectKnown_OnlyUnambiguousExtensions pins the dialect split:
+// .pgsql and .psql (case-folded) name PostgreSQL; .sql does not, and
+// neither does anything that is not SQL at all.
+func TestSQLDialectKnown_OnlyUnambiguousExtensions(t *testing.T) {
+	cases := map[string]bool{
+		"/proj/fn.pgsql":    true,
+		"/proj/setup.psql":  true,
+		"/proj/SETUP.PSQL":  true,
+		"/proj/schema.sql":  false,
+		"/proj/schema.SQL":  false,
+		"/proj/data.json":   false,
+		"/proj/pgsql":       false,
+		"/proj/notes.mysql": false,
+	}
+	for p, want := range cases {
+		if got := sqlDialectKnown(p); got != want {
+			t.Errorf("sqlDialectKnown(%q) = %v, want %v", p, got, want)
+		}
 	}
 }
 

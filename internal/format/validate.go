@@ -66,6 +66,11 @@ func Validates(filePath string) bool {
 	switch kindFor(filePath) {
 	case kindJSON, kindCSV:
 		return true
+	case kindSQL:
+		// Only where the extension rules out the other dialects — see
+		// sqlDialectKnown. A .sql file is still formatted, never
+		// underlined.
+		return sqlDialectKnown(filePath)
 	default:
 		// Go is deliberately absent. gopls already reports parse errors
 		// with far better messages than a bare go/parser pass, and two
@@ -89,9 +94,32 @@ func Validate(filePath string, src []byte) []Problem {
 		return validateJSON(src)
 	case kindCSV:
 		return validateCSV(src)
+	case kindSQL:
+		// Re-asked here, not just in Validates, so the two can never
+		// disagree (TestValidates_MatchesValidate): a caller that skips
+		// the cheap predicate must still get silence on a .sql file.
+		if sqlDialectKnown(filePath) {
+			return validateSQL(src)
+		}
+		return nil
 	default:
 		return nil
 	}
+}
+
+// NotValidatedReason explains why ced has no built-in check for a file
+// that a user might reasonably expect one on, or returns "" when there
+// is nothing particular to say (the file is validated, or ced simply
+// has no opinion about its language).
+//
+// Today that is .sql alone: ced FORMATS it as PostgreSQL, so a user who
+// asks to validate it deserves to hear why the answer is no — and what
+// to do about it — rather than the generic "no checker" line.
+func NotValidatedReason(filePath string) string {
+	if kindFor(filePath) == kindSQL && !sqlDialectKnown(filePath) {
+		return "ced checks PostgreSQL live only in .pgsql / .psql files (.sql is shared with other dialects); ≡ File → Format file reports what does not lex"
+	}
+	return ""
 }
 
 // validateJSON parses src as strict JSON and locates the first syntax

@@ -56,11 +56,20 @@ const (
 	// verb therefore says "no formatter" for it, which is the truth,
 	// rather than contradicting the validator.
 	kindCSV
-	// kindSQL is PostgreSQL, FORMATTED but not validated. The formatter
-	// refuses what it cannot lex (and says where), but a live underline
-	// on every .sql file would misfire on the other dialects that share
-	// the extension — MySQL's backslash escapes and `#` comments lex as
-	// unterminated PostgreSQL strings — so ced stays quiet until asked.
+	// kindSQL is PostgreSQL. Every SQL extension is FORMATTED; only the
+	// dialect-unambiguous ones (.pgsql, .psql — see sqlDialectKnown) are
+	// also VALIDATED live. The formatter refuses what it cannot lex (and
+	// says where), but a live underline on every .sql file would misfire
+	// on the other dialects that share the extension — MySQL's backslash
+	// escapes and `#` comments lex as unterminated PostgreSQL strings —
+	// so for .sql ced stays quiet until asked.
+	//
+	// One kind, not two (kindSQL + kindPgSQL): the three extensions are
+	// the same language to the formatter, the external-tool ladder and
+	// the install offer, and a second kind would have to be remembered
+	// at every one of those switches. The dialect question is asked only
+	// by the one verb it changes — Validates — through sqlDialectKnown,
+	// which lives here so the extension knowledge stays in this file.
 	kindSQL
 )
 
@@ -121,6 +130,27 @@ func kindFor(filePath string) kind {
 		// and falling through to kindNone means ced leaves them alone
 		// rather than reporting every comment as a syntax error.
 		return kindNone
+	}
+}
+
+// sqlDialectKnown reports whether filePath's extension names PostgreSQL
+// unambiguously, which is what licenses a LIVE syntax check on it.
+//
+//	.pgsql / .psql   only ever PostgreSQL (or psql scripts) → validated
+//	.sql             shared by MySQL, SQLite, T-SQL, …      → formatted only
+//
+// The asymmetry is deliberate. Formatting is a verb the user asks for,
+// and on a MySQL file the formatter's refusal ("line 3, col 9:
+// unterminated string") is an honest answer to that question. A live
+// underline is UNASKED: it would appear on sight on every MySQL dump
+// (`'it\'s'`, `# comment`) as a confident claim that a working file is
+// broken. Only callers that already hold kindSQL ask this.
+func sqlDialectKnown(filePath string) bool {
+	switch strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), ".")) {
+	case "pgsql", "psql":
+		return true
+	default:
+		return false
 	}
 }
 

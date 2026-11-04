@@ -41,32 +41,6 @@ plus the LSP work done in the seeding session itself
 
 ## Open
 
-- **N-005** · raised `2026-0913-1919-cats-plugin` · value low
-  cats-side decision: should two ced launch paths share ONE sidebar group
-  (map the shell-launched fallback id to the configured plugin id)? Rare in
-  practice; left as-is.
-
-- **N-006** · raised `2026-0913-1919-cats-plugin` · value low
-  cats-side decision: should a BLOCKED editor count toward the AGENTS
-  attention tally? Currently it does not.
-
-- **N-043** · raised `2026-0930-2056-bookmarks` · value medium
-  Bookmarks have no keyboard door: the leader table is out of letters,
-  so Toggle / Next / Previous are ≡ Nav rows reached by the palette
-  (`Esc k` + typing). A function key (F2 / F11-style, nothing in ced
-  binds F-keys yet) or a ⌘ chord (must be pressed in a real browser
-  first, per the ⌘ allowlist rule) would make stepping through them
-  practical. Decide which, then add it as a second door.
-
-- **N-068** · raised `2026-1016-1651-postgres-sql-formatting` · value low
-  SQL files get no live syntax underline (`kindSQL` is formatted, not
-  validated) because .sql is shared with other dialects — MySQL's
-  backslash escapes and `#` comments lex as unterminated PostgreSQL
-  strings. The formatter's positioned refusal is the only answer today.
-  Option: validate only the dialect-unambiguous `.pgsql` / `.psql`
-  extensions with the existing lexer + paren matcher (sqllex.go,
-  `matchSQLParens`), keeping the three-verb table in agreement.
-
 - **N-069** · raised `2026-1016-1651-postgres-sql-formatting` · value low
   ced's in-process SQL formatter (sqlfmt.go) deliberately does not wrap
   long lines and does not look inside `$$` PL/pgSQL bodies (a second
@@ -543,6 +517,11 @@ and `raised`.
 
 Wanted, but not next. Parked, not declined.
 
+- **N-005** · raised `2026-0913-1919-cats-plugin` · value low
+  cats-side decision: should two ced launch paths share ONE sidebar group
+  (map the shell-launched fallback id to the configured plugin id)? Rare in
+  practice; left as-is.
+
 - **N-017** · raised `2026-0909-1845-tree-multi-select` · value low
   Tree marks: a cross-folder "select all matching" (tick every
   `*_test.go`). The finder answers the question differently today.
@@ -551,6 +530,14 @@ Wanted, but not next. Parked, not declined.
   Real chat RESUME via ACP `session/load`. Contingent on an agent
   advertising `loadSession` and on solving the replay-doubles-the-transcript
   problem; the archive deliberately does not store the agent session id.
+
+- **N-043** · raised `2026-0930-2056-bookmarks` · value medium
+  Bookmarks have no keyboard door: the leader table is out of letters,
+  so Toggle / Next / Previous are ≡ Nav rows reached by the palette
+  (`Esc k` + typing). A function key (F2 / F11-style, nothing in ced
+  binds F-keys yet) or a ⌘ chord (must be pressed in a real browser
+  first, per the ⌘ allowlist rule) would make stepping through them
+  practical. Decide which, then add it as a second door.
 
 - **N-074** · raised `2026-1017-2044-button-hover-labels` · value low
   Button hover labels (buttontip.go) skip three spots: buttons inside
@@ -578,6 +565,8 @@ Wanted, but not next. Parked, not declined.
 
 ## Non-goals
 
+- **N-006** · declined 2026-11-03 · raised `2026-0913-1919-cats-plugin`
+  — Editor should not count as an agent
 - **N-020** · declined `2026-0910-2016-tool-windows` — polishing a bottom-docked
   Explorer / narrow-docked git panels. Usable but cramped on purpose; the
   internal seams are tuned for a wide strip and nobody has asked.
@@ -610,6 +599,19 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-03, `2026-1103-1952-n068-pgsql-live-validation` —
+  **N-068** `.pgsql` / `.psql` files are now validated live (◇ + caret
+  note); `.sql` stays formatted-only. Still ONE kind (`kindSQL`): the
+  dialect is asked only by the validator, via `sqlDialectKnown`
+  (kinds.go). The check (format/sqlvalidate.go) is formatSQL's front half
+  — `lexSQL` + `matchSQLParens` — so the underline and Format's refusal
+  give the same message at the same place
+  (`TestValidateSQL_AgreesWithTheFormatter`); a lex error hides the paren
+  check (one problem). ≡ "Validate file" on a .sql file now flashes the
+  dialect reason and names .pgsql (`format.NotValidatedReason`) instead
+  of "ced checks JSON and CSV". Checked in the real binary with run-ced:
+  the same text is marked in fn.pgsql, quiet in dump.sql.
 
 - closed 2026-11-03, `2026-1103-1906-n003-readme-pins` —
   **N-003** the README is now pinned to the code, both ways (a row

@@ -65,6 +65,30 @@ func TestValidate_BrokenCSVIsMarked(t *testing.T) {
 	}
 }
 
+// TestValidate_PgSQLIsMarkedButSQLIsNot pins the dialect split end to
+// end: the same unterminated string is marked on the opening quote in a
+// .pgsql / .psql file (PostgreSQL by name) and left alone in a .sql
+// file, where it may be a MySQL `\'` escape that is perfectly valid.
+func TestValidate_PgSQLIsMarkedButSQLIsNot(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	const src = "select 1;\nselect 'it\\'s' from t;\n"
+	for _, name := range []string{"fn.pgsql", "setup.psql"} {
+		tab := openScratch(t, a, name, src)
+		probs := a.liveProblems(tab)
+		if len(probs) != 1 || probs[0].Line != 1 {
+			t.Fatalf("%s: liveProblems = %v, want one finding on line 1", name, probs)
+		}
+		_, marks := validateSource{app: a}.Decorations(tab, theme.Default(), 0, 3)
+		if len(marks) != 1 || marks[0].Glyph != validateMark {
+			t.Errorf("%s: marks = %v, want one %q", name, marks, validateMark)
+		}
+	}
+	tab := openScratch(t, a, "dump.sql", src)
+	if probs := a.liveProblems(tab); probs != nil {
+		t.Errorf("dump.sql: liveProblems = %v, want nil (.sql is shared with other dialects)", probs)
+	}
+}
+
 // TestValidate_ValidFileSaysNothing pins the quiet case, which is
 // almost every file almost all the time.
 func TestValidate_ValidFileSaysNothing(t *testing.T) {
@@ -360,6 +384,20 @@ func TestValidateFile_NothingCanCheckExplains(t *testing.T) {
 
 	if !strings.HasPrefix(a.statusMsg, "Can't validate notes.txt") {
 		t.Errorf("flash = %q", a.statusMsg)
+	}
+}
+
+// TestValidateFile_SQLExplainsTheDialectCall pins the .sql refusal: ced
+// formats .sql but will not check it, and the flash says so and names
+// the door (.pgsql) instead of implying ced knows nothing about SQL.
+func TestValidateFile_SQLExplainsTheDialectCall(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	openScratch(t, a, "schema.sql", "select 1;\n")
+
+	a.validateFile()
+
+	if !strings.HasPrefix(a.statusMsg, "Can't validate schema.sql") || !strings.Contains(a.statusMsg, ".pgsql") {
+		t.Errorf("flash = %q, want the dialect reason naming .pgsql", a.statusMsg)
 	}
 }
 

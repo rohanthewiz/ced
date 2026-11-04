@@ -6,7 +6,8 @@
 // =============================================================================
 
 // validate.go is ced's own syntax checker for the data formats it
-// parses in-process — JSON and CSV today, and whatever joins
+// parses in-process — JSON, CSV and PostgreSQL (.pgsql / .psql only)
+// today, and whatever joins
 // format.kindFor later. It turns "this file does not parse" into a mark on the line
 // that broke, which is the only form of that answer worth having.
 //
@@ -408,7 +409,15 @@ func (a *App) validateFile() {
 	}
 	diags := a.diagsFor(t.Path)
 	if !builtin && server == "" && len(diags) == 0 {
-		a.flash("Can't validate " + name + " — ced checks JSON and CSV itself; other files need their language server on PATH")
+		// A file ced FORMATS but does not check (.sql) gets its own
+		// reason: the generic line would read as "ced knows nothing
+		// about SQL", when the truth is a deliberate dialect call with
+		// a door (.pgsql, or the Format verb's positioned refusal).
+		if why := format.NotValidatedReason(t.Path); why != "" {
+			a.flash("Can't validate " + name + " — " + why)
+			return
+		}
+		a.flash("Can't validate " + name + " — ced checks JSON, CSV and PostgreSQL (.pgsql / .psql) itself; other files need their language server on PATH")
 		return
 	}
 	if len(diags) == 0 {

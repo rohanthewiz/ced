@@ -509,8 +509,9 @@ Then:
   - *Show git history* — the git log filtered to this file (`p:` query,
     renames followed).
   - *Compare with clipboard*, *Preview* (markdown files), *Format file*.
-  - *Validate file* — ced's own JSON / CSV check plus whatever the language
-    server last reported; the caret lands on the first error.
+  - *Validate file* — ced's own JSON / CSV / PostgreSQL (`.pgsql`,
+    `.psql`) check plus whatever the language server last reported; the
+    caret lands on the first error.
   - *Restore (discard changes)…* — puts the file back the way the last
     commit has it (staged changes too), after a confirm that says how
     many lines go. An open tab reloads, and one Undo brings your text
@@ -728,7 +729,7 @@ still clickable and says why (install a binary, export `$EDITOR`).
 | `New folder` / `New folder (in <folder>)` | | Create a folder in the active folder. |
 | `Save` | `esc s` | Save the active tab (Go files are formatted as they save). |
 | `Format file` | | Run the file's formatter now — the only way non-Go files are formatted. See [Formatting](#formatting). |
-| `Validate file` | | Check the file now: ced's own JSON / CSV parse plus what the language server and plugins last reported. |
+| `Validate file` | | Check the file now: ced's own JSON / CSV / PostgreSQL (`.pgsql`, `.psql`) parse plus what the language server and plugins last reported. |
 | `Revert file` | | Put the buffer back to how it was when you opened it (Undo recovers it). |
 | `Disable auto-save` / `Enable auto-save` | | Save dirty tabs after an idle pause (`"autosave"`, `"autosavedelay"`). |
 | `Save & close tab` | | Save, then close. |
@@ -1925,8 +1926,13 @@ file** (a dirty buffer is saved first). That covers:
   SQL that doesn't lex — an unterminated string, an unbalanced
   parenthesis, a MySQL backtick, a `{{ template }}` — is left alone and
   the flash says where (`sql formatter failed: line 12, col 8:
-  unterminated string`). A project on another database can point `"sql"`
-  at its own tool in `.ced/format.json`.
+  unterminated string`). In a `.pgsql` or `.psql` file the same check
+  also runs **as you type** (◇ in the gutter, on the opening quote,
+  comment or parenthesis that never closes); a plain `.sql` file is only
+  checked when you format it, because `.sql` is shared with MySQL and
+  others, whose `\'` escapes and `#` comments are not PostgreSQL. A
+  project on another database can point `"sql"` at its own tool in
+  `.ced/format.json`.
 - **Any extension your project lists** in `.ced/format.json` —
   `php-cs-fixer`, `ruff`, `prettier`, anything you like. This is **off by
   default** and only kicks in for projects that opt in by checking in a

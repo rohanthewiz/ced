@@ -246,15 +246,23 @@ and `raised`.
 
 - **N-067** · raised `2026-1016-1651-postgres-sql-formatting` · value low
   PostgreSQL formatting's external rung has only run with stubbed
-  binaries: neither `pg_format` nor `sql-formatter` was installed, so the
-  argvs (`pg_format -i --tabs|--spaces N --keyword-case 1|2`, `-c
-  <root>/.pg_format`; `sql-formatter --fix -c '<inline JSON>'` / `-c
-  <root>/.sql-formatter.json`) were checked against each project's
-  README only. Install both and run ≡ File → Format file on a tab- and
-  a four-space-indented, lower-case .sql file: each tool rewrites in
-  place, keeps the indent and case, and a root config wins. Also confirm
-  the in-process rung in the real binary (run-ced): format, then one
-  Esc u undoes it.
+  binaries. 2026-11-04 (`2026-1104-1610-n067-sql-formatter-real-run`):
+  **sql-formatter 15.9.0 and the in-process rung are checked.**
+  sql-formatter (npm, scratchpad) takes ced's argv as built: `--fix -c
+  '<inline JSON>'` rewrites in place and keeps lower case with tabs
+  (`useTabs`) or 4 spaces (`tabWidth`); a root `.sql-formatter.json`
+  handed over with `-c <path>` wins (upper case, 3 spaces, on a
+  lower-case file). Through the real binary (run-ced, sql-formatter on
+  PATH, ≡ File "Format file" via the palette) a lower-case 4-space file
+  came back clause-per-line, lower case, 4 spaces, on disk and in the
+  tab. With nothing on PATH the in-process rung formatted the same way,
+  and ONE `Esc u` put the original line back. **Still unchecked:
+  pg_format** — fetching pgFormatter's release tarball was refused by
+  the session's auto-mode check, so it needs installing by hand
+  (`brew install pgformatter`), then: ≡ File → Format file on a tab- and
+  a four-space-indented lower-case .sql file (argv `pg_format -i --tabs
+  | --spaces N --keyword-case 1|2`), and a root `.pg_format` (`-c`)
+  winning.
 
 - **N-070** · raised `2026-1016-1849-tree-star-find-files-quit-button` · value low
   The ✕ quit button left of ≡ (quitbutton.go) has only run in tests and

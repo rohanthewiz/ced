@@ -6118,7 +6118,9 @@ func (a *App) drawMenu() {
 // menuSplitContrast is the least a split rule must stand off the menu's
 // background. The border tone alone (Subtle) measures 1.13–1.49:1 on the
 // builtins — enough for a solid frame line, too faint for a sparse dotted
-// one — and 1.00:1 on cool-blue, where Subtle IS the modal background.
+// one. (cool-blue's stated `line` IS its modal background; ToTheme now
+// floors Subtle at 1.12:1 there — theme.subtleInk — which a frame line
+// survives but a dotted rule still doesn't.)
 // 1.8 keeps the rule below the Muted shortcut hints on most themes, so
 // it still reads as structure rather than as text.
 const menuSplitContrast = 1.8

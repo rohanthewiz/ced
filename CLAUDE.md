@@ -1305,6 +1305,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Eight core keys; the rest derived via the ordered table in palette.go
   (new keys get a derivation). Palettes are `map[string]string`; specs
   keep the sparse palette.
+- `Theme.Subtle` (frame / divider ink) is FLOORED against LineHL in
+  ToTheme (`subtleInk`, `minSubtleContrast` 1.12 — just under the
+  faintest built-in, so only a collapsed `line` == `line-hl` moves; it
+  was cool-blue's 1.00:1 invisible modal frames). Fix such things there,
+  never per surface (`TestToTheme_SubtleStandsOffLineHLOnEveryBuiltin`).
 - Host theme (app/catstheme.go): cats' `panel` becomes `sidebar-bg`
   only when it is DARKER than bg (else derived); folders = `fg`, never
   the accent (`catsHostTreeColors`, same fix as Darcula's palette).
@@ -1347,7 +1352,7 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   walking actions only); `menuGeometry` gives it its own row (ignored on
   a section's first row). Drawn as an inset dotted `┄` from the label
   column, ink = Subtle lifted to `menuSplitContrast` 1.8:1
-  (`menuSplitColor`; Subtle is 1:1 on cool-blue). No split for a 1-row
+  (`menuSplitColor`; Subtle alone is a frame's ink, too faint dotted). No split for a 1-row
   run — reorder instead; ~3-row sections carry none. A split above the
   terminal rows spends the above-the-fold budget.
 - **Adding a menu row means updating the pins** — a README menu-reference

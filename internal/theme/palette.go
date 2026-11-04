@@ -265,6 +265,12 @@ func Normalize(p Palette) (Palette, error) {
 // The mapping is written out longhand rather than reflected so that
 // adding a Theme field forces a deliberate decision about which color
 // key feeds it (and, in derivations, how it falls out of the core eight).
+//
+// One field is not a straight lookup: Subtle, the frame / divider ink,
+// is floored against LineHL (subtleInk). Every modal paints its border
+// and title rule in Subtle ON LineHL (modals.go's chrome, the ≡ menu's
+// borderStyle), and a theme whose `line` equals its `line-hl` draws
+// every one of those at 1.00:1 — invisible, not quiet.
 func ToTheme(p Palette) Theme {
 	c := func(key string) tcell.Color { return mustColor(p[key]) }
 	return Theme{
@@ -277,7 +283,7 @@ func ToTheme(p Palette) Theme {
 
 		Text:       c("fg"),
 		Muted:      c("muted"),
-		Subtle:     c("line"),
+		Subtle:     subtleInk(c("line"), c("line-hl")),
 		Accent:     c("accent"),
 		AccentSoft: c("accent-soft"),
 		Selection:  c("selection"),
@@ -394,6 +400,29 @@ func mix(a, b string, t float64) string {
 // needs to read as "the brighter sibling" of another (accent-soft,
 // syn-operator) rather than as a wash over the surface.
 func lighten(c string, t float64) string { return mix(c, "#ffffff", t) }
+
+// minSubtleContrast is the floor Subtle (`line`) keeps against LineHL,
+// the surface every modal frame sits on.
+//
+// Set just BELOW the faintest frame a built-in already ships and that has
+// been looked at (dark-city, 1.13:1; the rest run to 1.49), so the floor
+// catches only the collapsed case — `line` stated equal to, or within a
+// hair of, `line-hl`, which Nord-style palettes do because both are the
+// "elevated surface" grey — and never re-tunes a theme that reads today.
+// A frame is chrome, not text: it wants to be findable, not loud, so this
+// is nowhere near the 4.5 text floor (MinTextContrast).
+const minSubtleContrast = 1.12
+
+// subtleInk is the Subtle colour ToTheme hands out: the theme's `line`
+// unchanged when it already stands off LineHL by minSubtleContrast, else
+// lifted (hue kept, away from LineHL's lightness) by the shared
+// LiftToContrast stepping until it does. Done here, once, rather than per
+// surface: the modal chrome, the ≡ menu frame and the palette's spacer
+// rule all read Theme.Subtle, and a per-surface lift is how the ≡ menu's
+// splits came to read while the frame around them did not.
+func subtleInk(line, lineHL tcell.Color) tcell.Color {
+	return LiftToContrast(line, lineHL, minSubtleContrast)
+}
 
 // tabBarTint is how much err is mixed into sidebar-bg for the tab strip.
 // 8% is "slight" in the literal sense: 12–19 channel units off the tree's

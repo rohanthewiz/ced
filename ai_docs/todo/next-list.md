@@ -130,16 +130,6 @@ plus the LSP work done in the seeding session itself
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
 
-- **N-107** · raised `2026-1031-0200-menu-search-box-splitters` · value medium
-  **Modal frames are invisible on cool-blue.** Its Subtle is exactly its
-  LineHL (`#3b4252`), so every modal's border, title divider and the
-  palette's spacer rule (`chrome().border`, the ≡ menu's `borderStyle`)
-  draw at 1.00:1. On the other built-ins they sit at 1.13–1.49:1. The ≡
-  menu's new splits dodge it by lifting Subtle (`menuSplitColor`); the
-  frames don't. Fix in the theme (cool-blue's `line`, or a derivation
-  floor for Subtle against LineHL) rather than per surface, then pin it
-  with an every-builtin contrast test.
-
 - **N-108** · raised `2026-1031-0200-menu-search-box-splitters` · value low
   **Right-click menus have no splitters.** The ≡ sections got split
   rules between runs of related rows (`splitAbove`), but the tree's
@@ -577,6 +567,18 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-04, `2026-1104-1349-n107-n109-n097-subtle-floor-pathinside-draft-queue` —
+  **N-107** fixed in the theme, not per surface: `ToTheme` floors
+  `Theme.Subtle` against LineHL (`subtleInk`, palette.go) at
+  `minSubtleContrast` 1.12 — just under the faintest built-in frame that
+  reads (dark-city, 1.13), so only a collapsed `line` == `line-hl`
+  moves; user themes get the same guard. cool-blue's frames go from
+  `#3b4252` on `#3b4252` (1.00:1) to `#4f5563` (seen in run-ced's HTML
+  capture of the palette on cool-blue). Pinned by
+  `TestToTheme_SubtleStandsOffLineHLOnEveryBuiltin` (fails without the
+  floor), `…FloorLeavesReadableThemesAlone` (the other nine keep their
+  stated `line` exactly) and `TestSubtleInk_LiftsACollapsedLineOnLightAndDark`.
 
 - closed 2026-11-04, `2026-1104-1308-n080-n098-n089-label-plural-cmd-o` —
   **N-098** cats `3f77564`: `"KeyO"` is in `CMD_TO_PANE`, so ⌘O (Open

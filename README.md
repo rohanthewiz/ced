@@ -687,17 +687,37 @@ The reverse is not true: some verbs have no `Esc` key at all — **Select all**
 is ≡ **Edit ▸ Select all** (also under ≡ **File**, and `⌘A`, where `Cmd` arrives), for instance — and the command palette
 (`Esc k`) finds any of them by name.
 
-**Command-key accelerators.** If your terminal forwards the `Cmd` key —
-kitty, Ghostty, WezTerm, or a cats pane — ced also answers the chords
-your hands already know from every other editor: `⌘S` save, `⌘P` find
-file, `⌘⇧P` command palette, `⌘F` find all in file, `⌘⇧F` find in project, `⌘D`
-duplicate line, `⌘/` toggle comment, `⌘L` go to line, `⌘G` git panel, `⌘E` recent files,
-`⌘A` select all, `⌘O` open a file by path (anywhere on disk),
-plus `⌘←` / `⌘→` for the start and end of the line and `⌘↑` / `⌘↓` for
-the top and end of the file (hold `Shift` to select there). Every one of them is a second door onto something the
-`Esc` table or the `≡` menu already does, so nothing is lost in a
+#### Command-key accelerators
+
+If your terminal forwards the `Cmd` key — kitty, Ghostty, WezTerm, or a
+cats pane — ced also answers the chords your hands already know from
+every other editor. Every one of them is a second door onto something
+the `Esc` table or the `≡` menu already does, so nothing is lost in a
 terminal that keeps `Cmd` for itself — and in that case the chord simply
-does nothing rather than something surprising.
+does nothing rather than something surprising. The host decides which
+chords arrive: cats hands an editor pane the ones its help overlay
+lists, and most terminals keep `⌘W` for closing their own window.
+
+| Chord | Action | Same as |
+| --- | --- | --- |
+| `⌘S` | Save | `Esc s` |
+| `⌘P` | Find file | `Esc p` |
+| `⌘⇧P` | Command palette | `Esc k` |
+| `⌘O` | Open file | ≡ **File ▸ Open file…** — a typed path, anywhere on disk |
+| `⌘F` | Find all in file | `Esc F` |
+| `⌘⇧F` | Find in project | `Esc P` |
+| `⌘W` | Close tab | `Esc w` |
+| `⌘D` | Duplicate line | ≡ **Edit ▸ Duplicate line** (`Ctrl-D`) |
+| `⌘/` | Toggle comment | `Esc /` |
+| `⌘L` | Go to line | `Esc j` |
+| `⌘G` | Git panel | `Esc g` |
+| `⌘E` | Recent files | `Esc B` |
+| `⌘A` | Select all | ≡ **Edit ▸ Select all** |
+| `⌘[` | Go back | `Esc o` |
+| `⌘]` | Go forward | `Esc O` |
+| `⌘←` / `⌘→` | Start / end of the line (`⇧` selects) | `Home` / `End` |
+| `⌘↑` / `⌘↓` | Top / end of the file (`⇧` selects) | `Esc j`, or `PgUp` / `PgDn` |
+| `⌘C` / `⌘V` / `⌘Z` | Copy / paste / undo | ≡ **Edit**; each panel takes its own paste |
 
 ### The ≡ menu, row by row
 
@@ -979,6 +999,119 @@ See [AI features](#ai-features-chat-agents--copilot-completions).
 | Row | Key | What it does |
 | --- | --- | --- |
 | `Quit editor` | `esc q` | Quit (asks about unsaved tabs). Same as the red `✕`. |
+
+### Right-click menus
+
+Three surfaces answer a right-click with a menu of their own: a row of
+the file tree, a tab, and the code itself. Each menu is in runs of
+related rows divided by a dotted rule, and lists only the rows that mean
+something where you clicked — **Shown** says when a row appears. In the
+tab and editor menus, a row that can't act right now (no selection, no
+saved path) is dimmed rather than hidden. Every verb here also has a
+`≡` row, because macOS Terminal and tmux often swallow the right-click.
+`<…>` stands for the part of a label that varies.
+
+#### File tree
+
+| Row | Shown | What it does |
+| --- | --- | --- |
+| `New File` | folders, the project | Create a file in this folder (asks for the name). |
+| `New Folder` | folders, the project | Create a folder in this folder. |
+| `Find all in folder…` / `Find in project…` | folders, the project | Search the text of every file under this folder (the project, on its root row). |
+| `Find files in folder…` / `Find file in project…` | folders, the project | The file finder, limited to this folder. |
+| `Rename` | not the project | Rename the file or folder. |
+| `Delete` | not the project | Delete it (asks first). |
+| `Git restore…` | a file in a git repository | Throw away its uncommitted changes, back to `HEAD` (asks first, and says how much is lost). |
+| `Copy` | not the project | Put it on ced's file clipboard for **Paste**. |
+| `Copy to…` | everywhere | Copy it into a folder you type, anywhere on disk. |
+| `Paste` | after a **Copy** | Paste the copied files into this folder (or this file's folder). |
+| `Zip` | everywhere | Make a `.zip` of it, next to it. |
+| `Copy name` | everywhere | Put its name on the system clipboard. |
+| `Copy rel path` | everywhere | Put its project-relative path on the system clipboard. |
+| `Copy abs path` | everywhere | Put its absolute path on the system clipboard. |
+| `Preview` / `Stop Preview` | Markdown files | Open the file rendered, or go back to its source. |
+| `Soft Wrap` / `Stop Soft Wrap` | text files | Wrap the file's long lines at the pane edge, or stop. |
+| `Select` / `Unselect` | not the project | Tick it into the tree's multi-selection. |
+| `Selected (<n>)…` | something is ticked | Act on everything ticked: copy, zip, delete… |
+| `Add to favorites…` | folders, the project | Name this place, so `ced fav <name>` comes back to it. |
+| `New tab group…` / `Tab group <name>…` | folders | Start a folder tab group here, or manage the one it has. |
+| `Open in $EDITOR` / `Open in <editor>` | everywhere | Open it in your own `$VISUAL` / `$EDITOR`. |
+| `Open in Finder` / `Open file manager` | everywhere | Show it in Finder (macOS), or open its folder (Linux). |
+| `Open in terminal` | everywhere | A shell in its folder: a cats split, a tmux split, or ced's terminal. |
+| `Shell command…` | everywhere | Run a command line with `{{DIR_ENTRY}}` / `{{DIR}}` filled in. |
+| `Refresh` | everywhere | Re-read the whole tree from disk. |
+| `Run in terminal…` | an executable file | Put `./name` on ced's terminal input line, ready for Enter. |
+
+#### Tab
+
+| Row | Shown | What it does |
+| --- | --- | --- |
+| `Reveal in file tree` | always | Expand the tree down to the file and select it. |
+| `Show uncommitted changes` | always | The git panel on this file's diff. |
+| `Show git history` | always | The git log, filtered to this file. |
+| `Compare with clipboard` | always | Compare the tab with the text on the clipboard. |
+| `Preview` / `Stop preview` | Markdown files | Show the tab rendered, or go back to its source. |
+| `Format file` | always | Run the file's formatter (saves first). |
+| `Validate file` | always | Check the file's syntax now (JSON, CSV, PostgreSQL). |
+| `Restore (discard changes)…` | always | Back to `HEAD`, after asking. One **Undo** brings it back. |
+| `Move to split →` | inside cats | Open the file in a new pane to the right, and close it here. |
+| `Copy to split →` | inside cats | Open the file in a new pane to the right, too. |
+| `Add to group…` | always | Add the tab to a tab group, or start one. |
+| `Remove from group <name>` | a grouped tab | Take the tab out of its group. |
+| `Zip file` | always | Make a `.zip` of the file, next to it. |
+| `Copy to…` | always | Copy the file into a folder you type; unsaved edits are copied as shown. |
+| `Copy file name` | always | Put the file's name on the system clipboard. |
+| `Copy relative path` | always | Put its project-relative path on the system clipboard. |
+| `Copy absolute path` | always | Put its absolute path on the system clipboard. |
+| `Close tab` | always | Close this tab (asks about unsaved edits). |
+| `Close other tabs` | always | Close every other tab, keeping any with unsaved edits. |
+
+The menu acts on the tab you clicked, without bringing it to the front,
+except for the rows whose answer is a view of the file or an edit to it
+(Compare, Preview, Format, Validate).
+
+#### Editor
+
+| Row | Shown | What it does |
+| --- | --- | --- |
+| `Accept <side>` | inside a merge conflict | Keep one side of the conflict; `<side>` names it (`current`, `yours (main)`, …). |
+| `Accept both` | inside a merge conflict | Keep both sides, in file order. |
+| `Accept both, <side> first` | inside a merge conflict | Keep both, the lower side first. |
+| `Accept base` | inside a diff3 conflict | Keep the common ancestor's text. |
+| `Accept neither` | inside a merge conflict | Drop the whole block. |
+| `Compare sides` / `Compare sides…` | inside a merge conflict | The two sides in the compare panel (a diff3 block first asks which pair). |
+| `Completions` | always | Completions at the caret (language server). |
+| `Go to definition` | always | Jump to where the symbol under the caret is defined. |
+| `Find references` | always | List every use of the symbol. |
+| `Rename symbol…` | always | Rename it across the project. |
+| `Hover info` | always | The symbol's type and docs, and any diagnostics on the line. |
+| `Code actions…` | always | The language server's fixes and refactors for this spot. |
+| `Copy` | always | Copy the selection. |
+| `Cut` | always | Cut the selection. |
+| `Paste` | always | Paste at the caret. |
+| `Select all` | always | Select the whole file. |
+| `Compare selection with paste…` | always | Compare the selection with text you paste next. |
+| `Toggle line comment` | languages with a line comment | Comment or uncomment the line, or every selected line. |
+| `Open in split →` | inside cats | This file in a new pane to the right. |
+| `Open in split ↓` | inside cats | This file in a new pane below. |
+| `Send selection to agent…` | inside cats, with a selection and an agent pane | Hand the selection to an agent running in another pane. |
+| `Ask cats chat about selection` | inside cats, with a selection | Ask cats' own chat about the selected code. |
+| `Summarize selection (<n>)…` | a selection | Ask ced's chat agent to summarize the selected lines. |
+| `Send selection to GoNotes…` | a selection | Save the selection as a GoNotes note. |
+| `Preview` | Markdown files | Show the file rendered. |
+| `Soft Wrap` / `Stop Soft Wrap` | always | Wrap the file's long lines at the pane edge, or stop. |
+| `Add bookmark` / `Remove bookmark` | a saved file | Bookmark the clicked line, or remove its bookmark. |
+| `Label bookmark…` | a bookmarked line | Give the bookmark a name. |
+| `Search project for "<word>"` | a word under the caret | Find in project for that word (or a one-line selection). |
+| `Show change…` | a changed line, in a repository | The change bar's diff for this line, with **Revert**. |
+| `Blame this line…` | a saved file, in a repository | The commit that last touched the line. |
+| `Git status…` | in a repository | `git status`, in full. |
+| `New branch…` | in a repository | Create a branch and switch to it. |
+
+The right-click puts the caret where you clicked first, so every
+language-server row aims at the symbol you clicked — unless you clicked
+inside your selection, which is kept for Copy, Cut and the selection
+rows.
 
 ### Multi-line editing
 

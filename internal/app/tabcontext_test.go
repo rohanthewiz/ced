@@ -401,3 +401,25 @@ func TestTabContext_SplitRowsOnlyInsideCats(t *testing.T) {
 		t.Errorf("tabs=%d active=%s, want all three kept and a.go in front", len(a.tabs), a.activeTabPtr().Path)
 	}
 }
+
+// TestREADME_TabMenuTableListsEveryRow pins README.md's tab right-click
+// table to tabContextItems, both ways (N-110). The fixture reaches every
+// row: a plain tab, a grouped tab, and a Markdown tab, inside cats (where
+// the split rows appear, dimmed or not).
+func TestREADME_TabMenuTableListsEveryRow(t *testing.T) {
+	a, paths := tabMenuTestApp(t)
+	a.cats.caps.InCats = true
+	grouped := a.tabByPath(paths[1])
+	a.addTabToGroup(grouped, a.newTabGroup("wip", ""))
+	md := filepath.Join(a.rootDir, "notes.md")
+	if err := os.WriteFile(md, []byte("# n\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.openFile(md)
+	var labels []string
+	for _, tab := range []*editor.Tab{a.tabByPath(paths[0]), grouped, a.tabByPath(md)} {
+		labels = append(labels, tabMenuLabels(a, tab)...)
+	}
+	pinRightClickREADME(t, "Tab", labels)
+}
+

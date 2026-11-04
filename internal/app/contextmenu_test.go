@@ -11,13 +11,16 @@
 package app
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/cats"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/filetree"
+	"github.com/rohanthewiz/ced/internal/readme"
 )
 
 // openEditorContextAt right-clicks the editor at buffer-ish local
@@ -923,5 +926,185 @@ func TestEditorContext_SplitRowsAreInert(t *testing.T) {
 	if r, _, _, _ := a.screen.GetContent(mx+5, cy); r != '┄' {
 		t.Errorf("split row paints %q at its label column, want the dotted rule", r)
 	}
+}
+
+// pinRightClickREADME checks the "#### <sub>" table of README.md's
+// "### Right-click menus" against labels — every row the menu builder
+// produced across a test's fixture states — both ways, with the ≡
+// reference's rules (TestREADME_MenuReferenceListsEveryRow):
+//
+//   - every label matches exactly one README row: an exact code span
+//     first, a "<…>" placeholder form only when no row spells it out;
+//     the row's last cell (What it does) must say something;
+//   - every README row was matched by some label, so a renamed or
+//     removed row can't linger. Only ONE form of a row has to be reached;
+//     the others ("Stop Preview" beside "Preview") document states the
+//     fixture needn't visit.
+//
+// The menus are built from state, so the caller's fixture is what makes
+// leg one meaningful: a row the fixture never reaches is unpinned, and
+// leg two then fails for its README row — which is the prompt to extend
+// the fixture rather than drop the row.
+func pinRightClickREADME(t *testing.T, sub string, labels []string) {
+	t.Helper()
+	doc, err := readme.LoadRepo()
+	if err != nil {
+		t.Fatalf("load README: %v", err)
+	}
+	sec, ok := doc.Section(3, "Right-click menus")
+	if !ok {
+		t.Fatal(`README has no "### Right-click menus" section`)
+	}
+	type readmeRow struct {
+		row   readme.Row
+		forms []string
+		used  bool
+	}
+	var rows []*readmeRow
+	found := false
+	for _, ss := range sec.Subsections() {
+		if ss.Title != sub {
+			continue
+		}
+		found = true
+		tables := ss.Tables()
+		if len(tables) != 1 {
+			t.Fatalf("README line %d: \"#### %s\" has %d tables, want 1", ss.Line, sub, len(tables))
+		}
+		for _, r := range tables[0].Rows {
+			forms := readme.CodeSpans(r.Cell(0))
+			if len(forms) == 0 {
+				t.Errorf("README line %d: Row cell %q names no label in backticks", r.Line, r.Cell(0))
+				continue
+			}
+			rows = append(rows, &readmeRow{row: r, forms: forms})
+		}
+	}
+	if !found {
+		t.Fatalf("README \"### Right-click menus\" has no \"#### %s\" table", sub)
+	}
+	seen := map[string]bool{}
+	for _, label := range labels {
+		if label == "" || seen[label] {
+			continue // a split row, or a label already checked
+		}
+		seen[label] = true
+		// Exact forms first. Among placeholder forms the most SPECIFIC
+		// wins — the one with the most literal text — so
+		// `Accept both, <side> first` takes "Accept both, incoming first"
+		// from `Accept <side>`, which matches it too.
+		var exact, loose []*readmeRow
+		best := -1
+		for _, r := range rows {
+			for _, f := range r.forms {
+				if f == label {
+					exact = append(exact, r)
+					break
+				}
+				if re := readmeLabelPattern(f); re != nil && re.MatchString(label) {
+					switch lit := readmeFormLiteralLen(f); {
+					case lit > best:
+						best, loose = lit, []*readmeRow{r}
+					case lit == best:
+						loose = append(loose, r)
+					}
+					break
+				}
+			}
+		}
+		match := exact
+		if len(match) == 0 {
+			match = loose
+		}
+		switch len(match) {
+		case 0:
+			t.Errorf("%s menu row %q has no row in README's \"#### %s\" table", sub, label, sub)
+			continue
+		case 1:
+		default:
+			t.Errorf("%s menu row %q matches %d README rows; make the forms distinct", sub, label, len(match))
+			continue
+		}
+		match[0].used = true
+		if r := match[0].row; strings.TrimSpace(r.Cell(2)) == "" {
+			t.Errorf("README line %d: %s menu row %q has no description", r.Line, sub, label)
+		}
+	}
+	for _, r := range rows {
+		if !r.used {
+			t.Errorf("README line %d: %s menu row %q matches no row the menu builds (renamed, removed, or the fixture misses it?)",
+				r.row.Line, sub, r.row.Cell(0))
+		}
+	}
+}
+
+// readmeFormLiteralLen is how much of a README label form is literal text
+// — its runes minus every "<…>" placeholder — the specificity
+// pinRightClickREADME ranks competing placeholder forms by.
+func readmeFormLiteralLen(form string) int {
+	n, depth := 0, 0
+	for _, r := range form {
+		switch {
+		case r == '<':
+			depth++
+		case r == '>' && depth > 0:
+			depth--
+		case depth == 0:
+			n++
+		}
+	}
+	return n
+}
+
+// editorMenuLabels is every row editorContextItems builds across states
+// chosen to reach them all: a merge conflict (plain and diff3) in a
+// repository with a change and a bookmark at the caret, a selection
+// inside cats with an agent pane beside it, and a Markdown file.
+func editorMenuLabels(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	collect := func(a *App) {
+		for _, it := range a.editorContextItems(a.activeTabPtr()) {
+			out = append(out, it.label)
+		}
+	}
+
+	// A conflict, a change and a bookmark under the caret, in a repo.
+	a, paths := conflictTestApp(t, "a.go")
+	tab := a.activeTabPtr()
+	tab.Cursor = editor.Position{Line: 4, Col: 5} // "var a = 2", on "a"
+	a.fileDiffs = map[string][]diffHunk{paths[0]: {{Start: 4, End: 4}}}
+	tab.ToggleBookmark(4)
+	collect(a)
+
+	// A diff3 block, for the base side.
+	base := filepath.Join(a.rootDir, "base.go")
+	writeFileT(t, base, "package x\n<<<<<<< HEAD\nvar b = 1\n||||||| base\nvar b = 0\n=======\nvar b = 2\n>>>>>>> other\n")
+	a.gitConflicted[base] = true
+	a.openFile(base)
+	a.activeTabPtr().Cursor = editor.Position{Line: 2}
+	collect(a)
+
+	// A selection, inside cats, with an agent in another pane.
+	withCtlSpy(t, a)
+	a.cats.panes = []cats.PaneInfo{{Pane: 3, Handle: "w1:p3", Agent: "claude"}}
+	sel := openTestFileTab(t, a, "sel.go")
+	st := a.tabByPath(sel)
+	st.Anchor = editor.Position{Line: 0, Col: 0}
+	st.Cursor = editor.Position{Line: 0, Col: 7}
+	collect(a)
+
+	// A Markdown file.
+	md := filepath.Join(a.rootDir, "notes.md")
+	writeFileT(t, md, "# notes\n")
+	a.openFile(md)
+	collect(a)
+	return out
+}
+
+// TestREADME_EditorMenuTableListsEveryRow pins README.md's editor
+// right-click table to editorContextItems, both ways (N-110).
+func TestREADME_EditorMenuTableListsEveryRow(t *testing.T) {
+	pinRightClickREADME(t, "Editor", editorMenuLabels(t))
 }
 

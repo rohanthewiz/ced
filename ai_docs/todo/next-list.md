@@ -113,15 +113,19 @@ plus the LSP work done in the seeding session itself
   swap the order.
 
 - **N-110** · raised `2026-1103-1906-n003-readme-pins` · value low
-  **The README pins stop at the ≡ menu.** N-003's tests pin the hotkey
-  tables, every ≡ row, the tool windows and the config.json keys — but
-  not the right-click menus (tree, tab, editor: `contextmenu.go`,
-  `tabcontext.go`, `editorContextItems`), the `⌘` accelerators
-  (metakeys.go; the README lists them in a prose sentence), or the
-  in-surface Alt chords of modals and the find bar. Those are the
-  remaining enumerable surfaces; a reference table per surface +
-  a both-ways test through `internal/readme` is the same recipe. Prose
-  itself (a feature's explanatory paragraph) stays unpinnable.
+  **The README pins stop short of the in-surface Alt chords.** Done
+  2026-11-04 (`2026-1104-1530-n108-n110-ctx-splits-readme-pins`): the
+  ⌘ accelerators are a `#### Command-key accelerators` table pinned to
+  `metaAccels` (`TestREADME_CommandKeyTableListsEveryChord`), and the
+  three right-click menus are `### Right-click menus` tables pinned
+  through `pinRightClickREADME` over fixtures that reach every row
+  (tree, tab, editor). What remains is the Alt chords of modals and
+  the find bar (`promptExtra.key` on each prompt's extras, the bar's
+  switch in find.go, the cherry-pick / diff-view chords). They have no
+  registry: each prompt builds its extras inline, so a both-ways pin
+  needs either an enumerator over the prompt constructors or a table
+  they all draw from — a refactor, not a doc pass. Prose stays
+  unpinnable.
 
 ## Validate
 

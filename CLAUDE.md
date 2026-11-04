@@ -157,9 +157,15 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (`TestREADME_MenuReferenceListsEveryRow`: one `####` table per section,
   Row cell = label in backticks, `<…>` for the varying part of a labelFor
   row, Key = the menu's hint verbatim), the `Tool window` table
-  (`TestREADME_ToolWindowTableListsEveryTool`) and the config.json table
-  (`TestREADME_ConfigTableListsEveryKey`, keys from `fileFormat`). All
-  parse through `internal/readme` — don't hand-roll another parser.
+  (`TestREADME_ToolWindowTableListsEveryTool`), the config.json table
+  (`TestREADME_ConfigTableListsEveryKey`, keys from `fileFormat`), the
+  `#### Command-key accelerators` table (`TestREADME_CommandKeyTableListsEveryChord`:
+  Action = the metaAccels label; non-table chords in
+  `metaChordsOutsideTable`) and `### Right-click menus` — one `####`
+  table each for File tree / Tab / Editor (`pinRightClickREADME`; the
+  menus are built from state, so each test's FIXTURE must reach every
+  row — extend it, never drop a README row). All parse through
+  `internal/readme` — don't hand-roll another parser.
 - **newTestApp stubs every host side effect** (LSP/Copilot/chat dead,
   `lspLookPath`/`chatLookPath` never-found, builtin formatters nil,
   plugin/skill/theme/chat-archive/history/session/favorites paths at temp

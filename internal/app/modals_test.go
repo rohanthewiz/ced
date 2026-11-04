@@ -1476,3 +1476,53 @@ func TestPromptClickAway_HookAnswersBeforeTheCancel(t *testing.T) {
 		}
 	}
 }
+
+// treeMenuLabels is every row openTreeContext builds across nodes chosen
+// to reach them all — the project root, a ticked folder, a Markdown file
+// and an executable — in a repository, with something on the file
+// clipboard.
+func treeMenuLabels(t *testing.T) []string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(filepath.Join(dir, "notes.md"), "# n\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "run.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, dir)
+	a.gitIsRepo = true
+	a.fileClipPaths = []string{filepath.Join(dir, "notes.md")}
+	byName := map[string]*filetree.Node{}
+	for _, c := range a.tree.Root.Children {
+		byName[c.Name] = c
+	}
+	for _, n := range []string{"sub", "notes.md", "run.sh"} {
+		if byName[n] == nil {
+			t.Fatalf("fixture: %s not in the tree", n)
+		}
+	}
+	if !byName["run.sh"].IsExec {
+		t.Fatal("fixture: run.sh is not seen as executable")
+	}
+	a.tree.SetMark(byName["sub"], true)
+	var out []string
+	for _, n := range []*filetree.Node{a.tree.Root, byName["sub"], byName["notes.md"], byName["run.sh"]} {
+		a.openTreeContext(n, 5, 5)
+		for _, it := range contextOf(a).items {
+			out = append(out, it.label)
+		}
+		a.closeModal()
+	}
+	return out
+}
+
+// TestREADME_TreeMenuTableListsEveryRow pins README.md's file-tree
+// right-click table to openTreeContext, both ways (N-110).
+func TestREADME_TreeMenuTableListsEveryRow(t *testing.T) {
+	pinRightClickREADME(t, "File tree", treeMenuLabels(t))
+}
+

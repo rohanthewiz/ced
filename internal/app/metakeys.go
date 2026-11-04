@@ -201,11 +201,10 @@ func metaAccels() []metaAccel {
 		// program on the machine spells the same way. It waited until
 		// Select all had a ≡ Edit row to be a second door onto (the
 		// never-the-only-path rule); the verb has no Esc key and will not
-		// get one. Live in kitty, Ghostty and WezTerm today. Browser-cats
-		// forwards ⌘ chords from an allowlist (CMD_TO_PANE in cats'
-		// 20-keys.js) that does not hold KeyA yet, so there the browser
-		// keeps the chord for its own select-all until cats adds it — the
-		// road ⌘E took.
+		// get one. Live in kitty, Ghostty and WezTerm, and in browser-cats
+		// since cats added KeyA to its CMD_TO_PANE allowlist (bd18905) —
+		// the road ⌘E took; whether Chrome and the mac app hand it over is
+		// N-026's hand check.
 		{key: 'a', action: (*App).menuSelectAll, label: "Select all"},
 		// ⌘[ / ⌘] walk the file-navigation history (nav.go) — the
 		// GoLand/VS Code "navigate back / forward" spelling, and the one

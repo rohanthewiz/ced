@@ -16,6 +16,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/ced/internal/editor"
+	"github.com/rohanthewiz/ced/internal/readme"
 )
 
 // armMetaHost makes the ⌘ layer live for one test by claiming to be
@@ -714,3 +715,82 @@ func TestMetaFileMotionDoesNotShadowMoveLine(t *testing.T) {
 		t.Fatalf("Alt+Up left line 0 as %q, want the middle line moved up", got)
 	}
 }
+
+// metaChordSpelling is how the README writes a table chord: ⌘, then ⇧
+// for a shifted one, then the keycap upper-cased (⌘⇧P, ⌘/, ⌘[).
+func metaChordSpelling(m metaAccel) string {
+	s := "⌘"
+	if m.shift {
+		s += "⇧"
+	}
+	return s + strings.ToUpper(string(m.key))
+}
+
+// metaChordsOutsideTable are the ⌘ chords ced answers WITHOUT a metaAccels
+// row — the arrows dispatch from the editing switch (metaLineMotion), and
+// ⌘C / ⌘V / ⌘Z from handleKey, because each is context-sensitive. The
+// README lists them in the same table; this set is what lets the pin
+// below tell them from a stale row.
+var metaChordsOutsideTable = map[string]bool{
+	"⌘←": true, "⌘→": true, "⌘↑": true, "⌘↓": true,
+	"⌘C": true, "⌘V": true, "⌘Z": true,
+}
+
+// TestREADME_CommandKeyTableListsEveryChord pins README.md's
+// "#### Command-key accelerators" table to metaAccels, both ways (N-110):
+// every table chord has a row whose Action is the entry's label and
+// whose "Same as" names the other door (the never-the-only-path rule,
+// stated where a reader sees it); every chord the README names is a
+// table entry or one of the few dispatched outside it.
+func TestREADME_CommandKeyTableListsEveryChord(t *testing.T) {
+	doc, err := readme.LoadRepo()
+	if err != nil {
+		t.Fatalf("load README: %v", err)
+	}
+	sec, ok := doc.Section(4, "Command-key accelerators")
+	if !ok {
+		t.Fatal(`README has no "#### Command-key accelerators" section`)
+	}
+	tables := sec.Tables()
+	if len(tables) != 1 {
+		t.Fatalf("README line %d: the ⌘ section has %d tables, want 1", sec.Line, len(tables))
+	}
+	table := map[string]metaAccel{}
+	for _, m := range metaAccels() {
+		table[metaChordSpelling(m)] = m
+		if metaChordsOutsideTable[metaChordSpelling(m)] {
+			t.Errorf("%s is in metaAccels AND listed as dispatched outside it", metaChordSpelling(m))
+		}
+	}
+	listed := map[string]bool{}
+	for _, r := range tables[0].Rows {
+		chords := readme.CodeSpans(r.Cell(0))
+		if len(chords) == 0 {
+			t.Errorf("README line %d: Chord cell %q names no chord in backticks", r.Line, r.Cell(0))
+		}
+		if strings.TrimSpace(r.Cell(2)) == "" {
+			t.Errorf("README line %d: %q names no other door (Same as)", r.Line, r.Cell(0))
+		}
+		for _, c := range chords {
+			listed[c] = true
+			m, inTable := table[c]
+			switch {
+			case inTable && r.Cell(1) != m.label:
+				t.Errorf("README line %d: %s Action = %q, want %q (its metaAccels label)", r.Line, c, r.Cell(1), m.label)
+			case !inTable && !metaChordsOutsideTable[c]:
+				t.Errorf("README line %d: %s is no ⌘ chord ced answers (removed or rebound?)", r.Line, c)
+			}
+		}
+	}
+	for c := range table {
+		if !listed[c] {
+			t.Errorf("metaAccels binds %s (%s), but the README table has no row for it", c, table[c].label)
+		}
+	}
+	for c := range metaChordsOutsideTable {
+		if !listed[c] {
+			t.Errorf("ced answers %s outside metaAccels, but the README table has no row for it", c)
+		}
+	}
+}
+

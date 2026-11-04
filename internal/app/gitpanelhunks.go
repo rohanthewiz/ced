@@ -311,6 +311,23 @@ func (a *App) gitPanelHunkClick(x, y int) bool {
 	return false
 }
 
+// gitPanelHunkChipHit reports whether (x, y) is on a hunk chip, without
+// running it — the press router's question, asked before the click so a
+// verb's press never also starts a drag-select.
+func (a *App) gitPanelHunkChipHit(x, y int) bool {
+	_, py, _, ph := a.gitPanelRect()
+	row := y - py - 1
+	if row < 0 || row >= ph-1 {
+		return false
+	}
+	for _, chip := range a.gitPanelHunkChipsAt(a.gitPanel.diffScroll + row) {
+		if chip.rect.contains(x, y) {
+			return true
+		}
+	}
+	return false
+}
+
 // -----------------------------------------------------------------------------
 // Building the patch
 // -----------------------------------------------------------------------------

@@ -73,6 +73,7 @@ package app
 
 import (
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -397,7 +398,6 @@ func (m *cherryPickModal) drawDiffPane(a *App) {
 
 	well := tcell.StyleDefault.Background(th.BG)
 	fillRect(a.screen, mx+1, top, mw-2, n, well)
-	w := mw - 4
 	switch {
 	case !ok:
 		drawAt(a.screen, mx+2, top, "No commit highlighted", well.Foreground(th.Muted))
@@ -409,9 +409,63 @@ func (m *cherryPickModal) drawDiffPane(a *App) {
 	// One painter for every diff pane (diffview.go): tabs expanded at
 	// the hunk's own prefix width (a combined diff from old git has one
 	// prefix column per parent), side by side when that's on.
-	a.drawDiffRows(lines, &m.diff.pane, m.diffRows(a), diffPaint{
-		x: mx + 2, y: top, w: w, n: n, scroll: m.diff.scroll,
+	a.drawDiffRows(lines, &m.diff.pane, m.diffRows(a), m.diffPaint(a))
+}
+
+// diffPaint is the preview body's paint geometry — the ONE source for
+// the painter and the drag-select hit-test, so a drag lands on the cell
+// it was drawn in: two columns inside the dialog's frame, the body rows
+// diffPaneRows names.
+func (m *cherryPickModal) diffPaint(a *App) diffPaint {
+	mx, _, mw, _ := m.rect(a)
+	_, top, n := m.diffPaneRows(a)
+	th := a.theme
+	return diffPaint{
+		x: mx + 2, y: top, w: mw - 4, n: n, scroll: m.diff.scroll,
 		style: func(line string) tcell.Style { return gitPanelDiffStyle(line, th) },
 		bg:    th.BG,
-	})
+	}
+}
+
+// startDiffSelection arms a drag-select when (x, y) is on the preview's
+// text (N-087), reporting whether it did. Only with the pane open and the
+// highlighted commit's diff loaded — "Loading diff…" is not text.
+func (m *cherryPickModal) startDiffSelection(a *App, x, y int) bool {
+	if !m.diffPaneContains(a, x, y) {
+		return false
+	}
+	lines, ok := m.diffLines()
+	if !ok || len(lines) == 0 {
+		return false
+	}
+	if !m.diff.pane.diffSelStart(lines, m.diffRows(a), m.diffPaint(a), x, y) {
+		return false
+	}
+	m.selecting = true
+	return true
+}
+
+// extendDiffSelection moves the selection's head to the pointer.
+func (m *cherryPickModal) extendDiffSelection(a *App, x, y int) {
+	if lines, ok := m.diffLines(); ok {
+		m.diff.pane.diffSelExtend(lines, m.diffRows(a), m.diffPaint(a), x, y)
+	}
+}
+
+// copyDiffSelection puts the preview's selection on both clipboards
+// (chatCopy, the shared path), flashing the line count. hint makes an
+// empty selection say how to make one — the ⌘C door's courtesy.
+func (m *cherryPickModal) copyDiffSelection(a *App, hint bool) {
+	lines, ok := m.diffLines()
+	text := ""
+	if ok {
+		text = m.diff.pane.diffSelText(lines, m.diffRows(a))
+	}
+	if text == "" {
+		if hint {
+			a.flash("Drag across the diff preview to select text — it copies on release")
+		}
+		return
+	}
+	a.chatCopy(text, plural(strings.Count(text, "\n")+1, "line", "lines"))
 }

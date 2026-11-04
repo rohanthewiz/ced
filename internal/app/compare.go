@@ -677,6 +677,12 @@ func (a *App) comparePanelPress(x, y int) (dragMode string) {
 		return ""
 	}
 	a.lastClick = clickRecord{x: x, y: y, when: now}
+	// A single press on the text also arms a drag-select (N-087) — after
+	// the revert chip had its refusal above, so a verb click never starts
+	// one, and after the double-click record, so the jump still works.
+	if a.diffSelArm("comparesel", x, y) {
+		return "comparesel"
+	}
 	return ""
 }
 
@@ -786,15 +792,25 @@ func (a *App) drawComparePanel() {
 	// The rows — unified or side by side, one painter for every pane —
 	// then the revert chips over the right end of each hunk header.
 	rows := a.compareRows()
-	a.drawDiffRows(a.compare.lines, &a.compare.pane, rows, diffPaint{
-		x: px + 2, y: py + 1, w: pw - 3, n: ph - 1, scroll: a.compare.scroll,
-		style: func(line string) tcell.Style { return gitPanelDiffStyle(line, th) },
-		bg:    th.BG,
-	})
+	a.drawDiffRows(a.compare.lines, &a.compare.pane, rows, a.comparePaint())
 	for row := 0; row < ph-1; row++ {
 		if chip, ok := a.compareRevertChipAt(a.compare.scroll + row); ok {
 			drawAt(a.screen, chip.x, chip.y, gitHunkChipLabel(hunkRevert), a.compareRevertChipStyle())
 		}
+	}
+}
+
+// comparePaint is the panel body's paint geometry — the ONE source for the
+// painter and the drag-select hit-test (diffSelSurfaces), so a drag lands
+// on the cell it was drawn in. Text starts two columns in (the gap
+// carries the ▸ change marker) and stops one short of the edge.
+func (a *App) comparePaint() diffPaint {
+	px, py, pw, ph := a.comparePanelRect()
+	th := a.theme
+	return diffPaint{
+		x: px + 2, y: py + 1, w: pw - 3, n: ph - 1, scroll: a.compare.scroll,
+		style: func(line string) tcell.Style { return gitPanelDiffStyle(line, th) },
+		bg:    th.BG,
 	}
 }
 

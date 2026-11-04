@@ -3183,8 +3183,10 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// universal "drop that" gesture, and a stale highlight sitting
 		// in the panel has no other way out.
 		a.chatClearSelection()
-		// …and for the git log detail's highlight, same reasoning.
+		// …and for the git log detail's highlight, same reasoning —
+		// and every other diff pane's (diffSelSurfaces).
 		a.gitLog.pane.clearSel()
+		a.diffSelClearAll()
 		// …and for an armed compare panel: Esc is the universal "drop
 		// that", and a mode still claiming the next paste is exactly the
 		// thing a user reaches for Esc to get out of.
@@ -3388,6 +3390,11 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 		// drag must not undo the drag.
 		if ev.Rune() == 'c' && a.gitLogHasSelection() {
 			a.gitLogCopySelection(true)
+			return
+		}
+		// Same for a compare / git panel diff selection.
+		if s, ok := a.diffSelLive(); ok && ev.Rune() == 'c' {
+			a.diffSelCopy(s, true)
 			return
 		}
 		switch ev.Rune() {
@@ -3956,6 +3963,10 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		a.gitLogSelDrag(x, y)
 		return
 	}
+	// …and the compare panel's / git panel diff's (diffSelSurfaces).
+	if leftDown && a.diffSelDrag(x, y) {
+		return
+	}
 
 	// Compare panel resize drag — same gesture, other bottom panel.
 	if leftDown && a.dragMode == "comparepanel" {
@@ -4017,6 +4028,7 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 		if !a.gitLogContains(x, y) {
 			a.gitLog.pane.clearSel()
 		}
+		a.diffSelClearOutside(x, y)
 		// The tree follows the same click-where-you-want-to-type rule:
 		// a press outside the sidebar hands the keyboard back; a press
 		// on a tree row (sidebarClick) takes it, and moves the cursor.
@@ -4199,6 +4211,8 @@ func (a *App) handleMouse(ev *tcell.EventMouse) {
 	if a.dragMode == "gitlogsel" {
 		a.gitLogSelFinish()
 	}
+	// So does a compare / git panel diff drag (diffSelSurfaces).
+	a.diffSelRelease()
 	a.dragMode, a.dragSplitOffset = "", 0
 	a.stopAutoScroll()
 }

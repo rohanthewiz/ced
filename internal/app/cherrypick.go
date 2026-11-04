@@ -188,6 +188,11 @@ type cherryPickModal struct {
 	lastBtn      tcell.ButtonMask
 	lastClickRow int
 	lastClickAt  time.Time
+
+	// selecting is a drag-select in the diff preview, from its press to
+	// its release (N-087). A modal owns its mouse — the app's drag modes
+	// never see these events — so the drag is the dialog's own state.
+	selecting bool
 }
 
 // cherryPickLoadEvent carries a finished commit listing to the main loop.
@@ -1054,6 +1059,12 @@ func (m *cherryPickModal) drawRow(a *App, idx, y int) {
 // the modal owns the keyboard, so the ≡ menu cannot be their door
 // (alt+d is the diff toggle's).
 func (m *cherryPickModal) handleKey(a *App, ev *tcell.EventKey) {
+	// ⌘C with a live preview selection copies it again (the release
+	// already did); otherwise ⌘C is not the dialog's.
+	if ev.Modifiers()&tcell.ModMeta != 0 && ev.Key() == tcell.KeyRune && ev.Rune() == 'c' {
+		m.copyDiffSelection(a, true)
+		return
+	}
 	if ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune {
 		switch ev.Rune() {
 		case 'a':
@@ -1140,7 +1151,23 @@ func (m *cherryPickModal) changeSource(a *App) {
 // buttons, options and source does what they say. Outside dismisses.
 func (m *cherryPickModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 	pressed := btn&tcell.Button1 != 0 && m.lastBtn&tcell.Button1 == 0
+	released := btn&tcell.Button1 == 0 && m.lastBtn&tcell.Button1 != 0
 	m.lastBtn = btn
+	// A drag-select in the preview owns the gesture until its release:
+	// motion extends it (outside the pane too — the hit-test clamps), the
+	// release copies (the git log's copy-on-release rule).
+	if m.selecting {
+		switch {
+		case released:
+			m.selecting = false
+			m.copyDiffSelection(a, false)
+			return
+		case btn&tcell.Button1 != 0 && !pressed:
+			m.extendDiffSelection(a, x, y)
+			return
+		}
+		m.selecting = false
+	}
 	if btn&(tcell.WheelUp|tcell.WheelDown) != 0 && m.diffPaneContains(a, x, y) {
 		m.scrollDiffWheel(a, btn)
 		return
@@ -1162,6 +1189,12 @@ func (m *cherryPickModal) handleMouse(a *App, x, y int, btn tcell.ButtonMask) {
 		a.closeModal()
 		return
 	}
+	// A press anywhere but the preview's text drops its highlight; one on
+	// the text starts a new selection (a plain click selects nothing).
+	if m.startDiffSelection(a, x, y) {
+		return
+	}
+	m.diff.pane.clearSel()
 	all, cancel, submit := m.buttons(a)
 	origin, stage := m.optionRects(a)
 	switch {

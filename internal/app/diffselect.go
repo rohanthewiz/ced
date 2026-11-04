@@ -9,9 +9,12 @@
 // panels capture the mouse, so the terminal's own drag-select never
 // reaches their text — a pane that wants its text copyable has to
 // select it itself, exactly as the chat transcript does
-// (copilot_chat.go). The git log's commit detail is the first surface
+// (copilot_chat.go). The git log's commit detail was the first surface
 // to arm it; the state and the painter live on the shared layer so any
-// other pane can opt in with a press/drag/release of its own.
+// other pane can opt in with a press/drag/release of its own. The
+// compare panel and the git panel's diff opt in through diffSelSurfaces
+// (below, N-087), and the cherry-pick dialog's preview inside its own
+// modal (cherrypickdiff.go), since a modal owns its mouse.
 //
 // Design choices:
 //
@@ -275,6 +278,145 @@ func (a *App) paintDiffSelection(lines []string, p *diffPane, rows []diffRow, d 
 		for c := from; c < min(to, w); c++ {
 			mainc, comb, st, _ := a.screen.GetContent(x+c, d.y+row)
 			a.screen.SetContent(x+c, d.y+row, mainc, comb, st.Background(a.theme.Selection))
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Tool-window surfaces (N-087)
+// -----------------------------------------------------------------------------
+
+// diffSelSurface is one tool-window diff pane that offers drag-select:
+// the drag mode its press starts, and how to reach its pane, its text and
+// its paint geometry. The geometry is the pane's OWN paint method — the
+// one its draw uses too — so a drag lands on the cell it was drawn in
+// (the gitLogDetailPaint rule).
+//
+// A registry rather than three copies of the git log's wiring: the drag
+// continuation, the release, Esc, the outside press and ⌘C are one loop
+// each in app.go. The git log keeps its own, older, wiring (gitlog.go);
+// folding it in is a refactor with nothing to gain for the user.
+type diffSelSurface struct {
+	mode     string // drag mode a press on its text starts
+	what     string // the pane's name, for the ⌘C hint
+	open     func(*App) bool
+	contains func(*App, int, int) bool
+	pane     func(*App) *diffPane
+	lines    func(*App) []string
+	rows     func(*App) []diffRow
+	paint    func(*App) diffPaint
+}
+
+// diffSelSurfaces lists the tool-window panes that select on drag.
+func diffSelSurfaces() []diffSelSurface {
+	return []diffSelSurface{
+		{
+			mode: "comparesel", what: "the compare panel",
+			open:     func(a *App) bool { return a.compare.open },
+			contains: (*App).comparePanelContains,
+			pane:     func(a *App) *diffPane { return &a.compare.pane },
+			lines:    func(a *App) []string { return a.compare.lines },
+			rows:     (*App).compareRows,
+			paint:    (*App).comparePaint,
+		},
+		{
+			mode: "gitpanelsel", what: "the git panel's diff",
+			open:     func(a *App) bool { return a.gitPanel.open },
+			contains: (*App).gitPanelContains,
+			pane:     func(a *App) *diffPane { return &a.gitPanel.pane },
+			lines:    func(a *App) []string { return a.gitPanel.diffLines },
+			rows:     (*App).gitPanelDiffRows,
+			paint:    (*App).gitPanelDiffPaint,
+		},
+	}
+}
+
+// diffSelSurfaceFor finds the surface whose drag mode is mode.
+func diffSelSurfaceFor(mode string) (diffSelSurface, bool) {
+	for _, s := range diffSelSurfaces() {
+		if s.mode == mode {
+			return s, true
+		}
+	}
+	return diffSelSurface{}, false
+}
+
+// diffSelArm starts a selection on surface mode's pane when (x, y) is on
+// its text, reporting whether it did — the press's last step, AFTER the
+// pane's own chips and clicks have had their turn. A plain click thus
+// clears the previous highlight: the new anchor selects nothing.
+func (a *App) diffSelArm(mode string, x, y int) bool {
+	s, ok := diffSelSurfaceFor(mode)
+	if !ok {
+		return false
+	}
+	return s.pane(a).diffSelStart(s.lines(a), s.rows(a), s.paint(a), x, y)
+}
+
+// diffSelDrag extends the live drag's selection to the pointer, reporting
+// whether a.dragMode was a surface's. It runs outside the pane too —
+// diffSelPosAt clamps to the visible rows.
+func (a *App) diffSelDrag(x, y int) bool {
+	s, ok := diffSelSurfaceFor(a.dragMode)
+	if !ok {
+		return false
+	}
+	s.pane(a).diffSelExtend(s.lines(a), s.rows(a), s.paint(a), x, y)
+	return true
+}
+
+// diffSelRelease is a surface drag's release: COPY ON RELEASE, the git
+// log's rule (gitLogSelFinish says why tmux makes it the one gesture
+// every host delivers). An empty selection — a plain click — copies
+// nothing and says nothing.
+func (a *App) diffSelRelease() {
+	if s, ok := diffSelSurfaceFor(a.dragMode); ok {
+		a.diffSelCopy(s, false)
+	}
+}
+
+// diffSelCopy puts surface s's selection on both clipboards (chatCopy,
+// the shared path) with a line count. hint makes an empty selection say
+// how to select — the ⌘C door wants that; the release doesn't.
+func (a *App) diffSelCopy(s diffSelSurface, hint bool) {
+	text := s.pane(a).diffSelText(s.lines(a), s.rows(a))
+	if text == "" {
+		if hint {
+			a.flash("Drag across " + s.what + " to select text — it copies on release")
+		}
+		return
+	}
+	a.chatCopy(text, plural(strings.Count(text, "\n")+1, "line", "lines"))
+}
+
+// diffSelLive returns the open surface holding a non-empty selection —
+// the ⌘C branch's test for whether a pane, not the editor, owns the copy.
+func (a *App) diffSelLive() (diffSelSurface, bool) {
+	for _, s := range diffSelSurfaces() {
+		if !s.open(a) {
+			continue
+		}
+		if _, _, ok := s.pane(a).diffSelRange(); ok {
+			return s, true
+		}
+	}
+	return diffSelSurface{}, false
+}
+
+// diffSelClearAll drops every surface's highlight — Esc's side effect.
+func (a *App) diffSelClearAll() {
+	for _, s := range diffSelSurfaces() {
+		s.pane(a).clearSel()
+	}
+}
+
+// diffSelClearOutside drops the highlight of every surface the press at
+// (x, y) is NOT inside, so ⌘C after selecting in the editor copies the
+// editor's text, not a stale pane selection the user moved on from.
+func (a *App) diffSelClearOutside(x, y int) {
+	for _, s := range diffSelSurfaces() {
+		if !s.contains(a, x, y) {
+			s.pane(a).clearSel()
 		}
 	}
 }

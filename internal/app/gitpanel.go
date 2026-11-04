@@ -823,7 +823,16 @@ func (a *App) gitPanelPress(x, y int) (dragMode string) {
 		a.dragSplitOffset = x - a.gitPanelDividerX()
 		return "gitlistdiv"
 	}
+	// A hunk chip's press is the chip's alone: asked BEFORE the click
+	// runs it (a verb may replace the diff), and it starts no selection.
+	onChip := a.gitPanelHunkChipHit(x, y)
 	a.gitPanelClick(x, y)
+	// A press on the diff text also arms a drag-select (N-087), after
+	// the click so the double-click jump keeps working — the git log's
+	// order (gitLogPress).
+	if !onChip && a.diffSelArm("gitpanelsel", x, y) {
+		return "gitpanelsel"
+	}
 	return ""
 }
 
@@ -1132,24 +1141,35 @@ func (a *App) drawGitPanel() {
 			a.screen.SetContent(cx, ry, ' ', nil, diffBG)
 		}
 	}
-	a.drawGitPanelDiff(px+listW+2, py+1, pw-listW-3, ph-1)
+	a.drawGitPanelDiff()
 }
 
 // drawGitPanelDiff paints the diff pane's visible rows — unified or side
 // by side (diffview.go) — then the hunk chips over the right end of
 // each visible hunk header.
-func (a *App) drawGitPanelDiff(x, y, w, n int) {
-	if w <= 0 {
+func (a *App) drawGitPanelDiff() {
+	d := a.gitPanelDiffPaint()
+	if d.w <= 0 {
 		return
 	}
+	a.drawDiffRows(a.gitPanel.diffLines, &a.gitPanel.pane, a.gitPanelDiffRows(), d)
+	for row := 0; row < d.n; row++ {
+		a.drawGitPanelHunkChips(a.gitPanel.diffScroll + row)
+	}
+}
+
+// gitPanelDiffPaint is the diff pane's paint geometry — the ONE source
+// for the painter and the drag-select hit-test (diffSelSurfaces): right
+// of the list and its divider, two columns in (the ▸ change marker's
+// gap), one short of the panel's edge, every body row.
+func (a *App) gitPanelDiffPaint() diffPaint {
+	px, py, pw, ph := a.gitPanelRect()
+	listW := a.gitPanelListW(pw)
 	th := a.theme
-	a.drawDiffRows(a.gitPanel.diffLines, &a.gitPanel.pane, a.gitPanelDiffRows(), diffPaint{
-		x: x, y: y, w: w, n: n, scroll: a.gitPanel.diffScroll,
+	return diffPaint{
+		x: px + listW + 2, y: py + 1, w: pw - listW - 3, n: ph - 1, scroll: a.gitPanel.diffScroll,
 		style: func(line string) tcell.Style { return gitPanelDiffStyle(line, th) },
 		bg:    th.BG,
-	})
-	for row := 0; row < n; row++ {
-		a.drawGitPanelHunkChips(a.gitPanel.diffScroll + row)
 	}
 }
 

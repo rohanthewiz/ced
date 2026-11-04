@@ -57,17 +57,6 @@ plus the LSP work done in the seeding session itself
   status, New branch) into one "Git…" picker row to keep the popup
   short.
 
-- **N-087** · raised `2026-1023-1213-gitlog-detail-select-copy` · value low
-  Drag-select lives on the shared `diffPane` layer, but only the git
-  log's detail arms it (`"gitlogsel"`). The compare panel, the git
-  panel's diff pane and the cherry-pick preview capture the mouse the
-  same way and still can't be copied from. Each needs a press/drag/
-  release wired to `diffSelStart`/`diffSelExtend`/`diffSelText` and a
-  paint-geometry helper shared with its draw (the `gitLogDetailPaint`
-  pattern). Watch the git panel's hunk chips and compare `[↺]`, which
-  must keep winning their presses. Copied text is the DISPLAY form
-  (tabs expanded) — revisit if lifting tab-indented code bites.
-
 - **N-095** · raised `2026-1026-1545-find-click-to-line-esc-back` · value low
   The find bar's Esc now goes back to where the bar opened, so there is
   no KEYBOARD way to close the bar and stay on a hit: the doors are a
@@ -347,7 +336,12 @@ and `raised`.
   highlights live, the release lands on the SYSTEM clipboard via OSC 52
   through tmux passthrough (paste it outside ced), split mode stays on
   the pressed side, dragging onto a clipped row's … takes the line's
-  tail, and Esc / a click elsewhere drops the highlight.
+  tail, and Esc / a click elsewhere drops the highlight. Since
+  `2026-1104-1610-n067-sql-formatter-real-run` (N-087) the compare panel,
+  the git panel's diff and the cherry-pick preview select the same way
+  (run-ced PTY: a scripted drag across the git panel diff flashed "3
+  lines copied"): check those three too, and that the git panel's hunk
+  chips and the compare `[↺]` still answer a real click.
 
 - **N-088** · raised `2026-1025-2017-cmd-up-down-l-g-chords` · value medium
   ⌘↑ / ⌘↓ (top / end of file, ⌘⇧ selecting; the markdown preview's top /
@@ -542,6 +536,26 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-04, `2026-1104-1610-n067-sql-formatter-real-run` —
+  **N-087** drag-select now works in every diff pane. The compare panel
+  and the git panel's diff join through a small registry,
+  `diffSelSurfaces` (diffselect.go: drag mode, pane, lines, rows, paint),
+  so app.go's drag / release / Esc / outside press / ⌘C are one loop
+  each (`diffSelDrag`, `diffSelRelease`, `diffSelClearAll`,
+  `diffSelClearOutside`, `diffSelLive`); the git log keeps its older
+  wiring. Each pane's paint geometry is ONE method its draw uses too
+  (`comparePaint`, `gitPanelDiffPaint`). The cherry-pick preview runs the
+  drag inside its modal (`selecting`, `diffPaint`, ⌘C in its handleKey),
+  since a modal owns its mouse. Chips keep winning: the compare `[↺]` is
+  checked before arming, and the git panel asks `gitPanelHunkChipHit`
+  before its click. Real binary: a scripted SGR drag across the git
+  panel diff flashed "3 lines copied". Tests:
+  `TestCompareSel_DragCopiesOnRelease`,
+  `TestGitPanelSel_DragCopiesAndChipsStillWin`,
+  `TestDiffSel_PressElsewhereAndCmdC`,
+  `TestCherryPickDiffSel_DragCopiesInsideTheDialog`. The real-mouse /
+  OSC 52 hand check joined N-086.
 
 - closed 2026-11-04, `2026-1104-1530-n108-n110-ctx-splits-readme-pins` —
   **N-108** the tree, tab and editor right-click menus carry dotted

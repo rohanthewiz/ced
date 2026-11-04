@@ -1015,9 +1015,16 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   cleared by the layout rebuild; ONE side per drag in split (holes
   skipped, full rows whole); text = display form, clipped rows whole
   (… = to EOL); geometry only via `diffSelTextRect`; painted as an
-  overlay at the end of `drawDiffRows`. Armed only by the git log detail
-  (`"gitlogsel"`): COPY ON RELEASE (⌘C rarely crosses tmux), Esc / an
-  outside press clear, ⌘C with a live selection copies it, not cmdCopy.
+  overlay at the end of `drawDiffRows`. Armed by EVERY diff pane: the
+  git log detail (`"gitlogsel"`, its own wiring), the compare panel and
+  the git panel's diff through `diffSelSurfaces` (`"comparesel"` /
+  `"gitpanelsel"`; each pane's paint method — `comparePaint`,
+  `gitPanelDiffPaint` — feeds draw AND hit-test), and the cherry-pick
+  preview inside its modal (`selecting`, `diffPaint`). COPY ON RELEASE
+  (⌘C rarely crosses tmux), Esc / an outside press clear, ⌘C with a
+  live selection copies it, not cmdCopy. Arming runs AFTER the pane's
+  chips (`[↺]`, hunk chips — `gitPanelHunkChipHit` asked first) and its
+  double-click record.
 - Compare revert: `[↺]` per hunk only when the new side is a whole OPEN
   buffer (not selection/conflict — `compareRevertBlocked` says why);
   buffer edit, one undo step, unsaved, no confirm; "+" side VERIFIED

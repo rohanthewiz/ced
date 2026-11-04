@@ -184,3 +184,144 @@ func TestPaintDiffSelection_BackgroundsOnlySelectedCells(t *testing.T) {
 		t.Error("the cell after the selection was highlighted too")
 	}
 }
+
+// dragAcross presses at (x0, y0), moves with the button held to (x1, y1)
+// and releases there — the whole drag-select gesture through the real
+// mouse router.
+func dragAcross(a *App, x0, y0, x1, y1 int) {
+	a.handleMouse(tcell.NewEventMouse(x0, y0, tcell.Button1, tcell.ModNone))
+	a.handleMouse(tcell.NewEventMouse(x1, y1, tcell.Button1, tcell.ModNone))
+	a.handleMouse(tcell.NewEventMouse(x1, y1, tcell.ButtonNone, tcell.ModNone))
+}
+
+// TestCompareSel_DragCopiesOnRelease pins N-087 on the compare panel: a
+// press on the diff text starts "comparesel", the held motion extends
+// it, the release copies the display text (prefixes kept — it's a diff)
+// and the highlight stays up; Esc then drops it.
+func TestCompareSel_DragCopiesOnRelease(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.compareTexts("left", []string{"x", "y"}, "right", []string{"x", "z"})
+	a.draw()
+	d := a.comparePaint()
+	// Row 0 is "--- left"; find the "-y" / "+z" rows by content.
+	rows := a.compareRows()
+	minus, plus := -1, -1
+	for i, r := range rows {
+		switch a.compare.lines[r.line()] {
+		case "-y":
+			minus = i
+		case "+z":
+			plus = i
+		}
+	}
+	if minus < 0 || plus != minus+1 {
+		t.Fatalf("fixture rows: -y at %d, +z at %d in %q", minus, plus, a.compare.lines)
+	}
+	a.handleMouse(tcell.NewEventMouse(d.x, d.y+minus, tcell.Button1, tcell.ModNone))
+	if a.dragMode != "comparesel" {
+		t.Fatalf("press on the text started drag %q, want comparesel", a.dragMode)
+	}
+	a.handleMouse(tcell.NewEventMouse(d.x+2, d.y+plus, tcell.Button1, tcell.ModNone))
+	a.handleMouse(tcell.NewEventMouse(d.x+2, d.y+plus, tcell.ButtonNone, tcell.ModNone))
+	if a.clipBuf != "-y\n+z" {
+		t.Fatalf("clipboard = %q, want %q", a.clipBuf, "-y\n+z")
+	}
+	if _, ok := a.diffSelLive(); !ok {
+		t.Error("the highlight did not survive the release")
+	}
+	a.handleKey(keyEvent(tcell.KeyEsc, 0))
+	if _, ok := a.diffSelLive(); ok {
+		t.Error("Esc left the compare highlight up")
+	}
+}
+
+// TestGitPanelSel_DragCopiesAndChipsStillWin pins N-087 on the git panel's
+// diff: a drag over the text copies it, and a press on a hunk chip runs
+// the chip and starts NO selection — the chips must keep winning.
+func TestGitPanelSel_DragCopiesAndChipsStillWin(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitPanel.open = true
+	a.gitPanel.files = []gitPanelFile{{Path: "/p/f.txt", Rel: "f.txt", Code: " M"}}
+	a.gitPanel.diffLines = []string{
+		"diff --git a/f.txt b/f.txt", "--- a/f.txt", "+++ b/f.txt",
+		"@@ -1,2 +1,3 @@", " one", "+two", " three",
+	}
+	a.gitPanel.diffSide = sideUnstaged
+	a.draw()
+	d := a.gitPanelDiffPaint()
+	dragAcross(a, d.x, d.y+4, d.x+4, d.y+5) // " one" → "+two" (the head column is exclusive)
+	if a.clipBuf != " one\n+two" {
+		t.Fatalf("clipboard = %q, want %q", a.clipBuf, " one\n+two")
+	}
+
+	chips := a.gitPanelHunkChipsAt(3)
+	if len(chips) == 0 {
+		t.Fatal("fixture: no hunk chips on the @@ row")
+	}
+	a.handleMouse(tcell.NewEventMouse(chips[0].rect.x, chips[0].rect.y, tcell.Button1, tcell.ModNone))
+	if a.dragMode == "gitpanelsel" {
+		t.Error("a press on a hunk chip started a drag-select")
+	}
+	a.handleMouse(tcell.NewEventMouse(chips[0].rect.x, chips[0].rect.y, tcell.ButtonNone, tcell.ModNone))
+}
+
+// TestDiffSel_PressElsewhereAndCmdC covers the two remaining doors: ⌘C
+// with a live surface selection copies it (not the active file's path,
+// cmdCopy's answer), and a press outside the pane drops the highlight so
+// a later ⌘C belongs to the editor again.
+func TestDiffSel_PressElsewhereAndCmdC(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	t.Setenv("TERM", "xterm-kitty") // arm the ⌘ layer (metaAccelArmed)
+	a.compareTexts("left", []string{"x", "y"}, "right", []string{"x", "z"})
+	a.draw()
+	d := a.comparePaint()
+	dragAcross(a, d.x, d.y+1, d.x+4, d.y+2)
+	a.clipBuf = ""
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModMeta))
+	if a.clipBuf == "" {
+		t.Fatal("⌘C with a live compare selection copied nothing")
+	}
+	ex, ey, _, _ := a.editorRect()
+	a.handleMouse(tcell.NewEventMouse(ex+1, ey, tcell.Button1, tcell.ModNone))
+	a.handleMouse(tcell.NewEventMouse(ex+1, ey, tcell.ButtonNone, tcell.ModNone))
+	if _, ok := a.diffSelLive(); ok {
+		t.Error("a press outside the panel left its highlight up")
+	}
+}
+
+// TestCherryPickDiffSel_DragCopiesInsideTheDialog pins N-087 in the
+// cherry-pick preview, which lives in a modal and so runs the drag on its
+// own: press on the text, held motion, release copies; a press on the
+// list drops the highlight; ⌘C copies a live one again.
+func TestCherryPickDiffSel_DragCopiesInsideTheDialog(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	m := diffTestModal(a, 3, numberedLines(10))
+	m.toggleDiff(a)
+	a.draw()
+	d := m.diffPaint(a)
+	m.handleMouse(a, d.x, d.y, tcell.Button1)
+	if !m.selecting {
+		t.Fatal("a press on the preview text did not start a selection")
+	}
+	m.handleMouse(a, d.x+4, d.y+1, tcell.Button1) // the head column is exclusive
+	m.handleMouse(a, d.x+4, d.y+1, tcell.ButtonNone)
+	if a.clipBuf != "+line 1\n+lin" {
+		t.Fatalf("clipboard = %q, want %q", a.clipBuf, "+line 1\n+lin")
+	}
+	if a.modal != m {
+		t.Fatal("the drag closed the dialog")
+	}
+	a.clipBuf = ""
+	m.handleKey(a, tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModMeta))
+	if a.clipBuf == "" {
+		t.Error("⌘C with a live preview selection copied nothing")
+	}
+	_, _, listTop, _, _, _, _ := m.rowY(a)
+	mx, _, _, _ := m.rect(a)
+	m.handleMouse(a, mx+6, listTop, tcell.Button1)
+	m.handleMouse(a, mx+6, listTop, tcell.ButtonNone)
+	if _, _, ok := m.diff.pane.diffSelRange(); ok {
+		t.Error("a press on the list left the preview highlight up")
+	}
+}
+

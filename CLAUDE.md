@@ -196,7 +196,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `modal` interface; button geometry in ONE method returning `btnRect`s
   used by both draw and hit-test; single-line input = `textField`. Don't
   add per-modal fields to App. `openModal` replaces rather than refuses,
-  so unprompted arrivals must DECLINE an occupied slot.
+  so unprompted arrivals must DECLINE an occupied slot. A modal that
+  BORROWED editor state implements `replacedModal` (modal.go):
+  closeAllModals clears the slot, then calls `replaced` — the live
+  prompt cancels (`onCancel`), the Find-all list accepts and hands its
+  tint back. Hooks never open a modal and must be idempotent.
 - **Anchored context menus scroll** (`editorContextModal` and the tree's
   `contextModal` share `ctxScroll`, contextmenu.go): placed by the
   CLIPPED height, ▲/▼ on the borders, wheel, arrows reveal, a press on

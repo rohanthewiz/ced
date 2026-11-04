@@ -336,3 +336,32 @@ func TestFindAllLive_InheritsTheFindBarOrigin(t *testing.T) {
 		t.Errorf("cursor %v after Esc, want the bar's origin %v", tab.Cursor, origin)
 	}
 }
+
+// TestFindAllLive_ReplacedRestoresViewAndFindState pins N-093: a live
+// prompt displaced by another modal (an unprompted arrival that didn't
+// decline the slot) was not answered, so it puts the view and the tab's
+// find state back exactly as Esc does — instead of leaving the caret on
+// its last preview and its tint on the tab.
+func TestFindAllLive_ReplacedRestoresViewAndFindState(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.SetFindQuery("int")
+	prior := len(tab.FindMatches)
+	origin := editor.Position{Line: 3, Col: 0}
+	m := openLiveFindAll(t, a, tab, origin)
+	retype(a, m, "count")
+	if tab.Cursor == origin {
+		t.Fatal("setup: typing should preview a hit away from the origin")
+	}
+
+	a.openConfirm("Arrival", "something unprompted", func(*App) {})
+	if _, ok := a.modal.(*confirmModal); !ok {
+		t.Fatalf("modal = %T, want the arrival in the slot", a.modal)
+	}
+	if tab.Cursor != origin {
+		t.Errorf("cursor = %v, want the origin %v", tab.Cursor, origin)
+	}
+	if tab.FindQuery != "int" || len(tab.FindMatches) != prior {
+		t.Errorf("find state: %q ×%d, want int ×%d", tab.FindQuery, len(tab.FindMatches), prior)
+	}
+}
+

@@ -104,6 +104,47 @@ func TestCloseAllModalsClearsSlot(t *testing.T) {
 	}
 }
 
+// spyReplacedModal is a replacedModal that counts its hook calls and
+// records whether the slot was already clear when it ran.
+type spyReplacedModal struct {
+	calls     int
+	slotClear bool
+}
+
+func (m *spyReplacedModal) handleKey(*App, *tcell.EventKey)              {}
+func (m *spyReplacedModal) handleMouse(*App, int, int, tcell.ButtonMask) {}
+func (m *spyReplacedModal) draw(*App)                                    {}
+func (m *spyReplacedModal) replaced(a *App) {
+	m.calls++
+	m.slotClear = a.modal == nil
+}
+
+// TestCloseAllModals_TellsADisplacedModal pins the replacedModal contract
+// (N-093): a modal pushed out of the slot by openModal hears about it
+// exactly once, with the slot already clear (so its hook can't re-enter),
+// and a modal that leaves by its own exit (closeModal) is never told.
+func TestCloseAllModals_TellsADisplacedModal(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	spy := &spyReplacedModal{}
+	a.openModal(spy)
+	a.openConfirm("Arrival", "unprompted", nil)
+	if spy.calls != 1 || !spy.slotClear {
+		t.Errorf("displaced: calls=%d slotClear=%v, want 1 / true", spy.calls, spy.slotClear)
+	}
+	a.closeAllModals() // the confirm is in the slot now; the spy is gone
+	if spy.calls != 1 {
+		t.Errorf("a modal no longer in the slot was told again (calls=%d)", spy.calls)
+	}
+
+	own := &spyReplacedModal{}
+	a.openModal(own)
+	a.closeModal()
+	a.closeAllModals()
+	if own.calls != 0 {
+		t.Errorf("own exit: calls=%d, want 0", own.calls)
+	}
+}
+
 // -----------------------------------------------------------------------------
 // textField
 // -----------------------------------------------------------------------------

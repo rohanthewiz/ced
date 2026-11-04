@@ -42,6 +42,13 @@ const (
 // exclusive and a stale drag from before the modal opened can't keep
 // extending a selection underneath it.
 func (a *App) closeAllModals() {
+	// A modal that borrowed editor state hears that it is being displaced
+	// (replacedModal, modal.go) — cleared FIRST, so the hook runs once and
+	// sees an empty slot.
+	if r, ok := a.modal.(replacedModal); ok {
+		a.modal = nil
+		r.replaced(a)
+	}
 	a.menuOpen = false
 	a.modal = nil
 	// The find bar goes too, so its query is remembered on the way out —
@@ -206,8 +213,9 @@ type promptModal struct {
 	// answer while the question is still being typed.
 	//
 	// onCancel runs when the prompt goes away WITHOUT submitting — Esc,
-	// Cancel, a click outside — so a live prompt can put back what its
-	// onEdit moved. Submit doesn't run it: the callback owns that exit.
+	// Cancel, a click outside, and being REPLACED in the slot (replaced,
+	// below) — so a live prompt can put back what its onEdit moved.
+	// Submit doesn't run it: the callback owns that exit.
 	//
 	// onClickAway hears a left press OUTSIDE the box before it cancels.
 	// Returning true means the hook dismissed the prompt itself and
@@ -322,6 +330,17 @@ func (m *promptModal) submit(a *App) {
 // skipped by whichever of them a future edit forgets.
 func (m *promptModal) cancel(a *App) {
 	a.closeModal()
+	if m.onCancel != nil {
+		m.onCancel(a)
+	}
+}
+
+// replaced is the replacedModal hook: a prompt displaced by another modal
+// was not answered, so it is a cancel — onCancel runs, and a live prompt
+// puts the view and the tab's find state back exactly as Esc would
+// (N-093). The slot is already clear, so this is onCancel alone, not
+// cancel's closeModal + onCancel.
+func (m *promptModal) replaced(a *App) {
 	if m.onCancel != nil {
 		m.onCancel(a)
 	}

@@ -768,6 +768,17 @@ func (m *findAllModal) accept(a *App) {
 	a.closeModal()
 }
 
+// replaced is the replacedModal hook: an unprompted modal took the slot
+// (a references answer, a confirm, any closeAllModals) while the list was
+// up. That is one of the "other dismissals", which ACCEPT — the caret
+// stays where the last preview left it, as a click on the tree would
+// leave it — and like every accept it hands the borrowed tint back, which
+// is what used to be skipped (N-093). Only an unpinned list is ever in
+// the slot; a pinned panel lives in findAllPin and is untouched.
+func (m *findAllModal) replaced(a *App) {
+	m.restoreFind(a)
+}
+
 // abort puts the view back exactly as it was and closes.
 //
 // RestoreView rather than MoveCursorTo: the captured SCROLL is part of

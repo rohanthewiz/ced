@@ -68,15 +68,6 @@ plus the LSP work done in the seeding session itself
   must keep winning their presses. Copied text is the DISPLAY form
   (tabs expanded) — revisit if lifting tab-indented code bites.
 
-- **N-093** · raised `2026-1026-1159-find-all-live-prompt` · value low
-  The live Find-all prompt restores its borrowed view and tint only on
-  its own exits (Esc / Cancel / outside click / Enter). A prompt REPLACED
-  through `openModal` → `closeAllModals` (an unprompted arrival that
-  doesn't decline the occupied slot) leaves the caret on the last preview
-  and the tint on the tab. Same gap the Find-all list itself has
-  (`restoreFind` runs only on its exits); a modal-level "being replaced"
-  hook would fix both.
-
 - **N-095** · raised `2026-1026-1545-find-click-to-line-esc-back` · value low
   The find bar's Esc now goes back to where the bar opened, so there is
   no KEYBOARD way to close the bar and stay on a hit: the doors are a
@@ -97,8 +88,17 @@ plus the LSP work done in the seeding session itself
   file over TS 5.9 shows both. That's silent degradation working, but it
   means a fresh `npm i -g typescript-language-server typescript` install
   gives no TypeScript features. Decide: register TypeScript 7's own
-  language server (command line to be found), document "needs TS ≤ 5.x",
-  or both.
+  language server, document "needs TS ≤ 5.x", or both.
+  2026-11-04 (`2026-1104-1442-n102-n093-return-hints-modal-replaced`):
+  the command line is found. TypeScript 7.0.2's own `tsc` IS a language
+  server: `tsc --lsp --stdio` (npm `typescript@7`, a native
+  `typescript-darwin-arm64` binary behind `bin/tsc`) answers
+  `initialize`, and validates strictly — it refuses a request missing
+  `processId` / `rootUri` / `capabilities`, which ced sends. TS 5.x's
+  `tsc` has no `--lsp`, so registering it means telling the two apart
+  (a `tsc --version` probe, or trying it after typescript-language-server
+  reports TypeScript "1.0.0, bundled") before spawning. Its inlay-hint
+  and diagnostics support is unchecked.
 
 - **N-103** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value low
   **pyright is tried before basedpyright, so a machine with both gets no
@@ -540,6 +540,19 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-04, `2026-1104-1442-n102-n093-return-hints-modal-replaced` —
+  **N-093** a modal-level "being replaced" hook: `replacedModal`
+  (modal.go), called by `closeAllModals` with the slot ALREADY cleared,
+  so it runs once and never for a modal's own exits (each clears the
+  slot first). The live Find-all prompt treats it as a cancel
+  (`promptModal.replaced` → `onCancel` → view + find state back, as Esc);
+  the unpinned Find-all list treats it as an accept (caret stays on the
+  preview, tint handed back via `restoreFind`). Pinned by
+  `TestFindAllLive_ReplacedRestoresViewAndFindState`,
+  `TestFindAll_ReplacedHandsBackTheTint` and the contract test
+  `TestCloseAllModals_TellsADisplacedModal` — all three seen failing
+  without the hook. CLAUDE.md's single-modal rule records it.
 
 - closed 2026-11-04, `2026-1104-1442-n102-n093-return-hints-modal-replaced` —
   **N-102** a type hint anchored just past `)` (spaces skipped,

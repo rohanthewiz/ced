@@ -1845,6 +1845,30 @@ func TestFindAll_EscWithoutAPickRestores(t *testing.T) {
 	}
 }
 
+// TestFindAll_ReplacedHandsBackTheTint pins N-093's list half: a list
+// displaced by another modal is one of the "other dismissals", so it
+// ACCEPTS — the caret stays on the previewed hit — and, like every
+// accept, takes its borrowed tint with it rather than leaving it on the
+// tab.
+func TestFindAll_ReplacedHandsBackTheTint(t *testing.T) {
+	a, tab := seedFindAllApp(t)
+	tab.SetFindQuery("int")
+	prior := len(tab.FindMatches)
+	openFindAllT(t, a, "count")
+	if tab.FindQuery != "count" {
+		t.Fatalf("setup: the list should tint its query, tint is %q", tab.FindQuery)
+	}
+	previewed := tab.Cursor
+
+	a.openConfirm("Arrival", "something unprompted", func(*App) {})
+	if tab.FindQuery != "int" || len(tab.FindMatches) != prior {
+		t.Errorf("find state: %q ×%d, want int ×%d handed back", tab.FindQuery, len(tab.FindMatches), prior)
+	}
+	if tab.Cursor != previewed {
+		t.Errorf("cursor = %v, want it left on the preview %v (an accept)", tab.Cursor, previewed)
+	}
+}
+
 // TestFindAll_RerunAndDismissDoNotPick: the list's OWN highlight moves —
 // ⟳ re-anchoring, a dismissal sliding the highlight down — are not the
 // user choosing a row, so Esc is still the restore after them.

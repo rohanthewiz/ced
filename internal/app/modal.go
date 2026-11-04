@@ -43,6 +43,28 @@ type modal interface {
 	draw(a *App)
 }
 
+// replacedModal is the optional half of the contract for a modal that
+// BORROWED editor state while it was up — the live Find-all prompt moves
+// the view and tints the tab, the Find-all list tints it — and must hand
+// it back however it goes. Its own exits (Esc, Enter, a click outside)
+// already do. What they can't see is the slot being taken from under them:
+// openModal from an arrival that didn't decline an occupied slot, or any
+// other closeAllModals. closeAllModals calls replaced for that case, with
+// the slot ALREADY cleared, so the hook can't be re-entered and needs no
+// guard against its own exits (each clears the slot before acting, so
+// none of them reaches here).
+//
+//	own exit:  Esc / Enter / click ──► closeModal ──► restore (its own)
+//	replaced:  openModal(other) ──► closeAllModals ──► replaced ──► restore
+//
+// A hook must not open a modal itself (closeAllModals would recurse) and
+// should be idempotent: the Find-all list's replace confirm, for one,
+// displaces the list and then restores its tint by hand as well.
+type replacedModal interface {
+	modal
+	replaced(a *App)
+}
+
 // openModal installs m as the active modal, dismissing any other modal
 // (and the main menu / find bar) first so overlays stay mutually
 // exclusive — the invariant the old per-modal open helpers each

@@ -726,3 +726,49 @@ func TestCommitPromptHint_NamesTheChord(t *testing.T) {
 		t.Error("the chord is not on screen")
 	}
 }
+
+// TestHandleGitCommitDiff_RefusesOverAQueuedMessage pins N-097: a
+// composer message queued during the handshake must not be replaced by
+// the draft ask (an assignment used to drop it). The ask refuses with
+// the reason, leaves the queue as it was, claims nothing, and echoes no
+// orphan "Suggest a commit message" line.
+func TestHandleGitCommitDiff_RefusesOverAQueuedMessage(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+	a.chat.starting = true
+	a.chat.queuedPrompt = "hello from the composer"
+	before := len(a.chat.msgs)
+
+	a.handleGitCommitDiff(&gitCommitDiffEvent{when: time.Now(), diff: "@@ -1 +1 @@\n+new"})
+	if a.chat.queuedPrompt != "hello from the composer" {
+		t.Errorf("queuedPrompt = %q, want the user's message untouched", a.chat.queuedPrompt)
+	}
+	if a.chat.commitSuggest != nil {
+		t.Error("a refused ask still claimed the next answer")
+	}
+	if len(a.chat.msgs) != before {
+		t.Errorf("transcript grew by %d on a refused ask", len(a.chat.msgs)-before)
+	}
+	if !strings.Contains(a.statusMsg, "waiting") {
+		t.Errorf("statusMsg = %q, want the queued-message reason", a.statusMsg)
+	}
+}
+
+// TestCommitDraftBlockedReason_NamesAQueuedMessage covers the ✦ buttons'
+// pre-check: both the commit and the note prompt ask it BEFORE closing,
+// so a refusal here costs the user neither their queued message nor what
+// they had typed into the prompt.
+func TestCommitDraftBlockedReason_NamesAQueuedMessage(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+	a.chat.starting = true
+	if why := a.commitDraftBlockedReason(); why != "" {
+		t.Fatalf("empty queue: blocked with %q", why)
+	}
+	a.chat.queuedPrompt = "hello"
+	if why := a.commitDraftBlockedReason(); !strings.Contains(why, "waiting") {
+		t.Errorf("queued message: reason = %q, want it named", why)
+	}
+}

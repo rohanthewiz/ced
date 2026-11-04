@@ -86,16 +86,6 @@ plus the LSP work done in the seeding session itself
   bar chord (Alt+Enter, say) that closes and keeps the caret, plus its
   hint word.
 
-- **N-097** · raised `2026-1027-1312-ai-draft-queued-claim` · value low
-  **An AI-draft ask overwrites a queued composer message.** While the
-  agent's handshake is in flight, `handleGitCommitDiff` and
-  `noteSuggestTitle` set `a.chat.queuedPrompt = prompt` — an assignment,
-  not chatSend's append — so a chat message the user typed during the
-  same handshake (already echoed in the transcript) is silently dropped
-  and never sent. Appending would mix the user's text into the draft's
-  answer, so the likely fix is to refuse the ask with a flash when a
-  composer message is already queued.
-
 - **N-101** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value medium
   **typescript-language-server is dead over TypeScript 7, silently.**
   npm's `typescript@latest` is 7.0.2 (the native port), which ships no
@@ -560,12 +550,26 @@ Wanted, but not next. Parked, not declined.
 Newest first. Closures before 2026-09-21 live in the session docs.
 
 - closed 2026-11-04, `2026-1104-1349-n107-n109-n097-subtle-floor-pathinside-draft-queue` —
+  **N-097** a draft ask no longer overwrites a queued composer message:
+  ✦ commit message, ✦ note title and Summarize (whose queued branch
+  assigned too) REFUSE with "a chat message is waiting for <agent> to
+  start — try again once it has sent" (`chatQueueBusyReason`,
+  copilot_chat.go). Checked at every door: the ✦ buttons' pre-check
+  (`commitDraftBlockedReason`, before the prompt closes, so its text
+  survives), `gitPanelSuggestCommit`, `handleGitCommitDiff` again (the
+  diff returns from a fork), `noteSuggestTitle`, `menuSummarize` (before
+  the attach). The converse is closed too: Enter refuses to APPEND to a
+  queued CLAIMED draft (`chatQueueHoldsDraft`) and keeps the composer
+  text, since the mixed answer would be pre-filled as the draft. Five
+  tests, each seen failing on the old code.
+
+- closed 2026-11-04, `2026-1104-1349-n107-n109-n097-subtle-floor-pathinside-draft-queue` —
   **N-109** `relEscapes(rel)` (gitstatus.go, beside `pathInside`) is
   now the one "does this Rel answer leave its base?" test: exactly `..`
   or a `..` + separator prefix, so a child named `..x` is inside.
-  `pathInside` and the seven other bare `HasPrefix(rel, "..")` sites with
-  the same meaning (runexec, zipops, gitopstate, tabgroups, projectsearch
-  ×2, recentlocations, tabbar, finder) go through it. Cases added to
+  `pathInside` and the nine other sites asking the same question of a
+  Rel answer (runexec, zipops, gitopstate, tabgroups, projectsearch ×2,
+  recentlocations, tabbar, finder) go through it. Cases added to
   `TestPathInside` (`/foo/..x` inside, `/..foo` not) plus a
   `TestRelEscapes` table.
 

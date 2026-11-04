@@ -714,6 +714,37 @@ func (a *App) chatDisconnect() {
 // Prompt turns
 // -----------------------------------------------------------------------------
 
+// chatQueueBusyReason is why an AI-draft ask (✦ commit message, ✦ note
+// title, Summarize) can't queue behind a still-starting agent: something
+// is already waiting in the start-up queue. "" means the ask may queue.
+//
+// The queue is ONE string flushed as ONE turn by handleChatReady. The
+// draft asks used to ASSIGN it (chatSend appends), so a message the user
+// had typed during the same handshake — already echoed in the transcript
+// — was silently replaced and never sent. Appending instead would be
+// worse for a claimed draft: the agent would answer both at once and
+// commitSubject / the title reader would take that mixed answer as the
+// draft. So the ask refuses, and says when to retry; nothing is lost and
+// nothing is mixed. A handshake takes seconds, so "once it has sent" is
+// a short wait.
+func (a *App) chatQueueBusyReason() string {
+	if !a.chat.starting || a.chat.queuedPrompt == "" {
+		return ""
+	}
+	return "a chat message is waiting for " + a.chatAgent().name + " to start — try again once it has sent"
+}
+
+// chatQueueHoldsDraft reports whether the start-up queue holds a CLAIMED
+// draft ask — a commit message or note title whose answer will be read
+// back into a prompt. chatSend refuses to append to it: the queued turn
+// would carry the user's text too, and the answer to both would be
+// pre-filled as the draft. (A queued Summarize claims nothing, so the
+// composer may still append to it, as it always has.)
+func (a *App) chatQueueHoldsDraft() bool {
+	return a.chat.starting && a.chat.queuedPrompt != "" &&
+		(a.chat.commitSuggest != nil || a.chat.noteTitle != nil)
+}
+
 // chatSend submits the input line: echo it into the transcript, then
 // either fire the turn, queue it behind a still-starting agent, or
 // explain why nothing will answer. Bound to Enter while the panel has
@@ -725,6 +756,12 @@ func (a *App) chatSend() {
 	}
 	if a.chat.turnActive {
 		a.flash(a.chatAgent().name + " is answering — ⏹ to stop it first")
+		return
+	}
+	// Checked BEFORE the composer is cleared: the refusal keeps the
+	// text, so Enter again once the draft has sent is all it takes.
+	if a.chatQueueHoldsDraft() {
+		a.flash("a draft is waiting for " + a.chatAgent().name + " to start — send this once it has")
 		return
 	}
 	a.chat.input = newChatComposer("")

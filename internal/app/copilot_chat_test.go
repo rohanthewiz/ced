@@ -1443,3 +1443,38 @@ func TestChatComposer_UpMovesCaretBeforeHistory(t *testing.T) {
 		t.Errorf("Up from the top row = %q, want the history entry", got)
 	}
 }
+
+// TestChatSend_RefusesToJoinAQueuedDraft is the converse of N-097: with a
+// claimed draft (here a commit message) queued behind the start, Enter
+// must not append the composer's text to it — the agent would answer
+// both and the mix would be pre-filled as the draft. The text stays in
+// the composer for a second Enter. A queued plain message still takes
+// appends, as before.
+func TestChatSend_RefusesToJoinAQueuedDraft(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+	a.chat.starting = true
+	a.chat.open = true
+	a.chat.queuedPrompt = "Write a git commit message…"
+	a.chat.commitSuggest = &commitSuggestReq{seq: a.chat.connSeq}
+
+	typeChatText(a, "early bird")
+	a.handleChatKey(enterKey())
+	if a.chat.queuedPrompt != "Write a git commit message…" {
+		t.Errorf("queuedPrompt = %q, want the draft alone", a.chat.queuedPrompt)
+	}
+	if got := a.chat.input.String(); got != "early bird" {
+		t.Errorf("composer = %q, want the text kept", got)
+	}
+	if !strings.Contains(a.statusMsg, "draft") {
+		t.Errorf("statusMsg = %q, want the draft named", a.statusMsg)
+	}
+
+	// No claim: the composer appends to a queued message as it always has.
+	a.chat.commitSuggest = nil
+	a.handleChatKey(enterKey())
+	if a.chat.queuedPrompt != "Write a git commit message…\nearly bird" {
+		t.Errorf("unclaimed queue: queuedPrompt = %q, want the append", a.chat.queuedPrompt)
+	}
+}

@@ -474,3 +474,27 @@ func TestAgentOneLine_StripsWhatAnAgentAdds(t *testing.T) {
 		t.Errorf("commitSubject = %q", got)
 	}
 }
+
+// TestNoteSuggestTitle_RefusesOverAQueuedMessage is N-097's GoNotes half:
+// the title ask must not replace a message already queued behind the
+// agent's start, nor claim its answer.
+func TestNoteSuggestTitle_RefusesOverAQueuedMessage(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+	a.chat.starting = true
+	seedChatFile(t, a, "main.go", "func Widget() {}\n")
+	at, _ := a.noteTarget()
+	a.chat.queuedPrompt = "hello from the composer"
+
+	a.noteSuggestTitle(at, false)
+	if a.chat.queuedPrompt != "hello from the composer" {
+		t.Errorf("queuedPrompt = %q, want the user's message untouched", a.chat.queuedPrompt)
+	}
+	if a.chat.noteTitle != nil {
+		t.Error("a refused ask still claimed the next answer")
+	}
+	if !strings.Contains(a.statusMsg, "waiting") {
+		t.Errorf("statusMsg = %q, want the queued-message reason", a.statusMsg)
+	}
+}

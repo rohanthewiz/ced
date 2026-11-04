@@ -124,6 +124,13 @@ func (a *App) menuSummarize() {
 	if !a.chat.open {
 		return
 	}
+	// The queued branch below ASSIGNS the start-up queue, which would
+	// drop a message the user already queued (N-097). Before the attach,
+	// so a refusal leaves no orphan attachment for the next send.
+	if why := a.chatQueueBusyReason(); why != "" {
+		a.flash(why)
+		return
+	}
 	a.chatAttachOnce(at)
 
 	label := a.chatAttachLabel(at)

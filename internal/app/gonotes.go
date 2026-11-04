@@ -339,6 +339,13 @@ func (a *App) noteSuggestTitle(at chatAttach, private bool) {
 	if !a.chat.open {
 		return
 	}
+	// Never replace a message already queued behind the start (N-097);
+	// the ✦ button pre-checks this too (commitDraftBlockedReason), this
+	// is the guard for any other caller.
+	if why := a.chatQueueBusyReason(); why != "" {
+		a.flash(why)
+		return
+	}
 	// The excerpt is resolved now so a failure is reported before a turn
 	// is spent, and so the agent is shown the same buffer text the send
 	// will capture.

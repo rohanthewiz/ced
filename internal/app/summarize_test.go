@@ -267,3 +267,26 @@ func TestSummarizePrompt_AsksForADescription(t *testing.T) {
 		t.Errorf("a ranged prompt should say excerpt:\n%s", got)
 	}
 }
+
+// TestMenuSummarize_RefusesOverAQueuedMessage: Summarize's queued branch
+// assigns the start-up queue too, so with a message already in it the ask
+// refuses — before attaching, so the next send carries no orphan file.
+func TestMenuSummarize_RefusesOverAQueuedMessage(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.copilot.enabled = true
+	a.chat.dead = false
+	a.chat.starting = true
+	seedChatFile(t, a, "main.go", "package main\n")
+	a.chat.queuedPrompt = "hello from the composer"
+
+	a.menuSummarize()
+	if a.chat.queuedPrompt != "hello from the composer" {
+		t.Errorf("queuedPrompt = %q, want the user's message untouched", a.chat.queuedPrompt)
+	}
+	if len(a.chat.attach) != 0 {
+		t.Errorf("attachments = %+v, want none from a refused ask", a.chat.attach)
+	}
+	if !strings.Contains(a.statusMsg, "waiting") {
+		t.Errorf("statusMsg = %q, want the queued-message reason", a.statusMsg)
+	}
+}

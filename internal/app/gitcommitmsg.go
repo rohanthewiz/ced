@@ -342,6 +342,12 @@ func (a *App) commitDraftBlockedReason() string {
 	if a.chat.turnActive {
 		return a.chatAgent().name + " is answering — ⏹ to stop it first"
 	}
+	// A message already queued behind the start: refusing here, before
+	// the prompt closes, keeps both the user's queued message and the
+	// text they had typed into this prompt (N-097).
+	if why := a.chatQueueBusyReason(); why != "" {
+		return why
+	}
 	return ""
 }
 
@@ -382,6 +388,10 @@ func (a *App) gitPanelSuggestCommit(files []gitPanelFile, trailer bool) {
 	if a.chat.dead || !a.chatAgentEnabled() {
 		return
 	}
+	if why := a.chatQueueBusyReason(); why != "" {
+		a.flash(why)
+		return
+	}
 	if a.screen == nil || a.rootDir == "" {
 		return
 	}
@@ -403,6 +413,14 @@ func (a *App) gitPanelSuggestCommit(files []gitPanelFile, trailer bool) {
 func (a *App) handleGitCommitDiff(e *gitCommitDiffEvent) {
 	if strings.TrimSpace(e.diff) == "" {
 		a.flash("Nothing to describe — no diff for " + gitCommitLabel(e.files))
+		return
+	}
+	// Re-checked here, not only at the ask: the diff comes back from a
+	// fork, and the user may have sent a composer message into the
+	// queue in between. Before the echo, so a refused ask leaves no
+	// "Suggest a commit message" line with nothing behind it.
+	if why := a.chatQueueBusyReason(); why != "" {
+		a.flash(why)
 		return
 	}
 	a.chatAppendMsg(chatMsg{

@@ -899,7 +899,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Commit of a selection stages first (`gitCommitFiles`, `runGitCmdSeq`);
   every commit goes through `gitCommitFiles`.
 - Agent-drafted messages: a visible chat turn claimed by generation +
-  transcript mark (`commitSuggestReq`); draft only pre-fills. Diff is
+  transcript mark (`commitSuggestReq`); draft only pre-fills. The
+  start-up queue holds ONE prompt: a draft ask (✦ commit / ✦ note title /
+  Summarize) REFUSES over a queued message (`chatQueueBusyReason`), and
+  the composer refuses to append to a queued claimed draft
+  (`chatQueueHoldsDraft`) — never overwrite, never mix. Diff is
   `diff HEAD`, capped, includes untracked contents.
   `"commitmsgtrailer"` adds `Co-Authored-By` ONLY to drafted messages
   (`openCommitPromptDraft` vs `openCommitPrompt`). `promptModal.extras`

@@ -862,6 +862,10 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Search history…", shortcut: "esc S", action: (*App).menuGitLogSearch, enabled: (*App).hasGitRepo},
 			// Same keyboard-twin rule for the log panel's Actions ▾ button.
 			{label: "Git log actions", action: (*App).menuGitLogActions, enabled: (*App).hasGitLogOpen},
+			// Keyboard twin of the log's "⑂ main ▾" scope button
+			// (gitlogscope.go). Like Search history… it opens the log
+			// when it's shut, so it is enabled on any repo.
+			{label: "Git log branch…", action: (*App).menuGitLogScope, enabled: (*App).hasGitRepo},
 			// The way back into a conflict picker that was dismissed —
 			// and the only way into one for a conflict ced never started
 			// (a `stash pop`, or a rebase run in the terminal beside it).

@@ -554,6 +554,7 @@ func (a *App) toolButtonTips() []buttonTip {
 			buttonTip{rect: a.gitLogActionsRect(), text: []string{"Actions on the selected commit"}},
 			buttonTip{rect: a.gitLogPushRect(), text: []string{"Push the current branch…"}, keyFn: (*App).menuGitPush},
 			buttonTip{rect: a.gitLogSearchRect(), text: []string{"Search the history"}, keyFn: (*App).menuGitLogSearch},
+			buttonTip{rect: a.gitLogScopeRect(), text: []string{"Choose which branch the log shows…"}, keyFn: (*App).menuGitLogScope},
 		)
 		tips = append(tips, a.diffToolbarTips(a.gitLogToolbar())...)
 		if a.gitLogFilterRows() > 0 {

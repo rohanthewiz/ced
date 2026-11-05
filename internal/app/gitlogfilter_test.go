@@ -88,10 +88,10 @@ func TestGitLogSetQueryMode(t *testing.T) {
 // difference between two entirely different answers — so it is tested
 // without git anywhere near it.
 func TestGitLogFilterArgs(t *testing.T) {
-	base := []string{"log", "--all", "--date=relative",
-		"-n", itoa(gitLogMaxCommits + 1), "--format=" + gitLogFormat}
+	base := []string{"log", "--date=relative",
+		"-n", itoa(gitLogMaxCommits + 1), "--format=" + gitLogFormat, "--all"}
 
-	if got := gitLogFilterArgs(gitLogQuery{}); !equalStrings(got, base) {
+	if got := gitLogFilterArgs(gitLogQuery{}, gitLogScopeAll); !equalStrings(got, base) {
 		t.Errorf("empty query args = %v, want the bare log command %v", got, base)
 	}
 
@@ -110,7 +110,7 @@ func TestGitLogFilterArgs(t *testing.T) {
 	}
 	for _, c := range cases {
 		want := append(append([]string{}, base...), c.tail...)
-		if got := gitLogFilterArgs(c.q); !equalStrings(got, want) {
+		if got := gitLogFilterArgs(c.q, gitLogScopeAll); !equalStrings(got, want) {
 			t.Errorf("args for %+v = %v, want %v", c.q, got, want)
 		}
 	}
@@ -122,7 +122,7 @@ func TestGitLogFilterArgs(t *testing.T) {
 // whole repository and buries the commit that was asked for. The rev
 // also has to be fenced behind `--`, like every other term here.
 func TestGitLogFilterArgs_CommitModeDropsAll(t *testing.T) {
-	args := gitLogFilterArgs(gitLogQuery{gitLogModeCommit, "a3f2c1d"})
+	args := gitLogFilterArgs(gitLogQuery{gitLogModeCommit, "a3f2c1d"}, gitLogScopeAll)
 
 	for _, a := range args {
 		if a == "--all" {
@@ -617,7 +617,7 @@ func TestLoadGitLogQuery_RealRepo(t *testing.T) {
 	gitRun(t, dir, "commit", "-q", "-m", "chore: drop magic")
 
 	subjects := func(q gitLogQuery) []string {
-		commits, _ := loadGitLogQuery(dir, gitLogFilterArgs(q))
+		commits, _ := loadGitLogQuery(dir, gitLogFilterArgs(q, gitLogScopeHead))
 		var out []string
 		for _, c := range commits {
 			out = append(out, c.Subject)

@@ -9,7 +9,8 @@
 // several commits, then cherry-pick them onto the current branch in ONE
 // `git cherry-pick`. It is the log-side twin of the cherry-pick dialog
 // (cherrypick.go), which only lists one branch's commits against HEAD;
-// the log lists every ref (--all), so a set can mix branches.
+// the log can list any branch or every ref (its ⑂ scope, gitlogscope.go),
+// and ticks survive a scope change, so a set can mix branches.
 //
 // House patterns in play:
 //

@@ -65,7 +65,8 @@ func TestParseGitLogCommits(t *testing.T) {
 // loader's %P field flags exactly the two --no-ff merges in the fixture.
 func TestLoadGitLogCommits_MarksMerges(t *testing.T) {
 	repo := cherryPickMergeRepo(t)
-	commits, _ := loadGitLogCommits(repo)
+	// The merges live on topic and HEAD is main, so walk every ref.
+	commits, _ := loadGitLogCommits(repo, gitLogScopeAll)
 	var merges []string
 	for _, c := range commits {
 		if c.Merge {
@@ -171,7 +172,7 @@ func TestLoadGitLogCommits_RealRepo(t *testing.T) {
 	writeCommit(t, repo, "f.txt", "one\n", "first commit")
 	writeCommit(t, repo, "f.txt", "one\ntwo\n", "second commit")
 
-	commits, truncated := loadGitLogCommits(repo)
+	commits, truncated := loadGitLogCommits(repo, gitLogScopeHead)
 	if truncated {
 		t.Error("two commits reported as truncated")
 	}
@@ -191,7 +192,7 @@ func TestLoadGitLogCommits_RealRepo(t *testing.T) {
 		t.Errorf("hash fields wrong: %q / %q", commits[0].Hash, commits[0].Short)
 	}
 
-	if got, _ := loadGitLogCommits(t.TempDir()); got != nil {
+	if got, _ := loadGitLogCommits(t.TempDir(), gitLogScopeHead); got != nil {
 		t.Errorf("non-repo should yield nil, got %d commits", len(got))
 	}
 }
@@ -237,7 +238,7 @@ func TestLoadGitLogDetail_RealRepo(t *testing.T) {
 	}
 	repo := initRepo(t)
 	writeCommit(t, repo, "f.txt", "one\n", "first commit")
-	commits, _ := loadGitLogCommits(repo)
+	commits, _ := loadGitLogCommits(repo, gitLogScopeHead)
 	if len(commits) != 1 {
 		t.Fatalf("setup: %d commits", len(commits))
 	}

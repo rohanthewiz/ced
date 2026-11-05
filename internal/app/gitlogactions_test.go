@@ -273,7 +273,7 @@ func TestGitLogActions_MergeEndToEnd(t *testing.T) {
 	a := newTestApp(t, repo)
 	a.rootDir = repo
 	a.refreshGitStatus()
-	a.gitLog.commits, _ = loadGitLogCommits(repo)
+	a.gitLog.commits, _ = loadGitLogCommits(repo, gitLogScopeAll)
 
 	runGitLogApply(t, a, 0, "merge side")
 	if got := gitOut(t, repo, "show", "--format=%s", "--name-only", "HEAD"); got != "merge side\n\ns.txt" {

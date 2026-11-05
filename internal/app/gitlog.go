@@ -115,6 +115,10 @@ type gitLogState struct {
 	// "closed", so the panel behaves exactly as it did before the bar
 	// existed until something opens it.
 	filter gitLogFilter
+	// scope is which history the list walks (gitlogscope.go): "" = the
+	// current branch (default), gitLogScopeAll = every ref, else a full
+	// refname. Session-only.
+	scope string
 	// ticked is the multi-commit selection (gitlogticks.go), keyed by
 	// full hash and holding the row as it was when ticked — so a tick
 	// survives a search that hides its row, and the confirm can still
@@ -179,7 +183,13 @@ func (a *App) refreshGitLogCommits() {
 		return
 	}
 	a.gitLog.toplevel = gitToplevel(a.rootDir)
-	commits, truncated := loadGitLogCommits(a.rootDir)
+	commits, truncated := loadGitLogCommits(a.rootDir, a.gitLog.scope)
+	// A branch that vanished under the panel (deleted, pruned) reads as
+	// an empty list; gitLogScopeGone puts the panel back on the current
+	// branch so the next load has something to show.
+	if len(commits) == 0 && a.gitLogScopeGone() {
+		commits, truncated = loadGitLogCommits(a.rootDir, a.gitLog.scope)
+	}
 	a.applyGitLogCommits(commits, truncated)
 }
 
@@ -257,27 +267,23 @@ func (a *App) gitLogSelectedCommit() (gitLogCommit, bool) {
 // itself contain a tab, and SplitN keeps a trailing field intact.
 const gitLogFormat = "%H%x09%h%x09%an%x09%ad%x09%D%x09%P%x09%s"
 
-// loadGitLogCommits returns up to gitLogMaxCommits commits across all
-// refs (--all, so a cherry-pick can reach commits on other branches),
-// newest first, plus whether the cap truncated the history. Best-effort
-// like every git read: non-repos, unborn branches, and missing git all
-// yield nil and the panel renders "(no commits)".
-func loadGitLogCommits(rootDir string) ([]gitLogCommit, bool) {
-	if rootDir == "" {
+// loadGitLogCommits returns up to gitLogMaxCommits commits of scope's
+// history (gitlogscope.go: the current branch, every ref, or one named
+// branch), newest first, plus whether the cap truncated it. Best-effort
+// like every git read: non-repos, unborn branches, a vanished branch and
+// missing git all yield nil and the panel renders "(no commits)".
+//
+// It is the empty-query case of gitLogFilterArgs on purpose, so the
+// plain list and a search over it are always the same command with or
+// without a filter — they can't come to cover different histories.
+func loadGitLogCommits(rootDir, scope string) ([]gitLogCommit, bool) {
+	commits, truncated := loadGitLogQuery(rootDir, gitLogFilterArgs(gitLogQuery{}, scope))
+	if len(commits) == 0 {
+		// nil, not an empty slice: callers (and tests) read "nothing
+		// loaded" as nil, whichever way the load came up empty.
 		return nil, false
 	}
-	// Ask for one past the cap purely to detect truncation.
-	out, err := exec.Command("git", "-C", rootDir, "log", "--all",
-		"--date=relative", "-n", itoa(gitLogMaxCommits+1),
-		"--format="+gitLogFormat).Output()
-	if err != nil {
-		return nil, false
-	}
-	commits := parseGitLogCommits(out)
-	if len(commits) > gitLogMaxCommits {
-		return commits[:gitLogMaxCommits], true
-	}
-	return commits, false
+	return commits, truncated
 }
 
 // parseGitLogCommits decodes the loader's tab-separated format, one
@@ -614,10 +620,11 @@ func (a *App) gitLogDetailRows() []diffRow {
 
 // gitLogToolbar lays out the shared diff toolbar (▲ ▼ split ws) on the
 // header's right-hand chain, left of ⧉ hash, and never over the
-// left-hand chain (Actions, push, search). The title yields to it.
+// left-hand chain (Actions, push, search, branch scope). The title
+// yields to it.
 func (a *App) gitLogToolbar() []diffToolBtn {
-	search := a.gitLogSearchRect()
-	return diffToolbar(search.x+search.w+1, a.gitLogCopyRect().x-1, search.y)
+	scope := a.gitLogScopeRect()
+	return diffToolbar(scope.x+scope.w+1, a.gitLogCopyRect().x-1, scope.y)
 }
 
 // gitLogEnsureSelectedVisible snaps the list scroll so the selected row
@@ -654,6 +661,8 @@ func (a *App) gitLogPress(x, y int) (dragMode string) {
 			a.openGitPush()
 		case a.gitLogSearchRect().contains(x, y):
 			a.toggleGitLogFilter()
+		case a.gitLogScopeRect().contains(x, y):
+			a.openGitLogScopePicker()
 		case a.gitLogCopyRect().contains(x, y):
 			if c, ok := a.gitLogSelectedCommit(); ok {
 				a.gitLogCopyHash(c)
@@ -903,7 +912,7 @@ func (a *App) gitLogScroll(x, _, delta int) {
 // -----------------------------------------------------------------------------
 
 // drawGitLog paints the whole panel: header rule with the Actions,
-// ↑ push, ⌕ search, ⧉ hash, ⟳, and ✕ buttons plus the title; the search
+// ↑ push, ⌕ search, ⑂ branch, ⧉ hash, ⟳, and ✕ buttons plus the title; the search
 // bar when it's open; the commit list; a vertical divider; the commit
 // detail with unified-diff coloring.
 func (a *App) drawGitLog() {
@@ -955,6 +964,11 @@ func (a *App) drawGitLog() {
 		searchSt = btnSt
 	}
 	drawAt(a.screen, searchBtn.x, searchBtn.y, gitLogSearchLabel, searchSt)
+	// The scope button: the branch the list is walking, always shown —
+	// it is the answer to "whose history is this?", which the list
+	// itself can't give once branches look alike.
+	scopeBtn := a.gitLogScopeRect()
+	drawAt(a.screen, scopeBtn.x, scopeBtn.y, a.gitLogScopeLabel(), btnSt)
 	toolbar := a.gitLogToolbar()
 	a.drawDiffToolbar(toolbar)
 
@@ -983,7 +997,7 @@ func (a *App) drawGitLog() {
 	if n := len(a.gitLog.ticked); n > 0 {
 		title += "· " + itoa(n) + " ticked "
 	}
-	if tx := searchBtn.x + searchBtn.w; tx+runeLen(title) <= diffToolbarLeft(toolbar, copyBtn.x) {
+	if tx := scopeBtn.x + scopeBtn.w; tx+runeLen(title) <= diffToolbarLeft(toolbar, copyBtn.x) {
 		drawAt(a.screen, tx, py, title, titleSt)
 	}
 

@@ -931,9 +931,10 @@ Needs a language server for the file — see
 | `Show git panel` / `Hide git panel` | `esc g` | Changed files with their diffs. |
 | `Review all changes ▶` | | Walk every changed file's diff in the git panel, one after another. |
 | `Git panel actions` | | The git panel's **Actions ▾** picker. |
-| `Show git log` / `Hide git log` | `esc L` | The commit log. |
+| `Show git log` / `Hide git log` | `esc L` | The commit log — the current branch's, until you pick another. |
 | `Search history…` | `esc S` | Open the git log with its filter box ready. |
 | `Git log actions` | | The git log's **Actions ▾** picker. |
+| `Git log branch…` | | Which history the git log shows: the current branch, all branches, or any other one (opens the log). |
 | `Resolve conflicts…` | | Pick a conflicted file. See [merge conflicts](#cherry-picking-and-merge-conflicts). |
 | `Resolve conflict at caret…` | | Choose a side for the conflict block under the caret. |
 | `Compare conflict sides…` | | Diff the two sides of that block in the compare panel. |
@@ -1609,6 +1610,14 @@ what that branch has that yours doesn't:
   filter before it closes the dialog. Ticks survive the filter — the
   summary says how many it is hiding — and `alt+a` ticks only what's
   showing.
+
+**Which branch the git log shows.** It opens on the **current
+branch**, and follows it when you switch. The **⑂ main ▾** button in
+its header (or ≡ Git → *Git log branch…*) picks another: **All
+branches**, or any local or remote-tracking branch by name. While it is
+showing a local branch you aren't on, the same list leads with **Check
+out** that branch. A history search runs over whichever branch is shown —
+except a `c:` commit search, which finds the commit wherever it is.
 
 The git log can pick a set too, from any branch it shows: click a
 commit's leftmost cell (or **Actions ▾ → Tick …**) to tick it — a `✓`

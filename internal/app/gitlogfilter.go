@@ -209,30 +209,34 @@ func gitLogSetQueryMode(text string, mode int) string {
 // The git command
 // -----------------------------------------------------------------------------
 
-// gitLogFilterArgs builds the full `git log` argument list for q — the
-// complete argv minus the leading `git -C <root>`. Split out from the
-// runner (the pushArgs rule) so every mode's flags are pinned by a test
-// that never forks git.
+// gitLogFilterArgs builds the full `git log` argument list for q over
+// scope's history (gitlogscope.go) — the complete argv minus the leading
+// `git -C <root>`. Split out from the runner (the pushArgs rule) so every
+// mode's flags are pinned by a test that never forks git.
 //
 // Terms are always attached to their flag (`--grep=x`, `-Sx`) or fenced
 // behind `--`, so a term that begins with a dash is a search term and
-// not an option, whatever the user typed.
-func gitLogFilterArgs(q gitLogQuery) []string {
-	args := []string{"log", "--all", "--date=relative",
+// not an option, whatever the user typed. The scope's revision rides
+// before any `--` (git reads revisions only there) and is either
+// `--all` or a full refname, which can't begin with a dash either.
+func gitLogFilterArgs(q gitLogQuery, scope string) []string {
+	args := []string{"log", "--date=relative",
 		"-n", itoa(gitLogMaxCommits + 1), "--format=" + gitLogFormat}
+	if q.active() && q.mode == gitLogModeCommit {
+		// The one mode that IGNORES the scope: it names its own start.
+		// --all (or a branch) would add more refs to the rev list, which
+		// would union that history back in and leave the named commit
+		// buried in it — and a commit off the scoped branch must still
+		// be findable (a blame click lands here). The rev is fenced
+		// behind its own `--` so a term beginning with a dash is a (bad)
+		// revision rather than an option, and the walk from it gives the
+		// panel a coherent list — this commit at the top, its ancestors
+		// under it.
+		return append(args, q.term, "--")
+	}
+	args = append(args, gitLogScopeRevs(scope)...)
 	if !q.active() {
 		return args
-	}
-	if q.mode == gitLogModeCommit {
-		// The one mode that must NOT carry --all: --all adds every ref to
-		// the rev list, which would union the whole history back in and
-		// leave the named commit buried in it. The rev is fenced behind
-		// its own `--` so a term beginning with a dash is a (bad) revision
-		// rather than an option, and the walk from it gives the panel a
-		// coherent list — this commit at the top, its ancestors under it.
-		return []string{"log", "--date=relative",
-			"-n", itoa(gitLogMaxCommits + 1), "--format=" + gitLogFormat,
-			q.term, "--"}
 	}
 	switch q.mode {
 	case gitLogModeAuthor:
@@ -352,7 +356,7 @@ func (a *App) gitLogFilterRun() {
 		return
 	}
 	text := a.gitLog.filter.field.String()
-	args := gitLogFilterArgs(parseGitLogQuery(text))
+	args := gitLogFilterArgs(parseGitLogQuery(text), a.gitLog.scope)
 	seq := a.gitLog.filter.seq
 	a.gitLog.filter.running = true
 	scr, root := a.screen, a.rootDir

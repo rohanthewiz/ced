@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-111**
+**Next ID: N-112**
 
 ## Open
 
@@ -115,6 +115,15 @@ plus the LSP work done in the seeding session itself
   needs either an enumerator over the prompt constructors or a table
   they all draw from — a refactor, not a doc pass. Prose stays
   unpinnable.
+
+- **N-111** · raised `2026-1104-2045-git-log-branch-scope` · value low
+  The git log's branch picker (gitlogscope.go) offers **Check out** only
+  for a viewed LOCAL branch. Viewing a remote-tracking branch
+  (`origin/feat`) offers nothing: checking it out means creating a local
+  tracking branch (`git switch --track`), which has its own naming
+  question (a local `feat` may already exist and differ). Add a "Check
+  out as local <name>" row if anyone asks; also open: whether the scope
+  should persist per project in `session.Entry` (session-only today).
 
 ## Validate
 

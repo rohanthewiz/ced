@@ -953,7 +953,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   age once per run. Switching style never turns the layer on. Author
   label = given name; surname letters only where two authors in the
   FILE share it (`disambiguateBlameAuthors`, in the parser) — no knob.
-- Git log (Esc-L): tool window; `--all`, capped 400; Actions picker
+- Git log (Esc-L): tool window; capped 400; SCOPE (gitlogscope.go)
+  defaults to the CURRENT branch (no rev = HEAD, follows a switch),
+  else `--all` (`gitLogScopeAll`) or a FULL refname, session-only,
+  spliced in by `gitLogFilterArgs` (the plain list is its empty query;
+  `c:` ignores scope); header `⑂ <name> ▾` + ≡ Git "Git log branch…"
+  open one picker (Check out row for a viewed local branch); a vanished
+  ref falls back to current with a flash. Actions picker
   (only `reset --hard` confirms); selection kept by hash; refresh rides
   `refreshGitStatus`. Ticks (gitlogticks.go): the leading blank cell,
   keyed by hash holding the row, NEVER pruned against the (possibly

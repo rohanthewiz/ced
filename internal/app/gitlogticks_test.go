@@ -30,7 +30,11 @@ func tickRepo(t *testing.T) (*App, string) {
 	a := newTestApp(t, repo)
 	a.rootDir = repo
 	a.refreshGitStatus()
-	commits, _ := loadGitLogCommits(repo)
+	// Ticks are the cross-branch verb: the side commits are only in the
+	// list under the all-branches scope, which every later refresh in
+	// these tests must keep walking too.
+	a.gitLog.scope = gitLogScopeAll
+	commits, _ := loadGitLogCommits(repo, gitLogScopeAll)
 	a.gitLog.commits = commits
 	return a, repo
 }
@@ -166,7 +170,7 @@ func TestGitLogTicks_SetWithAMergeEndToEnd(t *testing.T) {
 	a.rootDir = repo
 	a.refreshGitStatus()
 	a.gitBranch = "main"
-	a.gitLog.commits, _ = loadGitLogCommits(repo)
+	a.gitLog.commits, _ = loadGitLogCommits(repo, gitLogScopeAll)
 	a.gitLogToggleTick(logCommit(t, a, "merge side"))
 	a.gitLogToggleTick(logCommit(t, a, "c1 plain"))
 

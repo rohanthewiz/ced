@@ -138,8 +138,9 @@ func (a *App) gitLogActionItems(c gitLogCommit) []paletteItem {
 //
 // Both verbs share it because both answer the same question badly when
 // answered wrong: they write a commit onto the CURRENT branch, and the
-// log panel lists commits from --all, so the row under the pointer is
-// routinely from somewhere else. "Cherry-pick this" is a sentence with a
+// log panel can be showing another branch or all of them (its ⑂ scope,
+// gitlogscope.go), so the row under the pointer is routinely from
+// somewhere else. "Cherry-pick this" is a sentence with a
 // hidden second half, and this dialog is where it gets said out loud.
 //
 // A merge gets a third line naming the `-m 1` choice (gitLogMergeNote):

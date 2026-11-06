@@ -27,8 +27,11 @@
 //	        ├─ dead = false    the verdict being retried
 //	        │
 //	        ├─ binary still missing ──► dead again, flash NAMES the binaries
+//	        ├─ explainStart = true
 //	        └─ lspEnsureStarted ──► lspReadyEvent{gen} ──► handleLSPReady
-//	                                 re-announces every open tab it speaks for
+//	                 │               re-announces every open tab it speaks for
+//	                 └─ handshake fails ──► lspExitEvent{gen, err} ──► handleLSPExit
+//	                                         flash + info modal: "<id> failed to start"
 //
 // House rules:
 //
@@ -49,10 +52,20 @@
 //   - Inlay records are forgotten (inlayReask) and noInlay cleared: both
 //     describe the PROCESS that is gone, and the new one may be a newer
 //     build that speaks the method.
+//   - A FAILED HANDSHAKE IS EXPLAINED ONLY HERE (explainStart, N-112). Some
+//     servers refuse with a sentence worth reading (typescript-language-
+//     server over TypeScript 7: "…provides no tsserver.js…"), but a start
+//     from opening a file stays silent by the degradation rule. The row is
+//     the user asking "what is wrong?", so its spawn's failure is
+//     flashed when it lands, and shown whole in an info modal when the
+//     slot is free. A plain open never sets the flag.
 
 package app
 
-import "strings"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // lspRestartLabel is the ≡ row's dynamic label. It names the server a
 // click will restart, so the row never reads as "restart everything".
@@ -110,8 +123,63 @@ func (a *App) menuRestartLSP() {
 		a.flash(def.id + " is not installed (looked for " + lspCommandNames(def) + ")")
 		return
 	}
+	// The binary is there, so a failure now happens in the handshake, off
+	// the loop. Arm the slot so that failure is flashed with the server's
+	// own reason when it lands (handleLSPExit) — the async twin of the
+	// missing-binary flash above.
+	sv.explainStart = true
 	a.lspEnsureStarted(def)
 	a.flash("Restarting " + def.id + "…")
+}
+
+// explainLSPStartFailure answers a restart whose handshake failed. The
+// flash always fires, and an info modal carries the reason WHOLE: a
+// server's refusal is often a sentence wider than the status bar
+// (typescript-language-server over TypeScript 7 runs ~170 cells, with
+// the words that matter at the end). That is the failed-git-command
+// rule: a failure the user can act on is shown in full.
+//
+// The answer lands a moment AFTER the click, so it is an unprompted
+// arrival: it declines an occupied modal slot or an open ≡ menu, and the
+// flash is then the whole answer.
+func (a *App) explainLSPStartFailure(id, reason string) {
+	a.flash(id + " failed to start: " + reason)
+	if a.modal != nil || a.menuOpen {
+		return
+	}
+	a.openInfo(id+" failed to start", wrapChatText(reason, lspStartReasonWidth))
+}
+
+// lspStartReasonWidth is the wrap width for the reason in the info modal:
+// the modal body's text width, the same 78 errorBodyLines clips to.
+const lspStartReasonWidth = 78
+
+// lspStartReason turns a failed start's error into the words after
+// "<server> failed to start: ". It peels the wrapping layers, so the
+// server's own sentence is what fits in the status bar: the lsp client's
+// "lsp: initialize: … (code N)", then the "Request initialize failed with
+// message: " prefix that servers built on vscode-languageserver-node
+// (typescript-language-server, pyright) add to the error they throw.
+// Anything else (a spawn error, "connection closed") passes through bare.
+//
+// Paths under root are spelled relative to it. Servers name the install
+// they rejected by absolute path ("TypeScript 7.0.2 at
+// \"/Users/…/proj/node_modules/typescript/lib\""), and on a status bar
+// that path alone can push the sentence that matters ("…provides no
+// tsserver.js") off the right edge. The status bar's own path segment
+// uses the same project-relative spelling.
+func lspStartReason(err error, root string) string {
+	s := strings.TrimSpace(err.Error())
+	s = strings.TrimPrefix(s, "lsp: ")
+	s = strings.TrimPrefix(s, "initialize: ")
+	if i := strings.LastIndex(s, " (code "); i > 0 && strings.HasSuffix(s, ")") {
+		s = s[:i]
+	}
+	s = strings.TrimPrefix(s, "Request initialize failed with message: ")
+	if root != "" {
+		s = strings.ReplaceAll(s, strings.TrimSuffix(root, string(filepath.Separator))+string(filepath.Separator), "")
+	}
+	return s
 }
 
 // lspCommandNames lists the binaries a definition would accept, in the

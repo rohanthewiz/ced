@@ -178,6 +178,13 @@ type lspServer struct {
 	// for a slot that has never been restarted, which is what hand-built
 	// test events carry.
 	gen int
+	// explainStart is set by the ≡ Code "Restart language server" row and
+	// cleared by the next handshake's outcome. While it is set, a failed
+	// start FLASHES the server's reason (handleLSPExit). The user clicked
+	// the row to find out what is wrong, the same rule as the row's
+	// missing-binary flash. A start from merely opening a file leaves it
+	// clear and fails in silence, like every integration (N-112).
+	explainStart bool
 
 	// progress is the server's in-flight work keyed by progress token,
 	// and progressLast the token most recently heard from — the one the

@@ -572,7 +572,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   connection from `a.lspClientFor(path)`. Degradation is per server;
   `lspState.dead` is the global switch.
 - ≡ Code "Restart language server" is the retry; `lspServer.gen` drops
-  stale ready/exit events; `lspDropServer` is the shared teardown.
+  stale ready/exit events; `lspDropServer` is the shared teardown. Only
+  that row arms `explainStart`: its failed handshake (the exit event
+  carrying `err`) flashes AND shows the server's reason in an info modal
+  (declines a busy screen); a start from opening a file stays silent.
 - Sync via `EditRev` vs `syncedRev`, 300ms debounce; saves flush before
   didSave. Absolute paths only (root and tab paths).
 - Handshake declares workspaceEdit with `documentChanges: true` and EMPTY

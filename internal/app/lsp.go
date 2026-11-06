@@ -168,6 +168,13 @@ type lspExitEvent struct {
 	// old client during a restart fires its onExit; without this stamp
 	// that late event would mark the freshly started server dead.
 	gen int
+	// err is why the process never became usable: the spawn failed, or
+	// initialize came back with an error. That error is either the server
+	// explaining itself (typescript-language-server over TypeScript 7:
+	// "…provides no tsserver.js…") or the connection closing under the
+	// handshake. nil on the read loop's own exit report, which knows
+	// only that the pipe closed.
+	err error
 }
 
 // When satisfies the tcell.Event interface.
@@ -305,7 +312,7 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 		}
 		client, err := lsp.StartWithRequests(root, bin, args, onNotify, onRequest, onExit)
 		if err != nil {
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen})
+			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen, err: err})
 			return
 		}
 		if err := client.InitializeWithOptions(root, initOptionsOrNil(initOptions)); err != nil {
@@ -313,7 +320,9 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 			// The failed handshake already fires onExit via the read
 			// loop in most cases, but a timeout leaves the process
 			// running — post explicitly so the state machine settles.
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen})
+			// This post, not onExit's, carries the REASON, which the
+			// Restart row shows when it was the one that asked.
+			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen, err: err})
 			return
 		}
 		_ = scr.PostEvent(&lspReadyEvent{when: time.Now(), server: id, client: client, gen: gen})
@@ -332,6 +341,8 @@ func (a *App) handleLSPReady(e *lspReadyEvent) {
 		e.client.Close()
 		return
 	}
+	// The restart it was asked for worked; nothing is left to explain.
+	sv.explainStart = false
 	a.lspInstall(e.server, e.client)
 	// lspOpenDoc skips every tab this server doesn't speak for (their own
 	// server isn't the one that just came up, or is already announced).
@@ -359,6 +370,14 @@ func (a *App) handleLSPExit(e *lspExitEvent) {
 	}
 	a.lspDropServer(e.server)
 	sv.dead = true
+	// A start the Restart row asked for explains its failure (lspServer.
+	// explainStart). Only the report carrying the handshake's error may
+	// do that: the read loop's bare report for the same process can land
+	// first, and must not use up the flag with nothing to say.
+	if sv.explainStart && e.err != nil {
+		sv.explainStart = false
+		a.explainLSPStartFailure(e.server, lspStartReason(e.err, a.rootDir))
+	}
 }
 
 // lspDropServer empties one server's slot and everything per-document

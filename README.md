@@ -1795,7 +1795,9 @@ palette:
   pylsp don't provide inlay hints at all.
 - **Restart language server** — for a server that crashed, or one you
   installed after ced started. If it still can't be found, the message
-  names the binaries it looked for.
+  names the binaries it looked for. If it is found but refuses to start,
+  the server's own reason comes up in a box. Opening a file never does
+  that; a server that fails there just stays quiet.
 
 While a server is still loading a project the status bar says so
 (`gopls: Loading packages…`), and a lookup that comes back empty in the

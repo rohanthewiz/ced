@@ -105,8 +105,9 @@ plus the LSP work done in the seeding session itself
   javascript, editor). Separately, **typescript-language-server 6.0.3**
   (2026-11-02) now refuses TS7 at `initialize` with its own reason ("The
   TypeScript of the workspace (TypeScript 7.0.2 …) provides no
-  tsserver.js. No other valid TypeScript installation was found"). ced
-  drops that text, so the failure is still silent (N-112). **tsls 6.0.3
+  tsserver.js. No other valid TypeScript installation was found"). Since
+  N-112 the ≡ Code "Restart language server" row shows that reason in
+  full; opening a file still fails silently. **tsls 6.0.3
   over `typescript@6` (6.0.3) works with ced unchanged**: in the probe
   and in the real binary (run-ced) it gave `✗ Type 'string' is not
   assignable…`, the gutter ●, and `» name: "hi" · times: 3` notes. The
@@ -141,21 +142,6 @@ plus the LSP work done in the seeding session itself
   question (a local `feat` may already exist and differ). Add a "Check
   out as local <name>" row if anyone asks; also open: whether the scope
   should persist per project in `session.Entry` (session-only today).
-
-- **N-112** · raised `2026-1106-1059-n110-n101-alt-chords-tsc-lsp` · value low
-  **A language server whose `initialize` fails leaves no reason
-  anywhere.** `lspEnsureStarted` (lsp.go) closes the client and posts
-  `lspExitEvent` on a failed handshake, and the error text goes nowhere.
-  Some servers explain themselves there: typescript-language-server
-  6.0.3 over TypeScript 7 answers "The TypeScript of the workspace
-  (TypeScript 7.0.2 …) provides no tsserver.js. No other valid
-  TypeScript installation was found" (N-101). The house rules already
-  say how: "Startup errors are HELD for a ≡ label, not flashed", and an
-  unavailable row whose fix is the user's flashes the reason. A
-  candidate: hold the handshake error per server, and have the ≡ Code
-  "Restart language server (<id>)" row show it (label suffix, or a flash
-  when the restart fails again). Silent degradation stays: nothing
-  appears unless the user opens the menu.
 
 ## Validate
 
@@ -577,6 +563,30 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-06, `2026-1106-1059-n110-n101-alt-chords-tsc-lsp` —
+  **N-112** a failed restart now explains itself. ≡ Code "Restart
+  language server" arms `lspServer.explainStart` (lsprestart.go) before
+  `lspEnsureStarted`. The two start-failure posts in `lspEnsureStarted`
+  put the error on `lspExitEvent.err`. `handleLSPExit` answers the
+  err-carrying report (the read loop's bare report, which can land
+  first, neither flashes nor uses up the flag) through
+  `explainLSPStartFailure`: a flash plus an info modal with the whole
+  reason, wrapped to the modal; it declines an open modal or ≡ menu.
+  `lspStartReason` peels `lsp: initialize: … (code N)` and
+  vscode-languageserver's "Request initialize failed with message: ",
+  and spells paths under the root relative. A start from opening a file
+  stays silent. Decided: the modal on top of the flash, because tsls's
+  sentence is ~170 cells with the key words at the end (cut at 160
+  columns in the real binary), the failed-git-command rule. Checked:
+  `TestMenuRestartLSP_FailedHandshakeExplainsItself`,
+  `TestLSPStartFailure_SilentWithoutTheRow`, `TestLSPStartReason`,
+  `TestExplainLSPStartFailure_DeclinesABusyScreen`; full suite with
+  -race; in the real binary (run-ced, tsls 6.0.3 over a TypeScript 7
+  workspace) opening a.ts showed nothing, and the row brought up
+  "typescript-language-server failed to start" with "…provides no
+  tsserver.js. No other valid TypeScript installation was found.
+  Exiting." in full.
 
 - closed 2026-11-06, `2026-1106-1059-n110-n101-alt-chords-tsc-lsp` —
   **N-110** the in-surface Alt chords are pinned. Every keyboard-owning

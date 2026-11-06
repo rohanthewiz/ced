@@ -88,7 +88,7 @@ plus the LSP work done in the seeding session itself
   (a `tsc --version` probe, or trying it after typescript-language-server
   reports TypeScript "1.0.0, bundled") before spawning. Its inlay-hint
   and diagnostics support is unchecked.
-  2026-11-06 (`2026-1106-1059-n110-n101-alt-chords-tsc-lsp`): **checked,
+  2026-11-06 (`2026-1106-1114-n110-n101-alt-chords-tsc-lsp`): **checked,
   and the two routes are now concrete.** Probed with ced's own handshake
   (a scratchpad script: ced's capability set, null
   `workspace/configuration` answers, full-text didChange).
@@ -564,7 +564,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-11-06, `2026-1106-1059-n110-n101-alt-chords-tsc-lsp` —
+- closed 2026-11-06, `2026-1106-1114-n110-n101-alt-chords-tsc-lsp` —
   **N-112** a failed restart now explains itself. ≡ Code "Restart
   language server" arms `lspServer.explainStart` (lsprestart.go) before
   `lspEnsureStarted`. The two start-failure posts in `lspEnsureStarted`
@@ -588,7 +588,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   tsserver.js. No other valid TypeScript installation was found.
   Exiting." in full.
 
-- closed 2026-11-06, `2026-1106-1059-n110-n101-alt-chords-tsc-lsp` —
+- closed 2026-11-06, `2026-1106-1114-n110-n101-alt-chords-tsc-lsp` —
   **N-110** the in-surface Alt chords are pinned. Every keyboard-owning
   surface that answers Alt+<letter> now has ONE table, `altChords`
   (altchords.go: `altChord{key, run}`, `altChordRune`, `fireAltChord`,

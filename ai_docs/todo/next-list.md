@@ -121,7 +121,7 @@ plus the LSP work done in the seeding session itself
   and a `tsc --version` check (5.x/6.x `tsc` has no `--lsp`), ordered
   ahead of tsls for TS7;
   (3) both, with (1) now and (2) later.
-  2026-11-06 (`2026-1106-1132-n101-typescript6-docs`): **the user chose
+  2026-11-06 (`2026-1106-1133-n101-typescript6-docs`): **the user chose
   (3).** (1) landed: the README's server table is followed by "install
   it with TypeScript 6" (`npm install -g typescript-language-server
   typescript@6`), why (no `tsserver.js` in 7), and the fallback. tsls

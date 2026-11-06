@@ -150,15 +150,6 @@ plus the LSP work done in the seeding session itself
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
 
-- **N-111** · raised `2026-1104-2045-git-log-branch-scope` · value low
-  The git log's branch picker (gitlogscope.go) offers **Check out** only
-  for a viewed LOCAL branch. Viewing a remote-tracking branch
-  (`origin/feat`) offers nothing: checking it out means creating a local
-  tracking branch (`git switch --track`), which has its own naming
-  question (a local `feat` may already exist and differ). Add a "Check
-  out as local <name>" row if anyone asks; also open: whether the scope
-  should persist per project in `session.Entry` (session-only today).
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -580,6 +571,23 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-11-06, `2026-1106-1153-n111-git-log-remote-checkout` —
+  **N-111** the git log's scope picker now checks out a viewed
+  remote-tracking branch (`gitLogScopeRemoteCheckout`, gitlogscope.go).
+  `loadGitLogRefs` adds `%(upstream)`, so the picker's single fork tells
+  it which local branch already tracks the ref. Rows: "Check out <local>
+  (tracks origin/x)" when one does (preferring the same name; no row
+  when you're on it), "Check out as local x" (`switch --create=x --track
+  refs/remotes/origin/x`) when the name is free, and "Check out as local
+  branch…" (a prompt seeded `origin-x`) when an unrelated local `x`
+  exists. Every variant puts the scope back on HEAD, because the remote
+  ref never gets your next commits. Decided: the scope stays
+  session-only, not in `session.Entry`, because it is a view rather than
+  a setting (reason in the file header). Checked:
+  `TestGitLogScopeRemoteCheckout_Cases`,
+  `…_CreatesTrackingBranch`, `…_CollisionPrompts` (real git),
+  `TestParseGitLogRefs_ReadsUpstream`, `TestGitLogTrackArgs`,
+  `TestGitLogRemoteLocalName`.
 - closed 2026-11-06, `2026-1106-1114-n110-n101-alt-chords-tsc-lsp` —
   **N-112** a failed restart now explains itself. ≡ Code "Restart
   language server" arms `lspServer.explainStart` (lsprestart.go) before

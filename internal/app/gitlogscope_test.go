@@ -153,7 +153,7 @@ func TestGitLogScopeItems(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.gitBranch = "main"
 	refs := []gitLogRef{
-		{full: "refs/heads/main", short: "main"},
+		{full: "refs/heads/main", short: "main", upstream: "refs/remotes/origin/main"},
 		{full: "refs/heads/feat", short: "feat"},
 		{full: "refs/remotes/origin/main", short: "origin/main", remote: true},
 	}
@@ -176,11 +176,181 @@ func TestGitLogScopeItems(t *testing.T) {
 		t.Errorf("viewing feat rows = %v, want %v", got, want)
 	}
 
-	// A remote-tracking branch gets no Check out row: that would be a
-	// branch-creating verb, not a switch.
+	// A remote branch whose local copy is the checked-out branch gets no
+	// Check out row: there is nothing to switch to.
 	a.gitLog.scope = "refs/remotes/origin/main"
 	if got := labels(); strings.HasPrefix(got[0], "Check out") {
-		t.Errorf("remote scope offered %q", got[0])
+		t.Errorf("remote scope tracked by the current branch offered %q", got[0])
+	}
+}
+
+// TestParseGitLogRefs_ReadsUpstream pins the third field: a local
+// branch carries its upstream refname, a remote one never does, and a
+// two-field line (no upstream column) reads as tracking nothing.
+func TestParseGitLogRefs_ReadsUpstream(t *testing.T) {
+	out := []byte("refs/heads/feat\t\trefs/remotes/origin/feat\n" +
+		"refs/heads/solo\t\n" +
+		"refs/remotes/origin/feat\t\trefs/remotes/origin/x\n")
+	refs := parseGitLogRefs(out)
+	if len(refs) != 3 {
+		t.Fatalf("refs = %+v, want 3", refs)
+	}
+	if refs[0].upstream != "refs/remotes/origin/feat" {
+		t.Errorf("feat upstream = %q", refs[0].upstream)
+	}
+	if refs[1].upstream != "" || refs[2].upstream != "" {
+		t.Errorf("solo / remote upstreams = %q / %q, want none", refs[1].upstream, refs[2].upstream)
+	}
+}
+
+// TestGitLogScopeRemoteCheckout_Cases walks the three answers for a
+// viewed remote branch: switch to the local branch already tracking it
+// (preferring the same name), create a local one when the name is free,
+// and ask for a name when an unrelated local owns it. Local scopes and
+// a nameless remote ref get no row.
+func TestGitLogScopeRemoteCheckout_Cases(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitBranch = "main"
+	remote := gitLogRef{full: "refs/remotes/origin/feat", short: "origin/feat", remote: true}
+	label := func(refs ...gitLogRef) string {
+		it, ok := a.gitLogScopeRemoteCheckout(refs)
+		if !ok {
+			return ""
+		}
+		return it.label
+	}
+	a.gitLog.scope = remote.full
+
+	// Free name → one-click create.
+	if got := label(gitLogRef{full: "refs/heads/main", short: "main"}, remote); got != "Check out as local feat" {
+		t.Errorf("free name row = %q", got)
+	}
+	// A differently-named tracker wins over creating a second copy.
+	mine := gitLogRef{full: "refs/heads/my-feat", short: "my-feat", upstream: remote.full}
+	if got := label(mine, remote); got != "Check out my-feat (tracks origin/feat)" {
+		t.Errorf("tracker row = %q", got)
+	}
+	// Two trackers → the one named like the remote branch.
+	same := gitLogRef{full: "refs/heads/feat", short: "feat", upstream: remote.full}
+	if got := label(mine, same, remote); got != "Check out feat (tracks origin/feat)" {
+		t.Errorf("two-tracker row = %q, want the same-named one", got)
+	}
+	// Already on the tracker → nothing to offer.
+	a.gitBranch = "feat"
+	if got := label(same, remote); got != "" {
+		t.Errorf("on the tracker, row = %q, want none", got)
+	}
+	a.gitBranch = "main"
+	// The name belongs to an unrelated branch → ask.
+	other := gitLogRef{full: "refs/heads/feat", short: "feat", upstream: "refs/remotes/fork/feat"}
+	if got := label(other, remote); got != "Check out as local branch…" {
+		t.Errorf("collision row = %q", got)
+	}
+	// Not a remote scope, or a remote ref with no branch part → no row.
+	a.gitLog.scope = "refs/heads/feat"
+	if got := label(remote); got != "" {
+		t.Errorf("local scope got remote row %q", got)
+	}
+	a.gitLog.scope = "refs/remotes/stray"
+	if got := label(); got != "" {
+		t.Errorf("nameless remote ref got row %q", got)
+	}
+}
+
+// TestGitLogRemoteLocalName strips the remote and keeps slashes in the
+// branch part; a ref with no branch part has no name.
+func TestGitLogRemoteLocalName(t *testing.T) {
+	cases := map[string]string{
+		"origin/feat":   "feat",
+		"origin/feat/x": "feat/x",
+		"stray":         "",
+	}
+	for in, want := range cases {
+		if got := gitLogRemoteLocalName(in); got != want {
+			t.Errorf("gitLogRemoteLocalName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestGitLogTrackArgs pins the argv: the name glued to --create so a
+// leading "-" can't become an option, the full refname as start point.
+func TestGitLogTrackArgs(t *testing.T) {
+	got := gitLogTrackArgs("-x", "refs/remotes/origin/feat")
+	want := []string{"switch", "--create=-x", "--track", "refs/remotes/origin/feat"}
+	if !equalStrings(got, want) {
+		t.Errorf("args = %v, want %v", got, want)
+	}
+}
+
+// remoteScopeRepo clones scopeRepo so origin/side exists as a
+// remote-tracking branch with no local copy in the clone.
+func remoteScopeRepo(t *testing.T) string {
+	t.Helper()
+	up := scopeRepo(t)
+	clone := t.TempDir()
+	gitRun(t, clone, "clone", "-q", up, ".")
+	return clone
+}
+
+// runScopeRow runs the picker row at index 0 and waits for git to finish.
+func runScopeRow(t *testing.T, a *App, want string) {
+	t.Helper()
+	items := a.gitLogScopeItems(loadGitLogRefs(a.rootDir))
+	if items[0].label != want {
+		t.Fatalf("first row = %q, want %q", items[0].label, want)
+	}
+	a.statusMsg = ""
+	items[0].run(a)
+}
+
+// TestGitLogScopeRemoteCheckout_CreatesTrackingBranch runs the one-click
+// row against real git: viewing origin/side creates local side tracking
+// it, switches to it, and puts the log back on the current branch.
+func TestGitLogScopeRemoteCheckout_CreatesTrackingBranch(t *testing.T) {
+	repo := remoteScopeRepo(t)
+	a := newTestApp(t, repo)
+	a.rootDir = repo
+	a.refreshGitStatus()
+	a.gitLog.open = true
+	a.setGitLogScope("refs/remotes/origin/side")
+
+	runScopeRow(t, a, "Check out as local side")
+	pumpAppEvents(t, a, func() bool { return strings.HasSuffix(a.statusMsg, "— done") })
+	if got := strings.TrimSpace(gitOut(t, repo, "branch", "--show-current")); got != "side" {
+		t.Errorf("current branch = %q, want side", got)
+	}
+	if got := strings.TrimSpace(gitOut(t, repo, "rev-parse", "--abbrev-ref", "side@{upstream}")); got != "origin/side" {
+		t.Errorf("side's upstream = %q, want origin/side", got)
+	}
+	if a.gitLog.scope != gitLogScopeHead {
+		t.Errorf("scope = %q, want the current branch after checkout", a.gitLog.scope)
+	}
+}
+
+// TestGitLogScopeRemoteCheckout_CollisionPrompts covers an unrelated
+// local branch owning the name: the row opens a prompt seeded with
+// "origin-side", and submitting it creates that tracking branch.
+func TestGitLogScopeRemoteCheckout_CollisionPrompts(t *testing.T) {
+	repo := remoteScopeRepo(t)
+	gitRun(t, repo, "branch", "-q", "--no-track", "side", "main") // same name, different history
+	a := newTestApp(t, repo)
+	a.rootDir = repo
+	a.refreshGitStatus()
+	a.gitLog.scope = "refs/remotes/origin/side"
+
+	runScopeRow(t, a, "Check out as local branch…")
+	p, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the name prompt", a.modal)
+	}
+	if got := p.field.String(); got != "origin-side" {
+		t.Errorf("prompt seed = %q, want origin-side", got)
+	}
+	a.closeModal()
+	p.callback(a, "origin-side")
+	pumpAppEvents(t, a, func() bool { return strings.HasSuffix(a.statusMsg, "— done") })
+	if got := strings.TrimSpace(gitOut(t, repo, "rev-parse", "--abbrev-ref", "origin-side@{upstream}")); got != "origin/side" {
+		t.Errorf("origin-side's upstream = %q, want origin/side", got)
 	}
 }
 

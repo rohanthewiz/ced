@@ -12,6 +12,10 @@
 // also carries "Check out <branch>" while the log is showing a local
 // branch you are not on — the log is where you go looking at a branch,
 // and switching to the one you're reading is the natural next step.
+// A remote-tracking branch gets the same next step in its own shape
+// (gitLogScopeRemoteCheckout): switch to the local branch already
+// tracking it, else create one — "Check out as local <name>" — and ask
+// for a name only when the obvious one is taken by a different branch.
 //
 // Why the current branch by default: the panel used to walk `--all`,
 // which on any repo with a few feature branches interleaves their
@@ -36,6 +40,11 @@
 //   - Choose-one-from-a-list = openPicker, like every other list.
 //   - Session-only, like the list width: a fresh session opens on the
 //     current branch, which is the answer the panel should start from.
+//     Persisting it per project (session.Entry) was weighed and declined
+//     (N-111): the view is a question asked of the log, not a setting —
+//     restoring "origin/feat" a week later would open the panel on a
+//     history nobody asked for, under a header easy to misread as the
+//     checked-out branch.
 //   - A scope that stops existing (the branch was deleted, a remote
 //     pruned) falls back to the current branch and says so once, rather
 //     than leaving an inexplicably empty list (gitLogScopeGone).
@@ -76,6 +85,11 @@ type gitLogRef struct {
 	full   string
 	short  string
 	remote bool
+	// upstream is a LOCAL branch's configured upstream as a full refname
+	// (refs/remotes/origin/feat), "" when it tracks nothing. It is how
+	// the remote checkout row finds the local branch that already
+	// follows a remote one — whatever that local branch is called.
+	upstream string
 }
 
 // gitLogScopeRevs is the revision argument a scope contributes to a log
@@ -145,14 +159,15 @@ func loadGitLogRefs(rootDir string) []gitLogRef {
 		return nil
 	}
 	out, err := exec.Command("git", "-C", rootDir, "for-each-ref",
-		"--format=%(refname)%09%(symref)", "refs/heads", "refs/remotes").Output()
+		"--format=%(refname)%09%(symref)%09%(upstream)", "refs/heads", "refs/remotes").Output()
 	if err != nil {
 		return nil
 	}
 	return parseGitLogRefs(out)
 }
 
-// parseGitLogRefs decodes loadGitLogRefs' "refname<TAB>symref" lines.
+// parseGitLogRefs decodes loadGitLogRefs' "refname<TAB>symref<TAB>upstream"
+// lines (a missing upstream field reads as none).
 // Split out so the symref and grouping rules are testable without a
 // repo. Locals come first whatever order the input had — the branch
 // you're likely to want is yours, not a remote's copy of it.
@@ -160,13 +175,15 @@ func parseGitLogRefs(out []byte) []gitLogRef {
 	var locals, remotes []gitLogRef
 	for _, ln := range strings.Split(string(out), "\n") {
 		ln = strings.TrimRight(ln, "\r")
-		full, sym, _ := strings.Cut(ln, "\t")
+		full, rest, _ := strings.Cut(ln, "\t")
+		sym, up, _ := strings.Cut(rest, "\t")
 		if full == "" || sym != "" {
 			continue
 		}
 		r := gitLogRef{full: full, short: gitLogRefShort(full)}
 		switch {
 		case strings.HasPrefix(full, "refs/heads/"):
+			r.upstream = up
 			locals = append(locals, r)
 		case strings.HasPrefix(full, "refs/remotes/"):
 			r.remote = true
@@ -179,6 +196,7 @@ func parseGitLogRefs(out []byte) []gitLogRef {
 // gitLogScopeItems builds the scope picker's rows. Order:
 //
 //	Check out feat/x            ← only while viewing a local branch you're not on
+//	                              (or a remote one: see gitLogScopeRemoteCheckout)
 //	Current branch (main)
 //	All branches
 //	feat/x (viewing)            ← other local branches
@@ -203,6 +221,8 @@ func (a *App) gitLogScopeItems(refs []gitLogRef) []paletteItem {
 			label: "Check out " + br,
 			run:   func(app *App) { app.runGitCmd("Switch to "+br, "switch", br) },
 		})
+	} else if it, ok := a.gitLogScopeRemoteCheckout(refs); ok {
+		items = append(items, it)
 	}
 	items = append(items,
 		paletteItem{
@@ -229,9 +249,9 @@ func (a *App) gitLogScopeItems(refs []gitLogRef) []paletteItem {
 
 // gitLogScopeCheckoutTarget reports the local branch the log is showing
 // when it is NOT the checked-out one — the branch "Check out" would
-// switch to. Remote-tracking branches don't qualify: switching to one
-// means creating a local branch, a different verb with its own naming
-// question, which ≡ Git → "New branch…" / the terminal answer better.
+// switch to. Remote-tracking branches don't qualify here: switching to
+// one means finding or creating a local branch, a different verb with
+// its own naming question — gitLogScopeRemoteCheckout answers it.
 func (a *App) gitLogScopeCheckoutTarget() (string, bool) {
 	if !strings.HasPrefix(a.gitLog.scope, "refs/heads/") {
 		return "", false
@@ -241,6 +261,125 @@ func (a *App) gitLogScopeCheckoutTarget() (string, bool) {
 		return "", false
 	}
 	return br, true
+}
+
+// gitLogScopeRemoteCheckout is the checkout row for a viewed
+// remote-tracking branch, or false when there is none to offer. Three
+// cases, decided from the picker's own ref list (no extra fork):
+//
+//	viewing origin/feat
+//	  │
+//	  ├─ a local branch tracks it ── on it already? → no row
+//	  │                              else → "Check out feat (tracks origin/feat)"
+//	  │                                     = git switch feat
+//	  ├─ no local "feat"         ──→ "Check out as local feat"
+//	  │                              = git switch --create=feat --track <ref>
+//	  └─ "feat" exists, tracks something else or nothing
+//	                             ──→ "Check out as local branch…" → name prompt
+//
+// Why a tracking branch wins over the name: it IS this branch's local
+// copy, whatever it is called (a `feat` made by `git switch feat` DWIM,
+// or a `my-feat` set up by hand), and creating a second one would leave
+// two locals following one remote. When several track it, the one named
+// like it is preferred, else the first in git's order.
+//
+// Why the collision asks instead of guessing: a same-named local that
+// does not track this ref is a DIFFERENT line of work — switching to it
+// would show a history other than the one being read, and resetting it
+// would destroy work. The prompt is seeded with "<remote>-<name>"
+// (origin-feat), a free-looking name that says where it came from;
+// git's own refusal covers the case where that is taken too.
+//
+// Every variant leaves the log on the CURRENT branch afterwards
+// (gitLogScopeHead): the remote ref never receives the commits you make
+// next, so staying pinned to it would hide your own work from the panel
+// the moment you commit.
+func (a *App) gitLogScopeRemoteCheckout(refs []gitLogRef) (paletteItem, bool) {
+	scope := a.gitLog.scope
+	if !strings.HasPrefix(scope, "refs/remotes/") {
+		return paletteItem{}, false
+	}
+	short := gitLogRefShort(scope)
+	name := gitLogRemoteLocalName(short)
+	if name == "" {
+		return paletteItem{}, false // refs/remotes/<x> with no branch part
+	}
+	followHead := func(app *App) { app.setGitLogScope(gitLogScopeHead) }
+
+	// Case 1: a local branch already follows this remote branch.
+	tracking, nameTaken := "", false
+	for _, r := range refs {
+		if r.remote {
+			continue
+		}
+		if r.short == name {
+			nameTaken = true
+		}
+		if r.upstream == scope && (tracking == "" || r.short == name) {
+			tracking = r.short
+		}
+	}
+	if tracking != "" {
+		if tracking == a.gitBranch {
+			return paletteItem{}, false // already on its local copy
+		}
+		return paletteItem{
+			label: "Check out " + tracking + " (tracks " + short + ")",
+			run: func(app *App) {
+				app.runGitCmdOK("Switch to "+tracking, followHead, "switch", tracking)
+			},
+		}, true
+	}
+
+	// Case 2: the obvious local name is free — one click, no prompt.
+	if !nameTaken {
+		return paletteItem{
+			label: "Check out as local " + name,
+			run: func(app *App) {
+				app.runGitCmdOK("Check out "+short+" as "+name, followHead,
+					gitLogTrackArgs(name, scope)...)
+			},
+		}, true
+	}
+
+	// Case 3: the name belongs to an unrelated local branch — ask.
+	return paletteItem{
+		label: "Check out as local branch…",
+		run: func(app *App) {
+			// The picker closes itself before running a row
+			// (runSelected), so the prompt lands in a free modal slot.
+			app.openPrompt("Check out "+short+" as", "local "+name+" already exists and doesn't track it",
+				strings.ReplaceAll(short, "/", "-"), func(app *App, local string) {
+					app.runGitCmdOK("Check out "+short+" as "+local, followHead,
+						gitLogTrackArgs(local, scope)...)
+				})
+		},
+	}, true
+}
+
+// gitLogRemoteLocalName is the local branch name a remote-tracking
+// branch checks out as: its short name minus the remote, origin/feat/x →
+// feat/x. It strips ONE segment, which is git's own default refspec
+// (refs/remotes/<remote>/*) for every remote name without a slash — the
+// overwhelmingly common case; a slashed remote name gets a longer
+// suggestion, which the user still sees in the row's label before
+// anything runs. "" when there is no branch part.
+func gitLogRemoteLocalName(short string) string {
+	_, name, ok := strings.Cut(short, "/")
+	if !ok {
+		return ""
+	}
+	return name
+}
+
+// gitLogTrackArgs is the git argv that creates local from remote (a full
+// refname) with remote as its upstream, and switches to it. The name is
+// GLUED to --create (newBranchArgs' reason: a name starting with "-" is
+// still the flag's value, so git refuses it rather than misparsing it),
+// and the start point is a full refs/remotes/… name, which can't start
+// with "-" either. --track (no =mode) leaves the start point positional.
+func gitLogTrackArgs(local, remote string) []string {
+	return []string{"switch", "--create=" + local, "--track", remote}
 }
 
 // openGitLogScopePicker lists the scopes. The refs are read inline (one

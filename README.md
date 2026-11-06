@@ -1662,7 +1662,13 @@ branch**, and follows it when you switch. The **⑂ main ▾** button in
 its header (or ≡ Git → *Git log branch…*) picks another: **All
 branches**, or any local or remote-tracking branch by name. While it is
 showing a local branch you aren't on, the same list leads with **Check
-out** that branch. A history search runs over whichever branch is shown —
+out** that branch. On a remote-tracking branch (`origin/feat`) it leads
+with **Check out feat (tracks origin/feat)** when a local branch already
+follows it, otherwise **Check out as local feat**, which creates `feat`
+tracking `origin/feat` and switches to it. If an unrelated local `feat`
+is in the way, it asks for a name instead (suggesting `origin-feat`).
+After a remote checkout the log goes back to the current branch, so your
+next commits show up. A history search runs over whichever branch is shown —
 except a `c:` commit search, which finds the commit wherever it is.
 
 The git log can pick a set too, from any branch it shows: click a

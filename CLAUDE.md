@@ -970,7 +970,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   else `--all` (`gitLogScopeAll`) or a FULL refname, session-only,
   spliced in by `gitLogFilterArgs` (the plain list is its empty query;
   `c:` ignores scope); header `⑂ <name> ▾` + ≡ Git "Git log branch…"
-  open one picker (Check out row for a viewed local branch); a vanished
+  open one picker (Check out row for a viewed local branch; a viewed
+  REMOTE one gets `gitLogScopeRemoteCheckout`: its tracker by upstream,
+  else create `--track` under the stripped name, else a name prompt
+  when an unrelated local owns it — then scope back to HEAD); scope is
+  session-only BY DECISION (N-111), not persisted; a vanished
   ref falls back to current with a flash. Actions picker
   (only `reset --hard` confirms); selection kept by hash; refresh rides
   `refreshGitStatus`. Ticks (gitlogticks.go): the leading blank cell,

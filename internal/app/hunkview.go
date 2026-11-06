@@ -706,21 +706,26 @@ func (m *hunkViewModal) revert(a *App) {
 	a.flash("Reverted the change — Undo brings it back")
 }
 
-// handleKey: Esc closes; alt+r reverts (the button's in-surface twin);
-// Tab / ←/→ move the button focus and Enter presses it; the arrows,
-// PgUp/PgDn and Home/End scroll the body.
+// altChords is the change view's Alt table (altchords.go): the in-surface
+// twins of its buttons — r for [ Revert change ], and p / n / s for the
+// nav row's ◂ Prev / Next ▸ / Side by side.
+func (m *hunkViewModal) altChords(*App) []altChord {
+	return []altChord{
+		{key: 'r', run: m.revert},
+		{key: 'n', run: func(app *App) { m.step(app, 1) }},
+		{key: 'p', run: func(app *App) { m.step(app, -1) }},
+		{key: 's', run: m.toggleSplit},
+	}
+}
+
+// handleKey: Esc closes; the Alt chords (altChords) are the buttons'
+// in-surface twins; Tab / ←/→ move the button focus and Enter presses
+// it; the arrows, PgUp/PgDn and Home/End scroll the body.
 func (m *hunkViewModal) handleKey(a *App, ev *tcell.EventKey) {
-	if ev.Key() == tcell.KeyRune && ev.Modifiers()&tcell.ModAlt != 0 {
-		switch ev.Rune() {
-		case 'r':
-			m.revert(a)
-		case 'n':
-			m.step(a, 1)
-		case 'p':
-			m.step(a, -1)
-		case 's':
-			m.toggleSplit(a)
-		}
+	// Every Alt rune is the view's, bound or not (the switch this table
+	// replaced swallowed them too): nothing here takes typed text.
+	if r, ok := altChordRune(ev); ok {
+		fireAltChord(a, m.altChords(a), r)
 		return
 	}
 	page := max(m.bodyRows(a)-1, 1)

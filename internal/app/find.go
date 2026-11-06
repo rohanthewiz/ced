@@ -358,7 +358,7 @@ const (
 // three. That priority is deliberate: regex changes what the typed TEXT
 // means, while case / word only narrow a query that reads the same
 // either way. All three chords work whether or not their chip is drawn
-// (fireExtraKey), so the narrow case loses only the click target.
+// (promptModal.altChords), so the narrow case loses only the click target.
 //
 // The opened prompt is returned so a caller can make it LIVE (its onEdit
 // / onCancel / status hooks — Find all in file, findalllive.go); the
@@ -770,23 +770,10 @@ func (a *App) handleFindKey(ev *tcell.EventKey) {
 			return
 		}
 	}
-	if ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune {
-		switch ev.Rune() {
-		case 'c':
-			a.toggleFindCase()
-			return
-		case 'w':
-			a.toggleFindWord()
-			return
-		case 'r':
-			a.toggleFindRegex()
-			return
-		case 'a':
-			if a.findReplaceOpen {
-				a.replaceAll()
-			}
-			return
-		}
+	// The bar's Alt table (findBarAltChords). An Alt rune it doesn't bind
+	// falls through to the field below, as it always has.
+	if r, ok := altChordRune(ev); ok && fireAltChord(a, a.findBarAltChords(), r) {
+		return
 	}
 	switch ev.Key() {
 	case tcell.KeyEsc:
@@ -825,6 +812,26 @@ func (a *App) handleFindKey(ev *tcell.EventKey) {
 	}
 	if _, edited := a.findField.handleKey(ev); edited {
 		a.findApplyQuery()
+	}
+}
+
+// findBarAltChords is the find bar's Alt table (altchords.go): the
+// keyboard twins of its Aa, |W| and .* toggles and the replace row's All.
+//
+// alt+a is bound whether or not the replace row is showing. With the row
+// shut it does nothing, but it is still CONSUMED, so the chord never
+// types an "a" into the query; replacing needs the row because the
+// replacement is read from it.
+func (a *App) findBarAltChords() []altChord {
+	return []altChord{
+		{key: 'c', run: (*App).toggleFindCase},
+		{key: 'w', run: (*App).toggleFindWord},
+		{key: 'r', run: (*App).toggleFindRegex},
+		{key: 'a', run: func(app *App) {
+			if app.findReplaceOpen {
+				app.replaceAll()
+			}
+		}},
 	}
 }
 

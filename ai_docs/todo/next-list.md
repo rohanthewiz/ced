@@ -101,21 +101,6 @@ plus the LSP work done in the seeding session itself
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
 
-- **N-110** · raised `2026-1103-1906-n003-readme-pins` · value low
-  **The README pins stop short of the in-surface Alt chords.** Done
-  2026-11-04 (`2026-1104-1530-n108-n110-ctx-splits-readme-pins`): the
-  ⌘ accelerators are a `#### Command-key accelerators` table pinned to
-  `metaAccels` (`TestREADME_CommandKeyTableListsEveryChord`), and the
-  three right-click menus are `### Right-click menus` tables pinned
-  through `pinRightClickREADME` over fixtures that reach every row
-  (tree, tab, editor). What remains is the Alt chords of modals and
-  the find bar (`promptExtra.key` on each prompt's extras, the bar's
-  switch in find.go, the cherry-pick / diff-view chords). They have no
-  registry: each prompt builds its extras inline, so a both-ways pin
-  needs either an enumerator over the prompt constructors or a table
-  they all draw from — a refactor, not a doc pass. Prose stays
-  unpinnable.
-
 - **N-111** · raised `2026-1104-2045-git-log-branch-scope` · value low
   The git log's branch picker (gitlogscope.go) offers **Check out** only
   for a viewed LOCAL branch. Viewing a remote-tracking branch
@@ -545,6 +530,26 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-06, `2026-1106-1059-n110-n101-alt-chords-tsc-lsp` —
+  **N-110** the in-surface Alt chords are pinned. Every keyboard-owning
+  surface that answers Alt+<letter> now has ONE table, `altChords`
+  (altchords.go: `altChord{key, run}`, `altChordRune`, `fireAltChord`,
+  first match wins), and its handleKey dispatches THROUGH it, so the list
+  a test reads is the list a key reaches: the prompt (extras, then the
+  `×` clear chord; `fireExtraKey` folded in), the find bar
+  (`findBarAltChords`), the cherry-pick dialog, the change view and a
+  picker's ⧉ headings (`runHeadingCopy` folded in). No behaviour changed:
+  unbound Alt runes are swallowed or typed exactly where they were.
+  README gained `#### Alt chords inside dialogs` under Hotkeys, pinned
+  both ways by `TestREADME_AltChordTableListsEveryChord` over the
+  `altChordSurfaces` fixture (find bar, find prompts, commit message,
+  GoNotes title, label bookmark, add to favorites, cherry-pick, change
+  view, Recent folders / locations), plus
+  `TestAltChords_NoSurfaceBindsAKeyTwice`. Checked: a dropped row and a
+  bogus row both fail the pin; full suite with -race green; in the real
+  binary (run-ced) Alt+c took the bar from "1 of 4" to "1 of 2" and
+  Alt+x emptied the Find all prompt.
 
 - closed 2026-11-04, `2026-1104-1610-n067-sql-formatter-real-run` —
   **N-087** drag-select now works in every diff pane. The compare panel

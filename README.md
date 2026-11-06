@@ -719,6 +719,48 @@ lists, and most terminals keep `⌘W` for closing their own window.
 | `⌘↑` / `⌘↓` | Top / end of the file (`⇧` selects) | `Esc j`, or `PgUp` / `PgDn` |
 | `⌘C` / `⌘V` / `⌘Z` | Copy / paste / undo | ≡ **Edit**; each panel takes its own paste |
 
+#### Alt chords inside dialogs
+
+While a dialog, a prompt or the find bar is up, it owns the keyboard:
+`Esc` leaders and the `≡` menu can't reach its buttons. So every button
+there has an `Alt` twin, which works whether or not a narrow terminal had
+room to draw the button. The surface takes the chord before the leader
+table sees it, so these never fire an `Esc` key, even inside tmux.
+
+| Where | Chord | Does |
+| --- | --- | --- |
+| Find bar | `alt+c` | Match case on / off (`Aa`) |
+| Find bar | `alt+w` | Whole word on / off (`\|W\|`) |
+| Find bar | `alt+r` | Regex on / off (`.*`) |
+| Find bar | `alt+a` | Replace all (**All**, with the replace row open) |
+| Find prompts | `alt+c` | `[case: …]` — match case on / off |
+| Find prompts | `alt+w` | `[word: …]` — whole word on / off |
+| Find prompts | `alt+r` | `[regex: …]` — regex on / off |
+| Find prompts | `alt+x` | Clear the field (the `×` at its end) |
+| Commit message | `alt+a` | `[ ✦ AI ]` — have your chat agent draft the message |
+| Commit message | `alt+t` | `[trailer: …]` — the agent's `Co-Authored-By` line on / off (drafted messages only) |
+| GoNotes title | `alt+a` | `[ ✦ AI ]` — have your chat agent draft the title |
+| GoNotes title | `alt+p` | `[private: …]` — send the note to GoNotes' private database |
+| Label bookmark | `alt+c` | `[Clear name]` — remove the bookmark's name (named bookmarks only) |
+| Add to favorites | `alt+s` | `[scope: …]` — this project or global |
+| Cherry-pick | `alt+a` | Select all (the visible rows) |
+| Cherry-pick | `alt+x` | Add git's "(cherry picked from …)" line on / off |
+| Cherry-pick | `alt+s` | Stage only, no commit (`--no-commit`) on / off |
+| Cherry-pick | `alt+b` | Change the branch to pick from |
+| Cherry-pick | `alt+d` | Open / close the diff preview |
+| Cherry-pick | `alt+v` | Preview side by side / unified |
+| Cherry-pick | `alt+n` / `alt+p` | Next / previous change in the preview |
+| Change view | `alt+r` | **Revert change** |
+| Change view | `alt+n` / `alt+p` | **Next ▸** / **◂ Prev** change in the file |
+| Change view | `alt+s` | **Side by side** |
+| Recent folders / locations | `alt+r` | `⧉` on the **MRU** heading — copy those folders |
+| Recent folders / locations | `alt+f` | `⧉` on the **MFU** heading — copy those folders |
+
+"Find prompts" are the prompts of **Find all in file**, **Find in
+project** and **Find all in folder**. Two `Alt` keys aren't button twins
+and so aren't listed: `alt+↑` / `alt+↓` scroll the cherry-pick preview,
+and `alt+Enter` breaks a line in the chat composer.
+
 ### The ≡ menu, row by row
 
 Every row of the `≡` menu, section by section, in the order the menu

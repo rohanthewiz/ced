@@ -632,7 +632,9 @@ func (m *paletteModal) handleKey(a *App, ev *tcell.EventKey) {
 	case tcell.KeyBacktab:
 		m.switchPane(m.pane - 1)
 	case tcell.KeyRune:
-		if ev.Modifiers()&tcell.ModAlt != 0 && m.runHeadingCopy(a, ev.Rune()) {
+		// A heading's ⧉ copy (altChords); an Alt rune no heading binds is
+		// typed into the query, as it always was.
+		if r, ok := altChordRune(ev); ok && fireAltChord(a, m.altChords(a), r) {
 			return
 		}
 		if _, edited := m.field.handleKey(ev); edited {
@@ -647,18 +649,24 @@ func (m *paletteModal) handleKey(a *App, ev *tcell.EventKey) {
 	}
 }
 
-// runHeadingCopy runs the copy of the heading bound to Alt+r, reporting
-// whether one was. It walks m.items, not the matches: a query hides the
-// headings but the sections are still there, and "copy the MRU list"
-// means the whole list whatever is typed.
-func (m *paletteModal) runHeadingCopy(a *App, r rune) bool {
+// altChords is the picker's Alt table (altchords.go): one chord per
+// section heading that carries a ⧉ copy and a key (Recent folders /
+// Recent locations: alt+r copies the MRU list, alt+f the MFU list). Most
+// pickers have no such heading and an empty table.
+//
+// It walks m.items, not the matches: a query hides the headings but the
+// sections are still there, and "copy the MRU list" means the whole list
+// whatever is typed. m.items is the CURRENT pane's list, so a two-pane
+// picker answers the chords of the pane on show.
+func (m *paletteModal) altChords(*App) []altChord {
+	var cs []altChord
 	for _, it := range m.items {
-		if it.copy != nil && it.copyKey == r {
-			m.runCopy(a, it)
-			return true
+		if it.copy == nil || it.copyKey == 0 {
+			continue
 		}
+		cs = append(cs, altChord{key: it.copyKey, run: func(app *App) { m.runCopy(app, it) }})
 	}
-	return false
+	return cs
 }
 
 // runCopy is the one door both the ⧉ click and its Alt key go through:

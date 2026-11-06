@@ -32,6 +32,9 @@ syntax-highlighted editor, status bar. One static Go binary, no CGO.
 - **Keyboard-owning surfaces (modals, prompts, the find bar) can't reach
   the ≡ menu**, so any button on them needs an in-surface key/Alt chord
   (Alt is safe inside them — the modal eats it before the leader branch).
+  Alt chords live in the surface's `altChords` table (altchords.go),
+  which its handleKey dispatches THROUGH (`fireAltChord`) — never a
+  private switch, or the README pin can't see it.
 
 ## Module / repo
 
@@ -90,6 +93,7 @@ internal/app/
   app.go                      Event loop, layout, rendering
   inputburst.go               One frame per wheel/motion burst
   modal.go leader.go whichkey.go  Modal slot; leader table + namespaces; which-key band
+  altchords.go                In-surface Alt chord tables (prompts, find bar, dialogs)
   metakeys.go nav.go          ⌘ layer; back/forward history
   quitbutton.go               ✕ quit button left of ≡ (confirm, then menuQuit)
   buttontip.go                Hover labels on chrome buttons (one enumerator)
@@ -164,7 +168,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `metaChordsOutsideTable`) and `### Right-click menus` — one `####`
   table each for File tree / Tab / Editor (`pinRightClickREADME`; the
   menus are built from state, so each test's FIXTURE must reach every
-  row — extend it, never drop a README row). All parse through
+  row — extend it, never drop a README row), and the `#### Alt chords
+  inside dialogs` table (`TestREADME_AltChordTableListsEveryChord`:
+  Where = the surface's name in the `altChordSurfaces` fixture, one row
+  per chord or chord pair; a new Alt-chord surface gets a fixture
+  entry). All parse through
   `internal/readme` — don't hand-roll another parser.
 - **newTestApp stubs every host side effect** (LSP/Copilot/chat dead,
   `lspLookPath`/`chatLookPath` never-found, builtin formatters nil,

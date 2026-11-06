@@ -378,15 +378,11 @@ func (m *promptModal) handleKey(a *App, ev *tcell.EventKey) {
 		m.openHist(a)
 		return
 	}
-	if ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune && m.fireExtraKey(a, ev.Rune()) {
-		m.edited(a)
-		return
-	}
-	// Checked after the extras so a prompt that ever binds x to an extra
-	// keeps it; consumed even on an empty field so the chord never falls
-	// through to the textField as a typed rune.
-	if m.clearable && ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune && ev.Rune() == promptClearKey {
-		m.clear(a)
+	// The extras' chords, then the clear chord (altChords orders them).
+	// Clear is consumed even on an empty field so the chord never falls
+	// through to the textField as a typed rune; an Alt rune the table
+	// doesn't bind still does, as it always has.
+	if r, ok := altChordRune(ev); ok && fireAltChord(a, m.altChords(a), r) {
 		return
 	}
 	if ev.Key() == tcell.KeyTab && m.complete != nil {
@@ -431,21 +427,39 @@ func (m *promptModal) clear(a *App) {
 	m.edited(a)
 }
 
-// fireExtraKey runs the extra bound to r, reporting whether it consumed
-// the keystroke. Deliberately NOT gated on extraRects: a chord cannot
-// mislead the way a truncated button would, so an extra the terminal is
-// too narrow to DRAW is still reachable from the keyboard — which is the
-// one place the narrow-terminal degradation costs nothing.
-func (m *promptModal) fireExtraKey(a *App, r rune) bool {
+// altChords is the prompt's Alt table (altchords.go): every extra that
+// carries a key, in extras order, then the clear chord on a clearable
+// prompt. Extras come first so a prompt that ever binds x to an extra
+// keeps it (fireAltChord's first match wins).
+//
+// An extra's chord is followed by edited, as it always was: an extra
+// can change what the same text MEANS (the find prompts' case / word /
+// regex chips) without touching a rune of it, so a live prompt must
+// re-ask. The clear chord goes through clear, which calls edited itself
+// and skips an already-empty field.
+//
+// Deliberately NOT gated on extraRects: a chord cannot mislead the way a
+// truncated button would, so an extra the terminal is too narrow to DRAW
+// is still reachable from the keyboard — which is the one place the
+// narrow-terminal degradation costs nothing.
+func (m *promptModal) altChords(*App) []altChord {
+	var cs []altChord
 	for _, e := range m.extras {
-		if e.key != 0 && e.key == r {
-			if e.run != nil {
-				e.run(a)
-			}
-			return true
+		if e.key == 0 {
+			continue
 		}
+		run := e.run
+		cs = append(cs, altChord{key: e.key, run: func(app *App) {
+			if run != nil {
+				run(app)
+			}
+			m.edited(app)
+		}})
 	}
-	return false
+	if m.clearable {
+		cs = append(cs, altChord{key: promptClearKey, run: m.clear})
+	}
+	return cs
 }
 
 // buttons returns the Cancel / OK button rects — the one geometry source

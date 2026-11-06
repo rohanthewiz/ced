@@ -1054,10 +1054,31 @@ func (m *cherryPickModal) drawRow(a *App, idx, y int) {
 // Keyboard
 // -----------------------------------------------------------------------------
 
+// altChords is the dialog's Alt table (altchords.go): the keyboard twins
+// of every button, since the modal owns the keyboard and the ≡ menu
+// cannot be their door. a / x / s / b are the options row (Select all,
+// -x, --no-commit, the source branch); d is the diff toggle on the
+// detail row; v / n / p are the open preview's split and change
+// steppers.
+func (m *cherryPickModal) altChords(*App) []altChord {
+	return []altChord{
+		{key: 'a', run: func(*App) { m.toggleAll() }},
+		{key: 'x', run: func(*App) { m.recordOrigin = !m.recordOrigin }},
+		{key: 's', run: func(*App) { m.noCommit = !m.noCommit }},
+		{key: 'b', run: m.changeSource},
+		{key: 'd', run: m.toggleDiff},
+		// Side by side is one switch for every pane; flipping it here
+		// flips it everywhere, and setDiffSplit keeps this pane's top
+		// line in view.
+		{key: 'v', run: func(app *App) { app.setDiffSplit(!app.diffSplit) }},
+		{key: 'n', run: func(app *App) { m.stepDiff(app, 1) }},
+		{key: 'p', run: func(app *App) { m.stepDiff(app, -1) }},
+	}
+}
+
 // handleKey: arrows and paging move, Space ticks, Enter picks, Esc
-// cancels, and the Alt chords are the keyboard twins of every button —
-// the modal owns the keyboard, so the ≡ menu cannot be their door
-// (alt+d is the diff toggle's).
+// cancels, and the Alt chords (altChords) are the keyboard twins of
+// every button.
 func (m *cherryPickModal) handleKey(a *App, ev *tcell.EventKey) {
 	// ⌘C with a live preview selection copies it again (the release
 	// already did); otherwise ⌘C is not the dialog's.
@@ -1065,28 +1086,11 @@ func (m *cherryPickModal) handleKey(a *App, ev *tcell.EventKey) {
 		m.copyDiffSelection(a, true)
 		return
 	}
-	if ev.Modifiers()&tcell.ModAlt != 0 && ev.Key() == tcell.KeyRune {
-		switch ev.Rune() {
-		case 'a':
-			m.toggleAll()
-		case 'x':
-			m.recordOrigin = !m.recordOrigin
-		case 's':
-			m.noCommit = !m.noCommit
-		case 'b':
-			m.changeSource(a)
-		case 'd':
-			m.toggleDiff(a)
-		case 'v':
-			// Side by side is one switch for every pane; flipping it here
-			// flips it everywhere, and setDiffSplit keeps this pane's
-			// top line in view.
-			a.setDiffSplit(!a.diffSplit)
-		case 'n':
-			m.stepDiff(a, 1)
-		case 'p':
-			m.stepDiff(a, -1)
-		}
+	// Every Alt rune is the dialog's, bound or not: an unbound one is
+	// swallowed rather than typed into the filter, which is what the
+	// switch this table replaced did.
+	if r, ok := altChordRune(ev); ok {
+		fireAltChord(a, m.altChords(a), r)
 		return
 	}
 	// Alt/Shift + arrows and paging scroll the diff pane while it is open;

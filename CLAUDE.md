@@ -120,6 +120,7 @@ internal/app/
   hostopen.go openterminal.go entrycmd.go  Open in Finder / terminal; {{DIR_ENTRY}} shell command
   autosave.go format.go validate.go syntax.go zipops.go
   copypaste.go copyto.go      File clipboard Copy/Paste; Copy to… a typed folder (one engine)
+  copyref.go                  Copy reference: `<abs path>:<line>` (editor/tab right-click, ≡ File)
   folder.go favorites.go favmanage.go recentlocations.go remote.go
   openfile.go                 Open file… / ⌘O: typed path anywhere on disk, Tab completes
   bookmarks.go                Project-wide bookmarks: park/adopt, verbs, persistence
@@ -330,7 +331,7 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (markdown only), Format, Validate (`validateFile`), Restore (`restoreFile`),
   Move/Copy to split → (only when `InCats`, like the ≡ Cats group), Add to group…,
   Remove from group <name> (grouped tabs only), Zip, Copy to…, copy name + paths,
-  Close tab, Close other tabs (KEEPS dirty tabs). Rows call the same
+  Copy reference (`abs:line`, copyref.go — editor right-click and ≡ File twins), Close tab, Close other tabs (KEEPS dirty tabs). Rows call the same
   verbs as their ≡ twins: Nav "Reveal file in tree", File "Validate
   file" / "Close other tabs" / "Copy file to…", Git "Show file's uncommitted changes" /
   "Show file's git history" / "Restore file (discard changes)…", Cats "Move to split →" ("Open in split →"
@@ -1400,9 +1401,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   terminal rows spends the above-the-fold budget.
 - **Adding a menu row means updating the pins** — a README menu-reference
   row first, then the layout counts:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 190 group
-  actions + 15 headers (207), 36 splits, height 249, dividers
-  `[2, 5, 246]`; also the Git fold height (35 rows + 8 splits = 43) in
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 192 group
+  actions + 15 headers (209), 36 splits, height 251, dividers
+  `[2, 5, 248]`; also the Git fold height (35 rows + 8 splits = 43) in
   `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.

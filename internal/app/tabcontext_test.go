@@ -100,7 +100,7 @@ func TestTabContext_RightClickOpensTheTabMenu(t *testing.T) {
 	}
 	// An empty cell is a split row (N-108): look · change · place · copy · close.
 	want := "Reveal in file tree|Show uncommitted changes|Show git history|Compare with clipboard||" +
-		"Format file|Validate file|Restore (discard changes)…||Add to group…||Zip file|Copy to…|Copy file name|Copy relative path|Copy absolute path||Close tab|Close other tabs"
+		"Format file|Validate file|Restore (discard changes)…||Add to group…||Zip file|Copy to…|Copy file name|Copy relative path|Copy absolute path|Copy reference (path:line)||Close tab|Close other tabs"
 	if got := strings.Join(labels, "|"); got != want {
 		t.Errorf("rows = %s, want %s", got, want)
 	}

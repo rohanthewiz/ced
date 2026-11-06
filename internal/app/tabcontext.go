@@ -199,6 +199,11 @@ func (a *App) tabContextItems(t *editor.Tab) []editorContextItem {
 		editorContextItem{label: "Copy absolute path", action: func(app *App) {
 			app.copyPathToSystemClipboard(absolutePathFor(t.Path), "absolute path")
 		}, enabled: hasPath},
+		// The absolute path plus the clicked tab's caret line
+		// (copyref.go); acts in place like the path rows above it.
+		editorContextItem{label: copyReferenceLabel, action: func(app *App) {
+			app.copyReferenceFor(t)
+		}, enabled: hasPath},
 		editorCtxSplit(),
 		editorContextItem{label: "Close tab", action: func(app *App) { app.requestCloseTab(app.tabIndexOf(t)) }, enabled: alwaysTrue},
 		editorContextItem{label: "Close other tabs", action: func(app *App) { app.closeOtherTabs(t) }, enabled: (*App).hasMultipleTabs},

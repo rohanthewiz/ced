@@ -370,6 +370,9 @@ func builtinMenuGroups() []menuGroup {
 			{splitAbove: true, label: "Copy file name", action: (*App).menuCopyFileName, enabled: (*App).hasFileTab},
 			{label: "Copy relative path", action: (*App).menuCopyRelativePath, enabled: (*App).hasFileTab},
 			{label: "Copy absolute path", action: (*App).menuCopyAbsolutePath, enabled: (*App).hasFileTab},
+			// "<absolute path>:<caret line>" (copyref.go) — the ≡ twin of
+			// the editor and tab right-click rows of the same label.
+			{label: copyReferenceLabel, action: (*App).menuCopyReference, enabled: (*App).hasFileTab},
 			// A twin of the ≡ Edit row, for the user who reads "select the
 			// whole FILE" as a file verb and looks here first. Same action
 			// and predicate as the Edit row, so the two can't drift; it sits

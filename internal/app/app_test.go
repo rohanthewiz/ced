@@ -403,7 +403,7 @@ func TestMenuModalRect_Centered(t *testing.T) {
 	// The menu (141 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 250
+	a.height = 251
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -2276,19 +2276,19 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 250 {
-		t.Errorf("modalHeight = %d, want 250 (214 + 36 splits)", h)
+	if h != 251 {
+		t.Errorf("modalHeight = %d, want 251 (215 + 36 splits)", h)
 	}
 	if got := len(a.menuGeometry().splits); got != 36 {
 		t.Errorf("splits = %d, want 36", got)
 	}
-	if got := len(items); got != 208 {
-		t.Errorf("row count = %d, want 208 (2 top-zone + 191 group actions + 15 headers)", got)
+	if got := len(items); got != 209 {
+		t.Errorf("row count = %d, want 209 (2 top-zone + 192 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (247) — headers separate the
+	// one setting off the headerless Quit group (248) — headers separate the
 	// sections, and splits (not dividers) the runs inside them.
-	wantDiv := []int{2, 5, 247}
+	wantDiv := []int{2, 5, 248}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2873,8 +2873,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 253 { // 250 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 253", h)
+	if h != 254 { // 251 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 254", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -3328,7 +3328,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 250
+	a.height = 251
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

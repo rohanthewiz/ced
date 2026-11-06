@@ -324,6 +324,14 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 				label: "Label bookmark…", action: (*App).menuLabelBookmark, enabled: alwaysTrue,
 			})
 		}
+		// "<absolute path>:<line>" of the clicked line (copyref.go) — a
+		// bookmark you hand to someone else, so it shares this run. The
+		// click already moved the caret there, so the verb reads the
+		// caret. Saved files only, like the bookmark row: an untitled
+		// buffer has no path to name.
+		items = append(items, editorContextItem{
+			label: copyReferenceLabel, action: func(app *App) { app.copyReferenceFor(tab) }, enabled: alwaysTrue,
+		})
 	}
 	if word := a.contextSearchWord(tab); word != "" {
 		items = append(items, editorContextItem{

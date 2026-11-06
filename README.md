@@ -521,7 +521,8 @@ Then:
     unsaved tab is saved first, since the second editor reads the disk.
   - *Add to group…* / *Remove from group* — see tab groups below.
   - *Zip file*, *Copy to…* (into any folder on disk — see above),
-    *Copy relative / absolute path*, *Close tab*, *Close other tabs*
+    *Copy relative / absolute path*, *Copy reference (path:line)*
+    (`/abs/path/file.go:42`, the caret's line), *Close tab*, *Close other tabs*
     (unsaved tabs are kept).
 
   Rows that show you something about the file (compare, preview,
@@ -813,6 +814,7 @@ still clickable and says why (install a binary, export `$EDITOR`).
 | `Copy file name` | | Copy the active file's name to the clipboard. |
 | `Copy relative path` | | Copy its project-relative path. |
 | `Copy absolute path` | | Copy its absolute path. |
+| `Copy reference (path:line)` | | Copy `<absolute path>:<line>` for the caret's line. |
 | `Select all` | | Select the whole buffer (the same row as under Edit). |
 | `Open in $EDITOR` | | Open the active file in your own `$VISUAL` / `$EDITOR`; the row names it. See [Open in $EDITOR](#open-in-editor). |
 | `Open in Finder` / `Open file manager` | | Show the active file (or the project) in the host's file manager. |
@@ -1106,6 +1108,7 @@ saved path) is dimmed rather than hidden. Every verb here also has a
 | `Copy file name` | always | Put the file's name on the system clipboard. |
 | `Copy relative path` | always | Put its project-relative path on the system clipboard. |
 | `Copy absolute path` | always | Put its absolute path on the system clipboard. |
+| `Copy reference (path:line)` | always | Put `<absolute path>:<line>` for the tab's caret line on the system clipboard. |
 | `Close tab` | always | Close this tab (asks about unsaved edits). |
 | `Close other tabs` | always | Close every other tab, keeping any with unsaved edits. |
 
@@ -1145,6 +1148,7 @@ except for the rows whose answer is a view of the file or an edit to it
 | `Soft Wrap` / `Stop Soft Wrap` | always | Wrap the file's long lines at the pane edge, or stop. |
 | `Add bookmark` / `Remove bookmark` | a saved file | Bookmark the clicked line, or remove its bookmark. |
 | `Label bookmark…` | a bookmarked line | Give the bookmark a name. |
+| `Copy reference (path:line)` | a saved file | Put `<absolute path>:<line>` for the clicked line on the system clipboard. |
 | `Search project for "<word>"` | a word under the caret | Find in project for that word (or a one-line selection). |
 | `Show change…` | a changed line, in a repository | The change bar's diff for this line, with **Revert**. |
 | `Blame this line…` | a saved file, in a repository | The commit that last touched the line. |

@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-112**
+**Next ID: N-113**
 
 ## Open
 
@@ -88,6 +88,38 @@ plus the LSP work done in the seeding session itself
   (a `tsc --version` probe, or trying it after typescript-language-server
   reports TypeScript "1.0.0, bundled") before spawning. Its inlay-hint
   and diagnostics support is unchecked.
+  2026-11-06 (`2026-1106-1059-n110-n101-alt-chords-tsc-lsp`): **checked,
+  and the two routes are now concrete.** Probed with ced's own handshake
+  (a scratchpad script: ced's capability set, null
+  `workspace/configuration` answers, full-text didChange).
+  `tsc --lsp --stdio` (typescript-go 7.0.2) initializes and answers
+  hover in markdown, but **its diagnostics are PULL-only**: one EMPTY
+  publishDiagnostics on open, nothing after an edit or a save, while
+  `textDocument/diagnostic` answers (3 items, 5 after an edit). ced is
+  push-only, so it would show no diagnostics. **Its inlay hints ignore
+  `initializationOptions.preferences`** (0 hints). VS Code-shaped
+  settings (`typescript.inlayHints.parameterNames.enabled: "literals"`,
+  `variableTypes.enabled`, `functionLikeReturnTypes.enabled`) give 6,
+  pushed by `workspace/didChangeConfiguration` (which it registers for)
+  or answered to `workspace/configuration` (sections js/ts, typescript,
+  javascript, editor). Separately, **typescript-language-server 6.0.3**
+  (2026-11-02) now refuses TS7 at `initialize` with its own reason ("The
+  TypeScript of the workspace (TypeScript 7.0.2 …) provides no
+  tsserver.js. No other valid TypeScript installation was found"). ced
+  drops that text, so the failure is still silent (N-112). **tsls 6.0.3
+  over `typescript@6` (6.0.3) works with ced unchanged**: in the probe
+  and in the real binary (run-ced) it gave `✗ Type 'string' is not
+  assignable…`, the gutter ●, and `» name: "hi" · times: 3` notes. The
+  choice is now:
+  (1) document `npm i -g typescript-language-server typescript@6` in
+  the README's server table (cheap, works today; `typescript@latest` is
+  7);
+  (2) register `tsc --lsp --stdio`, which needs three pieces: pull
+  diagnostics (ask `textDocument/diagnostic` after each sync and feed
+  the same diags path), a per-server settings push after `initialized`,
+  and a `tsc --version` check (5.x/6.x `tsc` has no `--lsp`), ordered
+  ahead of tsls for TS7;
+  (3) both, with (1) now and (2) later.
 
 - **N-103** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value low
   **pyright is tried before basedpyright, so a machine with both gets no
@@ -109,6 +141,21 @@ plus the LSP work done in the seeding session itself
   question (a local `feat` may already exist and differ). Add a "Check
   out as local <name>" row if anyone asks; also open: whether the scope
   should persist per project in `session.Entry` (session-only today).
+
+- **N-112** · raised `2026-1106-1059-n110-n101-alt-chords-tsc-lsp` · value low
+  **A language server whose `initialize` fails leaves no reason
+  anywhere.** `lspEnsureStarted` (lsp.go) closes the client and posts
+  `lspExitEvent` on a failed handshake, and the error text goes nowhere.
+  Some servers explain themselves there: typescript-language-server
+  6.0.3 over TypeScript 7 answers "The TypeScript of the workspace
+  (TypeScript 7.0.2 …) provides no tsserver.js. No other valid
+  TypeScript installation was found" (N-101). The house rules already
+  say how: "Startup errors are HELD for a ≡ label, not flashed", and an
+  unavailable row whose fix is the user's flashes the reason. A
+  candidate: hold the handshake error per server, and have the ≡ Code
+  "Restart language server (<id>)" row show it (label suffix, or a flash
+  when the restart fails again). Silent degradation stays: nothing
+  appears unless the user opens the menu.
 
 ## Validate
 

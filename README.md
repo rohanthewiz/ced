@@ -1754,6 +1754,22 @@ language's features and nothing else; the editor never nags about it.
 | C / C++ | `clangd` | `.c` `.h` `.cc` `.cpp` `.cxx` `.hpp` `.hh` `.hxx` |
 | Zig | `zls` | `.zig` |
 
+**TypeScript: install it with TypeScript 6.**
+
+```sh
+npm install -g typescript-language-server typescript@6
+```
+
+`typescript-language-server` drives the `tsserver.js` that ships with
+TypeScript 6 and earlier. TypeScript 7, which is what a plain
+`npm install typescript` gives you now, is a native rewrite with no
+`tsserver.js`, and the server refuses to start on it. A TypeScript 6
+installed beside the server is enough: if a project's own
+`node_modules` holds TypeScript 7, the server falls back to that copy.
+TypeScript 7 brings its own language server (`tsc --lsp`), which ced
+doesn't use yet. If the server won't start, ≡ **Code ▸ Restart language
+server** shows its reason.
+
 Everything below lives in the ≡ **Code** group, and so in the command
 palette:
 

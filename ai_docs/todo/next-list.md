@@ -121,6 +121,22 @@ plus the LSP work done in the seeding session itself
   and a `tsc --version` check (5.x/6.x `tsc` has no `--lsp`), ordered
   ahead of tsls for TS7;
   (3) both, with (1) now and (2) later.
+  2026-11-06 (`2026-1106-1132-n101-typescript6-docs`): **the user chose
+  (3).** (1) landed: the README's server table is followed by "install
+  it with TypeScript 6" (`npm install -g typescript-language-server
+  typescript@6`), why (no `tsserver.js` in 7), and the fallback. tsls
+  6.0.3 uses a TypeScript 6 installed BESIDE it when the project's own
+  `node_modules` holds 7 ("Using Typescript version (bundled) 6.0.3"),
+  seen in the probe and in the real binary (✗ diagnostic, `» name: "hi"
+  · times: 3`). lspservers.go's TypeScript entry carries the same note.
+  **What remains is (2), decided and ready to build:** register `tsc
+  --lsp --stdio` ahead of tsls for TypeScript 7, with pull diagnostics
+  (`textDocument/diagnostic` after each sync, into the same diags path),
+  a per-server VS Code-shaped settings push after `initialized`
+  (`typescript.inlayHints.*` via `workspace/didChangeConfiguration`), and
+  a `tsc --version` check so 5.x/6.x `tsc` (no `--lsp`) is never spawned
+  as a server. When it lands, the README's TypeScript note changes with
+  it.
 
 - **N-103** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value low
   **pyright is tried before basedpyright, so a machine with both gets no

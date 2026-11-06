@@ -140,6 +140,16 @@ var lspServers = []lspServerDef{
 		// typescript-language-server 5.3.0 over TypeScript 5.9 this blob
 		// gets five hints on a ten-line file and none without it
 		// (2026-10-28); no didChangeConfiguration push is needed.
+		//
+		// The server needs TypeScript ≤ 6: it drives tsserver.js, which
+		// TypeScript 7 (the native rewrite, npm's `latest` since 7.0)
+		// doesn't ship. 6.0.3 refuses a TS7-only setup at initialize, and
+		// falls back to a TypeScript 6 installed beside it when only the
+		// project's node_modules holds 7. The README says to install
+		// `typescript@6` (N-101). TS7's own server, `tsc --lsp --stdio`,
+		// is not registered: its diagnostics are pull-only and its inlay
+		// hints read VS Code-shaped settings, neither of which ced speaks
+		// yet (N-101 lists the three pieces).
 		initOptions: map[string]any{"preferences": map[string]any{
 			"includeInlayParameterNameHints":          "literals",
 			"includeInlayVariableTypeHints":           true,

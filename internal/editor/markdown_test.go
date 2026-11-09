@@ -268,6 +268,7 @@ func TestMDPalette_TextRolesReadOnEveryBuiltin(t *testing.T) {
 			"inline": pal.inline, "code": pal.code, "h1": pal.h1, "h2": pal.h2,
 			"h3": pal.h3, "quote": pal.quote, "link": pal.link, "image": pal.image,
 			"meta": pal.meta, "tblHead": pal.tblHead, "bullet": pal.bullet,
+			"check": pal.check,
 		}
 		for name, st := range roles {
 			fg, bg, _ := st.Decompose()
@@ -280,30 +281,73 @@ func TestMDPalette_TextRolesReadOnEveryBuiltin(t *testing.T) {
 	}
 }
 
-// TestMDPalette_ReadableColoursUntouched pins the other half: the lift
-// only touches colours under the floor. Tokyo Night's accent already
-// reads at ~6.8:1, so its headings must keep the theme's exact accent.
-func TestMDPalette_ReadableColoursUntouched(t *testing.T) {
-	th := mdBuiltin(t, "tokyo-night")
-	fg, _, _ := mdPaletteFor(th).h1.Decompose()
-	if fg != th.Accent {
-		t.Errorf("readable accent was altered: %v, want %v", fg, th.Accent)
+// TestMDPalette_BodyTextReachesItsTierOnEveryBuiltin pins the raised
+// body target: the prose reaches mdBodyContrast in every built-in, the
+// themes that used to sit under it (Darcula, Solarized) included.
+func TestMDPalette_BodyTextReachesItsTierOnEveryBuiltin(t *testing.T) {
+	for _, spec := range theme.Builtins() {
+		th, err := spec.Resolve()
+		if err != nil {
+			t.Fatalf("resolve %s: %v", spec.Name, err)
+		}
+		fg, bg, _ := mdPaletteFor(th).base.Decompose()
+		if c := theme.ContrastRatio(fg, bg); c < mdBodyContrast-0.01 {
+			t.Errorf("%s: body text reads at %.2f:1, want %.1f", spec.Name, c, mdBodyContrast)
+		}
 	}
 }
 
-// TestInkFloor_FollowsALowContrastTheme pins the Solarized carve-out:
-// when the theme's own body text sits under 4.5:1, the floor drops to
-// match it, so headings and quotes are never lifted past the prose.
-func TestInkFloor_FollowsALowContrastTheme(t *testing.T) {
-	th := mdBuiltin(t, "solarized-light")
-	body := theme.ContrastRatio(th.Text, th.BG)
-	if body >= theme.MinTextContrast {
-		t.Fatalf("fixture premise gone: solarized-light body text is %.2f:1", body)
+// TestMDPalette_ReadableColoursUntouched pins the other half: the lift
+// only touches colours under their target. Tokyo Night's fg already
+// clears the body tier, so its prose must keep the theme's exact colour.
+func TestMDPalette_ReadableColoursUntouched(t *testing.T) {
+	th := mdBuiltin(t, "tokyo-night")
+	fg, _, _ := mdPaletteFor(th).base.Decompose()
+	if fg != th.Text {
+		t.Errorf("readable body text was altered: %v, want %v", fg, th.Text)
 	}
-	if f := inkFloor(th); f != body {
+}
+
+// TestMDPalette_ProseWearsNoSyntaxHue is the magenta bug: Darcula's
+// #9876aa (accent-soft and syn-constant) tinted inline code, h2 rules,
+// h3s, bullets and the quote bar. Inline code must be the code slab's
+// neutral ink, and the heading structure must share the one accent.
+func TestMDPalette_ProseWearsNoSyntaxHue(t *testing.T) {
+	th := mdBuiltin(t, "darcula")
+	pal := mdPaletteFor(th)
+	if pal.inline != pal.code {
+		t.Errorf("inline code %v differs from the slab's neutral ink %v", pal.inline, pal.code)
+	}
+	accent, _, _ := pal.h1.Decompose()
+	for name, st := range map[string]tcell.Style{
+		"h3": pal.h3, "rule2": pal.rule2, "bullet": pal.bullet,
+	} {
+		if fg, _, _ := st.Decompose(); fg != accent {
+			t.Errorf("%s = %v, want the heading accent %v", name, fg, accent)
+		}
+	}
+	if fg, _, _ := pal.bar.Decompose(); fg != th.Accent {
+		t.Errorf("quote bar = %v, want the raw accent %v", fg, th.Accent)
+	}
+}
+
+// TestInkFloor_FollowsAnUnreachableBody pins the carve-out: on a mid-grey
+// background even pure white cannot reach the targets, so the floor drops
+// to what the body achieves and headings are never aimed past the prose.
+// A normal theme gets the plain target.
+func TestInkFloor_FollowsAnUnreachableBody(t *testing.T) {
+	grey := theme.Theme{
+		BG:   tcell.NewRGBColor(0x80, 0x80, 0x80),
+		Text: tcell.NewRGBColor(0xf0, 0xf0, 0xf0),
+	}
+	body := theme.ContrastRatio(mdBodyInk(grey), grey.BG)
+	if body >= mdInkContrast {
+		t.Fatalf("fixture premise gone: body reaches %.2f:1 on mid-grey", body)
+	}
+	if f := inkFloor(grey); f != body {
 		t.Errorf("floor = %.2f, want body contrast %.2f", f, body)
 	}
-	if f := inkFloor(mdBuiltin(t, "tokyo-night")); f != theme.MinTextContrast {
-		t.Errorf("high-contrast theme floor = %.2f, want %.1f", f, theme.MinTextContrast)
+	if f := inkFloor(mdBuiltin(t, "tokyo-night")); f != mdInkContrast {
+		t.Errorf("high-contrast theme floor = %.2f, want %.1f", f, mdInkContrast)
 	}
 }

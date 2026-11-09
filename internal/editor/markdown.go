@@ -106,12 +106,20 @@ type mdCell struct {
 // washed-out profile. Links are underlined for the same reason.
 //
 // Every TEXT role is lifted to inkFloor against the surface it actually
-// sits on (see mdPaletteFor). The roles borrow colours the theme tuned
-// for other jobs — syn-constant for inline code, muted for quotes,
-// accent-soft for h3 — and nothing about those jobs promised they would
-// read as prose, let alone on the code slab (Darcula's inline code was
-// 2.85:1). Pure decoration — hr, table rules, the quote bar — is left
-// alone: a line needs to be seen, not read.
+// sits on (see mdPaletteFor). The preview is a reading surface, so it
+// holds itself to more than the 4.5:1 the rest of the editor settles for:
+// body text aims at mdBodyContrast and everything else at mdInkContrast.
+// Pure decoration — hr, table rules, the quote bar — is left alone: a
+// line needs to be seen, not read.
+//
+// Prose roles deliberately take NO colour from the syntax family.
+// accent-soft and syn-constant are tuned to mark keywords and constants
+// in code; in most palettes that means purple, so borrowing them tinted
+// every inline span, h2 rule, h3 and bullet magenta (and olive on a green
+// accent, where accent-soft is a blend toward err). The slab alone says
+// "this is code", so inline spans wear neutral ink; the single accent
+// carries the whole heading/bullet/quote-bar structure. Fenced blocks are
+// the exception that keeps its hues: there the colours are real syntax.
 type mdPalette struct {
 	base    tcell.Style
 	h1, h2  tcell.Style
@@ -137,60 +145,73 @@ type mdPalette struct {
 // Each text colour goes through ink, which lifts it (same hue, paler on
 // a dark theme, deeper on a light one) until it reads at inkFloor on
 // its own background. Colours that already clear the floor come back
-// untouched, so a high-contrast theme renders exactly as before.
+// untouched, so a high-contrast theme keeps its exact inks.
 //
-// A heading's rule and a list's bullet wear the LIFTED colour of their
-// heading / h3 tier, so the underline never drifts a shade away from
-// the word above it. The quote bar stays raw accent-soft: decoration.
+// A heading's rule and a list's bullet wear the LIFTED accent, so the
+// underline never drifts a shade away from the word above it. The quote
+// bar stays raw accent: decoration.
 func mdPaletteFor(th theme.Theme) mdPalette {
 	floor := inkFloor(th)
 	ink := func(fg, bg tcell.Color) tcell.Color { return theme.LiftToContrast(fg, bg, floor) }
 
 	accent := ink(th.Accent, th.BG)
-	soft := ink(th.AccentSoft, th.BG)
 	muted := ink(th.Muted, th.BG)
 
-	base := tcell.StyleDefault.Background(th.BG).Foreground(th.Text)
+	base := tcell.StyleDefault.Background(th.BG).Foreground(mdBodyInk(th))
 	code := tcell.StyleDefault.Background(th.MDCodeBG).Foreground(ink(th.Text, th.MDCodeBG))
 	return mdPalette{
-		base:    base,
-		h1:      base.Foreground(accent).Bold(true),
-		h2:      base.Foreground(accent).Bold(true),
-		h3:      base.Foreground(soft).Bold(true),
+		base: base,
+		h1:   base.Foreground(accent).Bold(true),
+		h2:   base.Foreground(accent).Bold(true),
+		// h3 shares the accent with h1/h2. The tiers stay apart by their
+		// rules (heavy, light, none), which survive any palette; a second
+		// hue here is what used to bring the keyword colour into prose.
+		h3:      base.Foreground(accent).Bold(true),
 		hN:      base.Bold(true),
 		rule1:   base.Foreground(accent),
-		rule2:   base.Foreground(soft),
+		rule2:   base.Foreground(accent),
 		hr:      base.Foreground(th.Subtle),
 		code:    code,
-		inline:  tcell.StyleDefault.Background(th.MDCodeBG).Foreground(ink(th.SynConstant, th.MDCodeBG)),
+		inline:  code, // the slab marks it; a hue on top only adds noise
 		quote:   base.Foreground(muted).Italic(true),
-		bar:     base.Foreground(th.AccentSoft),
-		bullet:  base.Foreground(soft),
+		bar:     base.Foreground(th.Accent),
+		bullet:  base.Foreground(accent),
 		link:    base.Foreground(accent).Underline(true),
 		image:   base.Foreground(muted),
 		meta:    base.Foreground(muted),
 		tblRule: base.Foreground(th.Subtle),
 		tblHead: base.Foreground(accent).Bold(true),
-		check:   base.Foreground(th.GitAdded).Bold(true),
+		check:   base.Foreground(ink(th.GitAdded, th.BG)).Bold(true),
 	}
 }
 
-// inkFloor is the contrast every preview text role is lifted to: WCAG's
-// 4.5:1, or the theme's own body text contrast when that is LOWER.
-//
-// The second half is for themes like Solarized, whose fg sits barely
-// over (light: under) 4.5 on purpose. Aiming headings and quotes past
-// the body text would invert the hierarchy — the quiet roles would out-
-// shout the prose — and would "fix" a contrast level the theme author
-// chose for everything else on screen. Body text itself is never lifted
-// on the page background for the same reason: it is the theme's call.
+// The preview's contrast targets. Between WCAG AA (4.5) and what a dark
+// theme's fg usually reaches (11+), so strong palettes are left alone and
+// only the dim ones move. Body text sits a tier above the other roles on
+// purpose: it is what the user came to read, and keeping it brightest
+// means a lifted quote or heading can never out-shout the prose.
+const (
+	mdBodyContrast = 9.0
+	mdInkContrast  = 7.0
+)
+
+// mdBodyInk is the colour of the document's prose: the theme's fg, lifted
+// to mdBodyContrast on the page background.
+func mdBodyInk(th theme.Theme) tcell.Color {
+	return theme.LiftToContrast(th.Text, th.BG, mdBodyContrast)
+}
+
+// inkFloor is the contrast every non-body text role is lifted to:
+// mdInkContrast, or what the body text actually achieves when that is
+// LOWER. The second half only bites on a mid-tone background, where even
+// white or black cannot reach the target; aiming headings and quotes past
+// the prose there would invert the hierarchy.
 //
 // The floor is the TARGET; LiftToContrast moves in tenth steps and can
-// land up to one step past it (Solarized Light's quotes reach ~4.7
-// against body text at 4.1). Close enough that hue and italics still
+// land up to one step past it. Close enough that hue and italics still
 // carry the hierarchy, and it keeps one lift shared by every surface.
 func inkFloor(th theme.Theme) float64 {
-	return math.Min(theme.MinTextContrast, theme.ContrastRatio(th.Text, th.BG))
+	return math.Min(mdInkContrast, theme.ContrastRatio(mdBodyInk(th), th.BG))
 }
 
 // slabInk lifts a fenced block's syntax colour so the code slab costs it

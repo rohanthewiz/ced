@@ -427,10 +427,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   with tabs expanded; fences highlighted via one `HighlightLang` pass.
   `md-code-bg` is a derived key (`TestDerive_MDCodeBGIsVisiblyOffTheBackground`).
 - Every TEXT role in `mdPaletteFor` goes through `theme.LiftToContrast`
-  to `inkFloor` (4.5, or the theme's own body-text contrast when LOWER)
-  against the surface it sits on — they borrow colours tuned for other
-  jobs (`TestMDPalette_TextRolesReadOnEveryBuiltin`). Body text and pure
-  decoration (hr, table rules, quote bar) are never lifted. Fenced syntax
+  against the surface it sits on: body to `mdBodyContrast` (9), the rest
+  to `inkFloor` (`mdInkContrast` 7, or what the body achieves when LOWER;
+  `TestMDPalette_TextRolesReadOnEveryBuiltin`). Pure decoration (hr,
+  table rules, quote bar) is never lifted. Prose takes NO syntax hue
+  (`TestMDPalette_ProseWearsNoSyntaxHue`): inline code = the slab's
+  neutral ink, h1–h3 / rules / bullets / quote bar = the one accent —
+  accent-soft and syn-constant are purple in most palettes. Fenced syntax
   tokens get `slabInk`: back only what the slab took (target = their
   page contrast, capped at the floor), so comments stay quieter.
 - No config key. Leader Esc-v; ≡ View row below the terminal rows.

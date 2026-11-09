@@ -460,16 +460,21 @@ and `raised`.
   theme/palette.go.
 
 - **N-105** · raised `2026-1030-1649-markdown-preview-contrast` · value low
-  **The lifted markdown preview colours by eye.** Inline code, headings,
-  bullets and quotes are now lifted to 4.5:1 (`mdPaletteFor` → `inkFloor`),
-  and fenced syntax colours get back what the code slab took (`slabInk`).
-  Seen only through run-ced's PTY capture on Darcula (inline code
-  `#9876aa` → `#b79fc3`) and as numbers for the other built-ins. Look at a
-  real document in a real terminal on Darcula, a Solarized and a light
-  theme: does inline code still read as code rather than as washed-out
-  prose, and do fenced comments stay quieter than the code? Lift step
-  granularity (tenths, up to one step of overshoot) is the knob if a
-  colour lands too pale.
+  **The lifted markdown preview colours by eye.** Body text is now lifted
+  to 9:1 and the other text roles to 7:1 (`mdBodyContrast`, `mdInkContrast`
+  → `inkFloor`), and prose takes no syntax hue: inline code is the slab's
+  neutral ink, headings / rules / bullets the one accent
+  (`2026-1108-2028-markdown-preview-contrast`). Fenced syntax colours get
+  back what the code slab took (`slabInk`). Seen only through run-ced's
+  PTY capture on Darcula (inline code `#cbd4dd`, 7.24:1) and a seeded
+  Cats green palette, and as numbers for the other built-ins. Look at a
+  real document in a real terminal on Darcula, Cats green, a Solarized
+  and a light theme: does inline code still read as code with only the
+  slab marking it, do h2 and h3 stay distinct with one accent, is
+  Solarized's lifted body text acceptable, and do fenced comments stay
+  quieter than the code? The two constants, then lift step granularity
+  (tenths, up to one step of overshoot), are the knobs if a colour lands
+  too pale.
 
 - **N-106** · raised `2026-1031-0200-menu-search-box-splitters` · value low
   **The ≡ menu's search box and splits by eye.** Seen only through

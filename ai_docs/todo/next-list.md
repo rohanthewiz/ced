@@ -888,7 +888,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-11-10, this session (uncommitted; session doc pending) —
+- closed 2026-11-10, `2026-1110-1723-audit-wave1-data-safety` —
   **N-120** config.json is read per key (`decodeFileFormat`,
   userconfig.go): a bad value keeps that key's default and is named in
   the error ("2 bad values: …"), every good key still applies; JSON
@@ -898,7 +898,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   waits on N-135's "Open config.json" row. Checked:
   `TestLoad_OneBadValueKeepsTheRest`, `…_AcceptsJSONBooleans`,
   `…_WrongShapeIsAPerKeyError`, `…_KeysMatchCaseInsensitively`.
-- closed 2026-11-10, this session —
+- closed 2026-11-10, `2026-1110-1723-audit-wave1-data-safety` —
   **N-119** every state.json write is a read-modify-write
   (`session.Update`), so an instance changes only its own root and the
   last one to quit no longer erases the others. A corrupt file is moved
@@ -911,7 +911,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `TestRecordSession_TwoInstancesKeepEachOthersEntries`,
   `TestLoadSessionStore_CorruptFileIsSetAsideNotOverwritten`,
   `TestUpdate_*`, `TestSave_ConcurrentWritersNeverShareATemp`.
-- closed 2026-11-10, this session —
+- closed 2026-11-10, `2026-1110-1723-audit-wave1-data-safety` —
   **N-117** change detection is `Tab.DiskChanged` (editor/diskstamp.go):
   an (mtime, size, inode) stamp where ANY difference counts, then a
   sha256 of the raw bytes so a touch is not a change (the new stamp is
@@ -931,7 +931,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `TestDiskChanged_*`, `TestReconcile_BackdatedWriteReloadsCleanTab`,
   `TestSaveGuard_BlocksOverABackdatedWrite`,
   `TestHandleAutoSave_TouchIsNotAConflict`.
-- closed 2026-11-10, this session —
+- closed 2026-11-10, `2026-1110-1723-audit-wave1-data-safety` —
   **N-116** one formatter run per path (`formatClaim`, format.go): a
   request mid-run folds into the run's rerun flag (loud if any folded
   request was explicit). The done-event carries `seq` + the claim-time
@@ -943,7 +943,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   Checked: `TestHandleFormatDone_StaleRunDoesNotSwapANewerSave` (the
   reproduction, real in-process JSON rerun), `TestFormatClaim_*`,
   `TestFormatRerun_QueuedRequestStartsAfterSettle`.
-- closed 2026-11-10, this session —
+- closed 2026-11-10, `2026-1110-1723-audit-wave1-data-safety` —
   **N-115** `WriteFileAtomic` falls back to an in-place write ONLY when
   the temp file is refused for permission (EACCES / EPERM / EROFS,
   `tempRefusedByPermission`); ENOSPC and the rest return the error with
@@ -952,7 +952,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `createTemp` is a test seam. Checked:
   `TestWriteFileAtomic_FullDiskLeavesTheOriginal`,
   `TestSave_FullDiskKeepsTheTabDirty`, `TestWriteInPlace_ShrinksAndGrows`.
-- closed 2026-11-10, this session —
+- closed 2026-11-10, `2026-1110-1723-audit-wave1-data-safety` —
   **N-113** Undo / Redo / Revert set Dirty against the LAST-SAVED text
   (`savedLines`, undo.go), set by initUndo (read), Save and ReloadAsEdit
   (`markSaved`, a header copy). The disk holding text the tab never saw
@@ -962,7 +962,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   reproduction), `TestRedo_BackToSavedTextIsClean`,
   `TestRevertFile_AfterSaveIsDirty`, the three app twins in
   reconcile_test.go.
-- closed 2026-11-10, this session —
+- closed 2026-11-10, `2026-1110-1723-audit-wave1-data-safety` —
   **N-125** a key handled while `pasting` never paints (`deferFrame`,
   inputburst.go); the start and end markers (EventPaste) and any
   non-key event mid-paste still do. Checked:

@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-113**
+**Next ID: N-140**
 
 ## Open
 
@@ -149,6 +149,362 @@ plus the LSP work done in the seeding session itself
   npm package also installs a `pyright-langserver` alias, so an
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
+
+- **N-113** · raised `2026-1110-1630-reliability-performance-usability-audit` · value high
+  **Undo can leave a tab "clean" while the disk holds different text.**
+  Undo, Redo and Revert set `t.Dirty = t.CanRevert()` (undo.go:335,
+  :357, :375), and `CanRevert` compares against `undoOriginal`, the
+  ON-OPEN snapshot, which `Save` never updates. Type, let auto-save
+  write (or save), undo back to the opened text: the tab reads clean,
+  the disk keeps the undone text, and `menuQuit` quits with no prompt.
+  ≡ "Revert file" does the same. The reverse also holds: undo back to
+  the SAVED text reads dirty. Reproduced by a test on a scratch copy
+  (after auto-save + undo: buffer `original`, disk `original
+  EXPERIMENT`, dirty=false). Fix: keep a last-saved baseline (a header
+  copy set in NewTab / Reload / Save / ReloadAsEdit) and set Dirty from
+  buffer != baseline in all three.
+
+- **N-114** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **Editing a non-UTF-8 file corrupts it silently.** `internal/editor`
+  never asks `utf8.Valid`. The buffer primitives go through `[]rune`
+  (buffer.go:108-114, :148-151), so any edit to a line rewrites every
+  invalid byte on THAT line as U+FFFD, and auto-save persists it 5s
+  later. Reproduced: Latin-1 `caf\xe9 one` + one typed rune saves as
+  `caf\xef\xbf\xbd oneX`; Shift-JIS and BOM-less UTF-16 without a NUL in
+  the first 8KB the same. Untouched lines and a no-edit save round-trip
+  byte for byte. Decide the policy: (1) stopgap, open such a file with
+  auto-save off and a held warning (or read-only); (2) decode Latin-1 /
+  CP1252 on open and re-encode on save. Suggested: (1) first.
+
+- **N-115** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **A full disk empties the file being saved.** `WriteFileAtomic` falls
+  back to a truncating `os.WriteFile` on ANY `CreateTemp` error
+  (fileio.go:209-212), against its own header comment ("a crash or a
+  full disk can never leave a half-written file"). Reproduced on a 1MB
+  volume filled to 100%: 28000 bytes before, 0 after; with auto-save it
+  hits every dirty tab. The buffer survives and the tab stays dirty.
+  The temp-file path itself is solid (original intact, temp removed).
+  Fix: fall back only on EACCES / EPERM / EROFS, and in the fallback
+  write without O_TRUNC, truncating to length after a good write.
+
+- **N-116** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **Format-on-save race: a stale formatter result replaces newer saved
+  text.** `handleFormatDone` (format.go:666-692) matches by path and
+  calls `ReloadAsEdit` whenever the tab is clean, with no generation or
+  `EditRev` check, and `execFormatterChain` starts a second run while
+  one is in flight. Save, keep typing, save again before formatter #1
+  finishes: #1's output lands on disk and in the buffer and the text
+  typed between the saves is gone (still in undo, but the swap is
+  silent). Reproduced with a 400ms read-then-write stand-in formatter.
+  Breaks the "generation-check async results" rule. Fix: carry the
+  tab's `EditRev` at save on `formatDoneEvent` and skip adoption if it
+  moved; one run per path, with one queued rerun.
+
+- **N-117** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **An external change whose mtime is not NEWER is invisible, then
+  overwritten.** Reconcile (reconcile.go:152), `diskNewerThanTab`
+  (:464) and the auto-save guard (autosave.go:282) only test
+  `ModTime().After(tab.Mtime)`; no size, inode or hash. `cp -p`,
+  `rsync -t`, `tar x`, a restored backup, or a write inside the same
+  timestamp granule (NFS, some sshfs) is never seen. Reproduced: same
+  mtime, external content ignored by reconcile, next save `ok=true`
+  with no modal; an mtime 48h older, auto-save wrote over it. Also
+  `NewTab` stats AFTER the read (tab.go:296-305). Fix: record (mtime,
+  size, inode) at load and save, treat ANY difference as changed, stat
+  before the read; hash-compare on mismatch to avoid false conflicts.
+
+- **N-118** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **No crash safety.** No `recover()` and no `os/signal` anywhere in
+  non-test code; `main.go` calls `a.Close()` only after `Run` returns.
+  A panic (main loop or any of ~74 `go func` sites), SIGTERM, or SIGHUP
+  from a killed tmux pane skips `Close`: unsaved edits, the tab list
+  (`recordSession`) and history (`writeHistory`) are lost, and a panic
+  or SIGTERM leaves the terminal in raw mode / alt screen / mouse 1003
+  / kitty keyboard with the trace printed into the alt screen.
+  Auto-save is a pure debounce (autosave.go:107-127 re-arms on every
+  edit, :147-150 while a modal or menu is up), so steady typing is
+  never saved. Read, not run. Four parts: (a) recover in `Run` plus a
+  `safeGo` wrapper for goroutines: write dirty buffers
+  (`EncodedBytes`) to a recovery folder, `screen.Fini()`, re-panic;
+  (b) `signal.Notify(SIGHUP, SIGTERM)` posting a quit event through the
+  normal `Close` path; (c) a max wait on auto-save (force a save after
+  ~30s of continuous dirtiness); (d) `recordSession` on tab open and
+  close. Decide where recovery files live: `<repo>/.ced/recover/` is
+  inside an existing dotdir; outside a repository it needs a home
+  under `~/.config/ced/`, which the "no new dotfiles" rule must allow.
+
+- **N-119** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **state.json is overwritten wholesale.** `recordSession`
+  (folder.go:146-147) and the startup touch (`loadSessionStore`,
+  folder.go:72-85) dump the store loaded at STARTUP. Two instances: the
+  last to quit erases the other's entry (reproduced: after B quits its
+  entry is there with 1 tab; after A quits it is gone). A parse error
+  flashes and is then saved over, so one stray comma wipes every
+  recent folder and layout (reproduced: three folders → one). The temp
+  name is a fixed `path + ".tmp"` shared by concurrent writers
+  (session.go:238-242). `saveToolLayout` already re-reads before
+  writing; config.json's `saveKey` is fine. Fix: re-`Load` and upsert
+  only this root's entry, rename an unparseable file to
+  `state.json.bad` rather than saving over it, `CreateTemp` for the
+  temp name.
+
+- **N-120** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **One bad value in config.json resets EVERY setting to defaults.**
+  `Load` returns `Defaults()` on a parse error and on any single bad
+  value (userconfig.go:666-669, :680-684, :695-699); the app only
+  flashes. Reproduced: `{"autosave": false, "chatwrite": "off"}` loads
+  as AutoSave=true ChatWrite=true (a JSON boolean is "bad"), and so
+  does a valid file with one unrelated typo'd value. Auto-save, agent
+  file writes and plugins silently come back on. Fix: apply keys one
+  by one and keep the valid ones, accept JSON booleans, hold the error
+  for a ≡ label per the startup-errors rule.
+
+- **N-121** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
+  **Smaller data-safety fixes, each contained.** Close a part by
+  striking it here; close the item when all are done. All reproduced
+  on a scratch copy unless marked.
+  (a) Every save replaces the inode: group, xattrs, ACLs, hard links
+  and setgid are lost, a 0444 file in a writable dir is overwritten
+  silently (auto-save too), and the directory is not fsynced
+  (fileio.go:203-236). Fix: `fchown` the temp and copy the full mode;
+  write in place when nlink > 1 or ownership can't be kept; refuse or
+  confirm when the target lacks owner write.
+  (b) Undo onto a state gofmt would change, then one idle auto-save:
+  `ReloadAsEdit`'s `pushUndo` clears the redo stack (tab.go:586,
+  undo.go:244). Fix: skip auto-save (or the quiet formatter) while
+  `CanRedo()`.
+  (c) A clean tab whose file vanishes and returns (branch switch away
+  and back) was marked Dirty by DiskGone (reconcile.go:128-136), so it
+  comes back as a false "unsaved edits" conflict holding stale text,
+  and "Keep mine" overwrites the new content. Fix: remember whether it
+  was dirty before DiskGone; if clean, `ReloadUndoable`.
+  (d) The chat agent's fs write is a plain `os.WriteFile(…, 0o644)`
+  and an open CRLF / BOM tab is served to it as LF without the BOM
+  (copilot_chat_perm.go:584-587, :614-620), so the write-back converts
+  the file. Fix: re-apply the tab's LineEnding / BOM and write through
+  `editor.WriteFileAtomic`.
+  (e) A failed paste runs `os.RemoveAll(p.dest)` even when the failure
+  was "dest already exists" (copypaste.go:522-531). Fix: remove only
+  what ced's own Mkdir / O_EXCL create made.
+  (f) The dirty-close dialog captures a tab INDEX (app.go:5013-5023);
+  a tab closing to its left under the dialog (the cats Move-to-split
+  answer) makes Discard close a different tab. Fix: capture
+  `*editor.Tab` and resolve with `tabIndexOf`, as tabcontext.go does.
+  (g) Deleting a folder closes open dirty tabs inside it without a
+  prompt, and the confirm does not mention them (fileops.go:218-230;
+  read, not run).
+  (h) A minority-CRLF file keeps `\r` in the buffer as a character;
+  typing at end of line writes text after the CR (fileio.go:108-115).
+
+- **N-122** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **Git children share ced's controlling terminal.** `runGitCmdFull`
+  (gitcmd.go:136-138) is `exec.Command` + `CombinedOutput` with the
+  inherited env: no Setsid, no `GIT_TERMINAL_PROMPT`, no timeout, no
+  handle kept. Only `ls-remote` sets `GIT_TERMINAL_PROMPT=0`
+  (gitpush.go:432; its comment "nothing is attached to a terminal it
+  could prompt on" is wrong). Reproduced under a pty against a local
+  401 server: `Username for …:` is written to the tty over the frame,
+  git waits forever, keys are split between tcell and git, and after
+  killing git its `git remote-http` helper survives holding the pipe,
+  so `CombinedOutput` never returns. No cancel path. Suspected the
+  same way, not run: an ssh passphrase / unknown host key, a signed
+  commit with pinentry-curses, custom actions running `scp` / `ssh`
+  (app.go:5427). Also: no read-only git call sets
+  `GIT_OPTIONAL_LOCKS=0`, so the 10s `git status` can take
+  `index.lock` under a git command the user runs in another pane
+  (absence verified by grep, the collision not reproduced). Fix: ONE
+  constructor for every launcher (`runGitCmdFull`, `runGitCmdSeqHook`,
+  `runGitApplyPatch`, `fetchGitPushHeads`, `execCustomAction`):
+  `Setsid` (as `hostRun` does), `GIT_TERMINAL_PROMPT=0`, `GPG_TTY`
+  dropped, `CommandContext` with a process-group kill and `WaitDelay`,
+  `GIT_OPTIONAL_LOCKS=0` on reads. A refusal then lands in the
+  existing "Git failed" modal.
+
+- **N-123** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **A wedged language server freezes the editor.** `lspFlushChange`
+  sends the whole document on the MAIN LOOP (lsp.go:580
+  `client.DidChange(…, t.Buffer.String())`, didOpen at :471), and
+  `Client.send` is a blocking pipe write with no deadline
+  (client.go:332-349). A server that is alive but not reading (a
+  deadlock, swap, SIGSTOP) fills the pipe within a few edits and the
+  loop never returns; `Close()` writes `exit` through the same `send`
+  before its 2s Kill fallback, so quit and ≡ "Restart language server"
+  block too. Reproduced with `sleep 8` as the server: `DidChange(300kB)`
+  and `Close()` both still blocked after 2s. Fix: a writer goroutine
+  per client fed by a bounded queue; `Notify` enqueues without
+  blocking; overflow or a write past N seconds marks the server dead
+  and kills it; `Close` kills after its grace period without writing
+  first.
+
+- **N-124** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **Dropped `PostEvent`s leave permanent stuck state.** tcell's
+  `PostEvent` is non-blocking and DROPS when its 256-slot queue is
+  full, while tcell's own input enqueue blocks, so input arriving
+  faster than the loop drains pins the queue. 107 of 110 call sites
+  write `_ = scr.PostEvent(…)` (handled: terminal.go:223,
+  lspcodeaction.go:372, remote.go:169). Drops that stick:
+  `formatDoneEvent` and Restore's `gitCmdDoneEvent` leave
+  `formatRuns[path]` up (reconcile off for that path until restart);
+  `termDoneEvent` leaves `term.running` (terminal "busy" for the
+  session); `chatTurnDoneEvent` leaves `chat.turnActive`;
+  `chatPermRequestEvent` leaves its goroutine waiting up to 15 min;
+  the four `…ReadyEvent`s leave `starting` set and leak the child;
+  `autoSaveEvent`, `validateEvent`, `pluginEditEvent` leave their
+  one-shot timers unarmed until the next edit. The mechanism and the
+  per-event cost are verified; no collision was reproduced end to end.
+  What fills the queue: a paste (N-125) or a main-loop stall (N-127)
+  while the pointer moves (all-motion mouse is on). Fix: a
+  `postResult` helper for COMPLETION events that retries until
+  delivered or the App is closed (every such site is on a goroutine or
+  an AfterFunc); tickers may keep dropping.
+
+- **N-125** · raised `2026-1110-1630-reliability-performance-usability-audit` · value high
+  **A paste draws one full frame per pasted character.** A bracketed
+  paste arrives as one EventKey per rune; `handleKey` only appends to
+  `pasteBuf`, but `Run` still runs `draw()` + `Show()` for each
+  (`deferFrame` defers only wheel / motion events). Measured by
+  replaying Run's loop body on a simulation screen at 200×60: 5250
+  runes (125 lines) took 9.0s, 1.72 ms per rune, every frame
+  identical. It is also the easiest way to pin the event queue
+  (N-124). Fix: skip the frame while `a.pasting`.
+
+- **N-126** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
+  **Missing bounds on children and wire input.** Close a part by
+  striking it here. Read, not run, unless marked.
+  (a) Formatters run `exec.Command` + `CombinedOutput` with no timeout
+  (format.go:508-510); a hang leaves `formatRuns[path]` up for good.
+  Fix: `CommandContext` with a 30–60s cap and `WaitDelay`.
+  (b) A plugin's 30s timeout kills only `sh` (plugincmd.go:120-128: no
+  Setpgid, no WaitDelay, and a grandchild holding the pipe keeps
+  `Run()` waiting); edit-triggered runs have no in-flight check
+  (plugindeco.go:134, :157). Fix: Setpgid + group kill + WaitDelay,
+  skip a provider already running.
+  (c) `Close` kills no in-flight git / formatter / plugin /
+  custom-action child and not the terminal's foreground job; a server
+  still handshaking at a folder switch leaks, since its client exists
+  only inside the ready event (lsp.go:328, :341); `Client.Close`
+  returns early without `Wait` when the read loop already closed
+  (client.go:296), one zombie per server that exits on its own.
+  (d) An uncapped `Content-Length` reaches `make([]byte, contentLen)`
+  (client.go:532-535) and panics the read goroutine. REPRODUCED
+  (`makeslice: len out of range`). Fix: reject above a cap (64MB).
+  (e) One non-JSON stdout line ends an ACP / MCP connection
+  (acp.go:90-91), a common MCP stdio wrapper bug; `ReadBytes('\n')`
+  is unbounded. Fix: skip unparsable lines, cap the line length.
+  (f) `handleEvent` has no case for `*tcell.EventError`, so a dead
+  tty that does not SIGHUP ced leaves it polling git forever
+  (suspected). Fix: treat it as quit.
+
+- **N-127** · raised `2026-1110-1630-reliability-performance-usability-audit` · value high
+  **The git status snapshot runs synchronously on the main loop, every
+  10 seconds and after every save.** `refreshGitStatus` →
+  `loadGitStatus` is six forks in a row (gitstatus.go:113, :122, :197,
+  :206, :315, :333), called from the tree tick (`refreshTreeNow`),
+  `handleAutoSave` and ~33 sites in all. Measured on this repo, this
+  machine: 190–265 ms per call, so the UI stalls that long every 10s;
+  `app.New` takes 230–360 ms, mostly this (the rest of startup is
+  ~30–50 ms). The same tick also forks one `git diff` per open tab
+  (`requestOpenTabDiffs`, ~38 ms each, off-loop) and a `git ls-files`
+  (the finder rebuild), every 10s forever, focused or not, against
+  the "standing timers only while something needs them" rule. Fix:
+  (a) run the snapshot on one coalesced goroutine (in-flight flag +
+  seq) and post a `gitStatusEvent`; (b) fold the six forks into one
+  `git status --porcelain=v2 --branch --show-stash`; (c) reconcile on
+  focus-IN and stop polling while unfocused (terminals that report no
+  focus keep the tick); (d) skip the per-tab diff when neither the
+  file's mtime nor HEAD / index moved. Lands well with N-122's
+  constructor (timeout, `GIT_OPTIONAL_LOCKS=0`).
+
+- **N-128** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **Every structural edit re-lexes the whole file on the main loop.**
+  Enter, a multi-line paste, undo and line ops call
+  `InvalidateStyles`, and the next Render runs Chroma over the whole
+  buffer. Measured: ~0.5 ms per KB, so on `internal/app/app.go` (261KB)
+  Enter + Render is 129 ms and Undo + Render 151 ms, with 59MB of
+  garbage each; typing (the deferred path) is 1.2 ms. Fix: (a) patch
+  the grid for line inserts / deletes (splice rows) and DEFER like an
+  intra-line edit; (b) run the settle re-lex on a goroutine keyed by
+  `EditRev`, posting the grid back, so the loop never blocks on
+  Chroma. With N-129, `MaxHighlightBytes` (512KB) can be revisited.
+
+- **N-129** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **The style grid stores a 72-byte `tcell.Style` per character.**
+  Measured: `app.go`'s 261KB of text keeps a 19.1MB grid resident (75×
+  the text) holding 9 distinct styles; each lex allocates 59MB. Twenty
+  ordinary open tabs hold tens of MB of grid. Fix: a one-byte style
+  CLASS per rune plus a palette table resolved at paint time. A theme
+  switch then swaps the palette without a re-lex (`restyleTabs`), and
+  brace matching can ask "is this class string / comment" instead of
+  comparing colours (the degradation when a theme's syn-string == fg
+  goes away).
+
+- **N-130** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
+  **Render converts whole lines whatever the viewport shows.**
+  `runes := []rune(line)` and `rowStyles := make([]tcell.Style,
+  len(runes))` per visible line, per frame (tab.go:1196-1213).
+  Measured at 200×60 on a single-line file: 1MB → 14 ms and 84MB of
+  garbage per frame; 5MB → 190 ms and 420MB per frame (every frame,
+  mouse motion included), so a minified bundle under the 32MB open cap
+  is unusable. Ordinary files are fine (1.2 ms a frame). Fix: walk to
+  `ScrollX` without allocating (tab stops still anchor at column 0)
+  and build runes / styles for the visible window only; the wrapped
+  layout needs the same treatment.
+
+- **N-131** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **Undo depth collapses on big files and depends on WHERE you edit.**
+  Each step is a whole-buffer header copy (16 bytes × lines) charged
+  to the 32MB budget, and `snapshotCost` compares index by index, so a
+  line insert or delete near the top charges every shifted line's
+  bytes. Measured, structural edits: 50k lines → 41 steps survive,
+  200k → 10, 400k → 5; on a 6,000-line, 437KB file of distinct lines
+  (the size of app.go) 61 steps survive near the top against 330 near
+  the end. The trim is silent. Fix: delta undo records (line range,
+  removed lines, inserted lines), so memory and accounting are both
+  O(change); `pushUndoEntry` stays the single write path.
+
+- **N-132** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
+  **Find allocates per line per keystroke.** `SetFindQuery("gamma")`
+  measured 6 ms at 10k lines, 49 ms / 79MB at 100k, 181 ms / 317MB at
+  400k, and the find bar and the live Find-all prompt re-scan on every
+  keystroke. Fix: an ASCII fast path on bytes (`strings.Index`),
+  converting to rune columns only on a hit. Only matters on very
+  large files.
+
+- **N-133** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **`ced path/to/file.go` roots the editor at the file's folder.**
+  `resolveTarget` (main.go:139) returns the parent dir as the root.
+  Inside a repository that then (a) writes `<subfolder>/.ced/`
+  (history.bytdb, its lock, a .gitignore covering only the database),
+  which `git status` shows as `?? internal/app/.ced/` (seen in a
+  scratch clone); (b) adds the subfolder to Recent folders in
+  state.json; (c) narrows the tree, finder, project search, git and
+  the LSP rootUri to that folder. Fix: root at the nearest ancestor
+  holding `.git` (`projectRootFor` already exists) and reveal + open
+  the file; no repository → the parent dir as today. A change to
+  documented behaviour (README Usage, `helpText`): decide.
+
+- **N-134** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
+  **Flashed messages vanish.** `flash` is one slot shown for 3s
+  (`statusFlashFor`), overwritten by the next of 647 call sites, and
+  many carry the only explanation of a refusal ("an unavailable row
+  explains itself"). There is no history. Add a small message log
+  (the last N flashes with their time) behind a ≡ View row, opened
+  through `openPicker`; consider holding error-class flashes longer.
+
+- **N-135** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
+  **No in-app door to config.json or a key reference.** config.json
+  has 25 hand-edited keys and no ≡ row opens it; the which-key band
+  exists only behind `Esc ?`; the README (2958 lines) is the only
+  reference. Add ≡ rows "Open config.json" (create it with `{}` when
+  missing, then plain `openFile`) and "Keyboard reference" (the
+  which-key band). Each new row moves the README and menu-layout pins.
+
+- **N-136** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
+  **Limits that bite are silent.** A non-UTF-8 file (N-114) and a
+  trimmed undo history (N-131) change what the editor will do for you
+  and say nothing. Give each a status-bar segment with a `tip`, and
+  flash once when an undo trim first drops a step. Waits on the
+  decisions in N-114 and N-131.
 
 ## Validate
 
@@ -488,6 +844,42 @@ and `raised`.
   the dotted splits on both light themes. If the box is too faint, the
   fill is in `drawMenuSearchBox`; if the splits are too loud or too
   faint, the knob is `menuSplitContrast`.
+
+- **N-137** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **CI has never run on this fork.** `.github/workflows/test.yml`
+  already runs `go test ./... -race` on ubuntu-latest and macos-latest,
+  but Actions is not enabled in the fork's Actions tab. Linux is the
+  platform ced is written for (SSH into a box) and the suite has only
+  ever run on the macOS dev machine. Enable Actions, push, and read
+  the first run: a Linux-only failure is raised as a new Open item.
+  For scale, the suite takes 2m40s locally WITHOUT -race, 153s of it
+  in `internal/app`.
+
+- **N-138** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **There are no benchmarks and no fuzz tests.** Zero `func Benchmark`
+  and zero `func Fuzz` in the repo, so the numbers in N-125 and
+  N-127 … N-132 were taken with throwaway tests and nothing guards
+  them. Write: (a) benchmarks for `Highlight`, a clean `Tab.Render`
+  frame, Enter + Render, `App.draw`, `SetFindQuery`, an undo push on a
+  large buffer, and a paste replayed through Run's loop body, with a
+  loose budget test on the ones a fix is meant to move; (b) fuzz
+  targets for the code that parses what ced did not write: the LSP
+  frame reader (`Content-Length`, N-126d), the ndjson reader,
+  `plugins.ParseDiagnostic`, the conflict-marker scanner, `lexSQL`,
+  the JSON explainer, and a `readTextFile` → `EncodedBytes` round trip
+  that must be byte-identical (N-114).
+
+- **N-139** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
+  **The hand checks have no harness.** About 25 Validate items above
+  wait on a real tmux, and there is no tmux on the dev machine;
+  run-ced's capture driver speaks to a bare PTY. Run that driver
+  THROUGH tmux in a Linux container (mouse on, `focus-events on`), so
+  the checks that are about tmux itself become scripted: Esc folded
+  into Alt (the alt+r / alt+x chords of N-082, N-084, N-094), OSC 52
+  passthrough (N-086, N-078), and clicks on chrome buttons (N-070,
+  N-073, N-090). What only an eye can judge (colours, glyph width)
+  and the cats / Terminal.app checks stay by hand. Each item this
+  covers gets its result recorded in place.
 
 ## Roadmap
 

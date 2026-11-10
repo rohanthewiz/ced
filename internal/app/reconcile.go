@@ -20,12 +20,15 @@
 //
 //	disk      buffer   behaviour
 //	-------   ------   -------------------------------------------------
-//	newer     clean    reload — but UNDOABLY, and say so
-//	newer     dirty    record a conflict; ⚠ marker; raise the prompt
+//	changed   clean    reload — but UNDOABLY, and say so
+//	changed   dirty    record a conflict; ⚠ marker; raise the prompt
 //	deleted   any      keep the buffer, ⊘ marker; a save recreates it
 //
-// B: saveGuard stats before every write. If the file grew a newer mtime
-// than the one the tab loaded, the write is ABORTED and the same prompt
+// "Changed" is any version other than the one the tab last read or wrote
+// — not merely a newer mtime (editor/diskstamp.go, N-117).
+//
+// B: saveGuard stats before every write. If the file is a different
+// version from the one the tab loaded, the write is ABORTED and the same prompt
 // is raised, with the blocked save armed as `resume` so answering "Keep
 // mine" completes the gesture the user actually asked for. Before this
 // existed ced warned about the conflict and then wrote anyway, which is
@@ -38,7 +41,7 @@
 // through an explicit answer:
 //
 //	Compare…     look first — buffer vs. the current disk copy
-//	Keep mine    adopt the disk mtime; the next save knowingly overwrites
+//	Keep mine    adopt the disk version; the next save knowingly overwrites
 //	Take disk    ReloadUndoable — reversible with one Undo
 //	Decide later marker stays, saves stay guarded
 //
@@ -58,7 +61,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -84,10 +86,10 @@ type diskConflict struct {
 	tab  *editor.Tab
 	path string // captured at detection so the record survives a rename.
 
-	// mtime is the disk timestamp that triggered the conflict. Kept so a
+	// stamp is the disk version that triggered the conflict. Kept so a
 	// LATER external write can be detected as new news (see noteConflict)
 	// and re-raise a prompt the user had deferred.
-	mtime time.Time
+	stamp editor.DiskStamp
 
 	// resume is the save this conflict blocked, re-run verbatim if the
 	// user answers "Keep mine". nil when the conflict came from the
@@ -133,6 +135,11 @@ func (a *App) reconcileOpenTabsWithDisk() {
 				// without a murmur and take the file's last remains
 				// with it. The ⊘ marker says which kind of dirty.
 				tab.Dirty = true
+				// …and it must STAY dirty through Undo / Redo / Revert,
+				// which recompute the flag against the saved text: that
+				// text no longer exists anywhere, so no buffer state can
+				// match it.
+				tab.ForgetSavedText()
 				a.flash(fmt.Sprintf("%s deleted on disk — save to recreate it",
 					filepath.Base(tab.Path)))
 			}
@@ -144,12 +151,16 @@ func (a *App) reconcileOpenTabsWithDisk() {
 			continue
 		}
 		if tab.DiskGone {
-			// File reappeared. Force the mtime check below to fire so we
-			// either reload or warn about a dirty conflict.
+			// File reappeared. Force the check below to fire so we either
+			// reload or warn about a dirty conflict.
 			tab.DiskGone = false
-			tab.Mtime = time.Time{}
+			tab.ForgetDiskStamp()
 		}
-		if !info.ModTime().After(tab.Mtime) {
+		// ANY difference from the version the tab read or wrote counts —
+		// an older mtime (cp -p, rsync -t, a restored backup) and a
+		// same-granule rewrite included — unless the bytes hash the same
+		// (a touch). See editor/diskstamp.go (N-117).
+		if !tab.DiskChanged(info) {
 			continue // unchanged on disk.
 		}
 		if tab.Dirty {
@@ -163,7 +174,7 @@ func (a *App) reconcileOpenTabsWithDisk() {
 			// disk version" and re-open the clobber the guard exists to
 			// prevent. The conflict record is what suppresses the repeats
 			// instead.
-			a.noteConflict(tab, info.ModTime(), nil)
+			a.noteConflict(tab, editor.StampOf(info), nil)
 			continue
 		}
 		// Clean buffer: the disk copy is strictly newer information, so
@@ -202,18 +213,20 @@ func (a *App) conflictFor(tab *editor.Tab) *diskConflict {
 // gets to come back. If nothing new happened, the record is left alone —
 // that is what stops the reconcile tick from re-flashing and re-popping
 // once per tick.
-func (a *App) noteConflict(tab *editor.Tab, diskMtime time.Time, resume func(*App)) *diskConflict {
+func (a *App) noteConflict(tab *editor.Tab, disk editor.DiskStamp, resume func(*App)) *diskConflict {
 	if a.conflicts == nil {
 		a.conflicts = make(map[*editor.Tab]*diskConflict)
 	}
 	c := a.conflicts[tab]
 	if c == nil {
-		c = &diskConflict{tab: tab, path: tab.Path, mtime: diskMtime}
+		c = &diskConflict{tab: tab, path: tab.Path, stamp: disk}
 		a.conflicts[tab] = c
 		a.flash(fmt.Sprintf("%s changed on disk — ⚠ your edits are not saved",
 			filepath.Base(tab.Path)))
-	} else if diskMtime.After(c.mtime) {
-		c.mtime = diskMtime
+	} else if !disk.Same(c.stamp) {
+		// A DIFFERENT version, not just a newer one — same rule as the
+		// watcher (N-117).
+		c.stamp = disk
 		c.prompted = false // new news deserves a new question.
 	}
 	// A save that arrives while a conflict stands re-arms the resume: the
@@ -342,22 +355,25 @@ func (a *App) conflictCompare(c *diskConflict) {
 	a.compareWithFile(c.tab.Path)
 }
 
-// conflictKeepMine adopts the disk's mtime without touching the buffer:
-// the tab now claims to be based on the file as it stands, so the guard
-// stops firing and the next write knowingly overwrites. The blocked save
-// (if this conflict interrupted one) is then re-run, because "keep mine"
-// in answer to a save means "yes, write it".
+// conflictKeepMine adopts the disk's version without touching the
+// buffer: the tab now claims to be based on the file as it stands, so the
+// guard stops firing and the next write knowingly overwrites. The blocked
+// save (if this conflict interrupted one) is then re-run, because "keep
+// mine" in answer to a save means "yes, write it".
 //
-// The mtime is re-stat'ed rather than taken from the record: the user may
-// have spent a minute reading the compare panel, and adopting a
-// timestamp older than the file's current one would leave the guard
-// armed and the save bouncing a second time.
+// The version is re-read (AdoptDisk) rather than taken from the record:
+// the user may have spent a minute reading the compare panel, and
+// adopting an older version than the file's current one would leave the
+// guard armed and the save bouncing a second time. If the file vanished
+// meanwhile, nothing is adopted: the resumed save recreates it, and the
+// watcher marks it gone otherwise.
 func (a *App) conflictKeepMine(c *diskConflict) {
-	if info, err := os.Stat(c.tab.Path); err == nil {
-		c.tab.Mtime = info.ModTime()
-	} else {
-		c.tab.Mtime = c.mtime
-	}
+	_ = c.tab.AdoptDisk()
+	// The disk now holds the OTHER writer's text, which this tab never
+	// read. Undoing back to what the user last saved must not read clean
+	// — the file no longer says that — so the baseline is unknown until
+	// the next save writes "mine" over it.
+	c.tab.ForgetSavedText()
 	resume := c.resume
 	a.clearConflict(c.tab)
 	if resume != nil {
@@ -411,11 +427,11 @@ func (a *App) saveGuard(tab *editor.Tab, resume func(*App)) bool {
 	if tab == nil || tab.Path == "" {
 		return true
 	}
-	diskMtime, newer := diskNewerThanTab(tab)
-	if !newer {
+	disk, changed := diskChangedUnderTab(tab)
+	if !changed {
 		return true
 	}
-	c := a.noteConflict(tab, diskMtime, resume)
+	c := a.noteConflict(tab, disk, resume)
 	// Unlike the deferred watcher path this always raises, even on a
 	// record the user already deferred: they just asked to save, and the
 	// save cannot proceed until they answer.
@@ -444,27 +460,30 @@ func (a *App) autoSaveGuard(tab *editor.Tab) bool {
 	if _, err := os.Stat(tab.Path); err != nil {
 		return false
 	}
-	diskMtime, newer := diskNewerThanTab(tab)
-	if !newer {
+	disk, changed := diskChangedUnderTab(tab)
+	if !changed {
 		return true
 	}
-	a.noteConflict(tab, diskMtime, nil)
+	a.noteConflict(tab, disk, nil)
 	return false
 }
 
-// diskNewerThanTab reports the file's mtime and whether it is newer than
-// the copy the tab loaded — the single measurement both guards and the
-// watcher agree on. A zero tab mtime (never read or written) is treated
-// as "no conflict": there is no prior state to have been clobbered.
-func diskNewerThanTab(tab *editor.Tab) (time.Time, bool) {
+// diskChangedUnderTab reports the file's current version and whether it
+// differs from the one the tab last read or wrote — the single measurement
+// both guards and the watcher agree on (editor.Tab.DiskChanged: any stamp
+// difference whose bytes also differ, N-117). A tab with no recorded
+// version (never read or written) is treated as "no conflict": there is
+// no prior state to have been clobbered.
+func diskChangedUnderTab(tab *editor.Tab) (editor.DiskStamp, bool) {
 	info, err := os.Stat(tab.Path)
 	if err != nil {
-		return time.Time{}, false
+		return editor.DiskStamp{}, false
 	}
-	if tab.Mtime.IsZero() || !info.ModTime().After(tab.Mtime) {
-		return info.ModTime(), false
+	now := editor.StampOf(info)
+	if tab.DiskStamp().IsZero() {
+		return now, false
 	}
-	return info.ModTime(), true
+	return now, tab.DiskChanged(info)
 }
 
 // -----------------------------------------------------------------------------

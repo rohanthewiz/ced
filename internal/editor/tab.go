@@ -10,6 +10,7 @@ package editor
 import (
 	"fmt"
 	"image"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -70,9 +71,22 @@ type Tab struct {
 	lastEditAt time.Time
 
 	// Mtime is the file's modification time as of the last successful
-	// read or write. The app's periodic disk-reconcile loop compares it
-	// against the live mtime to detect external edits.
+	// read or write — a READ-ONLY mirror of diskStamp's time, kept for the
+	// many readers that only want a timestamp. Change detection is
+	// DiskChanged's job, never `mtime.After` (N-117); see diskstamp.go.
 	Mtime time.Time
+
+	// diskStamp / diskSum record the version of the file this tab last
+	// read or wrote: the stat's (mtime, size, inode) and the sha256 of the
+	// raw bytes. diskSumOK is false when no sum is known (image tabs, a
+	// forgotten stamp). Written only through diskstamp.go's recordDisk /
+	// recordDiskStampOnly / ForgetDiskStamp.
+	diskStamp DiskStamp
+	diskSum   [32]byte
+	diskSumOK bool
+	// diskSeenAt is when the content last matched diskStamp — the clock
+	// the "racily clean" rule measures the stamp's age against.
+	diskSeenAt time.Time
 
 	// LineEnding is the ending the file had when it was read ("\n" or
 	// "\r\n"), and the one every save re-emits. The buffer itself always
@@ -117,6 +131,22 @@ type Tab struct {
 	// appending to. See snapshotCost / trimUndo in undo.go.
 	undoBytes int
 	redoBytes int
+
+	// savedLines is the buffer as the file on disk is KNOWN to hold it —
+	// set when the tab is read (initUndo), written (Save), or adopts ced's
+	// own rewrite (ReloadAsEdit). Undo / Redo / RevertFile derive Dirty by
+	// comparing the buffer against it. It is NOT undoOriginal: that is the
+	// on-OPEN text Revert rewinds to, and measuring Dirty against it once
+	// a save had moved the disk on let an undo read "clean" while the file
+	// held other text — and quit without a prompt (N-113).
+	//
+	// savedKnown false means "the disk holds text this tab has never seen"
+	// (the file vanished, ced's formatter rewrote it under a dirty buffer,
+	// the user kept their edits over a foreign write). No buffer state can
+	// match that, so every recomputation answers dirty until the next save
+	// or reload re-establishes a baseline. See undo.go's markSaved.
+	savedLines []string
+	savedKnown bool
 
 	// Mode is "" for a normal text tab and imageMode (= "image") for a
 	// read-only image preview. Image tabs reuse the Tab type so the
@@ -286,34 +316,35 @@ func NewTab(path string) (*Tab, error) {
 	if path != "" && isImageExt(path) {
 		return newImageTab(path)
 	}
-	var text string
-	var mtime time.Time
-	bom, ending := false, lineEndingLF
+	r := diskRead{ending: lineEndingLF}
 	if path != "" {
 		var err error
 		// Guarded, decoded, and normalised in one place — see fileio.go
 		// for what "guarded" refuses and why the endings come back out.
-		text, bom, ending, err = readTextFile(path)
+		// The stamp comes from the stat readTextFile takes BEFORE the
+		// read: a write racing the open then reads as a change on the
+		// next tick, never as the version we loaded. (The old order —
+		// read, then stat — could record the racing write's mtime against
+		// the older bytes and never notice.)
+		r, err = readTextFile(path)
 		if err != nil {
 			return nil, err
-		}
-		// Record the on-disk mtime so the app can detect external edits
-		// later. A missing file leaves mtime as the zero value, which is
-		// fine — the reconcile loop handles that case explicitly.
-		if info, statErr := os.Stat(path); statErr == nil {
-			mtime = info.ModTime()
 		}
 	}
 	t := &Tab{
 		Path:       path,
-		Buffer:     NewBuffer(text),
+		Buffer:     NewBuffer(r.text),
 		StyleStale: true,
-		Mtime:      mtime,
-		BOM:        bom,
-		LineEnding: ending,
+		BOM:        r.bom,
+		LineEnding: r.ending,
 		// Highlighting cost scales with file size, so past a point it is
 		// cheaper — and much better to use — with no colors at all.
-		SyntaxOff: len(text) > MaxHighlightBytes,
+		SyntaxOff: len(r.text) > MaxHighlightBytes,
+	}
+	// A missing file records nothing (zero stamp) — the reconcile loop
+	// and the save guards handle "never read" explicitly.
+	if r.exists {
+		t.recordDisk(r.stamp, r.sum)
 	}
 	t.IndentUnit = DetectIndent(t.Buffer.Lines, path)
 	// Record the on-open buffer state so RevertFile has somewhere to
@@ -330,17 +361,15 @@ func newImageTab(path string) (*Tab, error) {
 	if err != nil {
 		return nil, err
 	}
-	var mtime time.Time
-	if info, statErr := os.Stat(path); statErr == nil {
-		mtime = info.ModTime()
-	}
 	t := &Tab{
 		Path:     path,
 		Buffer:   NewBuffer(""),
-		Mtime:    mtime,
 		Mode:     imageMode,
 		Image:    img,
 		ImageFmt: format,
+	}
+	if info, statErr := os.Stat(path); statErr == nil {
+		t.recordDiskStampOnly(StampOf(info))
 	}
 	// Capture the empty original snapshot so CanRevert / RevertFile
 	// behave sensibly even though image tabs are read-only — they'll
@@ -378,14 +407,21 @@ func (t *Tab) Save() error {
 	}
 	// Atomic (temp + rename) rather than a truncating in-place write, and
 	// re-encoded into the byte form the file arrived in. See fileio.go.
-	if err := WriteFileAtomic(t.Path, t.encode()); err != nil {
+	data := t.encode()
+	info, err := writeFileAtomic(t.Path, data)
+	if err != nil {
 		return err
 	}
 	t.Dirty = false
 	t.DiskGone = false
-	if info, err := os.Stat(t.Path); err == nil {
-		t.Mtime = info.ModTime()
-	}
+	// The disk now holds exactly this buffer — the baseline Undo / Redo /
+	// Revert measure Dirty against from here on.
+	t.markSaved()
+	// The stamp is the WRITTEN file's own stat (taken on the open handle
+	// before the rename), not a fresh os.Stat afterwards: a writer that
+	// slips in between our rename and a later stat would otherwise have
+	// its version recorded as ours. The sum is of the bytes we wrote.
+	t.recordDisk(StampOf(info), sumOf(data))
 	// Save is a natural logical-step boundary: the next typing burst is
 	// clearly a separate intent, so don't let it merge into whatever was
 	// in flight before the save.
@@ -394,22 +430,24 @@ func (t *Tab) Save() error {
 }
 
 // readDiskState performs the guarded read every reload path shares:
-// readTextFile's size / binary / BOM / line-ending work, plus the stat
-// whose mtime the caller records. One implementation, two consumers —
+// readTextFile's size / binary / BOM / line-ending work, plus the stamp
+// and content sum the caller records. One implementation, two consumers —
 // Reload installs what it returns as the new baseline and ReloadAsEdit
 // adopts it as an edit — because a second copy of the guards would drift
 // exactly where a user would notice it: a file that grew past
 // MaxOpenBytes, or turned binary, while we held it open.
-func (t *Tab) readDiskState() (text string, bom bool, ending string, mtime time.Time, err error) {
-	text, bom, ending, err = readTextFile(t.Path)
+//
+// A file that is gone is an error here (unlike NewTab, where a missing
+// path is a new file): there is nothing to reload FROM.
+func (t *Tab) readDiskState() (diskRead, error) {
+	r, err := readTextFile(t.Path)
 	if err != nil {
-		return "", false, "", time.Time{}, err
+		return diskRead{}, err
 	}
-	info, err := os.Stat(t.Path)
-	if err != nil {
-		return "", false, "", time.Time{}, err
+	if !r.exists {
+		return diskRead{}, &fs.PathError{Op: "stat", Path: t.Path, Err: fs.ErrNotExist}
 	}
-	return text, bom, ending, info.ModTime(), nil
+	return r, nil
 }
 
 // Reload re-reads the file from disk into the buffer. Cursor and anchor
@@ -439,26 +477,27 @@ func (t *Tab) Reload() error {
 		}
 		t.Image = img
 		t.ImageFmt = format
-		t.Mtime = info.ModTime()
+		t.recordDiskStampOnly(StampOf(info))
 		t.DiskGone = false
 		return nil
 	}
 	// Same guards and decoding as the open path: a file can grow past the
 	// limit, turn binary, or change its line endings while we hold it
 	// open, and a reload is exactly when we'd find out.
-	text, bom, ending, mtime, err := t.readDiskState()
+	r, err := t.readDiskState()
 	if err != nil {
 		return err
 	}
+	text := r.text
 	t.Buffer = NewBuffer(text)
-	t.BOM = bom
-	t.LineEnding = ending
+	t.BOM = r.bom
+	t.LineEnding = r.ending
 	t.Cursor = t.Buffer.Clamp(t.Cursor)
 	t.Anchor = t.Cursor // drop any selection — line indices may have shifted.
 	t.Carets = nil      // …and with them every secondary caret, for the same reason.
 	t.Dirty = false
 	t.DiskGone = false
-	t.Mtime = mtime
+	t.recordDisk(r.stamp, r.sum)
 	// Re-evaluated, not sticky: a file that grew past the limit while we
 	// held it open should stop highlighting, and one that shrank should
 	// start again.
@@ -552,21 +591,25 @@ func (t *Tab) ReloadAsEdit() (changed bool, err error) {
 	// and there is no reason a formatter's output gets a weaker check than
 	// a user's. A failure leaves the buffer and the history untouched —
 	// ReloadUndoable's "nothing to unwind" contract.
-	text, bom, ending, mtime, err := t.readDiskState()
+	r, err := t.readDiskState()
 	if err != nil {
 		return false, err
 	}
-	// The write is ours either way, so the tab adopts its mtime whether or
+	text, bom, ending := r.text, r.bom, r.ending
+	// The write is ours either way, so the tab adopts its stamp whether or
 	// not the bytes moved. Skipping this on the unchanged path would leave
 	// the tab looking like "someone else wrote your file" to the reconcile
 	// tick and the save guard (app/reconcile.go).
-	t.Mtime = mtime
+	t.recordDisk(r.stamp, r.sum)
 	t.DiskGone = false
 	if t.Buffer.String() == text {
 		// Encoding can still have been normalised out from under us even
 		// when the text matches, so those are adopted too — but nothing
 		// user-visible changed, so no undo step and no EditRev bump.
 		t.BOM, t.LineEnding = bom, ending
+		// The disk was just read and equals the buffer, so it is a known
+		// baseline even though nothing moved.
+		t.markSaved()
 		return false, nil
 	}
 
@@ -590,10 +633,11 @@ func (t *Tab) ReloadAsEdit() (changed bool, err error) {
 	t.BOM, t.LineEnding = bom, ending
 	// The buffer matches the file again, so the tab is clean — an
 	// auto-save that re-wrote it a moment later would be writing the same
-	// bytes back. (An Undo from here recomputes Dirty against the on-open
-	// original, which correctly marks the tab dirty: the user just asked
-	// for text the file no longer holds.)
+	// bytes back. The formatted text becomes the saved baseline, so an
+	// Undo from here recomputes Dirty against it and correctly marks the
+	// tab dirty: the user just asked for text the file no longer holds.
 	t.Dirty = false
+	t.markSaved()
 	// Re-evaluated, not sticky — same reasoning as Reload.
 	t.SyntaxOff = len(text) > MaxHighlightBytes
 	// Structural by definition: a reformat moves lines, so the style grid's

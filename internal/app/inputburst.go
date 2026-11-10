@@ -34,10 +34,23 @@
 //     lets the queue go empty, and without the cap the file would scroll
 //     invisibly and then jump — the cap keeps it visibly moving at ~30fps
 //     while still collapsing the thousands of frames in between.
-//   - Only wheel and motion defer. Every other event — keys, presses,
-//     releases, pastes, timers, background results — paints as before.
+//   - Only wheel and motion defer this way. Every other event — keys,
+//     presses, releases, timers, background results — paints as before.
 //     Those are events a user expects to SEE the effect of one by one, and
-//     none of them arrives in the volumes that caused the backlog.
+//     none of them arrives in the volumes that caused the backlog. (The
+//     one exception, keys INSIDE a bracketed paste, is below.)
+//
+// A BRACKETED PASTE is the other flood, and it needs no pending-input or
+// time test at all. Between the start and end markers every rune arrives
+// as its own EventKey, and handleKey only appends it to pasteBuf
+// (textpaste.go) — nothing on screen changes until the end marker splices
+// the whole paste in. Painting each of those frames was pure waste: a
+// 125-line paste (5250 runes) measured 9s at 200×60, 1.7ms a rune, every
+// frame identical, and the backlog it built is what pins tcell's event
+// queue (N-124, N-125). So a KEY handled while `pasting` is set never
+// paints; the end marker is an EventPaste, not a key, so it paints the
+// result. Anything else that lands mid-paste (a timer, a background
+// result) is not a key and still paints as usual.
 //
 // Deferring leaves draw's per-frame re-syncs (tab rects, tree focus, the
 // wrap width) at their last-painted values for the rest of the burst.
@@ -77,11 +90,21 @@ func isBurstMouseEvent(ev tcell.Event) bool {
 }
 
 // deferFrame reports whether the frame for the event just handled may be
-// skipped: it was a flood-kind mouse event, more input is already queued
-// behind it, and the screen was painted recently enough. now is passed in
-// so tests can pin the clock.
+// skipped: it was a key accumulated into a bracketed paste, or it was a
+// flood-kind mouse event with more input already queued behind it and the
+// screen painted recently enough. now is passed in so tests can pin the
+// clock.
 func (a *App) deferFrame(ev tcell.Event, now time.Time) bool {
-	if a.screen == nil || !isBurstMouseEvent(ev) {
+	if a.screen == nil {
+		return false
+	}
+	// Paste content: accumulated, not drawn — see the header. Checked
+	// AFTER handleEvent ran, so the end marker (which clears `pasting`)
+	// and the start marker (an EventPaste) both paint.
+	if _, isKey := ev.(*tcell.EventKey); isKey && a.pasting {
+		return true
+	}
+	if !isBurstMouseEvent(ev) {
 		return false
 	}
 	if !a.screen.HasPendingEvent() {

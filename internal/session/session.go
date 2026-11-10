@@ -199,7 +199,7 @@ func Load(path string) (*Store, error) {
 	}
 	var raw Store
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return s, fmt.Errorf("parse %s: %w", path, err)
+		return s, fmt.Errorf("parse %s: %w: %w", path, ErrCorrupt, err)
 	}
 	for _, e := range raw.Folders {
 		e.Root = normalize(e.Root)
@@ -218,11 +218,31 @@ func Load(path string) (*Store, error) {
 	return s, nil
 }
 
+// ErrCorrupt marks a Load failure that is the FILE's fault (it is not
+// JSON, or not this shape) rather than the disk's. Update sets such a
+// file aside instead of writing over it; a read error is never treated
+// that way, since the bytes may be fine and merely unreachable.
+var ErrCorrupt = errors.New("state file is not valid JSON")
+
+// BadSuffix names where Update moves a corrupt state file: state.json →
+// state.json.bad, beside it, for the user to repair or delete. One slot,
+// overwritten by the next corruption, so a recurring problem can never
+// pile files up in the config directory.
+const BadSuffix = ".bad"
+
 // Save writes the store to path atomically (temp + rename), creating the
 // config directory if it doesn't exist. Atomic because this file is
 // rewritten on every exit: a crash mid-write would otherwise leave a
 // half-JSON file that Load then reports as a parse error on the next
 // three startups.
+//
+// The temp name is UNIQUE per write (CreateTemp), not a fixed
+// path+".tmp": two instances quitting together used to share that one
+// name, so one could rename the other's half-written temp into place.
+//
+// Save writes exactly this store. Callers holding a store loaded some
+// time ago should use Update instead, which merges into what is on disk
+// NOW — see Update for why that matters.
 func (s *Store) Save(path string) error {
 	if path == "" {
 		return errors.New("no config directory resolved — cannot persist session state")
@@ -232,14 +252,76 @@ func (s *Store) Save(path string) error {
 		return err
 	}
 	out = append(out, '\n')
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0644); err != nil {
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(out); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	// CreateTemp makes 0600; the state file has always been 0644.
+	if err := os.Chmod(tmpName, 0644); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
+// Update is the read-modify-write every writer goes through: it loads the
+// file as it is NOW, applies fn, and saves the result. setAside is the
+// path a corrupt file was moved to ("" when none was).
+//
+// Two failures it exists for (N-119):
+//
+//   - Two ced instances. Each used to dump the store it loaded at
+//     STARTUP, so whichever quit last erased the other's entry — its tabs
+//     and layout gone, its folder dropped from the recent list. Merging
+//     into the current file means each instance changes only what it
+//     touches (its own root), and the other's entries survive. (The read
+//     and the write are not locked, so two writes in the same
+//     millisecond can still lose one; that window is far smaller than
+//     "the whole run" and needs no lock file.)
+//   - One stray comma. A parse error used to flash and then be SAVED
+//     OVER with the near-empty in-memory store, wiping every recent
+//     folder and layout. Now the corrupt file is renamed to
+//     state.json.bad first, so what the user had is still there to
+//     repair, and the write starts from an empty store.
+//
+// A read error (permissions, I/O) is returned WITHOUT writing: the bytes
+// might be perfectly good, and writing would replace them with whatever
+// little this instance knows.
+func Update(path string, fn func(*Store)) (setAside string, err error) {
+	if path == "" {
+		return "", errors.New("no config directory resolved — cannot persist session state")
+	}
+	s, err := Load(path)
+	if err != nil {
+		if !errors.Is(err, ErrCorrupt) {
+			return "", err
+		}
+		setAside = path + BadSuffix
+		if rerr := os.Rename(path, setAside); rerr != nil {
+			return "", fmt.Errorf("%w (and could not set it aside: %v)", err, rerr)
+		}
+		s = &Store{}
+	}
+	fn(s)
+	return setAside, s.Save(path)
 }
 
 // Find returns the remembered entry for root, if any. The bool is what

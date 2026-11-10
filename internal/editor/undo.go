@@ -179,6 +179,57 @@ func (t *Tab) initUndo() {
 	t.undoBytes = 0
 	t.redoBytes = 0
 	t.lastUndoGroup = undoGroupNone
+	// Both callers just read the file, so the on-open text IS the saved
+	// text. Sharing the original's slice costs nothing: snapshots are
+	// never written in place (applySnapshot copies out of them), so the
+	// two can't drift through aliasing.
+	t.savedLines = t.undoOriginal.Lines
+	t.savedKnown = true
+}
+
+// markSaved records the current buffer as what the file on disk holds.
+// Called wherever the two are known to agree after a write or a read that
+// is NOT a fresh baseline: Save, and ReloadAsEdit adopting ced's own
+// rewrite. A header copy, because Buffer.Lines is rewritten in place by
+// some primitives (MoveLines) — aliasing it would let the next edit
+// silently move the baseline along with the buffer.
+func (t *Tab) markSaved() {
+	if t.Buffer == nil {
+		t.savedLines, t.savedKnown = nil, true
+		return
+	}
+	lines := make([]string, len(t.Buffer.Lines))
+	copy(lines, t.Buffer.Lines)
+	t.savedLines, t.savedKnown = lines, true
+}
+
+// ForgetSavedText records that the file on disk no longer holds any text
+// this tab knows — it was deleted, ced's formatter rewrote it under a
+// dirty buffer, or the user chose to keep their edits over someone else's
+// write. Until the next Save or reload, every Undo / Redo / Revert leaves
+// the tab dirty: no buffer state is "what's on disk", so none may let the
+// editor quit without asking.
+func (t *Tab) ForgetSavedText() {
+	t.savedLines, t.savedKnown = nil, false
+}
+
+// matchesSaved reports whether the buffer holds exactly the text the
+// file on disk is known to hold. A string compare per line, but every
+// line the edits never touched shares its data pointer with the baseline,
+// so the common case is a pointer check — the same cost CanRevert pays.
+func (t *Tab) matchesSaved() bool {
+	if !t.savedKnown || t.Buffer == nil {
+		return false
+	}
+	if len(t.Buffer.Lines) != len(t.savedLines) {
+		return false
+	}
+	for i, ln := range t.Buffer.Lines {
+		if ln != t.savedLines[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // undoTop returns the entry a newly-pushed undo snapshot will sit on
@@ -332,7 +383,11 @@ func (t *Tab) Undo() bool {
 	t.trimUndo()
 
 	t.applySnapshot(prev)
-	t.Dirty = t.CanRevert()
+	// Against the SAVED text, never the on-open original: once a save has
+	// moved the disk on, undoing back to the opened text must read dirty
+	// (the file says something else), and undoing back to the saved text
+	// must read clean.
+	t.Dirty = !t.matchesSaved()
 	t.breakUndoGroup()
 	return true
 }
@@ -354,7 +409,7 @@ func (t *Tab) Redo() bool {
 	}
 
 	t.applySnapshot(next)
-	t.Dirty = t.CanRevert()
+	t.Dirty = !t.matchesSaved() // see Undo
 	t.breakUndoGroup()
 	return true
 }
@@ -372,7 +427,11 @@ func (t *Tab) RevertFile() bool {
 	t.redoStack = nil
 	t.redoBytes = 0
 	t.applySnapshot(t.undoOriginal)
-	t.Dirty = t.CanRevert() // false now — buffer matches original
+	// The buffer now matches the OPENED text, which is only the disk's
+	// text if nothing was saved since — so ask the saved baseline, as
+	// Undo does. A revert after a save leaves the tab dirty, and the next
+	// save writes the opened text back.
+	t.Dirty = !t.matchesSaved()
 	t.breakUndoGroup()
 	return true
 }

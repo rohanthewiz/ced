@@ -8,6 +8,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -80,5 +81,71 @@ func TestDeferFrame_KeysAlwaysPaint(t *testing.T) {
 
 	if a.deferFrame(tcell.NewEventKey(tcell.KeyRune, 'x', 0), now) {
 		t.Fatal("a key event deferred its frame")
+	}
+}
+
+// loopStep replays one iteration of Run's loop body — handle the event,
+// then ask deferFrame — and reports whether that iteration would paint.
+// Run itself blocks in PollEvent, so this is how a test counts frames.
+func loopStep(a *App, ev tcell.Event) bool {
+	a.handleEvent(ev)
+	return !a.deferFrame(ev, time.Now())
+}
+
+// TestDeferFrame_PasteContentNeverPaints is the N-125 regression: a
+// bracketed paste arrives as one EventKey per rune, and before the fix
+// each one paid a full frame (1.7ms a rune at 200×60; 9s for a 125-line
+// paste) though handleKey only appended it to pasteBuf. Now the start
+// marker and the end marker paint and nothing in between does — and the
+// text still lands whole.
+func TestDeferFrame_PasteContentNeverPaints(t *testing.T) {
+	a := openBlankTab(t)
+	text := strings.Repeat("abc\tdef\n", 50)
+
+	frames := 0
+	if loopStep(a, tcell.NewEventPaste(true)) {
+		frames++
+	}
+	if !a.pasting {
+		t.Fatal("the start marker did not arm accumulation on an editable tab")
+	}
+	for _, r := range text {
+		var ev *tcell.EventKey
+		switch r {
+		case '\n':
+			ev = tcell.NewEventKey(tcell.KeyEnter, '\r', tcell.ModNone)
+		case '\t':
+			ev = tcell.NewEventKey(tcell.KeyTab, '\t', tcell.ModNone)
+		default:
+			ev = tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone)
+		}
+		if loopStep(a, ev) {
+			frames++
+		}
+	}
+	if loopStep(a, tcell.NewEventPaste(false)) {
+		frames++
+	}
+
+	if frames != 2 {
+		t.Fatalf("a %d-rune paste painted %d frames, want 2 (start + end marker)",
+			len([]rune(text)), frames)
+	}
+	if got := a.activeTabPtr().Buffer.String(); got != text {
+		t.Fatalf("pasted text did not land whole: %q", got)
+	}
+}
+
+// TestDeferFrame_NonKeyEventsMidPastePaint: only the pasted KEYS skip
+// their frame — a timer or background result that lands between the
+// markers still paints, so nothing it changed waits on the end marker.
+func TestDeferFrame_NonKeyEventsMidPastePaint(t *testing.T) {
+	a := openBlankTab(t)
+	a.handlePaste(tcell.NewEventPaste(true))
+	if !a.pasting {
+		t.Fatal("paste not armed")
+	}
+	if a.deferFrame(tcell.NewEventInterrupt(nil), time.Now()) {
+		t.Fatal("a non-key event mid-paste deferred its frame")
 	}
 }

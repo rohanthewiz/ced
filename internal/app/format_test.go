@@ -300,7 +300,7 @@ func TestHandleFormatDone_ReloadsCleanBuffer(t *testing.T) {
 		t.Fatalf("rewrite: %v", err)
 	}
 
-	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt"})
+	deliverFormatDone(a, &formatDoneEvent{tabPath: target, label: "fmt"})
 
 	if got := tab.Buffer.String(); got != "formatted\n" {
 		t.Fatalf("buffer after reload: got %q, want %q", got, "formatted\n")
@@ -328,7 +328,7 @@ func TestHandleFormatDone_PreservesUndoHistory(t *testing.T) {
 		t.Fatalf("rewrite: %v", err)
 	}
 
-	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt"})
+	deliverFormatDone(a, &formatDoneEvent{tabPath: target, label: "fmt"})
 
 	if got := tab.Buffer.String(); got != "formatted\n" {
 		t.Fatalf("buffer = %q, want the formatted text", got)
@@ -359,7 +359,7 @@ func TestHandleFormatDone_QuietPreservesUndoHistory(t *testing.T) {
 		t.Fatalf("rewrite: %v", err)
 	}
 
-	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt", quiet: true})
+	deliverFormatDone(a, &formatDoneEvent{tabPath: target, label: "fmt", quiet: true})
 
 	if !tab.CanUndo() {
 		t.Fatal("a quiet format-on-save must not cost the undo stack")
@@ -384,7 +384,7 @@ func TestHandleFormatDone_UnchangedAddsNoUndoStep(t *testing.T) {
 	tab := openTabAtPath(t, a, target)
 	depth, rev := tab.UndoDepth(), tab.EditRev
 
-	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt"})
+	deliverFormatDone(a, &formatDoneEvent{tabPath: target, label: "fmt"})
 
 	if tab.UndoDepth() != depth || tab.EditRev != rev {
 		t.Fatalf("a no-op format moved the stack (%d→%d) or EditRev (%d→%d)",
@@ -404,11 +404,12 @@ func TestFormatRunTracking_ClearedOnDone(t *testing.T) {
 	a := newTestApp(t, root)
 	target := filepath.Join(root, "main.go")
 
-	a.formatRunBegin(target)
+	seq, rev, _ := a.formatClaim(target, false)
 	if !a.formatRunning(target) {
 		t.Fatal("a begun run must read as in flight")
 	}
-	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt", err: errors.New("boom")})
+	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt", err: errors.New("boom"),
+		seq: seq, rev: rev})
 	if a.formatRunning(target) {
 		t.Fatal("a failed run must still clear its in-flight mark")
 	}
@@ -449,7 +450,7 @@ func TestHandleFormatDone_PreservesDirtyBuffer(t *testing.T) {
 		t.Fatalf("rewrite: %v", err)
 	}
 
-	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt"})
+	deliverFormatDone(a, &formatDoneEvent{tabPath: target, label: "fmt"})
 
 	if got := tab.Buffer.String(); got != "user-typed-this\n" {
 		t.Fatalf("dirty buffer was overwritten: got %q", got)
@@ -462,7 +463,7 @@ func TestHandleFormatDone_PreservesDirtyBuffer(t *testing.T) {
 func TestHandleFormatDone_ClosedTabIsNoop(t *testing.T) {
 	useTestTrustFile(t)
 	a := newTestApp(t, t.TempDir())
-	a.handleFormatDone(&formatDoneEvent{tabPath: "/tmp/never-opened.go", label: "fmt"})
+	deliverFormatDone(a, &formatDoneEvent{tabPath: "/tmp/never-opened.go", label: "fmt"})
 	// No assertion — the test passes if we don't panic.
 }
 
@@ -670,6 +671,15 @@ func TestMaybeOfferInstall_ProjectHasEntryUsesTrustPath(t *testing.T) {
 	}
 }
 
+// deliverFormatDone hands ev to handleFormatDone as the completion of a
+// run claimed just now — the state a real run's event arrives in when
+// nothing moved since it started. Hand-built events need this since the
+// handler drops any event that is not the path's active run (N-116).
+func deliverFormatDone(a *App, ev *formatDoneEvent) {
+	ev.seq, ev.rev, _ = a.formatClaim(ev.tabPath, ev.quiet)
+	a.handleFormatDone(ev)
+}
+
 // waitForFormatEvent drains the simulation screen's event queue
 // until a formatDoneEvent shows up. Cap the wait at 2s so a hung
 // goroutine fails the test instead of hanging CI forever.
@@ -819,7 +829,7 @@ func TestHandleFormatDone_QuietErrorIsSilent(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.statusMsg = ""
 
-	a.handleFormatDone(&formatDoneEvent{
+	deliverFormatDone(a, &formatDoneEvent{
 		tabPath: "/tmp/x.go", label: "goimports",
 		err: fmt.Errorf("syntax error"), quiet: true,
 	})
@@ -848,7 +858,7 @@ func TestHandleFormatDone_QuietStillReloads(t *testing.T) {
 	}
 	a.statusMsg = ""
 
-	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "goimports", quiet: true})
+	deliverFormatDone(a, &formatDoneEvent{tabPath: target, label: "goimports", quiet: true})
 
 	if got := tab.Buffer.String(); got != "formatted\n" {
 		t.Fatalf("buffer after quiet reload: got %q, want %q", got, "formatted\n")
@@ -1213,5 +1223,171 @@ func TestFormatActiveFile_DirtyGoFormatsOnce(t *testing.T) {
 
 	if *calls != 1 {
 		t.Fatalf("builtin resolver consulted %d times, want 1", *calls)
+	}
+}
+
+// TestFormatClaim_OneRunPerPath pins the N-116 rule: a second request on
+// a path with a run in flight is queued, not started beside it, and the
+// queued rerun is LOUD if any folded request was an explicit one.
+func TestFormatClaim_OneRunPerPath(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	path := "/x/a.go"
+	seq, _, ok := a.formatClaim(path, true)
+	if !ok || seq == 0 {
+		t.Fatalf("first claim = (%d, %v), want a started run", seq, ok)
+	}
+	if _, _, ok := a.formatClaim(path, true); ok {
+		t.Fatal("a second run started beside the one in flight")
+	}
+	run := a.formatActive[path]
+	if !run.rerun || !run.rerunQuiet {
+		t.Fatalf("queued quiet request: rerun=%v quiet=%v", run.rerun, run.rerunQuiet)
+	}
+	a.formatClaim(path, false)
+	if run.rerunQuiet {
+		t.Fatal("an explicit request folded in must make the rerun loud")
+	}
+	if a.formatRuns[path] != 1 {
+		t.Fatalf("queued requests took reconcile marks: %d", a.formatRuns[path])
+	}
+}
+
+// TestHandleFormatDone_StaleRunDoesNotSwapANewerSave is the N-116
+// reproduction. Run #1 starts on text A; the user types and saves B while
+// it runs (that save's format request is queued); #1 then writes
+// format(A) over B and reports. Before the fix the handler matched by path
+// alone, found a clean tab, and adopted format(A): B was gone from buffer
+// and disk. Now the moved EditRev refuses the adoption, B goes back on
+// disk, and the queued run formats B.
+func TestHandleFormatDone_StaleRunDoesNotSwapANewerSave(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "data.json")
+	if err := os.WriteFile(target, []byte(`{"a":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tab := openTabAtPath(t, a, target)
+
+	// Run #1 claims on text A (what a save of A would do).
+	seq1, rev1, ok := a.formatClaim(target, true)
+	if !ok {
+		t.Fatal("run #1 did not start")
+	}
+	// The user edits to B and saves; that save's format request queues.
+	tab.Cursor = editor.Position{Line: 0, Col: len(`{"a":1`)}
+	tab.Anchor = tab.Cursor
+	tab.InsertString(`,"b":2`)
+	if err := tab.Save(); err != nil {
+		t.Fatal(err)
+	}
+	a.formatClaim(target, true)
+	// #1's late write lands on top of B.
+	if err := os.WriteFile(target, []byte("{\n  \"a\": 1\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "json formatter",
+		quiet: true, seq: seq1, rev: rev1})
+
+	if got := tab.Buffer.String(); !strings.Contains(got, `"b"`) {
+		t.Fatalf("the newer save was swapped out of the buffer: %q", got)
+	}
+	// The queued rerun formats B on disk and is adopted.
+	ev := waitForFormatEvent(t, a)
+	a.handleFormatDone(ev)
+	disk, _ := os.ReadFile(target)
+	if !strings.Contains(string(disk), `"b": 2`) {
+		t.Fatalf("disk = %q, want B formatted", disk)
+	}
+	if got := tab.Buffer.String(); got != string(disk) {
+		t.Fatalf("buffer %q != disk %q", got, disk)
+	}
+	if tab.Dirty {
+		t.Fatal("buffer equals disk but the tab reads dirty")
+	}
+	if len(a.formatActive) != 0 || a.formatRunning(target) {
+		t.Fatal("formatter bookkeeping left behind after the rerun settled")
+	}
+}
+
+// TestHandleFormatDone_UnclaimedEventIsDropped: an event that is not the
+// path's active run adopts nothing — the generation check the "async
+// results" rule asks for.
+func TestHandleFormatDone_UnclaimedEventIsDropped(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "main.go")
+	if err := os.WriteFile(target, []byte("first\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tab := openTabAtPath(t, a, target)
+	if err := os.WriteFile(target, []byte("formatted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "fmt", seq: 99})
+	if got := tab.Buffer.String(); got != "first\n" {
+		t.Fatalf("an unclaimed event was adopted: %q", got)
+	}
+}
+
+// TestFormatRerun_QueuedRequestStartsAfterSettle: a request folded into
+// the run in flight starts once that run has settled, and a dirty tab
+// skips it (its next save formats what the user actually wrote).
+func TestFormatRerun_QueuedRequestStartsAfterSettle(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	target := filepath.Join(root, "data.json")
+	if err := os.WriteFile(target, []byte(`{"a":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tab := openTabAtPath(t, a, target)
+
+	seq, rev, _ := a.formatClaim(target, true)
+	a.formatClaim(target, false) // ≡ Format file pressed mid-run
+	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "json formatter",
+		quiet: true, seq: seq, rev: rev})
+	next := a.formatActive[target]
+	if next == nil || next.seq == seq {
+		t.Fatal("the queued request did not start after the run settled")
+	}
+	a.handleFormatDone(waitForFormatEvent(t, a))
+	if strings.Contains(tab.Buffer.String(), `{"a":1}`) {
+		t.Fatalf("rerun result not adopted: %q", tab.Buffer.String())
+	}
+
+	// Dirty tab: the queued request is skipped.
+	seq, rev, _ = a.formatClaim(target, true)
+	a.formatClaim(target, true)
+	tab.InsertString(" ")
+	tab.Dirty = true
+	a.handleFormatDone(&formatDoneEvent{tabPath: target, label: "json formatter",
+		quiet: true, seq: seq, rev: rev})
+	if a.formatActive[target] != nil {
+		t.Fatal("a rerun started over a dirty buffer")
+	}
+}
+
+// TestFormatClaim_LostEventIsSuperseded: a run whose done-event never came
+// (a full tcell queue drops PostEvent, N-124) must not queue every later
+// format of the file behind it. Past formatRunStale the next request
+// starts fresh, the reconcile mark is not double-counted, and the old
+// event — should it turn up — is ignored without touching the new run.
+func TestFormatClaim_LostEventIsSuperseded(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	path := "/x/lost.go"
+	oldSeq, oldRev, _ := a.formatClaim(path, true)
+	a.formatActive[path].started = time.Now().Add(-formatRunStale - time.Second)
+
+	seq, _, ok := a.formatClaim(path, true)
+	if !ok || seq == oldSeq {
+		t.Fatal("a stale run still blocked the next request")
+	}
+	if a.formatRuns[path] != 1 {
+		t.Fatalf("reconcile marks = %d, want exactly the new run's", a.formatRuns[path])
+	}
+	a.handleFormatDone(&formatDoneEvent{tabPath: path, label: "fmt", quiet: true,
+		seq: oldSeq, rev: oldRev})
+	if a.formatActive[path] == nil || !a.formatRunning(path) {
+		t.Fatal("the superseded run's late event disturbed the new run")
 	}
 }

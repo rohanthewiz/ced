@@ -261,8 +261,8 @@ func autoSavable(t *editor.Tab) bool {
 	return t.Dirty && t.Path != "" && !t.DiskGone && !t.IsImage()
 }
 
-// diskChangedSinceLoad reports whether the file on disk is newer than
-// the content this tab was loaded from — i.e. someone else wrote it
+// diskChangedSinceLoad reports whether the file on disk is a different
+// version from the content this tab was loaded from — i.e. someone else wrote it
 // while we hold unsaved edits. Auto-save must not win that race
 // silently; the reconcile tick will surface the conflict and the
 // user can explicitly Save to overwrite. Stat errors report true
@@ -279,7 +279,8 @@ func diskChangedSinceLoad(t *editor.Tab) bool {
 	if err != nil {
 		return true
 	}
-	return !t.Mtime.IsZero() && info.ModTime().After(t.Mtime)
+	// A different version, not just a newer mtime (editor/diskstamp.go).
+	return !t.DiskStamp().IsZero() && t.DiskChanged(info)
 }
 
 // menuToggleAutoSave flips auto-save on/off from the ≡ menu and

@@ -8,9 +8,11 @@
 package editor
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -322,6 +324,109 @@ func TestWriteFileAtomic_FallsBackInAReadOnlyDirectory(t *testing.T) {
 	out, _ := os.ReadFile(path)
 	if string(out) != "after\n" {
 		t.Fatalf("fallback write did not land: %q", out)
+	}
+}
+
+// failCreateTemp swaps the createTemp seam for one that fails with err,
+// restored when the test ends.
+func failCreateTemp(t *testing.T, err error) {
+	t.Helper()
+	orig := createTemp
+	createTemp = func(string, string) (*os.File, error) { return nil, err }
+	t.Cleanup(func() { createTemp = orig })
+}
+
+// TestWriteFileAtomic_FullDiskLeavesTheOriginal is the N-115 regression:
+// a temp file that can't be created because the disk is full must NOT
+// fall back to a truncating in-place write. Before the fix the fallback
+// fired on any CreateTemp error and a 28KB file came out empty.
+func TestWriteFileAtomic_FullDiskLeavesTheOriginal(t *testing.T) {
+	path := writeTemp(t, "keep.txt", []byte("precious\n"))
+	failCreateTemp(t, &os.PathError{Op: "open", Path: path, Err: syscall.ENOSPC})
+
+	err := WriteFileAtomic(path, []byte("new content\n"))
+	if !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("err = %v, want ENOSPC surfaced", err)
+	}
+	out, _ := os.ReadFile(path)
+	if string(out) != "precious\n" {
+		t.Fatalf("original was touched: %q", out)
+	}
+}
+
+// TestSave_FullDiskKeepsTheTabDirty: through Tab.Save the failure is an
+// error and the tab stays dirty, so auto-save retries and quit still asks.
+func TestSave_FullDiskKeepsTheTabDirty(t *testing.T) {
+	path := writeTemp(t, "a.txt", []byte("a\n"))
+	tab, err := NewTab(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tab.InsertRune('x')
+	failCreateTemp(t, &os.PathError{Op: "open", Path: path, Err: syscall.ENOSPC})
+	if err := tab.Save(); err == nil {
+		t.Fatal("Save reported success on a full disk")
+	}
+	if !tab.Dirty {
+		t.Fatal("a failed save must leave the tab dirty")
+	}
+	out, _ := os.ReadFile(path)
+	if string(out) != "a\n" {
+		t.Fatalf("disk = %q, want the original", out)
+	}
+}
+
+// TestWriteFileAtomic_PermissionFallbackStillWrites: a PERMISSION refusal
+// is the one case the in-place fallback serves (seam form of the read-only
+// directory test, so it also runs as root).
+func TestWriteFileAtomic_PermissionFallbackStillWrites(t *testing.T) {
+	path := writeTemp(t, "p.txt", []byte("before\n"))
+	failCreateTemp(t, &os.PathError{Op: "open", Path: path, Err: syscall.EACCES})
+	if err := WriteFileAtomic(path, []byte("after\n")); err != nil {
+		t.Fatalf("permission refusal should fall back: %v", err)
+	}
+	out, _ := os.ReadFile(path)
+	if string(out) != "after\n" {
+		t.Fatalf("fallback write = %q", out)
+	}
+}
+
+// TestWriteInPlace_ShrinksAndGrows: without O_TRUNC the file must still
+// end exactly at the new length — shorter content cuts the old tail off,
+// longer content extends it.
+func TestWriteInPlace_ShrinksAndGrows(t *testing.T) {
+	path := writeTemp(t, "s.txt", []byte("a fairly long original line\n"))
+	if _, err := writeInPlace(path, []byte("short\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := os.ReadFile(path); string(out) != "short\n" {
+		t.Fatalf("shrink = %q", out)
+	}
+	long := strings.Repeat("grow ", 100)
+	if _, err := writeInPlace(path, []byte(long), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := os.ReadFile(path); string(out) != long {
+		t.Fatalf("grow = %q", out)
+	}
+}
+
+// TestTempRefusedByPermission pins which CreateTemp errors may fall back.
+func TestTempRefusedByPermission(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		want bool
+	}{
+		"EACCES": {&os.PathError{Err: syscall.EACCES}, true},
+		"EPERM":  {&os.PathError{Err: syscall.EPERM}, true},
+		"EROFS":  {&os.PathError{Err: syscall.EROFS}, true},
+		"ENOSPC": {&os.PathError{Err: syscall.ENOSPC}, false},
+		"EIO":    {&os.PathError{Err: syscall.EIO}, false},
+	}
+	for name, c := range cases {
+		if got := tempRefusedByPermission(c.err); got != c.want {
+			t.Errorf("%s: got %v, want %v", name, got, c.want)
+		}
 	}
 }
 

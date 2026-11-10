@@ -532,12 +532,12 @@ func (a *App) applyWorkspaceEdit(p *wsEditPlan) (map[string][]editor.EditResult,
 		}
 		// The clobber guard, in its non-interactive flavour (reconcile.go).
 		// A detached participant was read moments ago during planning, so
-		// a newer mtime means someone wrote the file inside that window —
+		// a different version means someone wrote the file inside that window —
 		// and this is the one write path that cannot stop to ask, because
 		// half of a cross-file rename is worse than none of it. Refusing
 		// unwinds the whole group through the rollback below, which is
 		// exactly the atomicity story this function is built around.
-		if _, newer := diskNewerThanTab(part.tab); newer {
+		if _, changed := diskChangedUnderTab(part.tab); changed {
 			a.rollbackGroup(group)
 			return nil, fmt.Errorf("%s changed on disk — nothing was written",
 				filepath.Base(part.path))

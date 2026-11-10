@@ -1742,6 +1742,14 @@ type App struct {
 	// one. See format.go's formatRunBegin.
 	formatRuns map[string]int
 
+	// formatActive is the ONE formatter run allowed per path at a time,
+	// with any request that arrived mid-run folded into its rerun flag;
+	// formatSeq numbers the runs so a done-event is matched to the run
+	// that posted it. See format.go's formatClaim for the race this
+	// closes (N-116).
+	formatActive map[string]*formatRun
+	formatSeq    int
+
 	// commitTrailer mirrors the persisted "commitmsgtrailer" preference
 	// (≡ Git toggle, default on): whether a commit message the chat
 	// agent DRAFTED carries a Co-Authored-By trailer naming it. Read at

@@ -54,6 +54,7 @@ internal/editor/
   buffer.go tab.go            Position/Buffer ([]string); Tab: path, cursor, anchor, scroll, dirty
   undo.go                     Snapshot stack: coalescing, byte budget
   fileio.go                   Open guards, line-ending/BOM round-trip, atomic save
+  diskstamp.go                Disk version: (mtime,size,inode) stamp + content sum
   highlight.go syntax.go      Chroma → style grid; re-lex settle policy + grid patch
   markdown*.go                Markdown preview: flag, row cache, blocks, inline spans
   softwrap.go                 Soft-wrap layout, row-unit scroll/hit-test/Up-Down
@@ -266,14 +267,27 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   multi-caret fan-out may set `undoSuppress`. One-step multi-range edits
   use `pushUndo(undoGroupStructural)` + direct Buffer edits (ReplaceAll,
   ApplyMultiEdit, workspace edits, `ReloadAsEdit`).
+  Undo/Redo/Revert set Dirty against the LAST-SAVED text (`savedLines`,
+  `markSaved` in Save / ReloadAsEdit, initUndo on read), never the on-open
+  snapshot. When the disk holds text the tab never saw (deleted, formatter
+  under a dirty buffer, Keep mine) call `ForgetSavedText` so no undo
+  state reads clean.
 - **Three Reload methods, don't collapse them**: `Reload` resets history
   (external writer, via `ReloadUndoable`); `ReloadAsEdit` adopts ced's
   own rewrite (formatter, plugin) as one undo step.
 - **File IO (fileio.go)**: guards (size on stat, NUL in first 8KB)
   BEFORE reading. Buffer is always bare LF; LineEnding/BOM re-emitted on
   write. Saves: temp file in TARGET dir + rename, symlinks resolved,
-  mode copied; read-only dir falls back to in-place. `WriteFileAtomic`
-  is exported for other writers — don't copy it.
+  mode copied; ONLY a permission refusal of the temp falls back to
+  in-place (no O_TRUNC — truncate after a good write); ENOSPC & co. return
+  the error with the original intact. `WriteFileAtomic` is exported for
+  other writers — don't copy it.
+- **Disk versions (diskstamp.go)**: "did the file change?" is
+  `Tab.DiskChanged` — (mtime, size, inode) stamp, ANY difference, then a
+  sha256 content check so a touch is not a change; a stamp younger than
+  `racyGranule` is content-checked anyway (same-granule rewrites). Never
+  `mtime.After`. Stamps are recorded only via recordDisk / AdoptDisk /
+  ForgetDiskStamp; `Tab.Mtime` is a read-only mirror.
 - **Scroll clamp** allows overscroll (`max(viewH/2, 3)`) — intentional.
 - **Jump margin (jumpmargin.go)**: a JUMP (find hit via
   `FocusCurrentMatch`, `lspJumpTo`, nav retrace, goto, the peek/list
@@ -303,6 +317,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   silent reload; dirty + changed → warn; deleted → `DiskGone`.
   A formatter run in flight suppresses it (`formatRunBegin/End`, per-path
   count).
+- **state.json writes merge** (`session.Update`: re-read, apply, save):
+  never dump the store loaded at startup — other instances share the
+  file. A corrupt file is set aside as `state.json.bad`, never saved over.
+- **config.json is read per key**: a bad value costs only that key
+  (default kept, named in the error); JSON booleans mean on/off.
 
 ### Tabs, labels, status bar
 - **Tab bar lead (quitbutton.go)**: `✕` (DiagError desaturated
@@ -760,6 +779,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   external (`BuiltinCommandsFor(root, path)`) → in-process → install
   offer. Go: goimports, else `gopls imports -w` + `gofmt -w`, else gofmt.
   `quiet=true` (auto-save) never prompts or flashes.
+- ONE formatter run per path (`formatClaim`): a request mid-run is folded
+  into a rerun; the done-event carries `seq` + the claim-time `EditRev`,
+  and a moved EditRev is never adopted (the clean case re-saves the
+  buffer and reruns). Launch only through `formatClaim`.
 - Documents keep their indentation (`format.DetectIndent`, indent.go):
   narrowest space run or tabs by vote; no evidence → tool default. JSON
   tools get it as flags unless the repo configures the tool (prettier

@@ -1871,3 +1871,127 @@ func TestREADME_ConfigTableListsEveryKey(t *testing.T) {
 		t.Errorf("README line %d: config table row %q is no key the loader reads", r.Line, key)
 	}
 }
+
+// loadBody writes body to a temp config.json and loads it.
+func loadBody(t *testing.T, body string) (Config, error) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return Load(p)
+}
+
+// TestLoad_OneBadValueKeepsTheRest is the N-120 regression: a single typo
+// used to return Defaults() for EVERYTHING, so auto-save, plugins and
+// agent file writes the user had turned off silently came back on. Now
+// the good keys hold, the bad one keeps its default, and the error names
+// it.
+func TestLoad_OneBadValueKeepsTheRest(t *testing.T) {
+	cfg, err := loadBody(t, `{"autosave": "off", "plugins": "off", "chatwrite": "of"}`)
+	if err == nil || !strings.Contains(err.Error(), "chatwrite") {
+		t.Fatalf("err = %v, want the bad key named", err)
+	}
+	if cfg.AutoSave {
+		t.Fatal("autosave off was reset by an unrelated typo")
+	}
+	if cfg.Plugins {
+		t.Fatal("plugins off was reset by an unrelated typo")
+	}
+	if cfg.ChatWrite != Defaults().ChatWrite {
+		t.Fatal("the bad key should keep its default")
+	}
+}
+
+// TestLoad_AcceptsJSONBooleans (N-120): `false` is the obvious way to
+// write an on/off key, and rejecting it reset the whole file. true → on,
+// false → off, everywhere "on"/"off" is read.
+func TestLoad_AcceptsJSONBooleans(t *testing.T) {
+	cfg, err := loadBody(t, `{"autosave": false, "chatwrite": false, "wordhl": true, "icons": false}`)
+	if err != nil {
+		t.Fatalf("booleans rejected: %v", err)
+	}
+	if cfg.AutoSave || cfg.ChatWrite || !cfg.WordHL || cfg.Icons != IconsOff {
+		t.Fatalf("booleans misread: %+v", cfg)
+	}
+}
+
+// TestLoad_NumberForAutoSaveDelay: a bare JSON number of seconds works.
+func TestLoad_NumberForAutoSaveDelay(t *testing.T) {
+	cfg, err := loadBody(t, `{"autosavedelay": 2}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AutoSaveDelay != 2*time.Second {
+		t.Fatalf("delay = %v, want 2s", cfg.AutoSaveDelay)
+	}
+}
+
+// TestLoad_WrongShapeIsAPerKeyError: an object or array where a string
+// belongs costs that key only.
+func TestLoad_WrongShapeIsAPerKeyError(t *testing.T) {
+	cfg, err := loadBody(t, `{"theme": {"name": "x"}, "autosave": "off", "diffview": "sideways"}`)
+	if err == nil || !strings.Contains(err.Error(), "theme") || !strings.Contains(err.Error(), "diffview") {
+		t.Fatalf("err = %v, want both bad keys named", err)
+	}
+	if !strings.Contains(err.Error(), "2 bad values") {
+		t.Fatalf("err = %v, want the count", err)
+	}
+	if cfg.AutoSave {
+		t.Fatal("autosave off was reset")
+	}
+}
+
+// TestLoad_KeysMatchCaseInsensitively keeps encoding/json's tag matching,
+// which the per-key decoder replaced: "commitMsgTrailer" still loads.
+func TestLoad_KeysMatchCaseInsensitively(t *testing.T) {
+	cfg, err := loadBody(t, `{"commitMsgTrailer": "off", "AUTOSAVE": "off"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CommitMsgTrailer || cfg.AutoSave {
+		t.Fatalf("case-folded keys ignored: %+v", cfg)
+	}
+}
+
+// TestLoad_NotJSONStillResetsAndSays: a file that is not JSON at all has
+// nothing trustworthy in it, so defaults plus the error, as before.
+func TestLoad_NotJSONStillResetsAndSays(t *testing.T) {
+	cfg, err := loadBody(t, `{"autosave": "off",`)
+	if err == nil {
+		t.Fatal("expected the parse error")
+	}
+	if cfg != Defaults() {
+		t.Fatal("an unparseable file should load as defaults")
+	}
+}
+
+// TestConfigValueString covers each accepted JSON shape and the refusal.
+func TestConfigValueString(t *testing.T) {
+	cases := map[string]string{`"x"`: "x", `true`: "on", `false`: "off", `1.5`: "1.5", `null`: ""}
+	for in, want := range cases {
+		got, err := configValueString([]byte(in))
+		if err != nil || got != want {
+			t.Errorf("%s → (%q, %v), want %q", in, got, err, want)
+		}
+	}
+	if _, err := configValueString([]byte(`[1]`)); err == nil {
+		t.Error("an array should be refused")
+	}
+}
+
+// TestJoinConfigErrors: nil for none, the error itself for one, a counted
+// one-line join for several.
+func TestJoinConfigErrors(t *testing.T) {
+	if joinConfigErrors(nil) != nil {
+		t.Fatal("no errors should join to nil")
+	}
+	one := os.ErrInvalid
+	if joinConfigErrors([]error{one}) != one {
+		t.Fatal("a single error should pass through")
+	}
+	got := joinConfigErrors([]error{one, os.ErrExist}).Error()
+	if strings.Contains(got, "\n") || !strings.HasPrefix(got, "2 bad values") {
+		t.Fatalf("joined = %q", got)
+	}
+}

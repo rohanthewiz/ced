@@ -15,6 +15,8 @@
 package editor
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -674,5 +676,173 @@ func TestUndoDepth_TracksTheStack(t *testing.T) {
 	}
 	if got := tab.UndoDepth(); got != maxUndoEntries {
 		t.Errorf("past the cap UndoDepth = %d, want %d", got, maxUndoEntries)
+	}
+}
+
+// openSavedTab writes body to a file in a temp dir and opens it with
+// NewTab, so Save / ReloadAsEdit exercise the real disk paths.
+func openSavedTab(t *testing.T, body string) (*Tab, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "f.txt")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tab, err := NewTab(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tab, path
+}
+
+// readDisk returns the file's bytes as a string, failing the test on error.
+func readDisk(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// TestUndo_AfterSaveBackToOpenedTextIsDirty is the N-113 reproduction:
+// type, save (auto-save does the same), undo back to the OPENED text. The
+// disk holds the saved text, so the tab must read dirty — before the fix
+// Dirty was measured against the on-open snapshot, the tab read clean,
+// and quit asked nothing while the file kept the undone edit.
+func TestUndo_AfterSaveBackToOpenedTextIsDirty(t *testing.T) {
+	tab, path := openSavedTab(t, "original")
+	tab.Cursor = Position{Line: 0, Col: len("original")}
+	tab.Anchor = tab.Cursor
+	tab.InsertString(" EXPERIMENT")
+	if err := tab.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if !tab.Undo() {
+		t.Fatal("expected an undo step")
+	}
+	if got := tab.Buffer.String(); got != "original" {
+		t.Fatalf("buffer after undo = %q", got)
+	}
+	if got := readDisk(t, path); got != "original EXPERIMENT" {
+		t.Fatalf("disk = %q, want the saved text", got)
+	}
+	if !tab.Dirty {
+		t.Fatal("buffer differs from disk after undo but the tab reads clean")
+	}
+}
+
+// TestRedo_BackToSavedTextIsClean is the reverse half of N-113: after an
+// undo past a save, redoing back to exactly the saved text reads clean —
+// before the fix it read dirty because it differed from the opened text.
+func TestRedo_BackToSavedTextIsClean(t *testing.T) {
+	tab, _ := openSavedTab(t, "a")
+	tab.Cursor = Position{Line: 0, Col: 1}
+	tab.Anchor = tab.Cursor
+	tab.InsertString("b")
+	if err := tab.Save(); err != nil {
+		t.Fatal(err)
+	}
+	tab.Undo()
+	if !tab.Dirty {
+		t.Fatal("undo past the save should read dirty")
+	}
+	tab.Redo()
+	if tab.Dirty {
+		t.Fatal("redo back to the saved text should read clean")
+	}
+}
+
+// TestRevertFile_AfterSaveIsDirty pins ≡ "Revert file" against the saved
+// baseline: it rewinds to the OPENED text, which a save has since moved
+// the disk away from, so the tab must stay dirty.
+func TestRevertFile_AfterSaveIsDirty(t *testing.T) {
+	tab, _ := openSavedTab(t, "one")
+	tab.Cursor = Position{Line: 0, Col: 3}
+	tab.Anchor = tab.Cursor
+	tab.InsertString(" two")
+	if err := tab.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if !tab.RevertFile() {
+		t.Fatal("expected revert to fire")
+	}
+	if got := tab.Buffer.String(); got != "one" {
+		t.Fatalf("buffer after revert = %q", got)
+	}
+	if !tab.Dirty {
+		t.Fatal("reverted to the opened text after a save, but the tab reads clean")
+	}
+}
+
+// TestUndo_WithoutSaveStillCleanAtOpenedText guards the old behaviour
+// that must survive: with no save in between, undoing back to the opened
+// text is clean (the disk still holds it).
+func TestUndo_WithoutSaveStillCleanAtOpenedText(t *testing.T) {
+	tab, _ := openSavedTab(t, "x")
+	tab.InsertString("y")
+	tab.Dirty = true
+	tab.Undo()
+	if tab.Dirty {
+		t.Fatal("back at the opened, never-saved-over text should read clean")
+	}
+}
+
+// TestForgetSavedText_KeepsEveryStateDirty pins the "disk holds text the
+// tab never saw" state (deleted file, formatter under a dirty buffer, keep
+// mine): no undo or revert may read clean until the next save.
+func TestForgetSavedText_KeepsEveryStateDirty(t *testing.T) {
+	tab, _ := openSavedTab(t, "base")
+	tab.InsertString("edit ")
+	tab.Dirty = true
+	tab.ForgetSavedText()
+	tab.Undo()
+	if !tab.Dirty {
+		t.Fatal("undo read clean with the saved text unknown")
+	}
+	tab.Redo()
+	tab.RevertFile()
+	if !tab.Dirty {
+		t.Fatal("revert read clean with the saved text unknown")
+	}
+	if err := tab.Save(); err != nil {
+		t.Fatal(err)
+	}
+	tab.InsertString("z")
+	tab.Undo()
+	if tab.Dirty {
+		t.Fatal("a save must re-establish the baseline")
+	}
+}
+
+// TestReloadAsEdit_FormattedTextIsTheNewBaseline: ced's own rewrite
+// (format-on-save) adopted through ReloadAsEdit becomes the saved text, so
+// undoing the reformat reads dirty and redoing it reads clean.
+func TestReloadAsEdit_FormattedTextIsTheNewBaseline(t *testing.T) {
+	tab, path := openSavedTab(t, "a  b")
+	if err := os.WriteFile(path, []byte("a b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := tab.ReloadAsEdit()
+	if err != nil || !changed {
+		t.Fatalf("ReloadAsEdit = %v, %v", changed, err)
+	}
+	tab.Undo()
+	if !tab.Dirty {
+		t.Fatal("undoing the adopted reformat should read dirty")
+	}
+	tab.Redo()
+	if tab.Dirty {
+		t.Fatal("redoing back to the disk's text should read clean")
+	}
+}
+
+// TestMarkSaved_CopiesTheLineHeaders: the baseline must not alias
+// Buffer.Lines, which some primitives rewrite in place.
+func TestMarkSaved_CopiesTheLineHeaders(t *testing.T) {
+	tab := newScratchTab("a\nb")
+	tab.markSaved()
+	tab.Buffer.Lines[0] = "changed"
+	if tab.savedLines[0] != "a" {
+		t.Fatal("savedLines aliases the live buffer")
 	}
 }

@@ -68,7 +68,9 @@ func (a *App) NextRoot() string { return a.nextRoot }
 // that the folder was opened at all.
 //
 // A broken state file flashes and is otherwise ignored: it holds
-// convenience, never the user's work, so it must never stop a start.
+// convenience, never the user's work, so it must never stop a start. A
+// CORRUPT one is also set aside as state.json.bad by the first write
+// (session.Update), so it is never saved over.
 func (a *App) loadSessionStore() {
 	path := sessionStatePathFn()
 	st, err := session.Load(path)
@@ -80,20 +82,35 @@ func (a *App) loadSessionStore() {
 	// anything, so the tabs coming back touch the ring on TOP of what was
 	// remembered rather than replacing it (recentfiles.go).
 	a.loadRecentFiles()
-	st.Touch(a.rootDir)
-	a.saveSessionStore()
+	root := a.rootDir
+	a.updateSessionStore(func(s *session.Store) { s.Touch(root) })
 }
 
-// saveSessionStore writes the store back to disk, flashing on failure.
-// Errors here are worth saying out loud — silently failing to remember a
+// updateSessionStore applies fn to this run's store AND to the state file
+// as it is on disk now (session.Update), flashing on failure.
+//
+// Two copies, deliberately. The in-memory store is this run's view, read
+// by the recent pickers and session restore. The file is SHARED with
+// every other ced instance, so a write must merge into its current
+// contents rather than dump the store loaded at startup — that dump is
+// what let the last instance to quit erase every other instance's entry
+// (N-119). fn must therefore touch only what this run owns: its own root,
+// or a folder it has just found missing.
+//
+// Errors are worth saying out loud — silently failing to remember a
 // folder looks like the feature doesn't work rather than like the config
 // directory is read-only.
-func (a *App) saveSessionStore() {
+func (a *App) updateSessionStore(fn func(*session.Store)) {
 	if a.sessionStore == nil {
 		return
 	}
-	if err := a.sessionStore.Save(sessionStatePathFn()); err != nil {
+	fn(a.sessionStore)
+	setAside, err := session.Update(sessionStatePathFn(), fn)
+	switch {
+	case err != nil:
 		a.flash("session: " + err.Error())
+	case setAside != "":
+		a.flash("session: state file was not valid JSON — set aside as " + filepath.Base(setAside))
 	}
 }
 
@@ -143,8 +160,7 @@ func (a *App) recordSession() {
 	// Tab groups ride the same write; membership is stored by path and
 	// re-resolved against whichever tabs come back (tabgroups.go).
 	e.Groups = a.encodeTabGroups()
-	a.sessionStore.Record(e)
-	a.saveSessionStore()
+	a.updateSessionStore(func(s *session.Store) { s.Record(e) })
 }
 
 // restoreSession reopens the tabs this folder had when it was last
@@ -438,10 +454,11 @@ func (a *App) menuRecentFolders() {
 	// current root goes in first: it is skipped as a row, and it must not
 	// come back around as a cats one.
 	have := map[string]bool{cur: true}
+	var gone []string
 	for _, root := range a.recentFolderRoots() {
 		info, err := os.Stat(root)
 		if err != nil || !info.IsDir() {
-			a.sessionStore.Remove(root)
+			gone = append(gone, root)
 			pruned = true
 			continue
 		}
@@ -460,7 +477,13 @@ func (a *App) menuRecentFolders() {
 		})
 	}
 	if pruned {
-		a.saveSessionStore()
+		// Only the folders found missing are removed, in memory and in the
+		// shared file alike — never a rewrite of the whole list.
+		a.updateSessionStore(func(s *session.Store) {
+			for _, root := range gone {
+				s.Remove(root)
+			}
+		})
 	}
 	// Then the host's frecency list, after ced's own and marked as its own
 	// kind of row (catsfrecency.go). Places you have BEEN, under places you

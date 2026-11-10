@@ -641,6 +641,69 @@ func TestLoadSessionStore_BrokenFileStartsAnyway(t *testing.T) {
 	}
 }
 
+// TestLoadSessionStore_CorruptFileIsSetAsideNotOverwritten (N-119): a
+// parse error used to flash and then be SAVED OVER, so one stray comma
+// wiped every recent folder and layout. The corrupt bytes must survive
+// as state.json.bad.
+func TestLoadSessionStore_CorruptFileIsSetAsideNotOverwritten(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	path := sessionStatePathFn()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := `{"folders": [{"root": "/a"}, {"root": "/b"},]}`
+	if err := os.WriteFile(path, []byte(corrupt), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	a.loadSessionStore()
+
+	bad, err := os.ReadFile(path + session.BadSuffix)
+	if err != nil || string(bad) != corrupt {
+		t.Fatalf("corrupt file not set aside intact: %q, %v", bad, err)
+	}
+	if !strings.Contains(a.statusMsg, "set aside") {
+		t.Fatalf("status = %q, want the set-aside named", a.statusMsg)
+	}
+}
+
+// TestRecordSession_TwoInstancesKeepEachOthersEntries (N-119): each
+// instance used to dump the store it loaded at STARTUP, so whichever quit
+// last erased the other's entry. Now each merges only its own root.
+func TestRecordSession_TwoInstancesKeepEachOthersEntries(t *testing.T) {
+	rootA, rootB := t.TempDir(), t.TempDir()
+	a := newTestApp(t, rootA)
+	b := newTestApp(t, rootB)
+	// newTestApp gives each its own temp state path; share A's, as two
+	// real instances share ~/.config/ced/state.json.
+	shared := sessionStatePathFn()
+	sessionStatePathFn = func() string { return shared }
+
+	a.loadSessionStore() // A starts …
+	b.loadSessionStore() // … then B, each holding its own startup copy.
+	pB := filepath.Join(rootB, "b.txt")
+	if err := os.WriteFile(pB, []byte("b\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	openTabAtPath(t, b, pB)
+
+	b.recordSession() // B quits first, with a tab …
+	a.recordSession() // … then A quits with its stale startup copy.
+
+	onDisk, err := session.Load(shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := onDisk.Find(rootB)
+	if !ok || len(e.Tabs) != 1 {
+		t.Fatalf("B's entry after A quit: ok=%v tabs=%d — the last instance erased it", ok, len(e.Tabs))
+	}
+	if _, ok := onDisk.Find(rootA); !ok {
+		t.Fatal("A's own entry missing")
+	}
+}
+
 // TestRestoreSession_ActiveFileVanished pins the fallback when the tab
 // the user was ON is the one that didn't come back: the last tab that
 // DID is the closest thing to where they were. Leaving activeTab at its

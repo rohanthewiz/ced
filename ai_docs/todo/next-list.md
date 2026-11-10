@@ -150,20 +150,6 @@ plus the LSP work done in the seeding session itself
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
 
-- **N-113** · raised `2026-1110-1630-reliability-performance-usability-audit` · value high
-  **Undo can leave a tab "clean" while the disk holds different text.**
-  Undo, Redo and Revert set `t.Dirty = t.CanRevert()` (undo.go:335,
-  :357, :375), and `CanRevert` compares against `undoOriginal`, the
-  ON-OPEN snapshot, which `Save` never updates. Type, let auto-save
-  write (or save), undo back to the opened text: the tab reads clean,
-  the disk keeps the undone text, and `menuQuit` quits with no prompt.
-  ≡ "Revert file" does the same. The reverse also holds: undo back to
-  the SAVED text reads dirty. Reproduced by a test on a scratch copy
-  (after auto-save + undo: buffer `original`, disk `original
-  EXPERIMENT`, dirty=false). Fix: keep a last-saved baseline (a header
-  copy set in NewTab / Reload / Save / ReloadAsEdit) and set Dirty from
-  buffer != baseline in all three.
-
 - **N-114** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **Editing a non-UTF-8 file corrupts it silently.** `internal/editor`
   never asks `utf8.Valid`. The buffer primitives go through `[]rune`
@@ -175,43 +161,6 @@ plus the LSP work done in the seeding session itself
   byte for byte. Decide the policy: (1) stopgap, open such a file with
   auto-save off and a held warning (or read-only); (2) decode Latin-1 /
   CP1252 on open and re-encode on save. Suggested: (1) first.
-
-- **N-115** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **A full disk empties the file being saved.** `WriteFileAtomic` falls
-  back to a truncating `os.WriteFile` on ANY `CreateTemp` error
-  (fileio.go:209-212), against its own header comment ("a crash or a
-  full disk can never leave a half-written file"). Reproduced on a 1MB
-  volume filled to 100%: 28000 bytes before, 0 after; with auto-save it
-  hits every dirty tab. The buffer survives and the tab stays dirty.
-  The temp-file path itself is solid (original intact, temp removed).
-  Fix: fall back only on EACCES / EPERM / EROFS, and in the fallback
-  write without O_TRUNC, truncating to length after a good write.
-
-- **N-116** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **Format-on-save race: a stale formatter result replaces newer saved
-  text.** `handleFormatDone` (format.go:666-692) matches by path and
-  calls `ReloadAsEdit` whenever the tab is clean, with no generation or
-  `EditRev` check, and `execFormatterChain` starts a second run while
-  one is in flight. Save, keep typing, save again before formatter #1
-  finishes: #1's output lands on disk and in the buffer and the text
-  typed between the saves is gone (still in undo, but the swap is
-  silent). Reproduced with a 400ms read-then-write stand-in formatter.
-  Breaks the "generation-check async results" rule. Fix: carry the
-  tab's `EditRev` at save on `formatDoneEvent` and skip adoption if it
-  moved; one run per path, with one queued rerun.
-
-- **N-117** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **An external change whose mtime is not NEWER is invisible, then
-  overwritten.** Reconcile (reconcile.go:152), `diskNewerThanTab`
-  (:464) and the auto-save guard (autosave.go:282) only test
-  `ModTime().After(tab.Mtime)`; no size, inode or hash. `cp -p`,
-  `rsync -t`, `tar x`, a restored backup, or a write inside the same
-  timestamp granule (NFS, some sshfs) is never seen. Reproduced: same
-  mtime, external content ignored by reconcile, next save `ok=true`
-  with no modal; an mtime 48h older, auto-save wrote over it. Also
-  `NewTab` stats AFTER the read (tab.go:296-305). Fix: record (mtime,
-  size, inode) at load and save, treat ANY difference as changed, stat
-  before the read; hash-compare on mismatch to avoid false conflicts.
 
 - **N-118** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **No crash safety.** No `recover()` and no `os/signal` anywhere in
@@ -233,32 +182,6 @@ plus the LSP work done in the seeding session itself
   inside an existing dotdir; outside a repository it needs a home
   under `~/.config/ced/`, which the "no new dotfiles" rule must allow.
 
-- **N-119** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **state.json is overwritten wholesale.** `recordSession`
-  (folder.go:146-147) and the startup touch (`loadSessionStore`,
-  folder.go:72-85) dump the store loaded at STARTUP. Two instances: the
-  last to quit erases the other's entry (reproduced: after B quits its
-  entry is there with 1 tab; after A quits it is gone). A parse error
-  flashes and is then saved over, so one stray comma wipes every
-  recent folder and layout (reproduced: three folders → one). The temp
-  name is a fixed `path + ".tmp"` shared by concurrent writers
-  (session.go:238-242). `saveToolLayout` already re-reads before
-  writing; config.json's `saveKey` is fine. Fix: re-`Load` and upsert
-  only this root's entry, rename an unparseable file to
-  `state.json.bad` rather than saving over it, `CreateTemp` for the
-  temp name.
-
-- **N-120** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **One bad value in config.json resets EVERY setting to defaults.**
-  `Load` returns `Defaults()` on a parse error and on any single bad
-  value (userconfig.go:666-669, :680-684, :695-699); the app only
-  flashes. Reproduced: `{"autosave": false, "chatwrite": "off"}` loads
-  as AutoSave=true ChatWrite=true (a JSON boolean is "bad"), and so
-  does a valid file with one unrelated typo'd value. Auto-save, agent
-  file writes and plugins silently come back on. Fix: apply keys one
-  by one and keep the valid ones, accept JSON booleans, hold the error
-  for a ≡ label per the startup-errors rule.
-
 - **N-121** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Smaller data-safety fixes, each contained.** Close a part by
   striking it here; close the item when all are done. All reproduced
@@ -277,7 +200,9 @@ plus the LSP work done in the seeding session itself
   and back) was marked Dirty by DiskGone (reconcile.go:128-136), so it
   comes back as a false "unsaved edits" conflict holding stale text,
   and "Keep mine" overwrites the new content. Fix: remember whether it
-  was dirty before DiskGone; if clean, `ReloadUndoable`.
+  was dirty before DiskGone; if clean, `ReloadUndoable`. (Since N-113 /
+  N-117, DiskGone also calls `ForgetSavedText`, and the return calls
+  `ForgetDiskStamp`; a reload re-seeds both.)
   (d) The chat agent's fs write is a plain `os.WriteFile(…, 0o644)`
   and an open CRLF / BOM tab is served to it as LF without the BOM
   (copilot_chat_perm.go:584-587, :614-620), so the write-back converts
@@ -344,7 +269,9 @@ plus the LSP work done in the seeding session itself
   write `_ = scr.PostEvent(…)` (handled: terminal.go:223,
   lspcodeaction.go:372, remote.go:169). Drops that stick:
   `formatDoneEvent` and Restore's `gitCmdDoneEvent` leave
-  `formatRuns[path]` up (reconcile off for that path until restart);
+  `formatRuns[path]` up (reconcile off for that path until restart;
+  for formatDoneEvent since N-116, only until `formatRunStale` (2m)
+  lets the next claim supersede the run);
   `termDoneEvent` leaves `term.running` (terminal "busy" for the
   session); `chatTurnDoneEvent` leaves `chat.turnActive`;
   `chatPermRequestEvent` leaves its goroutine waiting up to 15 min;
@@ -357,16 +284,6 @@ plus the LSP work done in the seeding session itself
   `postResult` helper for COMPLETION events that retries until
   delivered or the App is closed (every such site is on a goroutine or
   an AfterFunc); tickers may keep dropping.
-
-- **N-125** · raised `2026-1110-1630-reliability-performance-usability-audit` · value high
-  **A paste draws one full frame per pasted character.** A bracketed
-  paste arrives as one EventKey per rune; `handleKey` only appends to
-  `pasteBuf`, but `Run` still runs `draw()` + `Show()` for each
-  (`deferFrame` defers only wheel / motion events). Measured by
-  replaying Run's loop body on a simulation screen at 200×60: 5250
-  runes (125 lines) took 9.0s, 1.72 ms per rune, every frame
-  identical. It is also the easiest way to pin the event queue
-  (N-124). Fix: skip the frame while `a.pasting`.
 
 - **N-126** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Missing bounds on children and wire input.** Close a part by
@@ -498,6 +415,9 @@ plus the LSP work done in the seeding session itself
   reference. Add ≡ rows "Open config.json" (create it with `{}` when
   missing, then plain `openFile`) and "Keyboard reference" (the
   which-key band). Each new row moves the README and menu-layout pins.
+  The config row is also where config.json's load error belongs (the
+  "startup errors are HELD for a ≡ label" rule): N-120 made it per key,
+  but it is still only flashed at startup.
 
 - **N-136** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Limits that bite are silent.** A non-UTF-8 file (N-114) and a
@@ -968,6 +888,86 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-11-10, this session (uncommitted; session doc pending) —
+  **N-120** config.json is read per key (`decodeFileFormat`,
+  userconfig.go): a bad value keeps that key's default and is named in
+  the error ("2 bad values: …"), every good key still applies; JSON
+  `true`/`false` mean on/off and a JSON number works for autosavedelay.
+  Only a file that is not JSON at all loads as defaults. README notes
+  both. The error is still FLASHED at startup — holding it for a ≡ label
+  waits on N-135's "Open config.json" row. Checked:
+  `TestLoad_OneBadValueKeepsTheRest`, `…_AcceptsJSONBooleans`,
+  `…_WrongShapeIsAPerKeyError`, `…_KeysMatchCaseInsensitively`.
+- closed 2026-11-10, this session —
+  **N-119** every state.json write is a read-modify-write
+  (`session.Update`), so an instance changes only its own root and the
+  last one to quit no longer erases the others. A corrupt file is moved
+  to `state.json.bad` (one slot) before anything is written, and the
+  startup flash says so; a READ error writes nothing. `Save` uses a
+  unique `CreateTemp` name. App: `updateSessionStore` applies the same
+  fn to the in-memory store and the file (Touch, Record, the recent-list
+  prune); `saveToolLayout` goes through Update too. Unlocked by design:
+  two writes in the same millisecond can still lose one. Checked:
+  `TestRecordSession_TwoInstancesKeepEachOthersEntries`,
+  `TestLoadSessionStore_CorruptFileIsSetAsideNotOverwritten`,
+  `TestUpdate_*`, `TestSave_ConcurrentWritersNeverShareATemp`.
+- closed 2026-11-10, this session —
+  **N-117** change detection is `Tab.DiskChanged` (editor/diskstamp.go):
+  an (mtime, size, inode) stamp where ANY difference counts, then a
+  sha256 of the raw bytes so a touch is not a change (the new stamp is
+  adopted). A stamp younger than `racyGranule` (2s) is content-checked
+  even when it matches — git's "racily clean" rule — which catches a
+  same-size, same-granule rewrite; the reads stop once the stamp ages
+  (cost: one confirming read + hash per save, on the next tick).
+  `readTextFile` stats BEFORE the read and returns stamp + sum; Save
+  records the written file's own stat from the handle
+  (`writeFileAtomic`). Watcher, both save guards (`diskChangedUnderTab`),
+  the conflict record's "new news" and the workspace-edit guard all use
+  it; Keep mine / formatter-under-dirty adopt via `AdoptDisk`; a rename
+  keeps the stamp. `Tab.Mtime` stays as a read-only mirror. Inode read
+  by reflection, so internal/editor still builds without
+  `syscall.Stat_t`. Not changed: the workspace-edit undo journal's own
+  mtime check (workspaceedit.go `wsUndoValid`). Checked:
+  `TestDiskChanged_*`, `TestReconcile_BackdatedWriteReloadsCleanTab`,
+  `TestSaveGuard_BlocksOverABackdatedWrite`,
+  `TestHandleAutoSave_TouchIsNotAConflict`.
+- closed 2026-11-10, this session —
+  **N-116** one formatter run per path (`formatClaim`, format.go): a
+  request mid-run folds into the run's rerun flag (loud if any folded
+  request was explicit). The done-event carries `seq` + the claim-time
+  `EditRev`; the handler drops a non-matching seq, and a clean tab whose
+  EditRev moved is NOT adopted — the buffer (the newer save) goes back
+  on disk and the queued rerun formats it. A run older than
+  `formatRunStale` (2m) is presumed lost and superseded, so one dropped
+  event (N-124) can't block a file's formatting for the session.
+  Checked: `TestHandleFormatDone_StaleRunDoesNotSwapANewerSave` (the
+  reproduction, real in-process JSON rerun), `TestFormatClaim_*`,
+  `TestFormatRerun_QueuedRequestStartsAfterSettle`.
+- closed 2026-11-10, this session —
+  **N-115** `WriteFileAtomic` falls back to an in-place write ONLY when
+  the temp file is refused for permission (EACCES / EPERM / EROFS,
+  `tempRefusedByPermission`); ENOSPC and the rest return the error with
+  the original untouched. The fallback (`writeInPlace`) no longer
+  truncates first: WriteAt, then Truncate to length, then Sync.
+  `createTemp` is a test seam. Checked:
+  `TestWriteFileAtomic_FullDiskLeavesTheOriginal`,
+  `TestSave_FullDiskKeepsTheTabDirty`, `TestWriteInPlace_ShrinksAndGrows`.
+- closed 2026-11-10, this session —
+  **N-113** Undo / Redo / Revert set Dirty against the LAST-SAVED text
+  (`savedLines`, undo.go), set by initUndo (read), Save and ReloadAsEdit
+  (`markSaved`, a header copy). The disk holding text the tab never saw
+  — deleted file, formatter under a dirty buffer, Keep mine — calls
+  `ForgetSavedText`, after which no undo state reads clean until the
+  next save. Checked: `TestUndo_AfterSaveBackToOpenedTextIsDirty` (the
+  reproduction), `TestRedo_BackToSavedTextIsClean`,
+  `TestRevertFile_AfterSaveIsDirty`, the three app twins in
+  reconcile_test.go.
+- closed 2026-11-10, this session —
+  **N-125** a key handled while `pasting` never paints (`deferFrame`,
+  inputburst.go); the start and end markers (EventPaste) and any
+  non-key event mid-paste still do. Checked:
+  `TestDeferFrame_PasteContentNeverPaints` (400 runes: 402 frames
+  before, 2 after), `TestDeferFrame_NonKeyEventsMidPastePaint`.
 - closed 2026-11-06, `2026-1106-1153-n111-git-log-remote-checkout` —
   **N-111** the git log's scope picker now checks out a viewed
   remote-tracking branch (`gitLogScopeRemoteCheckout`, gitlogscope.go).

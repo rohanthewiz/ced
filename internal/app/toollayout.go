@@ -173,14 +173,15 @@ func (a *App) saveToolLayout() {
 	if path == "" {
 		return
 	}
-	store, err := session.Load(path)
-	if err != nil {
-		return
-	}
+	// Read-modify-write through session.Update, the one path every state
+	// writer shares: merged into the file as it is now, a corrupt file set
+	// aside rather than written over, a unique temp name. Still silent.
 	root := session.Normalize(a.rootDir)
-	entry, _ := store.Find(root)
-	entry.Root = root
-	entry.Layout = a.encodeToolLayout()
-	store.Record(entry)
-	_ = store.Save(path)
+	layout := a.encodeToolLayout()
+	_, _ = session.Update(path, func(store *session.Store) {
+		entry, _ := store.Find(root)
+		entry.Root = root
+		entry.Layout = layout
+		store.Record(entry)
+	})
 }

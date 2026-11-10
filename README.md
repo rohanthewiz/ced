@@ -2843,8 +2843,10 @@ Preferences live in `~/.config/ced/config.json` (`$XDG_CONFIG_HOME/ced/`
 when that is set). Every key is optional — a missing key, or a missing
 file, means the default — and most are written for you by the ≡ row that
 flips them, so you rarely open the file. On/off keys take the strings
-`"on"` and `"off"`. A key ced doesn't know is kept untouched when a ≡ row
-rewrites the file.
+`"on"` and `"off"`, or JSON `true` / `false`. A value ced can't read
+costs only its own key: that key keeps its default, the rest of the file
+still applies, and the status bar names what was wrong at startup. A key
+ced doesn't know is kept untouched when a ≡ row rewrites the file.
 
 ```json
 { "autosavedelay": "10s", "theme": "darcula", "terminal": "tmux" }

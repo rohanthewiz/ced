@@ -15,9 +15,12 @@
 package session
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -539,5 +542,116 @@ func TestGroupsRoundTrip(t *testing.T) {
 	}
 	if g := e.Groups[1]; g.Name != "todo" || len(g.Members) != 1 {
 		t.Errorf("ad-hoc group = %+v, want its one member", g)
+	}
+}
+
+// TestLoad_CorruptIsErrCorrupt: a parse failure is marked as the FILE's
+// fault, which is what lets Update set it aside (and only then).
+func TestLoad_CorruptIsErrCorrupt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte("{nope"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("err = %v, want ErrCorrupt", err)
+	}
+}
+
+// TestUpdate_MergesIntoTheCurrentFile (N-119): fn runs against the file as
+// it is NOW, so an entry another instance wrote after this one started
+// survives this one's write.
+func TestUpdate_MergesIntoTheCurrentFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	other := &Store{}
+	other.Record(Entry{Root: "/other", Tabs: []TabState{{Path: "/other/x.go"}}})
+	if err := other.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Update(path, func(s *Store) { s.Touch("/mine") }); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, ok := got.Find("/other"); !ok || len(e.Tabs) != 1 {
+		t.Fatalf("the other instance's entry was lost: %+v", got.Folders)
+	}
+	if got.Last() != "/mine" {
+		t.Fatalf("Last() = %q, want /mine", got.Last())
+	}
+}
+
+// TestUpdate_SetsACorruptFileAside (N-119): the corrupt bytes are moved to
+// state.json.bad, never written over, and the write starts fresh.
+func TestUpdate_SetsACorruptFileAside(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte("{oops,"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	setAside, err := Update(path, func(s *Store) { s.Touch("/mine") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if setAside != path+BadSuffix {
+		t.Fatalf("setAside = %q", setAside)
+	}
+	if b, _ := os.ReadFile(setAside); string(b) != "{oops," {
+		t.Fatalf("set-aside bytes = %q", b)
+	}
+	if got, err := Load(path); err != nil || got.Last() != "/mine" {
+		t.Fatalf("fresh file: %v, %v", got, err)
+	}
+}
+
+// TestUpdate_ReadErrorWritesNothing: an unreadable state file (here, a
+// directory in its place) may hold good data, so nothing is written.
+func TestUpdate_ReadErrorWritesNothing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.Mkdir(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	if _, err := Update(path, func(*Store) { called = true }); err == nil {
+		t.Fatal("expected the read error")
+	}
+	if called {
+		t.Fatal("fn ran over an unreadable file")
+	}
+	if _, err := Update("", func(*Store) {}); err == nil {
+		t.Fatal("an empty path must error")
+	}
+}
+
+// TestSave_ConcurrentWritersNeverShareATemp: the temp name used to be a
+// fixed path+".tmp", so two writers could publish each other's
+// half-written bytes. Every write now uses its own temp; whatever lands
+// last parses, and no temp is left behind.
+func TestSave_ConcurrentWritersNeverShareATemp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			s := &Store{}
+			for j := 0; j < 50; j++ {
+				s.Touch(fmt.Sprintf("/root/%d/%d", i, j))
+			}
+			_ = s.Save(path)
+		}(i)
+	}
+	wg.Wait()
+	if _, err := Load(path); err != nil {
+		t.Fatalf("state file corrupt after concurrent saves: %v", err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("temp files left behind: %v", names)
 	}
 }

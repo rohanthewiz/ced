@@ -122,6 +122,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -644,9 +645,19 @@ func PluginsDir() string { return configFilePath("plugins") }
 //   - file unreadable         → (Defaults(), err). Caller can flash a
 //     message; editor keeps running on defaults.
 //   - file empty / all-blank  → (Defaults(), nil).
-//   - unknown icons value     → (Defaults(), err). We'd rather tell
-//     the user their config has a typo than silently fall back to
-//     defaults and hide the bug.
+//   - not JSON at all         → (Defaults(), err). Nothing in it can be
+//     trusted to mean what it says.
+//   - one or more bad VALUES  → (cfg, err): every GOOD key is applied,
+//     each bad one keeps its default and is named in err. We'd rather
+//     tell the user their config has a typo than silently fall back and
+//     hide the bug — but a typo in one key must not quietly turn back on
+//     everything else they turned off (N-120: `"chatwrite": "of"` used to
+//     reset autosave, plugins and agent file writes to their defaults).
+//
+// Values are read per key, so a JSON boolean is accepted wherever "on" /
+// "off" is (true → on, false → off) and a JSON number wherever a number
+// is meant (autosavedelay). Writing `"autosave": false` is the obvious
+// spelling, and rejecting it reset the whole file.
 func Load(path string) (Config, error) {
 	cfg := Defaults()
 	if path == "" {
@@ -663,10 +674,14 @@ func Load(path string) (Config, error) {
 		return cfg, nil
 	}
 
-	var ff fileFormat
-	if err := json.Unmarshal(data, &ff); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return cfg, fmt.Errorf("parse %s: %w", path, err)
 	}
+	// Bad values are collected, never returned early: each key below that
+	// fails keeps its default and adds one line here.
+	var errs []error
+	ff := decodeFileFormat(raw, path, &errs)
 
 	switch IconsMode(strings.ToLower(strings.TrimSpace(ff.Icons))) {
 	case "":
@@ -678,10 +693,10 @@ func Load(path string) (Config, error) {
 	case IconsOff:
 		cfg.Icons = IconsOff
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: icons must be %q, %q, or %q (got %q)",
 			path, IconsAuto, IconsOn, IconsOff, ff.Icons,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.AutoSave)) {
@@ -692,10 +707,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.AutoSave = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: autosave must be \"on\" or \"off\" (got %q)",
 			path, ff.AutoSave,
-		)
+		))
 	}
 
 	switch TermDock(strings.ToLower(strings.TrimSpace(ff.TermDock))) {
@@ -706,10 +721,10 @@ func Load(path string) (Config, error) {
 	case TermDockLeft:
 		cfg.TermDock = TermDockLeft
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: termdock must be %q or %q (got %q)",
 			path, TermDockBottom, TermDockLeft, ff.TermDock,
-		)
+		))
 	}
 
 	switch FindAllDock(strings.ToLower(strings.TrimSpace(ff.FindAllDock))) {
@@ -720,10 +735,10 @@ func Load(path string) (Config, error) {
 	case FindAllDockRight:
 		cfg.FindAllDock = FindAllDockRight
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: findalldock must be %q or %q (got %q)",
 			path, FindAllDockTop, FindAllDockRight, ff.FindAllDock,
-		)
+		))
 	}
 
 	switch DiffView(strings.ToLower(strings.TrimSpace(ff.DiffView))) {
@@ -734,10 +749,10 @@ func Load(path string) (Config, error) {
 	case DiffViewSplit:
 		cfg.DiffView = DiffViewSplit
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: diffview must be %q or %q (got %q)",
 			path, DiffViewUnified, DiffViewSplit, ff.DiffView,
-		)
+		))
 	}
 
 	switch BlameStyle(strings.ToLower(strings.TrimSpace(ff.BlameStyle))) {
@@ -748,10 +763,10 @@ func Load(path string) (Config, error) {
 	case BlameStyleCompact:
 		cfg.BlameStyle = BlameStyleCompact
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: blamestyle must be %q or %q (got %q)",
 			path, BlameStyleBands, BlameStyleCompact, ff.BlameStyle,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.ExecMarks)) {
@@ -762,10 +777,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.ExecMarks = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: execmarks must be \"on\" or \"off\" (got %q)",
 			path, ff.ExecMarks,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.TreeAutoFit)) {
@@ -776,10 +791,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.TreeAutoFit = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: treeautofit must be \"on\" or \"off\" (got %q)",
 			path, ff.TreeAutoFit,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.WordHL)) {
@@ -790,10 +805,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.WordHL = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: wordhl must be \"on\" or \"off\" (got %q)",
 			path, ff.WordHL,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.InlayHints)) {
@@ -804,10 +819,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.InlayHints = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: inlayhints must be \"on\" or \"off\" (got %q)",
 			path, ff.InlayHints,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.DiagNote)) {
@@ -818,10 +833,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.DiagNote = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: diagnote must be \"on\" or \"off\" (got %q)",
 			path, ff.DiagNote,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.Copilot)) {
@@ -832,10 +847,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.Copilot = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: copilot must be \"on\" or \"off\" (got %q)",
 			path, ff.Copilot,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.Suggestions)) {
@@ -846,10 +861,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.Suggestions = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: suggestions must be \"on\" or \"off\" (got %q)",
 			path, ff.Suggestions,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.Plugins)) {
@@ -860,10 +875,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.Plugins = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: plugins must be \"on\" or \"off\" (got %q)",
 			path, ff.Plugins,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.ChatContext)) {
@@ -874,10 +889,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.ChatContext = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: chatcontext must be \"on\" or \"off\" (got %q)",
 			path, ff.ChatContext,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.ChatWrite)) {
@@ -888,10 +903,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.ChatWrite = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: chatwrite must be \"on\" or \"off\" (got %q)",
 			path, ff.ChatWrite,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.Remote)) {
@@ -902,10 +917,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.Remote = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: remote must be \"on\" or \"off\" (got %q)",
 			path, ff.Remote,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.Session)) {
@@ -916,10 +931,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.Session = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: session must be \"on\" or \"off\" (got %q)",
 			path, ff.Session,
-		)
+		))
 	}
 
 	switch strings.ToLower(strings.TrimSpace(ff.CommitMsgTrailer)) {
@@ -930,10 +945,10 @@ func Load(path string) (Config, error) {
 	case "off":
 		cfg.CommitMsgTrailer = false
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: commitmsgtrailer must be \"on\" or \"off\" (got %q)",
 			path, ff.CommitMsgTrailer,
-		)
+		))
 	}
 
 	// A typo is LOUD (the rule every key above follows — a silently
@@ -943,10 +958,10 @@ func Load(path string) (Config, error) {
 	// at the floor beats refusing the whole config over it.
 	switch d, perr := parseAutoSaveDelay(ff.AutoSaveDelay); {
 	case perr != nil:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: autosavedelay must be a duration like \"5s\" or a number of seconds (got %q)",
 			path, ff.AutoSaveDelay,
-		)
+		))
 	case d == 0:
 		// field omitted — keep default
 	default:
@@ -973,12 +988,96 @@ func Load(path string) (Config, error) {
 	case UnderlineColorOff:
 		cfg.UnderlineColor = UnderlineColorOff
 	default:
-		return Defaults(), fmt.Errorf(
+		errs = append(errs, fmt.Errorf(
 			"%s: underlinecolor must be %q, %q, or %q (got %q)",
 			path, UnderlineColorAuto, UnderlineColorOn, UnderlineColorOff, ff.UnderlineColor,
-		)
+		))
 	}
-	return cfg, nil
+	return cfg, joinConfigErrors(errs)
+}
+
+// joinConfigErrors folds the per-key failures into one error for a single
+// status line ("; " between them, not errors.Join's newlines, which a
+// one-row flash would cut at the first). nil when every key was good.
+func joinConfigErrors(errs []error) error {
+	switch len(errs) {
+	case 0:
+		return nil
+	case 1:
+		return errs[0]
+	}
+	msgs := make([]string, len(errs))
+	for i, e := range errs {
+		msgs[i] = e.Error()
+	}
+	return fmt.Errorf("%d bad values: %s", len(errs), strings.Join(msgs, "; "))
+}
+
+// decodeFileFormat fills a fileFormat from the file's raw key → value map
+// ONE KEY AT A TIME, so a value of the wrong JSON type costs that key
+// alone (it is left blank — "use the default" — and named in errs)
+// instead of failing the whole unmarshal.
+//
+// Keys are matched the way encoding/json matches field tags — exact
+// spelling first, then case-insensitively — so `"commitMsgTrailer"` keeps
+// loading. Each value may be a JSON string (taken as is), a boolean
+// (true → "on", false → "off": the obvious spelling of an on/off key), a
+// number (its literal text, for autosavedelay), or null (blank). Objects
+// and arrays are errors. Unknown keys are ignored, as before.
+func decodeFileFormat(raw map[string]json.RawMessage, path string, errs *[]error) fileFormat {
+	var ff fileFormat
+	v := reflect.ValueOf(&ff).Elem()
+	typ := v.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		if name == "" || name == "-" {
+			continue
+		}
+		msg, ok := raw[name]
+		if !ok {
+			for k, m := range raw {
+				if strings.EqualFold(k, name) {
+					msg, ok = m, true
+					break
+				}
+			}
+		}
+		if !ok {
+			continue
+		}
+		str, err := configValueString(msg)
+		if err != nil {
+			*errs = append(*errs, fmt.Errorf("%s: %s %v", path, name, err))
+			continue
+		}
+		v.Field(i).SetString(str)
+	}
+	return ff
+}
+
+// configValueString turns one raw JSON value into the string form every
+// key's parser reads. See decodeFileFormat for which shapes are accepted.
+func configValueString(msg json.RawMessage) (string, error) {
+	var x any
+	if err := json.Unmarshal(msg, &x); err != nil {
+		return "", err
+	}
+	switch val := x.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return val, nil
+	case bool:
+		if val {
+			return "on", nil
+		}
+		return "off", nil
+	case float64:
+		// The literal text, not a re-format: "1.5" stays "1.5" for the
+		// duration parser, and a large integer is not turned into 1e+06.
+		return strings.TrimSpace(string(msg)), nil
+	}
+	return "", fmt.Errorf("must be a string, true/false or a number (got %s)", strings.TrimSpace(string(msg)))
 }
 
 // parseTerminal resolves the "terminal" value. Keywords are matched

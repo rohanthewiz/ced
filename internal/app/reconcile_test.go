@@ -180,6 +180,96 @@ func TestReconcile_DeletedFileMarksGoneAndSaveRecreates(t *testing.T) {
 	}
 }
 
+// TestReconcile_DeletedFileStaysDirtyThroughUndo (N-113): the deleted
+// file's text exists nowhere but the buffer, so undoing back to the text
+// the tab opened with must NOT read clean — Undo recomputes Dirty against
+// the saved text, and before ForgetSavedText that was the gone file's
+// content, so quit would have asked nothing.
+func TestReconcile_DeletedFileStaysDirtyThroughUndo(t *testing.T) {
+	a, tab, path := reconcileFixture(t)
+	tab.InsertString("// mine\n")
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	a.reconcileOpenTabsWithDisk()
+
+	tab.Undo()
+	if tab.Buffer.String() != "package main\n" {
+		t.Fatalf("buffer after undo = %q", tab.Buffer.String())
+	}
+	if !tab.Dirty {
+		t.Fatal("the file is gone; no buffer state may read clean")
+	}
+}
+
+// backdatedWrite is the `cp -p` / restored-backup shape of an external
+// write: new bytes carrying an mtime OLDER than anything the tab saw.
+func backdatedWrite(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("external write: %v", err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+}
+
+// TestReconcile_BackdatedWriteReloadsCleanTab (N-117): the watcher used to
+// ask only "is the disk mtime AFTER ours?", so an external write carrying
+// an older mtime was never seen. Now any other version counts.
+func TestReconcile_BackdatedWriteReloadsCleanTab(t *testing.T) {
+	a, tab, path := reconcileFixture(t)
+	backdatedWrite(t, path, "package restored\n")
+
+	a.reconcileOpenTabsWithDisk()
+
+	if got := tab.Buffer.String(); got != "package restored\n" {
+		t.Fatalf("buffer = %q, want the backdated disk copy", got)
+	}
+}
+
+// TestSaveGuard_BlocksOverABackdatedWrite (N-117): the audit's other half —
+// the next save used to report ok over a backdated external write. It must
+// stop and ask, like any other clobber.
+func TestSaveGuard_BlocksOverABackdatedWrite(t *testing.T) {
+	a, tab, path := reconcileFixture(t)
+	tab.InsertString("// mine\n")
+	backdatedWrite(t, path, "package theirs\n")
+
+	if a.saveTabAt(0) {
+		t.Fatal("save went through over a backdated external write")
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "package theirs\n" {
+		t.Fatalf("their write was overwritten: %q", got)
+	}
+	if conflictOf(a) == nil {
+		t.Fatal("expected the clobber prompt")
+	}
+}
+
+// TestReconcile_TouchLeavesDirtyTabAlone (N-117): a touch changes the
+// stamp but not the bytes; with content sums it is not a conflict, so no
+// prompt about identical text.
+func TestReconcile_TouchLeavesDirtyTabAlone(t *testing.T) {
+	a, tab, path := reconcileFixture(t)
+	tab.InsertString("// mine\n")
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+
+	a.reconcileOpenTabsWithDisk()
+
+	if a.conflictFor(tab) != nil {
+		t.Fatal("a touch raised a conflict")
+	}
+	if !a.saveTabAt(0) {
+		t.Fatal("save blocked after a touch")
+	}
+}
+
 // TestReconcile_RepeatTicksStayQuietUntilNewNews pins the deferral
 // contract against the background tick: once the user has said "later",
 // further ticks about the SAME state must not re-ask, but a genuinely
@@ -295,6 +385,32 @@ func TestConflictKeepMine_CompletesTheBlockedSave(t *testing.T) {
 	}
 	if tab.Dirty {
 		t.Fatal("the resumed save should have cleared Dirty")
+	}
+}
+
+// TestConflictKeepMine_UndoAfterwardStaysDirty (N-113): "Keep mine"
+// from a background tick (no blocked save to resume) adopts the disk's
+// mtime while the disk holds the OTHER writer's text. Undoing back to the
+// text the tab opened with must read dirty — the file says something else
+// now — or quit would leave the foreign text in place without asking.
+func TestConflictKeepMine_UndoAfterwardStaysDirty(t *testing.T) {
+	a, tab, path := reconcileFixture(t)
+	tab.InsertString("// mine\n")
+	externalWrite(t, path, "package other\n", 60)
+	a.reconcileOpenTabsWithDisk()
+	c := a.conflictFor(tab)
+	if c == nil {
+		t.Fatal("expected a recorded conflict")
+	}
+	a.closeAllModals()
+	a.conflictKeepMine(c)
+
+	tab.Undo()
+	if tab.Buffer.String() != "package main\n" {
+		t.Fatalf("buffer after undo = %q", tab.Buffer.String())
+	}
+	if !tab.Dirty {
+		t.Fatal("disk holds the other writer's text; undo must not read clean")
 	}
 }
 
@@ -425,7 +541,7 @@ func TestFormatOnSave_KeptEditsAreNotAConflict(t *testing.T) {
 	externalWrite(t, path, "package main // formatted\n", 60)
 	tab.InsertString("// mine\n")
 
-	a.handleFormatDone(&formatDoneEvent{when: time.Now(), tabPath: path, label: "gofmt"})
+	deliverFormatDone(a, &formatDoneEvent{when: time.Now(), tabPath: path, label: "gofmt"})
 	a.reconcileOpenTabsWithDisk()
 
 	if a.conflictFor(tab) != nil {
@@ -436,6 +552,25 @@ func TestFormatOnSave_KeptEditsAreNotAConflict(t *testing.T) {
 	}
 	if !a.saveTabAt(0) {
 		t.Fatal("the next save must not be blocked")
+	}
+}
+
+// TestFormatOnSave_KeptEditsUndoStaysDirty (N-113): the formatter wrote
+// a reformatted save under a dirty buffer, so the disk holds text the
+// buffer never held. Undoing back to the opened text must read dirty.
+func TestFormatOnSave_KeptEditsUndoStaysDirty(t *testing.T) {
+	a, tab, path := reconcileFixture(t)
+	externalWrite(t, path, "package main // formatted\n", 60)
+	tab.InsertString("// mine\n")
+
+	deliverFormatDone(a, &formatDoneEvent{when: time.Now(), tabPath: path, label: "gofmt"})
+
+	tab.Undo()
+	if tab.Buffer.String() != "package main\n" {
+		t.Fatalf("buffer after undo = %q", tab.Buffer.String())
+	}
+	if !tab.Dirty {
+		t.Fatal("disk holds the formatted text; undo must not read clean")
 	}
 }
 
@@ -490,7 +625,7 @@ func TestTabMarker_WorstNewsWins(t *testing.T) {
 		t.Fatalf("dirty marker = %q, want ●", m)
 	}
 
-	a.noteConflict(tab, time.Now(), nil)
+	a.noteConflict(tab, editor.DiskStamp{ModTime: time.Now()}, nil)
 	if m, _, _ := a.tabMarker(tab); m != conflictMarker {
 		t.Fatalf("conflict marker = %q, want %q", m, conflictMarker)
 	}
@@ -507,7 +642,7 @@ func TestTabMarker_WorstNewsWins(t *testing.T) {
 // nobody has open.
 func TestCloseTab_ForgetsTheConflict(t *testing.T) {
 	a, tab, _ := reconcileFixture(t)
-	a.noteConflict(tab, time.Now(), nil)
+	a.noteConflict(tab, editor.DiskStamp{ModTime: time.Now()}, nil)
 
 	a.closeTab(0)
 

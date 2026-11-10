@@ -32,9 +32,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/rohanthewiz/ced/internal/clipboard"
+	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
@@ -81,6 +81,19 @@ func renameFile(oldPath, newPath string) error {
 		return fmt.Errorf("a file named %q already exists", filepath.Base(newPath))
 	}
 	return os.Rename(oldPath, newPath)
+}
+
+// renamedTabDisk settles a tab's recorded disk version after its file was
+// renamed under it (t.Path already points at the new name). A rename keeps
+// mtime, size and inode, so the version the tab read is still the one on
+// disk and is deliberately KEPT — re-reading it here would quietly adopt
+// any external write that landed before the rename. Only a file that can
+// no longer be found loses its record, so the watcher treats whatever
+// turns up there as news.
+func renamedTabDisk(t *editor.Tab) {
+	if _, err := os.Stat(t.Path); err != nil {
+		t.ForgetDiskStamp()
+	}
 }
 
 // tabPathRemoved reports whether a tab pointing at tabPath is now
@@ -192,11 +205,7 @@ func (a *App) doRenameFile(oldPath, newName string) {
 	for _, t := range a.tabs {
 		if t.Path == oldPath {
 			t.Path = newPath
-			if info, err := os.Stat(newPath); err == nil {
-				t.Mtime = info.ModTime()
-			} else {
-				t.Mtime = time.Time{}
-			}
+			renamedTabDisk(t)
 			t.DiskGone = false
 		}
 	}
@@ -482,11 +491,7 @@ func (a *App) doRenameFolder(oldPath, newName string) {
 		default:
 			continue
 		}
-		if info, err := os.Stat(t.Path); err == nil {
-			t.Mtime = info.ModTime()
-		} else {
-			t.Mtime = time.Time{}
-		}
+		renamedTabDisk(t)
 		t.DiskGone = false
 	}
 	// Keep activeFolder in sync. If we don't, the next "New file"

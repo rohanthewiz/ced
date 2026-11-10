@@ -72,6 +72,29 @@ type formatDoneEvent struct {
 	// flash — auto-save fires every idle pause, and goimports failing
 	// on mid-thought code would otherwise spam the status bar.
 	quiet bool
+	// seq is the run's number from formatClaim; the done handler drops
+	// an event whose seq is not the path's active run. rev is the tab's
+	// EditRev when the run started — the moment the buffer equalled the
+	// file the formatter was handed — so the handler can tell "the user
+	// edited since" from "nothing moved" (-1 when no tab was open).
+	seq int
+	rev int
+}
+
+// formatRun is the bookkeeping for the one formatter run in flight on a
+// path (App.formatActive). See formatClaim.
+type formatRun struct {
+	seq int // matches formatDoneEvent.seq
+	rev int // the tab's EditRev at claim time, -1 with no tab
+	// started is when the run was claimed; a run older than
+	// formatRunStale is presumed lost and superseded (formatClaim).
+	started time.Time
+	// rerun records that another request (a save, auto-save, or ≡ Format
+	// file) arrived while this run was in flight; it runs once this one
+	// settles. rerunQuiet is false when ANY of the folded requests was an
+	// explicit one, so the user who pressed Save still gets the flash.
+	rerun      bool
+	rerunQuiet bool
 }
 
 // When satisfies the tcell.Event interface.
@@ -492,13 +515,18 @@ func (a *App) execFormatterChain(tabPath string, cmds [][]string, quiet bool) {
 	// just the tool name. Config-supplied bare names pass through
 	// unchanged.
 	label := filepath.Base(cmds[0][0])
+	// One run per path: a request that arrives mid-run is queued, never
+	// started beside it — see formatClaim. The claim also records the
+	// in-flight mark BEFORE the goroutine starts, so the reconcile tick
+	// can never observe the window between the formatter's write and the
+	// done-event that adopts its mtime (formatRunBegin).
+	seq, rev, ok := a.formatClaim(tabPath, quiet)
+	if !ok {
+		return
+	}
 	if !quiet {
 		a.flash(label + "…")
 	}
-	// Recorded BEFORE the goroutine starts, so the reconcile tick can
-	// never observe the window between the formatter's write and the
-	// done-event that adopts its mtime. See formatRunBegin.
-	a.formatRunBegin(tabPath)
 	go func() {
 		var err error
 		for _, argv := range cmds {
@@ -538,6 +566,8 @@ func (a *App) execFormatterChain(tabPath string, cmds [][]string, quiet bool) {
 			label:   label,
 			err:     err,
 			quiet:   quiet,
+			seq:     seq,
+			rev:     rev,
 		})
 	}()
 }
@@ -576,13 +606,17 @@ func (a *App) execInProcessFormat(tabPath string, quiet bool) bool {
 	// as the NAME OF A TOOL in all of them — which is exactly what the
 	// external rung's label already is ("goimports", "prettier").
 	label := format.InProcessName(tabPath) + " formatter"
+	scr := a.screen
+	// Claimed BEFORE the goroutine starts, for the same reasons as the
+	// external chain — see formatClaim. A queued request still "took the
+	// job": it will run when the one in flight settles.
+	seq, rev, ok := a.formatClaim(tabPath, quiet)
+	if !ok {
+		return true
+	}
 	if !quiet {
 		a.flash(label + "…")
 	}
-	scr := a.screen
-	// Recorded BEFORE the goroutine starts, for the same reason as the
-	// external chain — see formatRunBegin.
-	a.formatRunBegin(tabPath)
 	go func() {
 		err := formatFileInPlace(tabPath)
 		_ = scr.PostEvent(&formatDoneEvent{
@@ -591,6 +625,8 @@ func (a *App) execInProcessFormat(tabPath string, quiet bool) bool {
 			label:   label,
 			err:     err,
 			quiet:   quiet,
+			seq:     seq,
+			rev:     rev,
 		})
 	}()
 	return true
@@ -638,7 +674,9 @@ func indexNewline(s string) int {
 	return -1
 }
 
-// handleFormatDone surfaces the result of a background formatter run.
+// handleFormatDone surfaces the result of a background formatter run,
+// after a generation check: only the path's active run (formatClaim) may
+// act, and a request queued behind it starts once it has settled.
 // On success it reloads the affected tab from disk so the buffer
 // shows the formatted output — but only if the user hasn't started
 // editing again in the meantime (Dirty=true). Trampling unsaved
@@ -653,10 +691,29 @@ func (a *App) handleFormatDone(e *formatDoneEvent) {
 	if e == nil {
 		return
 	}
-	// First act, before any early return: the run is over either way, and
-	// a count that leaked would suppress the reconcile tick for that file
-	// forever.
+	// Generation check: only the run this path is waiting on may adopt
+	// anything. Anything else is a stale answer and is dropped whole —
+	// including its reconcile mark, which formatClaim already released
+	// when it superseded the run (ending it twice would un-suppress the
+	// tick under the run that replaced it).
+	run := a.formatActive[e.tabPath]
+	if run == nil || run.seq != e.seq {
+		return
+	}
+	delete(a.formatActive, e.tabPath)
+	// Before any other early return: the run is over either way, and a
+	// count that leaked would suppress the reconcile tick for that file.
 	a.formatRunEnd(e.tabPath)
+	a.settleFormatRun(e, run)
+	// After the settle, whichever way it went: a request that arrived
+	// mid-run (or the re-save below) runs now, against what is on disk.
+	a.formatRerunIfQueued(e.tabPath, run)
+}
+
+// settleFormatRun is the body of handleFormatDone for the run that is
+// actually current: surface an error, keep a dirty buffer, put back a
+// save the formatter may have trampled, or adopt the formatted text.
+func (a *App) settleFormatRun(e *formatDoneEvent, run *formatRun) {
 	if e.err != nil {
 		if !e.quiet {
 			a.flash(fmt.Sprintf("%s failed: %v", e.label, e.err))
@@ -668,7 +725,7 @@ func (a *App) handleFormatDone(e *formatDoneEvent) {
 			continue
 		}
 		if tab.Dirty {
-			// The formatter's write was OURS, so adopt its mtime even
+			// The formatter's write was OURS, so adopt its version even
 			// though the buffer keeps the user's newer edits. Without
 			// this the tab would look exactly like "someone else wrote
 			// your file while you had unsaved changes" — a clobber
@@ -676,11 +733,35 @@ func (a *App) handleFormatDone(e *formatDoneEvent) {
 			// next save behind a question about a write it made itself.
 			// Their edits still win on save, which is what the flash
 			// below promises.
-			if info, err := os.Stat(tab.Path); err == nil {
-				tab.Mtime = info.ModTime()
-			}
+			_ = tab.AdoptDisk()
+			// The disk holds the FORMATTED save, which the buffer never
+			// held, so undoing back to the pre-format text must not read
+			// clean. Unknown until the next save.
+			tab.ForgetSavedText()
 			if !e.quiet {
 				a.flash(fmt.Sprintf("%s ran — kept your edits (file on disk was reformatted)", e.label))
+			}
+			return
+		}
+		if tab.EditRev != e.rev {
+			// Clean, yet the buffer moved after this run began: the user
+			// edited and SAVED again while the formatter was working on
+			// the OLDER text (or undid back to the saved text). This run's
+			// write may have landed on top of that save, so adopting it
+			// would swap the newer text out of the buffer AND leave it off
+			// disk — the N-116 loss, silent apart from the undo stack.
+			// Leaving it would be no better: a clean tab over a file that
+			// holds older text. So the buffer (which is what the user
+			// last saved) goes back on disk — our own write, so no clobber
+			// guard — and the formatter runs again over THAT.
+			if err := tab.Save(); err != nil {
+				a.flash(fmt.Sprintf("Save failed: %v", err))
+				return
+			}
+			a.requestFileDiff(tab.Path)
+			a.lspDidSave(tab)
+			if !run.rerun {
+				run.rerun, run.rerunQuiet = true, e.quiet
 			}
 			return
 		}
@@ -709,6 +790,81 @@ func (a *App) handleFormatDone(e *formatDoneEvent) {
 	// Tab was closed before the formatter finished — silent no-op.
 }
 
+// formatClaim registers a formatter run on tabPath and reports whether
+// the caller may start it. While a run is already in flight on the path
+// the request is folded into that run's rerun flag instead (ok=false),
+// and it starts when the run in flight settles.
+//
+// One run per path is the fix for N-116. Two overlapping runs used to be
+// allowed: save (run #1 starts on text A), keep typing, save again
+// (text B on disk, run #2 starts). If #1 finished last-but-one it wrote
+// format(A) over B, and the done handler — matching by path alone, on a
+// tab that read clean because of the second save — adopted it, so B
+// vanished from both the buffer and the disk. With one run per path and
+// the claim-time EditRev riding the event (seq, rev), the handler can
+// see the buffer moved, refuse the stale adoption, and put B back.
+//
+//	save A ──► claim #1 (rev=a) ──► gofmt(A) ··· done #1: rev moved
+//	save B ──► queued (rerun)                     → re-save B, rerun
+//	                                              ──► claim #2 ──► gofmt(B)
+//
+// The claim also takes the reconcile-suppression count (formatRunBegin),
+// so every formatter launch makes both marks in one call.
+func (a *App) formatClaim(tabPath string, quiet bool) (seq, rev int, ok bool) {
+	if r := a.formatActive[tabPath]; r != nil {
+		if time.Since(r.started) < formatRunStale {
+			if !r.rerun {
+				r.rerun, r.rerunQuiet = true, quiet
+			} else {
+				r.rerunQuiet = r.rerunQuiet && quiet
+			}
+			return 0, 0, false
+		}
+		// The run's done-event never came: tcell drops a PostEvent when
+		// its queue is full (N-124), and a formatter can hang (N-126a).
+		// Without this, one lost event would queue every later format of
+		// this file behind a run that will never settle. Release its marks
+		// and start fresh; if its event does turn up, the seq no longer
+		// matches and handleFormatDone ignores it.
+		delete(a.formatActive, tabPath)
+		a.formatRunEnd(tabPath)
+	}
+	a.formatSeq++
+	rev = -1
+	if t := a.tabForPath(tabPath); t != nil {
+		rev = t.EditRev
+	}
+	if a.formatActive == nil {
+		a.formatActive = map[string]*formatRun{}
+	}
+	a.formatActive[tabPath] = &formatRun{seq: a.formatSeq, rev: rev, started: time.Now()}
+	a.formatRunBegin(tabPath)
+	return a.formatSeq, rev, true
+}
+
+// formatRerunIfQueued starts the request folded into run while it was in
+// flight. Skipped when the tab is gone, or dirty: a dirty buffer is not
+// on disk, so formatting the disk now would format text the user has
+// moved past — their next save formats what they actually wrote.
+func (a *App) formatRerunIfQueued(tabPath string, run *formatRun) {
+	if !run.rerun {
+		return
+	}
+	tab := a.tabForPath(tabPath)
+	if tab == nil || tab.Dirty {
+		return
+	}
+	if idx := a.tabIndexOf(tab); idx >= 0 {
+		a.runFormatter(idx, run.rerunQuiet)
+	}
+}
+
+// formatRunStale is how long a claimed run may go without its done-event
+// before formatClaim presumes the event lost and starts afresh. Well past
+// any real formatter (gofmt takes milliseconds, prettier a second or two)
+// so a slow run is never superseded while it is still writing.
+const formatRunStale = 2 * time.Minute
+
 // formatRunBegin / formatRunEnd / formatRunning track how many formatter
 // runs are in flight per file path.
 //
@@ -720,10 +876,12 @@ func (a *App) handleFormatDone(e *formatDoneEvent) {
 // ReloadUndoable); on a dirty one it was worse, recording a conflict that
 // suspends auto-save and raises a modal about ced's own write.
 //
-// A count rather than a flag, because a chain (gopls imports, then gofmt)
-// and a re-save can overlap on one path. Main-loop only: incremented
-// before the goroutine starts, decremented as handleFormatDone's first
-// act, so no locking is needed.
+// A count rather than a flag: formatter runs are one per path now
+// (formatClaim), but git Restore holds the same mark (gitrestore.go) and
+// may overlap a formatter run on the same file. Main-loop only: incremented
+// before the goroutine starts, decremented when handleFormatDone accepts
+// the run's event (or formatClaim supersedes a lost one), so no locking is
+// needed.
 //
 // Deliberately NOT consulted by saveGuard / autoSaveGuard: those have the
 // same theoretical window, but hitting it needs a keypress inside ~100ms

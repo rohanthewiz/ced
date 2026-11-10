@@ -136,8 +136,12 @@ func TestHandleAutoSave_SkipsExternallyChangedFile(t *testing.T) {
 	a, target := autoSaveFixture(t)
 	tab := a.tabs[0]
 	tab.InsertString("// edited\n")
-	// Simulate an external write landing after our load: push the
-	// file's mtime past the tab's recorded one.
+	// Simulate an external write landing after our load: different bytes
+	// and an mtime past the tab's recorded one. (A bare touch is NOT an
+	// external edit any more — see the next test.)
+	if err := os.WriteFile(target, []byte("package main // theirs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	future := time.Now().Add(time.Hour)
 	if err := os.Chtimes(target, future, future); err != nil {
 		t.Fatalf("chtimes: %v", err)
@@ -149,8 +153,32 @@ func TestHandleAutoSave_SkipsExternallyChangedFile(t *testing.T) {
 		t.Fatal("auto-save must skip a file that changed on disk")
 	}
 	got, _ := os.ReadFile(target)
-	if string(got) != "package main\n" {
+	if string(got) != "package main // theirs\n" {
 		t.Fatalf("auto-save clobbered an external edit: %q", got)
+	}
+}
+
+// TestHandleAutoSave_TouchIsNotAConflict (N-117): a touch moves the mtime
+// but not the bytes, so the file is still the version the tab loaded and
+// nothing of anyone else's can be lost — auto-save proceeds instead of
+// suspending behind a conflict about identical content.
+func TestHandleAutoSave_TouchIsNotAConflict(t *testing.T) {
+	a, target := autoSaveFixture(t)
+	tab := a.tabs[0]
+	tab.InsertString("// edited\n")
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(target, future, future); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	a.handleAutoSave()
+
+	if tab.Dirty || a.conflictFor(tab) != nil {
+		t.Fatalf("a touch blocked auto-save: dirty=%v conflict=%v", tab.Dirty, a.conflictFor(tab) != nil)
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != tab.Buffer.String() {
+		t.Fatalf("disk = %q, want the buffer", got)
 	}
 }
 

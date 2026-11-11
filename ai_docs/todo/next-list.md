@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-140**
+**Next ID: N-142**
 
 ## Open
 
@@ -238,6 +238,12 @@ plus the LSP work done in the seeding session itself
   dropped, `CommandContext` with a process-group kill and `WaitDelay`,
   `GIT_OPTIONAL_LOCKS=0` on reads. A refusal then lands in the
   existing "Git failed" modal.
+  2026-11-10 (`2026-1110-1909-n127-git-status-off-loop`): the status
+  snapshot now runs on a goroutine (gitsnapshot.go), so a hung status no
+  longer freezes the UI — it holds the snapshot "in flight" until the 30s
+  relaunch. Its two forks in `loadGitStatus` (and the git panel's
+  `loadGitStatusFiles`) should still take the constructor, with
+  `GIT_OPTIONAL_LOCKS=0`; nothing in N-127 set it.
 
 - **N-123** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **A wedged language server freezes the editor.** `lspFlushChange`
@@ -278,6 +284,11 @@ plus the LSP work done in the seeding session itself
   `postResult` helper for COMPLETION events that retries until
   delivered or the App is closed (every such site is on a goroutine or
   an AfterFunc); tickers may keep dropping.
+  2026-11-10 (`2026-1110-1909-n127-git-status-off-loop`): two new
+  completion events don't stick on a drop: `gitStatusEvent` (a scan in
+  flight past `gitSnapshotStale`, 30s, is relaunched) and the gutter's
+  `gitDiffEvent` (its skip stamp is recorded on ARRIVAL, so a lost answer
+  just means the next tick asks again).
 
 - **N-126** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Missing bounds on children and wire input.** Close a part by
@@ -305,26 +316,6 @@ plus the LSP work done in the seeding session itself
   (f) `handleEvent` has no case for `*tcell.EventError`, so a dead
   tty that does not SIGHUP ced leaves it polling git forever
   (suspected). Fix: treat it as quit.
-
-- **N-127** · raised `2026-1110-1630-reliability-performance-usability-audit` · value high
-  **The git status snapshot runs synchronously on the main loop, every
-  10 seconds and after every save.** `refreshGitStatus` →
-  `loadGitStatus` is six forks in a row (gitstatus.go:113, :122, :197,
-  :206, :315, :333), called from the tree tick (`refreshTreeNow`),
-  `handleAutoSave` and ~33 sites in all. Measured on this repo, this
-  machine: 190–265 ms per call, so the UI stalls that long every 10s;
-  `app.New` takes 230–360 ms, mostly this (the rest of startup is
-  ~30–50 ms). The same tick also forks one `git diff` per open tab
-  (`requestOpenTabDiffs`, ~38 ms each, off-loop) and a `git ls-files`
-  (the finder rebuild), every 10s forever, focused or not, against
-  the "standing timers only while something needs them" rule. Fix:
-  (a) run the snapshot on one coalesced goroutine (in-flight flag +
-  seq) and post a `gitStatusEvent`; (b) fold the six forks into one
-  `git status --porcelain=v2 --branch --show-stash`; (c) reconcile on
-  focus-IN and stop polling while unfocused (terminals that report no
-  focus keep the tick); (d) skip the per-tab diff when neither the
-  file's mtime nor HEAD / index moved. Lands well with N-122's
-  constructor (timeout, `GIT_OPTIONAL_LOCKS=0`).
 
 - **N-128** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **Every structural edit re-lexes the whole file on the main loop.**
@@ -422,6 +413,22 @@ plus the LSP work done in the seeding session itself
   (the ` · cp1252` segment with a tip, a red `cp1252 ✗` badge while the
   buffer holds a character the file can't save); what remains here is
   the undo-trim half, waiting on N-131.
+
+- **N-140** · raised `2026-1110-1909-n127-git-status-off-loop` · value low
+  **What still forks on the main loop when the snapshot lands.**
+  N-127 took the status snapshot off the loop, but its apply
+  (`applyGitStatus`) still calls two panel refreshes that fork inline
+  while their panel is open: the git log (`refreshGitLogCommits` →
+  `gitToplevel` + `loadGitLogCommits`, two forks at ~40 ms each just to
+  start on the dev Mac, unmeasured as a whole) and the Conflicts panel
+  (`refreshConflictPanel` / `refreshConflictPanelInfo` →
+  `reloadGitOpInfo`, also run while an operation is parked with the
+  panel shut). Every 10s while the log is up, the loop stalls that long.
+  Separately the tick rebuilds the finder index (`git ls-files`,
+  off-loop) every period whether or not anything changed. Fix: give the
+  log and the op-info reads the snapshot's pattern (goroutine +
+  seq-checked event), and skip the finder rebuild when the tree refresh
+  found no change.
 
 ## Validate
 
@@ -798,6 +805,16 @@ and `raised`.
   and the cats / Terminal.app checks stay by hand. Each item this
   covers gets its result recorded in place.
 
+- **N-141** · raised `2026-1110-1909-n127-git-status-off-loop` · value low
+  **Focus pacing in a real cats and tmux.** The tick slows to 30s after
+  CSI O and refreshes on CSI I (tickpace.go). Seen only through run-ced's
+  PTY, which sends the bytes by hand. Check in cats (which forwards
+  per-pane focus) and in tmux with `focus-events on`: moving to the next
+  pane slows the tick (a file made there shows within 30s, not 10s),
+  coming back shows it at once, and a ced pane beside an agent still
+  picks up its writes while unfocused. Also that tmux WITHOUT
+  `focus-events` keeps the 10s tick.
+
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.
@@ -884,6 +901,38 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-10, `2026-1110-1909-n127-git-status-off-loop` —
+  **N-127** the git status snapshot is off the main loop and two forks
+  instead of six. (a) `refreshGitStatus` launches ONE coalesced
+  goroutine (gitsnapshot.go: `flightSeq`, `rerun`, a launch `seq` so only
+  the latest answer applies, a 30s `gitSnapshotStale` relaunch so a
+  dropped event can't wedge it) and applies on `gitStatusEvent`; the
+  inline `refreshGitStatusNow` / `refreshTreeAfterGit` stays only where
+  the next line reads the snapshot (`handleGitCmdDone`'s onOK hooks, the
+  conflict stop hook). A directly built App keeps snapshots inline
+  (`gitSnap.async` off; `New` sets it). (b) `rev-parse --show-toplevel
+  --absolute-git-dir --glob=refs/stas[h]` + `status --porcelain=v2
+  --branch -z` (`parsePorcelainV2`); the stash rides rev-parse because
+  v2's `# stash` header needs git 2.35 (Ubuntu 22.04 has 2.34); a gone
+  upstream (no `# branch.ab`) still reads as none; detached HEAD pays
+  one `rev-parse --short`. The git panel takes its rows from the
+  snapshot (`setGitPanelFiles`) and its own read shares the parser; v1
+  helpers retired (`loadGitTracking`, `loadGitHasStash`,
+  `parsePorcelain`, `unquotePath` …). (c) user's choice: SLOWER while
+  unfocused, not stopped — cats and tmux report per-pane focus, so an
+  unfocused pane beside an agent is still watched: 30s after CSI O,
+  focus-in (or a key / button press) refreshes at once and restores 10s
+  (tickpace.go). (d) the tick re-diffs an open file only when the file or
+  `.git/index` stamp moved (`diffStamp`, `editor.RacyGranule`). Measured
+  on ced's repo: `loadGitStatus` 190 → 69 ms, the tick's main-loop time
+  192 ms → 0.29 ms. Checked: `TestGitCmdDone_HooksSeeTheCommandsResultWhileAsync`
+  and `TestRequestOpenTabDiffs_SkipsWhenFileAndIndexUnchanged` seen
+  failing with their fix removed; `TestLoadGitStatus_PanelCodesMatchPorcelainV1`
+  (parity with v1 on a real repo); real binary (run-ced): `main ↑1` and
+  the panel rows at startup, a file made while unfocused shown on CSI I
+  (control without it: not shown), gutter mark on open. Raised N-140,
+  N-141.
 
 - closed 2026-11-10, `2026-1110-1813-n114-non-utf8-cp1252` —
   **N-114** a file whose bytes aren't valid UTF-8 is held as

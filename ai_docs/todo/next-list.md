@@ -150,18 +150,6 @@ plus the LSP work done in the seeding session itself
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
 
-- **N-114** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **Editing a non-UTF-8 file corrupts it silently.** `internal/editor`
-  never asks `utf8.Valid`. The buffer primitives go through `[]rune`
-  (buffer.go:108-114, :148-151), so any edit to a line rewrites every
-  invalid byte on THAT line as U+FFFD, and auto-save persists it 5s
-  later. Reproduced: Latin-1 `caf\xe9 one` + one typed rune saves as
-  `caf\xef\xbf\xbd oneX`; Shift-JIS and BOM-less UTF-16 without a NUL in
-  the first 8KB the same. Untouched lines and a no-edit save round-trip
-  byte for byte. Decide the policy: (1) stopgap, open such a file with
-  auto-save off and a held warning (or read-only); (2) decode Latin-1 /
-  CP1252 on open and re-encode on save. Suggested: (1) first.
-
 - **N-118** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **No crash safety.** No `recover()` and no `os/signal` anywhere in
   non-test code; `main.go` calls `a.Close()` only after `Run` returns.
@@ -207,7 +195,11 @@ plus the LSP work done in the seeding session itself
   and an open CRLF / BOM tab is served to it as LF without the BOM
   (copilot_chat_perm.go:584-587, :614-620), so the write-back converts
   the file. Fix: re-apply the tab's LineEnding / BOM and write through
-  `editor.WriteFileAtomic`.
+  `editor.WriteFileAtomic`. Since N-114 the same goes for the encoding:
+  the agent's READ of a Windows-1252 file is decoded (`chatFSRead` →
+  `editor.DecodeBytes`), so its write-back is UTF-8 text that must be
+  re-encoded with `editor.EncodeAs` (a refusal → ask, or write UTF-8
+  and say so) — today it silently converts the file to UTF-8.
   (e) A failed paste runs `os.RemoveAll(p.dest)` even when the failure
   was "dest already exists" (copypaste.go:522-531). Fix: remove only
   what ced's own Mkdir / O_EXCL create made.
@@ -220,6 +212,8 @@ plus the LSP work done in the seeding session itself
   read, not run).
   (h) A minority-CRLF file keeps `\r` in the buffer as a character;
   typing at end of line writes text after the CR (fileio.go:108-115).
+  Since N-114 that CR is at least VISIBLE: Render paints control runes
+  as stand-ins, so it shows as `␍` at the end of those lines.
 
 - **N-122** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **Git children share ced's controlling terminal.** `runGitCmdFull`
@@ -424,7 +418,10 @@ plus the LSP work done in the seeding session itself
   trimmed undo history (N-131) change what the editor will do for you
   and say nothing. Give each a status-bar segment with a `tip`, and
   flash once when an undo trim first drops a step. Waits on the
-  decisions in N-114 and N-131.
+  decisions in N-114 and N-131. 2026-11-10: the N-114 half is DONE
+  (the ` · cp1252` segment with a tip, a red `cp1252 ✗` badge while the
+  buffer holds a character the file can't save); what remains here is
+  the undo-trim half, waiting on N-131.
 
 ## Validate
 
@@ -887,6 +884,45 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-10, `2026-1110-1813-n114-non-utf8-cp1252` —
+  **N-114** a file whose bytes aren't valid UTF-8 is held as
+  WINDOWS-1252 (decided: Vim's model, over a read-only stopgap and over
+  byte escapes) and written back the same way. New
+  `internal/editor/encoding.go`: `readTextFile` asks `utf8.Valid` once
+  and sets `Tab.Encoding = "cp1252"`; the WHATWG table maps all 256
+  bytes to distinct runes (the five undefined ones → their C1 runes), so
+  any byte string round-trips — Shift-JIS and stray bytes show as
+  mojibake but cannot be damaged. `encode` re-encodes; a rune the code
+  page lacks makes Save / `EncodedBytes` return `*UnencodableError`
+  (line, rune), writing nothing. App (`internal/app/encoding.go`): an
+  explicit save (saveTabAt, Save & close) turns it into "Save as UTF-8?"
+  (user's choice over Vim's plain refusal) whose Yes converts and
+  re-runs the gesture; auto-save skips silently; copy / Copy to… refuse
+  naming the file. ≡ File "Convert file to UTF-8…" and a status segment
+  ` · cp1252` (red `cp1252 ✗` badge while unencodable, N-136's half)
+  open the same confirm; `ConvertToUTF8` is no undo step and calls
+  `ForgetSavedText`. The other readers read the tab's way: gutter-diff
+  hunk lines (`decodeDiffLine`: a revert of a removed Latin-1 line wrote
+  git's raw byte), blame's `--contents` (`blameContents`), the compare
+  panel's disk side, the agent's reads, reference context, and project
+  search (accent queries match, replace columns line up). The in-process
+  formatter refuses non-UTF-8. Render paints C0 / DEL / C1 controls as
+  one-cell stand-ins (`␛`, `▯`) — U+0090 / U+009D are DCS / OSC in 8-bit
+  form. README: Features bullet, `### Files that aren't UTF-8`, the ≡
+  row; menu pins +1 row (210 / 252 / `[2, 5, 249]`). Checked: the
+  reproduction `TestSave_EditedLatin1LineKeepsItsBytes` FAILS on the old
+  code ("caf\uFFFD oneX") and passes; `TestCP1252_EveryByteRoundTrips`,
+  `TestSave_AnyBytesRoundTripAroundAnEdit`, `TestRevertHunk_CP1252…`,
+  `TestBlameContents_…` (real git), `TestStatusAlertStyle_ReadsOnEveryBuiltin`
+  (caught liftToContrast pushing BG toward white on a mid-tone red:
+  3.4:1 on gruvbox-dark; the badge now takes the better of the theme's
+  two inks, else black / white). Real binary (run-ced): ` · cp1252`, then
+  `cp1252 ✗` after typing `→`; `Esc s` asked (the first wording was
+  elided by the 54-cell confirm, now pinned by
+  `TestUTF8Questions_FitTheConfirm`); No left `e9`; Yes wrote `c3 a9` /
+  `e2 86 92`; a plain edit + save kept `e9`. Not seen in a real
+  terminal: the badge colours and the `␛` / `▯` glyphs.
 
 - closed 2026-11-10, `2026-1110-1723-audit-wave1-data-safety` —
   **N-120** config.json is read per key (`decodeFileFormat`,

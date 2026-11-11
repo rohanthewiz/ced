@@ -264,12 +264,23 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `InvalidateStyles` is the DEFAULT for any new mutation path. Over
   `MaxHighlightBytes` (512KB) → `SyntaxOff`. `SyntaxSettle` is a package
   var for tests only.
-- **Undo (undo.go)**: capped by BYTES (`maxUndoBytes` 32MB, both stacks);
-  `snapshotCost` = headers + changed lines, measured against the entry
-  below, stamped once. Trimming never empties the stack. `pushUndoEntry`
-  is the single write path; keep the running sums exact. Only the
-  multi-caret fan-out may set `undoSuppress`. One-step multi-range edits
-  use `pushUndo(undoGroupStructural)` + direct Buffer edits (ReplaceAll,
+- **Undo (undo.go)**: entries are DELTAS (`undoStep`: line hunks +
+  caret at both ends), never buffer copies — O(change) in memory and
+  budget (N-131). `pushUndo` OPENS a step (caret only); the next push /
+  Undo / Redo SETTLES it by diffing `undoBase` (ONE private header copy,
+  the buffer at the last checkpoint) against the buffer (`lineHunks`:
+  prefix/suffix trim, index-aligned runs, `internal/diff` for a large
+  shifted middle — never a second differ). Mutators stay "pushUndo, then
+  edit any way you like"; never add per-primitive change hooks. A change
+  no pushUndo announced is filed as its own step and drops redo. Steps
+  are verified (`hunksFit`) before applying; a misfit drops the history,
+  never writes. Capped at 500 entries (open step counted in `UndoDepth`)
+  and 32MB (`stepCost`: headers + REMOVED text on undo, INSERTED on redo,
+  re-stamped on every move between stacks). Trimming keeps the last
+  settled step. `pushUndoEntry` is the single undo-stack write path; keep
+  the running sums exact. Only the multi-caret fan-out may set
+  `undoSuppress`. One-step multi-range edits use
+  `pushUndo(undoGroupStructural)` + direct Buffer edits (ReplaceAll,
   ApplyMultiEdit, workspace edits, `ReloadAsEdit`).
   Undo/Redo/Revert set Dirty against the LAST-SAVED text (`savedLines`,
   `markSaved` in Save / ReloadAsEdit, initUndo on read), never the on-open

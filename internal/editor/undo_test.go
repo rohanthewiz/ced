@@ -15,8 +15,11 @@
 package editor
 
 import (
+	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +62,7 @@ func TestInsertRune_CoalescesIntoSingleStep(t *testing.T) {
 	if !tab.CanUndo() {
 		t.Fatal("expected something to undo")
 	}
-	if got := len(tab.undoStack); got != 1 {
+	if got := tab.UndoDepth(); got != 1 {
 		t.Fatalf("expected 1 undo entry after a typing burst, got %d", got)
 	}
 	tab.Undo()
@@ -101,7 +104,7 @@ func TestInsertRune_BreakAfterTimeout(t *testing.T) {
 	tab.lastUndoAt = time.Now().Add(-2 * undoCoalesceWindow)
 	tab.InsertRune('b')
 
-	if got := len(tab.undoStack); got != 2 {
+	if got := tab.UndoDepth(); got != 2 {
 		t.Fatalf("expected two undo entries after timeout gap, got %d", got)
 	}
 	tab.Undo()
@@ -122,7 +125,7 @@ func TestInsertString_AlwaysStructural(t *testing.T) {
 	if got := tab.Buffer.String(); got != "aPASTEb" {
 		t.Fatalf("buffer = %q, want aPASTEb", got)
 	}
-	if got := len(tab.undoStack); got != 3 {
+	if got := tab.UndoDepth(); got != 3 {
 		t.Fatalf("expected 3 distinct undo entries, got %d", got)
 	}
 	tab.Undo()
@@ -151,7 +154,7 @@ func TestBackspace_CoalescesWithItself(t *testing.T) {
 	if got := tab.Buffer.String(); got != "he" {
 		t.Fatalf("after 3 backspaces = %q, want he", got)
 	}
-	if got := len(tab.undoStack); got != 1 {
+	if got := tab.UndoDepth(); got != 1 {
 		t.Fatalf("expected 1 entry from backspace burst, got %d", got)
 	}
 	tab.Undo()
@@ -188,7 +191,7 @@ func TestDelete_CoalescesAndBreaksProperly(t *testing.T) {
 	if got := tab.Buffer.String(); got != "cdef" {
 		t.Fatalf("after 2 deletes = %q, want cdef", got)
 	}
-	if got := len(tab.undoStack); got != 1 {
+	if got := tab.UndoDepth(); got != 1 {
 		t.Fatalf("expected 1 entry from delete burst, got %d", got)
 	}
 }
@@ -222,7 +225,7 @@ func TestInsertRune_OverSelectionPushesOnce(t *testing.T) {
 	if got := tab.Buffer.String(); got != "hello X" {
 		t.Fatalf("buffer = %q, want 'hello X'", got)
 	}
-	if got := len(tab.undoStack); got != 1 {
+	if got := tab.UndoDepth(); got != 1 {
 		t.Fatalf("expected 1 entry, got %d", got)
 	}
 	tab.Undo()
@@ -324,11 +327,11 @@ func TestRevertFile_GoesAllTheWayBack(t *testing.T) {
 // pollute the undo stack.
 func TestRevertFile_NoopWhenAlreadyOriginal(t *testing.T) {
 	tab := newScratchTab("clean")
-	before := len(tab.undoStack)
+	before := tab.UndoDepth()
 	if tab.RevertFile() {
 		t.Fatal("RevertFile on a clean buffer should return false")
 	}
-	if len(tab.undoStack) != before {
+	if tab.UndoDepth() != before {
 		t.Fatal("undo stack should not have grown")
 	}
 }
@@ -342,7 +345,7 @@ func TestUndoStack_CapsAtMaxEntries(t *testing.T) {
 	for i := 0; i < maxUndoEntries+50; i++ {
 		tab.InsertString(".")
 	}
-	if got := len(tab.undoStack); got != maxUndoEntries {
+	if got := tab.UndoDepth(); got != maxUndoEntries {
 		t.Fatalf("undo stack length = %d, want capped at %d", got, maxUndoEntries)
 	}
 }
@@ -359,7 +362,7 @@ func TestSave_BreaksTypingGroup(t *testing.T) {
 	tab.breakUndoGroup()
 	tab.InsertRune('b')
 
-	if got := len(tab.undoStack); got != 2 {
+	if got := tab.UndoDepth(); got != 2 {
 		t.Fatalf("expected 2 entries after group break, got %d", got)
 	}
 }
@@ -520,35 +523,80 @@ func TestBufferContentsAfterMixedHistory(t *testing.T) {
 // The byte budget (maxUndoBytes)
 // -----------------------------------------------------------------------------
 
-// TestSnapshotCost_ChargesHeadersNotSharedContent pins the central claim
-// of the cost model: two snapshots that share every line differ only by
-// the header array, so a long history over an unedited region must not
-// be charged for the same characters over and over.
-func TestSnapshotCost_ChargesHeadersNotSharedContent(t *testing.T) {
-	lines := make([]string, 100)
-	for i := range lines {
-		lines[i] = strings.Repeat("x", 1000)
+// TestStepCost_ChargesTheTextOnlyThisEntryHolds pins the central claim of
+// the cost model: a step is charged its hunks' headers plus the text that
+// nothing but it keeps alive — the REMOVED lines on the undo stack, the
+// INSERTED lines on the redo stack — and never the untouched rest of the
+// file, however big.
+func TestStepCost_ChargesTheTextOnlyThisEntryHolds(t *testing.T) {
+	s := undoStep{hunks: []undoHunk{{
+		at:       7,
+		removed:  []string{strings.Repeat("r", 100)},
+		inserted: []string{strings.Repeat("i", 30), strings.Repeat("j", 40)},
+	}}}
+	headers := undoStepOverhead + undoHunkOverhead + 3*lineHeaderBytes
+	if got, want := stepCost(s, false), headers+100; got != want {
+		t.Fatalf("undo-side cost = %d, want %d (headers + removed text)", got, want)
 	}
-	a := snapshot{Lines: lines}
-	b := snapshot{Lines: append([]string(nil), lines...)}
-
-	if got, want := snapshotCost(b, a), 100*lineHeaderBytes; got != want {
-		t.Fatalf("cost of an identical snapshot = %d, want %d (headers only)", got, want)
-	}
-	// A changed line IS charged — that's the case the header term misses.
-	b.Lines[3] = strings.Repeat("y", 1000)
-	if got, want := snapshotCost(b, a), 100*lineHeaderBytes+1000; got != want {
-		t.Fatalf("cost after one changed line = %d, want %d", got, want)
+	if got, want := stepCost(s, true), headers+70; got != want {
+		t.Fatalf("redo-side cost = %d, want %d (headers + inserted text)", got, want)
 	}
 }
 
-// TestSnapshotCost_ChargesTheFirstSnapshotAgainstAnEmptyBaseline proves a
-// snapshot with no predecessor pays for its content: nothing else is
-// holding those strings, so the estimate has to notice them.
-func TestSnapshotCost_ChargesTheFirstSnapshotAgainstAnEmptyBaseline(t *testing.T) {
-	s := snapshot{Lines: []string{"abcde", "fg"}}
-	if got, want := snapshotCost(s, snapshot{}), 2*lineHeaderBytes+7; got != want {
-		t.Fatalf("cost against an empty baseline = %d, want %d", got, want)
+// TestStepCost_IndependentOfFileSizeAndPosition is the N-131 claim in
+// miniature: one typed line costs the same in a 10-line file and a
+// 100k-line one, at the top or at the end. The snapshot model charged
+// 16 bytes per line of the file, plus every line an insert shifted.
+func TestStepCost_IndependentOfFileSizeAndPosition(t *testing.T) {
+	cost := func(lines, at int) int {
+		tab := newScratchTab(strings.Repeat("some line of text\n", lines))
+		tab.Cursor = Position{Line: at, Col: 0}
+		tab.Anchor = tab.Cursor
+		tab.InsertString("new line\n")
+		tab.settleUndo()
+		return tab.undoBytes
+	}
+	small := cost(10, 0)
+	for _, c := range []struct{ lines, at int }{{100_000, 0}, {100_000, 99_990}, {10, 9}} {
+		if got := cost(c.lines, c.at); got != small {
+			t.Errorf("%d lines, insert at %d: cost %d, want %d (same as a 10-line file)", c.lines, c.at, got, small)
+		}
+	}
+	if small > 512 {
+		t.Errorf("one inserted line costs %d bytes — expected a few hundred at most", small)
+	}
+}
+
+// TestUndoDepth_BigFileKeepsTheWholeHistory is the N-131 reproduction:
+// 300 line inserts near the TOP of a 20k-line file. The snapshot model
+// charged each step 320KB of headers plus every shifted line and kept
+// well under 100 of them; with deltas all 300 survive, and unwinding them
+// gives back the file exactly.
+func TestUndoDepth_BigFileKeepsTheWholeHistory(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 20_000; i++ {
+		fmt.Fprintf(&b, "line %05d of an ordinary source file, typical width\n", i)
+	}
+	original := b.String()
+	for _, where := range []string{"top", "end"} {
+		tab := newScratchTab(original)
+		for i := 0; i < 300; i++ {
+			line := 3
+			if where == "end" {
+				line = len(tab.Buffer.Lines) - 3
+			}
+			tab.Cursor = Position{Line: line, Col: 0}
+			tab.Anchor = tab.Cursor
+			tab.InsertString(fmt.Sprintf("inserted %d\n", i))
+		}
+		if got := tab.UndoDepth(); got != 300 {
+			t.Fatalf("%s: UndoDepth = %d after 300 edits, want all 300 kept", where, got)
+		}
+		for tab.Undo() {
+		}
+		if tab.Buffer.String() != original {
+			t.Fatalf("%s: unwinding every step did not restore the file", where)
+		}
 	}
 }
 
@@ -565,14 +613,14 @@ func TestUndoStack_CapsAtMaxBytes(t *testing.T) {
 		tab.Anchor = tab.Cursor
 		tab.InsertString("a") // structural — never coalesces
 	}
-	if len(tab.undoStack) >= maxUndoEntries {
+	if tab.UndoDepth() >= maxUndoEntries {
 		t.Fatalf("undo stack reached the entry cap (%d) — the byte budget never bound",
-			len(tab.undoStack))
+			tab.UndoDepth())
 	}
 	if tab.undoBytes+tab.redoBytes > maxUndoBytes {
 		t.Fatalf("undo budget exceeded: %d bytes > %d", tab.undoBytes+tab.redoBytes, maxUndoBytes)
 	}
-	if len(tab.undoStack) == 0 {
+	if tab.UndoDepth() == 0 {
 		t.Fatal("trimming must never empty the stack — the last step has to stay undoable")
 	}
 }
@@ -582,11 +630,11 @@ func TestUndoStack_CapsAtMaxBytes(t *testing.T) {
 // A history of zero is indistinguishable from undo being broken.
 func TestTrimUndo_KeepsTheLastStep(t *testing.T) {
 	tab := newScratchTab("seed")
-	tab.undoStack = []snapshot{{Lines: []string{"a"}, cost: maxUndoBytes * 4}}
+	tab.undoStack = []undoStep{{cost: maxUndoBytes * 4}}
 	tab.undoBytes = maxUndoBytes * 4
 	tab.trimUndo()
-	if len(tab.undoStack) != 1 {
-		t.Fatalf("stack length after trim = %d, want the single entry kept", len(tab.undoStack))
+	if tab.UndoDepth() != 1 {
+		t.Fatalf("stack length after trim = %d, want the single entry kept", tab.UndoDepth())
 	}
 }
 
@@ -844,5 +892,270 @@ func TestMarkSaved_CopiesTheLineHeaders(t *testing.T) {
 	tab.Buffer.Lines[0] = "changed"
 	if tab.savedLines[0] != "a" {
 		t.Fatal("savedLines aliases the live buffer")
+	}
+}
+
+// -----------------------------------------------------------------------------
+// Deltas: lineHunks, applyHunks, settling (N-131)
+// -----------------------------------------------------------------------------
+
+// TestLineHunks_TrimsToTheEditedMiddle covers the common shapes: an edit
+// inside a line, an inserted line, a deleted line, and no change at all.
+// Only the touched lines appear in a hunk; at is the before-state line.
+func TestLineHunks_TrimsToTheEditedMiddle(t *testing.T) {
+	before := []string{"a", "b", "c", "d"}
+	cases := []struct {
+		name  string
+		after []string
+		want  []undoHunk
+	}{
+		{"same", []string{"a", "b", "c", "d"}, nil},
+		{"edit", []string{"a", "B", "c", "d"}, []undoHunk{{at: 1, removed: []string{"b"}, inserted: []string{"B"}}}},
+		{"insert", []string{"a", "b", "new", "c", "d"}, []undoHunk{{at: 2, inserted: []string{"new"}}}},
+		{"delete", []string{"a", "c", "d"}, []undoHunk{{at: 1, removed: []string{"b"}}}},
+		{"two runs", []string{"A", "b", "C", "D"}, []undoHunk{
+			{at: 0, removed: []string{"a"}, inserted: []string{"A"}},
+			{at: 2, removed: []string{"c", "d"}, inserted: []string{"C", "D"}},
+		}},
+	}
+	for _, c := range cases {
+		got := lineHunks(before, c.after)
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: lineHunks = %#v, want %#v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestLineHunks_ShiftedMiddleUsesTheDiffer pins case 3: a line added near
+// the top and another near the bottom of a large region. Index pairing
+// would report every line in between; the patience differ gives the two
+// real hunks, and the step's cost is a few lines, not the span.
+func TestLineHunks_ShiftedMiddleUsesTheDiffer(t *testing.T) {
+	before := make([]string, 2000)
+	for i := range before {
+		before[i] = fmt.Sprintf("line %d", i)
+	}
+	after := append([]string(nil), before[:10]...)
+	after = append(after, "added at the top")
+	after = append(after, before[10:1990]...)
+	after = append(after, "added at the bottom", "and another")
+	after = append(after, before[1990:]...)
+
+	got := lineHunks(before, after)
+	want := []undoHunk{
+		{at: 10, inserted: []string{"added at the top"}},
+		{at: 1990, inserted: []string{"added at the bottom", "and another"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("lineHunks = %#v, want %#v", got, want)
+	}
+
+	// Same count, still shifted: one line added at the top, one removed at
+	// the bottom. Index pairing would call ~2000 lines changed.
+	shifted := append([]string{"new first"}, before[:1999]...)
+	got = lineHunks(before, shifted)
+	if len(got) != 2 {
+		t.Fatalf("equal-count shift: %d hunks, want 2 (one insert, one delete)", len(got))
+	}
+	if n := len(got[0].removed) + len(got[0].inserted) + len(got[1].removed) + len(got[1].inserted); n != 2 {
+		t.Fatalf("equal-count shift names %d lines, want 2", n)
+	}
+}
+
+// TestApplyHunks_RoundTripsRandomEdits is the property every Undo and
+// Redo leans on: for any before/after pair, lineHunks' hunks applied
+// forward to before give after, and applied backward to after give
+// before — through both the in-place path (no line-count change) and
+// the rebuild path, and through the differ for large shifted middles.
+// The inputs are copied first because applyHunks may patch in place.
+func TestApplyHunks_RoundTripsRandomEdits(t *testing.T) {
+	rng := rand.New(rand.NewSource(131))
+	word := func() string { return fmt.Sprintf("w%d", rng.Intn(40)) }
+	for iter := 0; iter < 2000; iter++ {
+		n := rng.Intn(120)
+		before := make([]string, n)
+		for i := range before {
+			before[i] = word()
+		}
+		after := append([]string(nil), before...)
+		for k := rng.Intn(6); k >= 0; k-- {
+			at := 0
+			if len(after) > 0 {
+				at = rng.Intn(len(after) + 1)
+			}
+			switch rng.Intn(3) {
+			case 0: // replace in place
+				if at < len(after) {
+					after[at] = word()
+				}
+			case 1: // insert a run
+				run := make([]string, rng.Intn(40)+1)
+				for i := range run {
+					run[i] = word()
+				}
+				after = append(after[:at], append(run, after[at:]...)...)
+			case 2: // delete a run
+				end := at + rng.Intn(40) + 1
+				if end > len(after) {
+					end = len(after)
+				}
+				after = append(after[:at], after[end:]...)
+			}
+		}
+		hunks := lineHunks(before, after)
+		s := undoStep{hunks: hunks, beforeLen: len(before), afterLen: len(after)}
+		if !hunksFit(before, s, true) || !hunksFit(after, s, false) {
+			t.Fatalf("iter %d: hunks don't fit their own sides", iter)
+		}
+		fwd := applyHunks(append([]string(nil), before...), hunks, true)
+		if !reflect.DeepEqual(nonNil(fwd), nonNil(after)) {
+			t.Fatalf("iter %d: forward gave %v, want %v (hunks %#v)", iter, fwd, after, hunks)
+		}
+		back := applyHunks(append([]string(nil), after...), hunks, false)
+		if !reflect.DeepEqual(nonNil(back), nonNil(before)) {
+			t.Fatalf("iter %d: backward gave %v, want %v (hunks %#v)", iter, back, before, hunks)
+		}
+	}
+}
+
+// nonNil maps a nil slice to an empty one so DeepEqual compares contents.
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+// TestUndoHunks_DoNotAliasTheBuffer protects against the aliasing bug
+// the delta model is most exposed to: the buffer and undoBase are patched
+// in place, so a hunk sharing their array would have its history
+// rewritten by the next edit.
+func TestUndoHunks_DoNotAliasTheBuffer(t *testing.T) {
+	tab := newScratchTab("alpha\nbeta\ngamma")
+	tab.MoveCursorTo(Position{Line: 1, Col: 0}, false)
+	tab.InsertRune('X')
+	tab.settleUndo()
+	h := tab.undoStack[0].hunks[0]
+	tab.Buffer.Lines[1] = "MUTATED"
+	tab.undoBase[1] = "MUTATED"
+	if h.removed[0] != "beta" || h.inserted[0] != "Xbeta" {
+		t.Fatalf("hunk was rewritten through the buffer: %#v", h)
+	}
+}
+
+// TestUndoDepth_SettlingDoesNotMoveIt: the open step is counted, so turning
+// it into a settled entry leaves the depth where it was — the workspace
+// edit journal compares depths across exactly such moments.
+func TestUndoDepth_SettlingDoesNotMoveIt(t *testing.T) {
+	tab := newScratchTab("a")
+	tab.InsertString("b")
+	if got := tab.UndoDepth(); got != 1 || !tab.undoOpen {
+		t.Fatalf("after one edit: depth %d open %v, want 1 and open", got, tab.undoOpen)
+	}
+	tab.settleUndo()
+	if got := tab.UndoDepth(); got != 1 || tab.undoOpen {
+		t.Fatalf("after settling: depth %d open %v, want 1 and settled", got, tab.undoOpen)
+	}
+	if !tab.CanUndo() {
+		t.Fatal("CanUndo false with a settled step on the stack")
+	}
+}
+
+// TestSettle_UnannouncedChangeIsItsOwnStep: a buffer change no pushUndo
+// announced is filed as a step when the history next moves, so Undo
+// takes it back rather than applying an older delta to text it doesn't
+// describe — and it drops redo, like any new edit.
+func TestSettle_UnannouncedChangeIsItsOwnStep(t *testing.T) {
+	tab := newScratchTab("one\ntwo\nthree")
+	tab.InsertString("x")
+	tab.Undo()
+	if !tab.CanRedo() {
+		t.Fatal("setup: expected a redo step")
+	}
+	tab.Buffer.Lines = []string{"one", "TWO", "three", "four"} // nobody called pushUndo
+	if tab.Redo() {
+		t.Fatal("Redo replayed a step over text that changed underneath it")
+	}
+	if got := tab.Buffer.String(); got != "one\nTWO\nthree\nfour" {
+		t.Fatalf("buffer after the refused redo = %q", got)
+	}
+	if !tab.Undo() {
+		t.Fatal("expected the unannounced change to be undoable")
+	}
+	if got := tab.Buffer.String(); got != "one\ntwo\nthree" {
+		t.Fatalf("after undo = %q, want the text before the unannounced change", got)
+	}
+}
+
+// TestUndo_RefusesAStepThatDoesNotFit: should the history ever disagree
+// with the buffer, Undo refuses and drops the history rather than writing
+// a delta over the wrong lines. The buffer is left exactly as it was.
+func TestUndo_RefusesAStepThatDoesNotFit(t *testing.T) {
+	tab := newScratchTab("a\nb")
+	tab.undoStack = []undoStep{{
+		hunks:     []undoHunk{{at: 0, removed: []string{"zzz"}, inserted: []string{"not here"}}},
+		beforeLen: 2, afterLen: 2,
+	}}
+	if tab.Undo() {
+		t.Fatal("Undo applied a step whose lines aren't in the buffer")
+	}
+	if got := tab.Buffer.String(); got != "a\nb" {
+		t.Fatalf("buffer = %q, want it untouched", got)
+	}
+	if tab.CanUndo() || tab.CanRedo() {
+		t.Fatal("the untrustworthy history should have been dropped")
+	}
+}
+
+// TestUndo_ScatteredMultiEditIsOneCheapStep: a multi-range edit that adds
+// lines at both ends of a large file (the multi-caret Enter / resolve-all
+// shape) is still ONE undo step, round-trips exactly, and is charged for
+// what it changed — not for the thousands of lines between its hunks.
+func TestUndo_ScatteredMultiEditIsOneCheapStep(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 5000; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	original := b.String()
+	tab := newScratchTab(original)
+	_, ok := tab.ApplyMultiEdit([]Edit{
+		{Start: Position{Line: 10, Col: 0}, End: Position{Line: 10, Col: 0}, NewText: "top\n"},
+		{Start: Position{Line: 4990, Col: 0}, End: Position{Line: 4990, Col: 0}, NewText: "bottom\nmore\n"},
+	})
+	if !ok {
+		t.Fatal("ApplyMultiEdit refused")
+	}
+	edited := tab.Buffer.String()
+	tab.settleUndo()
+	if got := len(tab.undoStack[0].hunks); got != 2 {
+		t.Fatalf("step has %d hunks, want 2", got)
+	}
+	if tab.undoBytes > 1024 {
+		t.Fatalf("step costs %d bytes — charged for the span, not the change", tab.undoBytes)
+	}
+	tab.Undo()
+	if tab.Buffer.String() != original {
+		t.Fatal("undo did not restore the original")
+	}
+	tab.Redo()
+	if tab.Buffer.String() != edited {
+		t.Fatal("redo did not restore the edit")
+	}
+}
+
+// TestUndo_StepRestoresBothCarets: Undo lands on the caret where the step
+// began, Redo on the caret where it ended — the two ends a delta records.
+func TestUndo_StepRestoresBothCarets(t *testing.T) {
+	tab := newScratchTab("hello\nworld")
+	tab.MoveCursorTo(Position{Line: 1, Col: 5}, false)
+	tab.InsertString("!\nnext")
+	end := tab.Cursor
+	tab.Undo()
+	if tab.Cursor != (Position{Line: 1, Col: 5}) {
+		t.Fatalf("cursor after undo = %+v, want {1 5}", tab.Cursor)
+	}
+	tab.Redo()
+	if tab.Cursor != end {
+		t.Fatalf("cursor after redo = %+v, want %+v", tab.Cursor, end)
 	}
 }

@@ -129,20 +129,34 @@ type Tab struct {
 	// cursorMoved — see jumpmargin.go.
 	jumpReveal bool
 
-	// Undo / redo stacks plus the original on-open snapshot used by
-	// RevertFile. See undo.go for the push / coalescing rules and the
-	// public Undo / Redo / RevertFile entry points.
-	undoStack     []snapshot
-	redoStack     []snapshot
+	// Undo / redo stacks (deltas, not buffer copies) plus the original
+	// on-open snapshot used by RevertFile. See undo.go for the push /
+	// settle / coalescing rules and the public Undo / Redo / RevertFile
+	// entry points.
+	undoStack     []undoStep
+	redoStack     []undoStep
 	undoOriginal  snapshot
 	lastUndoGroup undoGroup
 	lastUndoAt    time.Time
+
+	// undoBase is the buffer as of the last history checkpoint — a
+	// private header copy that settleUndo diffs the buffer against to
+	// measure a step once it's over. Never aliased: rebase and initUndo
+	// reuse its array in place.
+	undoBase []string
+
+	// undoOpen is set by pushUndo: a step has started and not yet been
+	// settled into an entry. undoOpenCursor / undoOpenAnchor are the caret
+	// at its start — what Undo of that step restores.
+	undoOpen       bool
+	undoOpenCursor Position
+	undoOpenAnchor Position
 
 	// undoBytes / redoBytes are the running sums of the two stacks'
 	// per-entry cost estimates. They share one budget (maxUndoBytes)
 	// because entries move between the stacks, and they're maintained
 	// incrementally so a push never has to re-measure the history it's
-	// appending to. See snapshotCost / trimUndo in undo.go.
+	// appending to. See stepCost / trimUndo in undo.go.
 	undoBytes int
 	redoBytes int
 
@@ -568,10 +582,17 @@ func (t *Tab) ReloadUndoable() error {
 	if err := t.Reload(); err != nil {
 		return err // buffer untouched; nothing to unwind.
 	}
-	// undoTop is the on-open original Reload just re-seeded (the stack is
-	// empty), which is exactly the "one edit step away" baseline
-	// snapshotCost wants to measure the entry against.
-	t.pushUndoEntry(before, t.undoTop())
+	// Reload just reset the history (initUndo: the disk's text is the
+	// checkpoint), so the step from "mine" to "disk" is filed directly,
+	// already settled: its hunks are exactly what one Undo puts back, and
+	// its after-state is the buffer undoBase now holds.
+	after := t.bufferLines()
+	t.pushUndoEntry(undoStep{
+		hunks:        lineHunks(before.Lines, after),
+		cursorBefore: before.Cursor, anchorBefore: before.Anchor,
+		cursorAfter: t.Cursor, anchorAfter: t.Anchor,
+		beforeLen: len(before.Lines), afterLen: len(after),
+	})
 	return nil
 }
 

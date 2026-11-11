@@ -26,8 +26,8 @@
 //     so an edit can only ever move text that lies AFTER the carets
 //     still waiting their turn. Top-down would invalidate every
 //     position below the first edit.
-//   - **One undo step.** The fan-out pushes a single structural
-//     snapshot up front and sets undoSuppress for the duration, so
+//   - **One undo step.** The fan-out opens a single structural undo
+//     step up front and sets undoSuppress for the duration, so
 //     undoing a five-caret typing burst is one Esc-u, not five. Without
 //     that, each primitive's own pushUndo would file its own entry.
 //

@@ -46,8 +46,9 @@ import (
 
 // MaxOpenBytes is the largest file NewTab will read. The ceiling isn't
 // the read — it's everything downstream: one Go string per line, a
-// per-rune style grid, and an undo stack that snapshots the whole line
-// slice. 32MB of source is already far past what this editor is for, and
+// per-rune style grid, and the undo history's whole-buffer header copies
+// (undoOriginal, the saved baseline, the settle checkpoint — three, no
+// longer one per step). 32MB of source is already far past what this editor is for, and
 // refusing with a clear message beats wedging on a file nobody meant to
 // open.
 const MaxOpenBytes = 32 << 20

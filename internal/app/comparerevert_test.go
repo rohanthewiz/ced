@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // compareHeaders lists the "@@" rows of the compare panel's diff.
@@ -34,9 +36,16 @@ func TestCompareRevertHunk_RestoresTheSavedCopy(t *testing.T) {
 	saved := "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\n"
 	a := seedCompareApp(t, map[string]string{"f.txt": saved}, "f.txt")
 	tab := a.activeTabPtr()
-	tab.Buffer.Lines[1] = "B"
-	tab.Buffer.Lines[9] = "J"
-	tab.EditRev++
+	// The two edits go through the editor (one undoable step), not a
+	// direct write to Buffer.Lines: the history files an unannounced
+	// change as a step of its own when it next moves, which would put an
+	// extra step between "depth" and the revert's.
+	if _, ok := tab.ApplyMultiEdit([]editor.Edit{
+		{Start: editor.Position{Line: 1}, End: editor.Position{Line: 1, Col: 1}, NewText: "B"},
+		{Start: editor.Position{Line: 9}, End: editor.Position{Line: 9, Col: 1}, NewText: "J"},
+	}); !ok {
+		t.Fatal("setup edits refused")
+	}
 	a.menuCompareSaved()
 	hs := compareHeaders(a)
 	if len(hs) != 2 {

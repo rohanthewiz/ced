@@ -1,12 +1,13 @@
 // =============================================================================
 // File: internal/app/gitstatus_test.go
-// Author: Spicer Matthews <spicer@cloudmanic.com>
+// Author: Rohan Allison <rohanthewiz@gmail.com>
 // Created: 2026-04-30
-// Copyright: 2026 Cloudmanic, LLC. All rights reserved.
+// Copyright: 2026 Rohan Allison. All rights reserved.
+// Portions copyright 2026 Cloudmanic, LLC. Original author: Spicer Matthews.
 // =============================================================================
 
-// Tests for gitstatus.go. The byte-parsing helpers (parsePorcelain,
-// unquotePath, dirtyFolderSet, pathInside) are exercised in isolation
+// Tests for gitstatus.go. The byte-parsing helpers (parsePorcelainV2,
+// pathSets, dirtyFolderSet, pathInside) are exercised in isolation
 // with synthetic input — no subprocess needed. The shell-out flow
 // (loadGitStatus end-to-end) is exercised against a real `git init`'d
 // repo in a t.TempDir, and skipped when git isn't on PATH so the test
@@ -19,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -198,97 +200,6 @@ func TestLoadGitStatus_FromSubdirectory(t *testing.T) {
 	}
 }
 
-// TestParsePorcelain_BasicCases pins down the byte-level porcelain v1
-// parser. Each case mirrors something `git status --porcelain` actually
-// produces — we want regression coverage on the format itself, not just
-// the happy path through real git.
-func TestParsePorcelain_BasicCases(t *testing.T) {
-	top := "/tmp/repo"
-	cases := []struct {
-		name     string
-		input    string
-		wantKeys []string
-	}{
-		{
-			name:     "single modified",
-			input:    " M file.txt\n",
-			wantKeys: []string{"/tmp/repo/file.txt"},
-		},
-		{
-			name:     "untracked",
-			input:    "?? new.go\n",
-			wantKeys: []string{"/tmp/repo/new.go"},
-		},
-		{
-			name:     "staged plus modified",
-			input:    "MM file.go\n",
-			wantKeys: []string{"/tmp/repo/file.go"},
-		},
-		{
-			name:     "multiple lines",
-			input:    " M a.txt\n?? b.txt\nA  c.txt\n",
-			wantKeys: []string{"/tmp/repo/a.txt", "/tmp/repo/b.txt", "/tmp/repo/c.txt"},
-		},
-		{
-			name:     "rename marks both old and new",
-			input:    "R  oldname.txt -> newname.txt\n",
-			wantKeys: []string{"/tmp/repo/oldname.txt", "/tmp/repo/newname.txt"},
-		},
-		{
-			name:     "quoted path with spaces",
-			input:    " M \"weird name.txt\"\n",
-			wantKeys: []string{"/tmp/repo/weird name.txt"},
-		},
-		{
-			name:     "blank input",
-			input:    "",
-			wantKeys: nil,
-		},
-		{
-			name:     "junk too short to parse is dropped",
-			input:    "M\n",
-			wantKeys: nil,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := parsePorcelain([]byte(tc.input), top)
-			if len(got) != len(tc.wantKeys) {
-				t.Fatalf("count mismatch: want %d (%v), got %d (%v)",
-					len(tc.wantKeys), tc.wantKeys,
-					len(got), sortedKeys(got))
-			}
-			for _, k := range tc.wantKeys {
-				if !got[k] {
-					t.Errorf("missing %q in %v", k, sortedKeys(got))
-				}
-			}
-		})
-	}
-}
-
-// TestUnquotePath_Variants verifies the C-style unquoter handles git's
-// default quoting — quoted paths come back clean, unquoted paths pass
-// through, and a malformed quoted string falls back to the raw input
-// rather than dropping the path entirely.
-func TestUnquotePath_Variants(t *testing.T) {
-	cases := map[string]string{
-		`plain.txt`:          `plain.txt`,
-		`"quoted.txt"`:       `quoted.txt`,
-		`"with space.txt"`:   `with space.txt`,
-		`"escaped\nnewline"`: "escaped\nnewline",
-		`""`:                 ``,
-		`   spaced.txt   `:   `spaced.txt`,
-		``:                   ``,
-		`"unterminated`:      `"unterminated`, // malformed → raw fallback
-	}
-	for in, want := range cases {
-		if got := unquotePath(in); got != want {
-			t.Errorf("unquotePath(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // TestDirtyFolderSet_RollsUpToRoot verifies that each dirty file paints
 // every ancestor folder up to (and including) the project root, so a
 // collapsed branch still shows the user there's a change inside.
@@ -443,35 +354,6 @@ func initRepo(t *testing.T) string {
 	return resolved
 }
 
-// gitRun invokes git in cwd. Fails the test on non-zero exit so a broken
-// TestHasStagedPorcelain pins the X-column classification: index-side
-// codes count as staged, while unmodified / untracked / ignored first
-// columns don't — the exact set that decides whether "Commit staged"
-// would succeed.
-func TestHasStagedPorcelain(t *testing.T) {
-	cases := []struct {
-		name string
-		out  string
-		want bool
-	}{
-		{"empty output", "", false},
-		{"worktree-only change", " M file.go\n", false},
-		{"untracked", "?? new.go\n", false},
-		{"ignored", "!! bin/\n", false},
-		{"staged modify", "M  file.go\n", true},
-		{"staged add", "A  new.go\n", true},
-		{"staged rename", "R  old.go -> new.go\n", true},
-		{"staged then edited again", "MM file.go\n", true},
-		{"mixed, staged last", " M a.go\n?? b.go\nD  c.go\n", true},
-		{"short garbage line", "M\n", false},
-	}
-	for _, tc := range cases {
-		if got := hasStagedPorcelain([]byte(tc.out)); got != tc.want {
-			t.Errorf("%s: hasStagedPorcelain = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
 // TestLoadGitStatus_HasStaged exercises the flag end-to-end against a
 // real repo through the untracked → staged → committed lifecycle.
 func TestLoadGitStatus_HasStaged(t *testing.T) {
@@ -494,6 +376,7 @@ func TestLoadGitStatus_HasStaged(t *testing.T) {
 	}
 }
 
+// gitRun invokes git in cwd. Fails the test on non-zero exit so a broken
 // fixture doesn't masquerade as a code bug.
 func gitRun(t *testing.T, cwd string, args ...string) {
 	t.Helper()
@@ -525,54 +408,6 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
-// TestStagedPorcelainSet pins the X-column filter: index-side entries
-// land in the set (renames mark both paths, mixed MM codes count),
-// while work-tree-only and untracked entries do not.
-func TestStagedPorcelainSet(t *testing.T) {
-	out := []byte("M  staged.txt\n" +
-		" M worktree.txt\n" +
-		"?? untracked.txt\n" +
-		"MM both.txt\n" +
-		"R  old.txt -> new.txt\n")
-	got := stagedPorcelainSet(out, "/repo")
-
-	want := []string{"/repo/staged.txt", "/repo/both.txt", "/repo/old.txt", "/repo/new.txt"}
-	if len(got) != len(want) {
-		t.Fatalf("staged set = %v, want %d entries", got, len(want))
-	}
-	for _, p := range want {
-		if !got[p] {
-			t.Errorf("staged set missing %s: %v", p, got)
-		}
-	}
-}
-
-// TestLoadGitHasStash pins the stash probe: false before any stash
-// exists, true once one does, and false for non-repos and empty roots
-// (the best-effort contract).
-func TestLoadGitHasStash(t *testing.T) {
-	if !gitAvailable() {
-		t.Skip("git not on PATH")
-	}
-	repo := initRepo(t)
-	writeFileT(t, filepath.Join(repo, "f.txt"), "x\n")
-	gitRun(t, repo, "add", ".")
-	gitRun(t, repo, "commit", "-q", "-m", "init")
-	if loadGitHasStash(repo) {
-		t.Fatal("fresh repo must report no stash")
-	}
-
-	writeFileT(t, filepath.Join(repo, "f.txt"), "y\n")
-	gitRun(t, repo, "stash", "push", "-q")
-	if !loadGitHasStash(repo) {
-		t.Fatal("stash entry should be detected")
-	}
-
-	if loadGitHasStash(t.TempDir()) || loadGitHasStash("") {
-		t.Fatal("non-repo / empty root must report no stash")
-	}
-}
-
 // TestIsPorcelainConflict pins the seven-code unmerged table. The two
 // same-letter pairs are the ones a "does either column say U?" test
 // quietly loses: AA is what two branches creating the same file looks
@@ -589,30 +424,6 @@ func TestIsPorcelainConflict(t *testing.T) {
 		if isPorcelainConflict(xy[0], xy[1]) {
 			t.Errorf("%q should NOT read as unmerged", xy)
 		}
-	}
-}
-
-// TestConflictPorcelainSet pins the extraction: only unmerged lines
-// contribute, paths come back absolute against the toplevel, and an
-// ordinary dirty repo yields nothing — the flag that lights the
-// "Resolve conflicts…" row must stay dark for the common case.
-func TestConflictPorcelainSet(t *testing.T) {
-	out := []byte("UU both.go\nA  staged.go\n M dirty.go\n?? new.go\nAA added-twice.go\n")
-	got := conflictPorcelainSet(out, "/repo")
-	want := map[string]bool{
-		filepath.Join("/repo", "both.go"):        true,
-		filepath.Join("/repo", "added-twice.go"): true,
-	}
-	if len(got) != len(want) {
-		t.Fatalf("conflicted = %v, want %v", sortedKeys(got), sortedKeys(want))
-	}
-	for p := range want {
-		if !got[p] {
-			t.Errorf("missing conflicted path %s (got %v)", p, sortedKeys(got))
-		}
-	}
-	if n := len(conflictPorcelainSet([]byte(" M a.go\n?? b.go\n"), "/repo")); n != 0 {
-		t.Errorf("a merely dirty repo reported %d conflicts, want 0", n)
 	}
 }
 
@@ -665,4 +476,271 @@ func TestLoadGitStatus_InProgressOperation(t *testing.T) {
 	if st := loadGitStatus(repo); st.InProgress != "" {
 		t.Errorf("after abort: InProgress=%q", st.InProgress)
 	}
+}
+
+// -----------------------------------------------------------------------------
+// porcelain v2 (N-127)
+// -----------------------------------------------------------------------------
+
+// TestParsePorcelainV2_Entries pins the -z entry grammar: an ordinary
+// change, a rename whose SOURCE rides in the next token, an unmerged
+// path, and untracked paths with a space and a non-ASCII rune (raw under
+// -z, never quoted). XY codes come back in v1's spelling.
+func TestParsePorcelainV2_Entries(t *testing.T) {
+	out := "# branch.oid abc\x00# branch.head main\x00" +
+		"1 .M N... 100644 100644 100644 h1 h2 sub/a.txt\x00" +
+		"1 MM N... 100644 100644 100644 h1 h2 b c.txt\x00" +
+		"2 R. N... 100644 100644 100644 h1 h2 R100 new name.txt\x00old.txt\x00" +
+		"u UU N... 100644 100644 100644 100644 h1 h2 h3 f.txt\x00" +
+		"? sub/new file.txt\x00" +
+		"? café.txt\x00"
+	got := parsePorcelainV2([]byte(out)).Entries
+	want := []porcelainEntry{
+		{XY: " M", Path: "sub/a.txt"},
+		{XY: "MM", Path: "b c.txt"},
+		{XY: "R ", Path: "new name.txt", Orig: "old.txt"},
+		{XY: "UU", Path: "f.txt", Unmerged: true},
+		{XY: "??", Path: "sub/new file.txt"},
+		{XY: "??", Path: "café.txt"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("entries = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestParsePorcelainV2_MalformedRenameStillConsumesItsSource: a rename
+// line too short to split must still swallow its source token, or a
+// source path that happens to look like an entry ("? x") would be listed
+// as a change of its own.
+func TestParsePorcelainV2_MalformedRenameStillConsumesItsSource(t *testing.T) {
+	got := parsePorcelainV2([]byte("2 R. truncated\x00? x\x00? real.txt\x00")).Entries
+	if len(got) != 1 || got[0].Path != "real.txt" {
+		t.Fatalf("entries = %+v, want only real.txt", got)
+	}
+}
+
+// TestParsePorcelainV2_JunkAndEmpty: empty output, a bare NUL and an
+// unknown line type parse to nothing rather than a guess.
+func TestParsePorcelainV2_JunkAndEmpty(t *testing.T) {
+	for _, in := range []string{"", "\x00", "1\x00", "Z something new\x00", "1 .M too few\x00"} {
+		if got := parsePorcelainV2([]byte(in)).Entries; len(got) != 0 {
+			t.Errorf("%q parsed to %+v, want nothing", in, got)
+		}
+	}
+}
+
+// TestParsePorcelainV2_BranchHeaders pins the header half: the branch
+// name, a detached HEAD, and the upstream rule — kept only when
+// "# branch.ab" follows, because git names a configured upstream even
+// after its ref is gone, and the old @{upstream} read called that "no
+// upstream".
+func TestParsePorcelainV2_BranchHeaders(t *testing.T) {
+	cases := []struct {
+		name          string
+		out           string
+		head          string
+		detached      bool
+		upstream      string
+		ahead, behind int
+	}{
+		{"tracked, ahead and behind",
+			"# branch.oid abc\x00# branch.head main\x00# branch.upstream origin/main\x00# branch.ab +3 -5\x00",
+			"main", false, "origin/main", 3, 5},
+		{"tracked, level",
+			"# branch.head topic\x00# branch.upstream origin/topic\x00# branch.ab +0 -0\x00",
+			"topic", false, "origin/topic", 0, 0},
+		{"upstream configured but gone",
+			"# branch.head gone\x00# branch.upstream origin/nosuch\x00",
+			"gone", false, "", 0, 0},
+		{"no upstream", "# branch.head local\x00", "local", false, "", 0, 0},
+		{"detached", "# branch.oid abc\x00# branch.head (detached)\x00", "", true, "", 0, 0},
+		{"unborn", "# branch.oid (initial)\x00# branch.head fresh\x00", "fresh", false, "", 0, 0},
+	}
+	for _, tc := range cases {
+		p := parsePorcelainV2([]byte(tc.out))
+		if p.Head != tc.head || p.Detached != tc.detached || p.Upstream != tc.upstream ||
+			p.Ahead != tc.ahead || p.Behind != tc.behind {
+			t.Errorf("%s: got head=%q detached=%v upstream=%q ahead=%d behind=%d",
+				tc.name, p.Head, p.Detached, p.Upstream, p.Ahead, p.Behind)
+		}
+	}
+}
+
+// TestParseBranchAB pins the "+ahead -behind" spelling (the minus is
+// spelling, not sign) and the malformed degrade to level.
+func TestParseBranchAB(t *testing.T) {
+	if a, b := parseBranchAB("+2 -7"); a != 2 || b != 7 {
+		t.Errorf("got ahead=%d behind=%d, want 2/7", a, b)
+	}
+	if a, b := parseBranchAB("garbage"); a != 0 || b != 0 {
+		t.Errorf("malformed: got %d/%d, want 0/0", a, b)
+	}
+}
+
+// TestPathSets pins the three sets: every entry (both sides of a rename)
+// is dirty; staged means an index-side letter — work-tree-only and
+// untracked entries are not, unmerged ones ARE (v1's reading, which
+// lights Commit staged / Unstage during a conflict); only 'u' entries
+// are conflicted. All three come back non-nil.
+func TestPathSets(t *testing.T) {
+	p := porcelainStatus{Entries: []porcelainEntry{
+		{XY: "M ", Path: "staged.txt"},
+		{XY: " M", Path: "worktree.txt"},
+		{XY: "??", Path: "untracked.txt"},
+		{XY: "MM", Path: "both.txt"},
+		{XY: "R ", Path: "new.txt", Orig: "old.txt"},
+		{XY: "D ", Path: "gone.txt"},
+		{XY: "AA", Path: "twice.txt", Unmerged: true},
+	}}
+	dirty, staged, conflicted := p.pathSets("/repo")
+	j := func(n ...string) []string {
+		out := make([]string, len(n))
+		for i, s := range n {
+			out[i] = filepath.Join("/repo", s)
+		}
+		sort.Strings(out)
+		return out
+	}
+	check := func(name string, got map[string]bool, want []string) {
+		t.Helper()
+		if g := sortedKeys(got); strings.Join(g, ",") != strings.Join(want, ",") {
+			t.Errorf("%s = %v, want %v", name, g, want)
+		}
+	}
+	check("dirty", dirty, j("staged.txt", "worktree.txt", "untracked.txt", "both.txt", "new.txt", "old.txt", "gone.txt", "twice.txt"))
+	check("staged", staged, j("staged.txt", "both.txt", "new.txt", "old.txt", "gone.txt", "twice.txt"))
+	check("conflicted", conflicted, j("twice.txt"))
+
+	d, s, c := porcelainStatus{}.pathSets("/repo")
+	if d == nil || s == nil || c == nil || len(d)+len(s)+len(c) != 0 {
+		t.Errorf("no entries: want three empty non-nil sets, got %v %v %v", d, s, c)
+	}
+}
+
+// TestRevParseHasStash pins the line arithmetic of the folded stash
+// probe: a third line is refs/stash's SHA, two lines mean no stash.
+func TestRevParseHasStash(t *testing.T) {
+	if revParseHasStash([]byte("/repo\n/repo/.git\n")) {
+		t.Error("two lines read as a stash")
+	}
+	if !revParseHasStash([]byte("/repo\n/repo/.git\n7fbf4aa7e1cec7647c4aee5b490ed621e409627f\n")) {
+		t.Error("third line not read as a stash")
+	}
+	if revParseHasStash([]byte("/repo\n/repo/.git\n\n")) {
+		t.Error("blank third line read as a stash")
+	}
+}
+
+// TestLoadGitStatus_HasStash is the end-to-end stash probe (ported from
+// the retired loadGitHasStash): none in a fresh repo, one after a stash,
+// and a BRANCH named "stash" never counts — the glob is anchored to
+// refs/stash exactly.
+func TestLoadGitStatus_HasStash(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	writeFileT(t, filepath.Join(repo, "f.txt"), "x\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-q", "-m", "init")
+	gitRun(t, repo, "branch", "stash")
+	if loadGitStatus(repo).HasStash {
+		t.Fatal("a branch named stash read as a stash entry")
+	}
+	writeFileT(t, filepath.Join(repo, "f.txt"), "y\n")
+	gitRun(t, repo, "stash", "push", "-q")
+	if !loadGitStatus(repo).HasStash {
+		t.Fatal("stash entry not detected")
+	}
+}
+
+// TestLoadGitStatus_DetachedHeadNamesShortSHA: the branch header says
+// "(detached)", and the label is git's own abbreviation of HEAD.
+func TestLoadGitStatus_DetachedHeadNamesShortSHA(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	writeCommit(t, repo, "f.txt", "x\n", "init")
+	gitRun(t, repo, "checkout", "-q", "--detach")
+	want := gitOut(t, repo, "rev-parse", "--short", "HEAD")
+	if got := loadGitStatus(repo).Branch; got != want {
+		t.Fatalf("detached branch label = %q, want %q", got, want)
+	}
+}
+
+// TestLoadGitStatus_PanelCodesMatchPorcelainV1 is the parity pin for the
+// v1 → v2 switch: on a real repo holding every kind of change, the
+// snapshot's panel rows (path + XY) are exactly what `git status
+// --porcelain -z` (v1) reports, in the same order — the panel draws the
+// code verbatim and its verbs key off it — and the panel's own read
+// (loadGitStatusFiles) agrees with the snapshot's.
+func TestLoadGitStatus_PanelCodesMatchPorcelainV1(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	for _, f := range []string{"mod.txt", "both.txt", "ren.txt", "del.txt", "staged.txt"} {
+		writeFileT(t, filepath.Join(repo, f), f+"\n")
+	}
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-q", "-m", "init")
+	writeFileT(t, filepath.Join(repo, "mod.txt"), "changed\n")           // " M"
+	writeFileT(t, filepath.Join(repo, "both.txt"), "staged\n")           //
+	gitRun(t, repo, "add", "both.txt")                                   //
+	writeFileT(t, filepath.Join(repo, "both.txt"), "staged then more\n") // "MM"
+	gitRun(t, repo, "mv", "ren.txt", "renamed file.txt")                 // "R "
+	gitRun(t, repo, "rm", "-q", "del.txt")                               // "D "
+	writeFileT(t, filepath.Join(repo, "staged.txt"), "s2\n")             //
+	gitRun(t, repo, "add", "staged.txt")                                 // "M "
+	writeFileT(t, filepath.Join(repo, "new file.txt"), "n\n")            // "??"
+	writeFileT(t, filepath.Join(repo, "café.txt"), "c\n")                // "??", raw under -z
+
+	// v1 -z: "XY path", a rename's source in the next token.
+	var want []gitPanelFile
+	toks := strings.Split(gitOutRaw(t, repo, "status", "--porcelain", "-z"), "\x00")
+	for i := 0; i < len(toks); i++ {
+		tok := toks[i]
+		if len(tok) < 4 {
+			continue
+		}
+		if tok[0] == 'R' || tok[0] == 'C' {
+			i++
+		}
+		want = append(want, gitPanelFile{Path: filepath.Join(repo, tok[3:]), Rel: tok[3:], Code: tok[:2]})
+	}
+	if len(want) != 7 {
+		t.Fatalf("fixture produced %d v1 entries, want 7: %+v", len(want), want)
+	}
+
+	got := loadGitStatus(repo).PanelFiles
+	if len(got) != len(want) {
+		t.Fatalf("panel rows = %+v\nwant %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	own := loadGitStatusFiles(repo)
+	if len(own) != len(got) {
+		t.Fatalf("loadGitStatusFiles = %+v, snapshot = %+v", own, got)
+	}
+	for i := range own {
+		if own[i] != got[i] {
+			t.Errorf("loadGitStatusFiles row %d = %+v, snapshot has %+v", i, own[i], got[i])
+		}
+	}
+}
+
+// gitOutRaw runs git in cwd and returns stdout untrimmed — for -z output,
+// whose NULs and trailing separator matter.
+func gitOutRaw(t *testing.T, cwd string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = cwd
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v in %s: %v", args, cwd, err)
+	}
+	return string(out)
 }

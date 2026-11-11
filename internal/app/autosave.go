@@ -201,12 +201,14 @@ func (a *App) autoSaveTabIfEligible(idx int) bool {
 // "off" means don't write behind my back — which losing focus does not
 // make less true.
 //
-// Regaining focus does nothing at all. The countdown is armed by EDITS,
+// Regaining focus does nothing HERE. The countdown is armed by EDITS,
 // not by attention, so there is nothing pending that coming back would
-// change. (Reconciling with disk on focus-IN is tempting — it would catch
-// "I came back from the shell where I ran git checkout" instantly — but
-// it can raise a conflict modal the moment you look at the window, which
-// is its own decision to make.)
+// change. Coming back does reconcile with disk — but that is the refresh
+// tick's business, not auto-save's: tickpace.go runs the tick's pipeline
+// on focus-in (N-127), so "I came back from the shell where I ran git
+// checkout" shows at once. That can raise the dirty-tab conflict prompt
+// as you return; it is the prompt the tick would raise anyway, asked
+// when you arrive rather than later.
 func (a *App) autoSaveOnFocusChange(focused bool) {
 	if focused || !a.autoSaveEnabled {
 		return

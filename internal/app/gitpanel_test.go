@@ -136,6 +136,35 @@ func TestLoadGitStatusFiles_CodesAndScope(t *testing.T) {
 	}
 }
 
+// TestGitPanelFilesFrom_ScopeLabelsAndRenames pins the row builder the
+// snapshot and loadGitStatusFiles share: entries outside rootDir are
+// dropped, labels are rootDir-relative, a rename is listed under its NEW
+// path, and the code is passed through verbatim.
+func TestGitPanelFilesFrom_ScopeLabelsAndRenames(t *testing.T) {
+	entries := []porcelainEntry{
+		{XY: " M", Path: "sub/a.txt"},
+		{XY: "R ", Path: "sub/new.txt", Orig: "sub/old.txt"},
+		{XY: " M", Path: "outside.txt"},
+		{XY: "??", Path: ""},
+	}
+	got := gitPanelFilesFrom(entries, "/repo", "/repo/sub")
+	want := []gitPanelFile{
+		{Path: "/repo/sub/a.txt", Rel: "a.txt", Code: " M"},
+		{Path: "/repo/sub/new.txt", Rel: "new.txt", Code: "R "},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rows = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if gitPanelFilesFrom(nil, "/repo", "/repo") != nil {
+		t.Error("no entries should build no rows (nil)")
+	}
+}
+
 // TestLoadGitPanelDiff_ModifiedAndUntracked exercises the two fetch
 // paths: a tracked edit produces a real unified diff, and an untracked
 // file falls back to synthesized all-added lines.

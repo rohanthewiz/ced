@@ -30,7 +30,6 @@
 package app
 
 import (
-	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -246,9 +245,27 @@ func (a *App) gitPanelToggleLabel() string {
 
 // refreshGitPanelFiles reloads the changed-file list, preserving the
 // selection by path (the identity-preserving-refresh idea from the
-// file tree, minus the tree). No-op while the panel is collapsed so
-// the 10s tick doesn't pay two extra git forks for a hidden surface.
+// file tree, minus the tree). No-op while the panel is collapsed so a
+// hidden surface pays no git forks.
+//
+// This is the panel's OWN read, for the moments it must be current right
+// now (opening the panel, its own verbs). The status snapshot does not
+// come through here: it already holds the same list and hands it to
+// setGitPanelFiles (gitsnapshot.go), so the tick no longer forks a second
+// `git status` on the main loop whenever the panel is up.
 func (a *App) refreshGitPanelFiles() {
+	if !a.gitPanel.open {
+		return
+	}
+	a.setGitPanelFiles(loadGitStatusFiles(a.rootDir))
+}
+
+// setGitPanelFiles installs files as the panel's list and re-derives
+// everything that hangs off it: the selection (kept by path), the tick
+// set and reviewed marks (pruned to what is still listed), the scrolls,
+// and the diff pane. No-op while the panel is collapsed. The shared tail
+// of refreshGitPanelFiles and the snapshot's apply.
+func (a *App) setGitPanelFiles(files []gitPanelFile) {
 	if !a.gitPanel.open {
 		return
 	}
@@ -256,7 +273,7 @@ func (a *App) refreshGitPanelFiles() {
 	if f, ok := a.gitPanelSelectedFile(); ok {
 		prevPath = f.Path
 	}
-	a.gitPanel.files = loadGitStatusFiles(a.rootDir)
+	a.gitPanel.files = files
 	a.gitPanel.selected = 0
 	for i, f := range a.gitPanel.files {
 		if f.Path == prevPath {
@@ -365,42 +382,44 @@ func (a *App) gitPanelPruneChecked() {
 // porcelain order, with their XY codes. Same best-effort contract as
 // loadGitStatus; entries outside rootDir are filtered because the
 // panel reviews the project the editor has open, not the whole repo.
+//
+// It reads the same porcelain v2 stream the snapshot does, through the
+// same parser (gitstatus.go's parsePorcelainV2), so the list the panel
+// loads itself and the list the snapshot hands it can never be spelled
+// two ways.
 func loadGitStatusFiles(rootDir string) []gitPanelFile {
 	if rootDir == "" {
 		return nil
 	}
 	toplevel := gitToplevel(rootDir)
-	out, err := exec.Command("git", "-C", rootDir, "status", "--porcelain").Output()
+	out, err := exec.Command("git", "-C", rootDir, "status", "--porcelain=v2", "-z").Output()
 	if err != nil || toplevel == "" {
 		return nil
 	}
+	return gitPanelFilesFrom(parsePorcelainV2(out).Entries, toplevel, rootDir)
+}
 
+// gitPanelFilesFrom builds the panel's rows from parsed status entries:
+// absolute path, label relative to rootDir, and the v1-spelled XY code
+// the panel draws verbatim. A rename is listed under its NEW path — what
+// exists on disk and what a diff can be shown for. Entries outside
+// rootDir are dropped (rootDir is often a subfolder of the repo). nil
+// when nothing is left, matching an empty status.
+func gitPanelFilesFrom(entries []porcelainEntry, toplevel, rootDir string) []gitPanelFile {
 	var files []gitPanelFile
-	for _, raw := range bytes.Split(out, []byte{'\n'}) {
-		line := string(raw)
-		if len(line) < 4 {
+	for _, e := range entries {
+		if e.Path == "" {
 			continue
 		}
-		code := line[:2]
-		body := line[3:]
-		// Renames report "old -> new"; the new path is what exists on
-		// disk and what a diff can be shown for.
-		if idx := strings.Index(body, " -> "); idx >= 0 {
-			body = body[idx+len(" -> "):]
-		}
-		rel := unquotePath(body)
-		if rel == "" {
-			continue
-		}
-		abs := filepath.Join(toplevel, rel)
+		abs := filepath.Join(toplevel, e.Path)
 		if !pathInside(abs, rootDir) {
 			continue
 		}
 		label, err := filepath.Rel(rootDir, abs)
 		if err != nil {
-			label = rel
+			label = e.Path
 		}
-		files = append(files, gitPanelFile{Path: abs, Rel: label, Code: code})
+		files = append(files, gitPanelFile{Path: abs, Rel: label, Code: e.XY})
 	}
 	return files
 }

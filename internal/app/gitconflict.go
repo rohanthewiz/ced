@@ -619,7 +619,8 @@ func gitConflictFailHook(app *App, _ *gitCmdDoneEvent) bool {
 	if gitInProgressOp(app.rootDir) == "" {
 		return false
 	}
-	app.refreshTreeNow()
+	// Inline: showConflictStop reads the unmerged set this refresh takes.
+	app.refreshTreeAfterGit()
 	return app.showConflictStop()
 }
 

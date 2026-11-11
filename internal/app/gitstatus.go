@@ -1,8 +1,9 @@
 // =============================================================================
 // File: internal/app/gitstatus.go
-// Author: Spicer Matthews <spicer@cloudmanic.com>
+// Author: Rohan Allison <rohanthewiz@gmail.com>
 // Created: 2026-04-30
-// Copyright: 2026 Cloudmanic, LLC. All rights reserved.
+// Copyright: 2026 Rohan Allison. All rights reserved.
+// Portions copyright 2026 Cloudmanic, LLC. Original author: Spicer Matthews.
 // =============================================================================
 
 // gitstatus.go shells out to `git` to figure out which files inside the
@@ -14,18 +15,51 @@
 // Everything in here is best-effort — if the project isn't a git
 // repo, or `git` isn't on PATH, or the command fails for any reason,
 // loadGitStatus returns an empty result and the editor renders normally.
-// We never block the UI on git, never spam errors at the user, and never
-// retry on failure.
+// We never spam errors at the user and never retry on failure.
+//
+// TWO FORKS, NOT SIX (N-127). The snapshot used to ask six questions in
+// six processes — toplevel + git dir, `status --porcelain`, the upstream,
+// the ahead/behind counts, the branch name, the stash ref — and each git
+// process costs 35–50 ms to START on a macOS box before it does any
+// work, so a snapshot cost ~270 ms whatever the repo's size. Now:
+//
+//	rev-parse --show-toplevel --absolute-git-dir --glob=refs/stas[h]
+//	    → toplevel, git dir, and (a third line) the stash ref if any
+//	status --porcelain=v2 --branch -z
+//	    → every changed path, plus "# branch.head / .upstream / .ab"
+//	      headers that answer branch, upstream, ahead and behind
+//
+// Conditional forks remain only for states that are rare or that already
+// had them: a detached HEAD (its short SHA), a branch with no upstream
+// (does any remote exist?), and unmerged files (their marker sizes).
+//
+// Why the stash rides rev-parse rather than `status --show-stash`:
+// porcelain v2 prints its "# stash N" header only from git 2.35, and
+// Ubuntu 22.04 ships 2.34 — there the header would be silently absent and
+// "Pop stash" would never light up. `--glob` lists refs on every version.
+// The `[h]` is load-bearing: a --glob pattern with no glob character is
+// anchored with "/*" (it would ask for refs UNDER refs/stash/), so the
+// one-character class is what makes the pattern match refs/stash itself
+// and nothing else.
+//
+// Why -z: porcelain v2 without -z still C-quotes "unusual" paths
+// (non-ASCII, control characters), and a rename separates its two paths
+// with a TAB that a filename may also contain. With -z every path is
+// printed raw and NUL-terminated, so there is nothing to unquote and no
+// separator a path can forge.
 
 package app
 
 import (
-	"bytes"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+// gitStashGlob is the rev-parse --glob pattern that matches exactly
+// refs/stash (see the file header for why the bracket is required).
+const gitStashGlob = "refs/stas[h]"
 
 // gitStatus is the snapshot of a single git status run. IsRepo distinguishes
 // "not a git repo" (don't bother trying again) from "git error" (we tried
@@ -42,21 +76,22 @@ type gitStatus struct {
 	// with an empty index only produces a git error, so the row stays
 	// dimmed until a stage actually happened.
 	HasStaged bool
-	// StagedFiles holds the absolute paths whose index side (porcelain X
-	// column) carries a staged change. It gates the "Unstage file" menu
-	// row and lets the git panel draw per-file stage checkboxes without
-	// forking git per row. Renames mark both paths, matching DirtyFiles.
+	// StagedFiles holds the absolute paths whose index side (the X of
+	// the XY pair) carries a staged change. It gates the "Unstage file"
+	// menu row and lets the git panel draw per-file stage checkboxes
+	// without forking git per row. Renames mark both paths, matching
+	// DirtyFiles.
 	StagedFiles map[string]bool
 	// HasStash reports whether refs/stash exists — i.e. `git stash pop`
 	// has something to pop. Gates the "Pop stash" menu row.
 	HasStash bool
 	// Upstream is HEAD's tracked remote-tracking branch in short form
-	// ("origin/main"), or "" when the branch has no upstream, HEAD is
-	// detached, or we couldn't tell. Ahead / Behind count the commits
-	// HEAD has that the upstream doesn't and vice versa; both are 0
-	// whenever Upstream is empty, because there is nothing to measure
-	// against. They feed the status bar's push indicator and seed the
-	// push dialog (gitpush.go).
+	// ("origin/main"), or "" when the branch has no upstream, the
+	// upstream ref no longer exists, HEAD is detached, or we couldn't
+	// tell. Ahead / Behind count the commits HEAD has that the upstream
+	// doesn't and vice versa; both are 0 whenever Upstream is empty,
+	// because there is nothing to measure against. They feed the status
+	// bar's push indicator and seed the push dialog (gitpush.go).
 	Upstream      string
 	Ahead, Behind int
 	// HasRemote reports whether the repo has at least one remote
@@ -67,7 +102,7 @@ type gitStatus struct {
 	HasRemote bool
 	// ConflictedFiles holds the absolute paths git reports as UNMERGED —
 	// a cherry-pick, revert, merge or rebase stopped on them and neither
-	// side has been chosen yet. Read out of the porcelain output the
+	// side has been chosen yet. Read out of the status output the
 	// snapshot already has, so knowing "is this repo mid-conflict?" costs
 	// no extra fork; it gates the Resolve conflicts row (gitconflict.go).
 	// The live list the conflict picker acts on is re-read at open time —
@@ -90,13 +125,23 @@ type gitStatus struct {
 	// — the answer to "nothing on screen says the repo is stopped".
 	GitDir     string
 	InProgress string
+	// PanelFiles is the git panel's row list — the changed entries under
+	// the project root, in status order, with their XY codes — built
+	// from the same status output. The panel used to fork its own
+	// `git status` every time the snapshot landed; reading the list off
+	// the snapshot keeps that fork off the main loop (gitpanel.go's
+	// setGitPanelFiles).
+	PanelFiles []gitPanelFile
 }
 
-// loadGitStatus inspects rootDir and returns the set of dirty file paths
-// reported by `git status --porcelain`. A non-git directory yields the
-// zero value (IsRepo=false, no dirty paths). Any failure of the underlying
-// commands degrades the same way — we'd rather lose the dirty highlight
-// than crash the editor over a transient git issue.
+// loadGitStatus inspects rootDir and returns the snapshot described on
+// gitStatus. A non-git directory yields the zero value (IsRepo=false, no
+// dirty paths). Any failure of the underlying commands degrades the same
+// way — we'd rather lose the dirty highlight than crash the editor over a
+// transient git issue.
+//
+// Safe to call off the main loop: it reads nothing but its argument and
+// the disk, and returns a value. gitsnapshot.go runs it on a goroutine.
 func loadGitStatus(rootDir string) gitStatus {
 	if rootDir == "" {
 		return gitStatus{}
@@ -105,32 +150,35 @@ func loadGitStatus(rootDir string) gitStatus {
 	// rev-parse --show-toplevel does double duty: it tells us whether
 	// we're in a git work tree at all (non-zero exit otherwise) and
 	// gives us the absolute path of the repo root, which is the prefix
-	// every porcelain path is reported relative to.
+	// every status path is reported relative to.
 	//
-	// --absolute-git-dir rides the same fork: rev-parse prints one answer
-	// per line in argument order, and the git dir is what the in-progress
-	// detection stats against (gitconflict.go's table).
-	topBytes, err := exec.Command("git", "-C", rootDir, "rev-parse", "--show-toplevel", "--absolute-git-dir").Output()
+	// --absolute-git-dir rides the same fork (rev-parse prints one answer
+	// per line in argument order), and so does the stash probe: --glob
+	// prints the stash's SHA on a third line when refs/stash exists and
+	// nothing at all when it doesn't — never an error, which is why it
+	// can share a fork whose failure means "not a repo".
+	revParse, err := exec.Command("git", "-C", rootDir, "rev-parse",
+		"--show-toplevel", "--absolute-git-dir", "--glob="+gitStashGlob).Output()
 	if err != nil {
 		return gitStatus{}
 	}
-	toplevel, gitDir := splitRevParseDirs(topBytes)
+	toplevel, gitDir := splitRevParseDirs(revParse)
 	if toplevel == "" {
 		return gitStatus{}
 	}
+	hasStash := revParseHasStash(revParse)
 
-	out, err := exec.Command("git", "-C", rootDir, "status", "--porcelain").Output()
+	out, err := exec.Command("git", "-C", rootDir, "status", "--porcelain=v2", "--branch", "-z").Output()
 	if err != nil {
 		// We *are* in a repo (rev-parse succeeded) but couldn't read
 		// status. Mark the result as a repo with no known dirty files
 		// so the caller at least knows we tried.
 		return gitStatus{IsRepo: true, DirtyFiles: map[string]bool{}, Branch: loadGitBranch(rootDir),
-			GitDir: gitDir, InProgress: gitOpFromGitDir(gitDir)}
+			HasStash: hasStash, GitDir: gitDir, InProgress: gitOpFromGitDir(gitDir)}
 	}
 
-	upstream, ahead, behind := loadGitTracking(rootDir)
-	dirty := parsePorcelain(out, toplevel)
-	conflicted := conflictPorcelainSet(out, toplevel)
+	p := parsePorcelainV2(out)
+	dirty, staged, conflicted := p.pathSets(toplevel)
 	var markerSizes map[string]int
 	if len(conflicted) > 0 {
 		paths := make([]string, 0, len(conflicted))
@@ -139,26 +187,39 @@ func loadGitStatus(rootDir string) gitStatus {
 		}
 		markerSizes = loadConflictMarkerSizes(toplevel, paths)
 	}
+	// The branch header names the branch, or says "(detached)". A
+	// detached HEAD (a rebase stop, a bisect, a checked-out tag) is the
+	// one case that pays a fork for its label, so the short SHA keeps
+	// git's own abbreviation length (core.abbrev grows it in big repos)
+	// rather than a guessed seven characters.
+	branch := p.Head
+	switch {
+	case p.Detached:
+		branch = loadGitShortHead(rootDir)
+	case branch == "":
+		branch = loadGitBranch(rootDir) // no header at all: ask the old way
+	}
 	return gitStatus{
 		IsRepo:      true,
 		DirtyFiles:  dirty,
-		Branch:      loadGitBranch(rootDir),
-		HasStaged:   hasStagedPorcelain(out),
-		StagedFiles: stagedPorcelainSet(out, toplevel),
-		HasStash:    loadGitHasStash(rootDir),
-		Upstream:    upstream,
-		Ahead:       ahead,
-		Behind:      behind,
+		Branch:      branch,
+		HasStaged:   len(staged) > 0,
+		StagedFiles: staged,
+		HasStash:    hasStash,
+		Upstream:    p.Upstream,
+		Ahead:       p.Ahead,
+		Behind:      p.Behind,
 		// Only an UNTRACKED branch has to ask whether a remote exists at
 		// all: an upstream is itself proof of one. The steady state (a
 		// tracked branch) therefore pays nothing for this answer, which
 		// is what keeps the extra fork off the 10-second tick for every
 		// repo anyone actually works in.
-		HasRemote:           upstream != "" || len(loadGitRemotes(rootDir)) > 0,
+		HasRemote:           p.Upstream != "" || len(loadGitRemotes(rootDir)) > 0,
 		ConflictedFiles:     conflicted,
 		ConflictMarkerSizes: markerSizes,
 		GitDir:              gitDir,
 		InProgress:          gitOpFromGitDir(gitDir),
+		PanelFiles:          gitPanelFilesFrom(p.Entries, toplevel, rootDir),
 	}
 }
 
@@ -178,142 +239,29 @@ func splitRevParseDirs(out []byte) (toplevel, gitDir string) {
 	return toplevel, gitDir
 }
 
-// loadGitTracking reports HEAD's upstream in short form plus how far
-// ahead of / behind it the local branch sits. Best-effort like
-// everything else here: no upstream, a detached HEAD, or any git failure
-// yields ("", 0, 0), which callers read as "nothing to say about the
-// remote".
-//
-// Two forks rather than one because each has an unambiguous machine
-// format. The one-fork alternative — `for-each-ref` with
-// %(upstream:track) — answers both questions at once but does it in
-// English ("[ahead 3, behind 1]"), which is a parser waiting to break.
-// The second fork is skipped entirely when there is no upstream, so the
-// case that would pay for a lookup that can only fail doesn't.
-func loadGitTracking(rootDir string) (upstream string, ahead, behind int) {
-	if rootDir == "" {
-		return "", 0, 0
-	}
-	out, err := exec.Command("git", "-C", rootDir, "rev-parse",
-		"--abbrev-ref", "--symbolic-full-name", "@{upstream}").Output()
-	if err != nil {
-		return "", 0, 0
-	}
-	upstream = strings.TrimRight(string(out), "\n\r")
-	if upstream == "" {
-		return "", 0, 0
-	}
-	cnt, err := exec.Command("git", "-C", rootDir, "rev-list",
-		"--count", "--left-right", "@{upstream}...HEAD").Output()
-	if err != nil {
-		return upstream, 0, 0
-	}
-	// --left-right counts the two halves of the symmetric difference in
-	// the order the revisions were named: with "@{upstream}...HEAD" the
-	// left column is the upstream's exclusive commits (we are BEHIND by
-	// that many) and the right column is ours (AHEAD).
-	ahead, behind = parseTrackingCounts(cnt)
-	return upstream, ahead, behind
-}
-
-// parseTrackingCounts decodes rev-list's "<behind>\t<ahead>" pair.
-// Split out so the column order — the one thing easy to get backwards —
-// can be pinned by a test without forking git.
-func parseTrackingCounts(out []byte) (ahead, behind int) {
-	fields := strings.Fields(string(out))
-	if len(fields) != 2 {
-		return 0, 0
-	}
-	behind, _ = strconv.Atoi(fields[0])
-	ahead, _ = strconv.Atoi(fields[1])
-	return ahead, behind
-}
-
-// hasStagedPorcelain reports whether any porcelain v1 line carries an
-// index-side (staged) change. The X column — the first byte of each
-// line — is the index status: anything except ' ' (unmodified),
-// '?' (untracked) and '!' (ignored) means `git add` has already
-// touched that entry. Reuses the same ≥4-byte line guard as
-// parsePorcelain so malformed tails are skipped, not misread.
-func hasStagedPorcelain(out []byte) bool {
-	for _, raw := range bytes.Split(out, []byte{'\n'}) {
-		if len(raw) < 4 {
-			continue
-		}
-		switch raw[0] {
-		case ' ', '?', '!':
-			continue
-		}
-		return true
-	}
-	return false
-}
-
-// stagedPorcelainSet returns the absolute paths of entries whose X
-// column reports a staged change — the per-file refinement of
-// hasStagedPorcelain, reusing parsePorcelain's path handling by feeding
-// it only the staged lines. Renames therefore mark both the old and the
-// new path: the staged rename involves both, and marking both keeps the
-// "is anything about this path staged?" question answerable either way.
-func stagedPorcelainSet(out []byte, toplevel string) map[string]bool {
-	var stagedLines []byte
-	for _, raw := range bytes.Split(out, []byte{'\n'}) {
-		if len(raw) < 4 {
-			continue
-		}
-		switch raw[0] {
-		case ' ', '?', '!':
-			continue
-		}
-		stagedLines = append(stagedLines, raw...)
-		stagedLines = append(stagedLines, '\n')
-	}
-	return parsePorcelain(stagedLines, toplevel)
-}
-
-// conflictPorcelainSet returns the absolute paths of UNMERGED entries,
-// reusing parsePorcelain's path handling by feeding it only the unmerged
-// lines — the same trick stagedPorcelainSet plays one column over.
-//
-// Porcelain v1 spells "unmerged" in seven XY pairs rather than one flag:
-// either side may be 'U' (UU both modified, AU / UA added by one side,
-// DU / UD deleted by one side), plus the two same-letter pairs git
-// defines as conflicts even though neither column says U — AA (both
-// added) and DD (both deleted). Testing only for 'U' would silently miss
-// the add/add case, which is the common one when two branches create the
-// same file.
-func conflictPorcelainSet(out []byte, toplevel string) map[string]bool {
-	var lines []byte
-	for _, raw := range bytes.Split(out, []byte{'\n'}) {
-		if len(raw) < 4 {
-			continue
-		}
-		if !isPorcelainConflict(raw[0], raw[1]) {
-			continue
-		}
-		lines = append(lines, raw...)
-		lines = append(lines, '\n')
-	}
-	return parsePorcelain(lines, toplevel)
+// revParseHasStash reads the snapshot's rev-parse output for the stash
+// probe: --glob prints refs/stash's SHA on the line after the git dir
+// when the ref exists, and nothing when it doesn't. Split out so the
+// line arithmetic is pinned without forking git.
+func revParseHasStash(out []byte) bool {
+	lines := strings.Split(strings.TrimRight(string(out), "\n\r"), "\n")
+	return len(lines) > 2 && strings.TrimSpace(lines[2]) != ""
 }
 
 // isPorcelainConflict reports whether an XY status pair marks an
-// unmerged entry. Split out so the seven-code table can be pinned by a
-// test — it is the sort of list that quietly loses a row in a refactor.
+// unmerged entry. Porcelain spells "unmerged" in seven XY pairs rather
+// than one flag: either side may be 'U' (UU both modified, AU / UA added
+// by one side, DU / UD deleted by one side), plus the two same-letter
+// pairs git defines as conflicts even though neither column says U — AA
+// (both added) and DD (both deleted). Testing only for 'U' would silently
+// miss the add/add case, which is the common one when two branches create
+// the same file.
+//
+// The snapshot no longer needs it — porcelain v2 gives unmerged entries a
+// line type of their own ('u') — but the conflict picker's live read
+// (gitopstate.go's parseConflictStatusZ) still speaks v1 and does.
 func isPorcelainConflict(x, y byte) bool {
 	return x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D')
-}
-
-// loadGitHasStash reports whether the repo has at least one stash entry.
-// rev-parse --verify on refs/stash is the cheapest possible probe (no
-// list formatting, exits non-zero when the ref is absent) and shares the
-// best-effort contract: any failure reads as "no stash".
-func loadGitHasStash(rootDir string) bool {
-	if rootDir == "" {
-		return false
-	}
-	err := exec.Command("git", "-C", rootDir, "rev-parse", "--verify", "--quiet", "refs/stash").Run()
-	return err == nil
 }
 
 // loadGitBranch returns the current branch name for rootDir, or a short
@@ -326,6 +274,10 @@ func loadGitHasStash(rootDir string) bool {
 // to distinguish "on a branch" from "detached"; the fallback to
 // `rev-parse --short HEAD` only fires when symbolic-ref's non-zero exit
 // tells us we're detached.
+//
+// The snapshot reads the branch off status's "# branch.head" header now,
+// so this is only its fallback — and the direct answer for callers that
+// want the label without a whole snapshot.
 func loadGitBranch(rootDir string) string {
 	if rootDir == "" {
 		return ""
@@ -333,71 +285,186 @@ func loadGitBranch(rootDir string) string {
 	if out, err := exec.Command("git", "-C", rootDir, "symbolic-ref", "--short", "HEAD").Output(); err == nil {
 		return strings.TrimRight(string(out), "\n\r")
 	}
+	return loadGitShortHead(rootDir)
+}
+
+// loadGitShortHead returns HEAD's abbreviated commit SHA, "" on any
+// failure (an unborn branch has no commit to name). The label for a
+// detached HEAD, shared by loadGitBranch and the snapshot.
+func loadGitShortHead(rootDir string) string {
+	if rootDir == "" {
+		return ""
+	}
 	if out, err := exec.Command("git", "-C", rootDir, "rev-parse", "--short", "HEAD").Output(); err == nil {
 		return strings.TrimRight(string(out), "\n\r")
 	}
 	return ""
 }
 
-// parsePorcelain converts the bytes returned by `git status --porcelain`
-// into a set of absolute file paths. Split out from loadGitStatus so it
-// can be exercised by tests without spawning a subprocess.
-//
-// The porcelain v1 format (without -z) is:
-//
-//	XY <path>
-//	XY <oldpath> -> <newpath>      (renames / copies)
-//	XY "quoted path with spaces"   (when core.quotePath is on, the default)
-//
-// We treat any line as dirty regardless of the X/Y status codes; for renames
-// we mark both the old and new paths so the user sees both rows tinted.
-func parsePorcelain(out []byte, toplevel string) map[string]bool {
-	dirty := map[string]bool{}
-	for _, raw := range bytes.Split(out, []byte{'\n'}) {
-		line := string(raw)
-		if len(line) < 4 {
-			continue
-		}
-		// Drop the two status chars + the separating space.
-		body := line[3:]
-
-		if idx := strings.Index(body, " -> "); idx >= 0 {
-			oldPath := unquotePath(body[:idx])
-			newPath := unquotePath(body[idx+len(" -> "):])
-			if oldPath != "" {
-				dirty[filepath.Join(toplevel, oldPath)] = true
-			}
-			if newPath != "" {
-				dirty[filepath.Join(toplevel, newPath)] = true
-			}
-			continue
-		}
-
-		path := unquotePath(body)
-		if path == "" {
-			continue
-		}
-		dirty[filepath.Join(toplevel, path)] = true
-	}
-	return dirty
+// porcelainEntry is one changed path from `git status --porcelain=v2 -z`.
+type porcelainEntry struct {
+	// XY is the status pair in porcelain v1's SPELLING — ' ' where v2
+	// writes '.' for "unmodified", and "??" for an untracked path —
+	// because the git panel draws the code verbatim and every reader of
+	// XY codes in this package (gitStageState, the conflict kinds, the
+	// panel's actions) speaks v1. The letters themselves are the same in
+	// both versions.
+	XY string
+	// Path is relative to the repository's top level. Orig is the source
+	// path of a rename or copy, "" otherwise.
+	Path, Orig string
+	// Unmerged marks a 'u' line: the path is in conflict.
+	Unmerged bool
 }
 
-// unquotePath undoes git's C-style quoting (enabled by default via
-// core.quotePath) so paths with spaces, unicode, or control chars come
-// back as a normal Go string. Falls back to the raw input on any parse
-// error — that's safer than dropping a path the user might want flagged.
-func unquotePath(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
+// porcelainStatus is what parsePorcelainV2 reads out of one status run.
+type porcelainStatus struct {
+	// Head is the "# branch.head" value — the branch name, including an
+	// unborn branch's — or "" when HEAD is detached or the header was
+	// absent. Detached records the "(detached)" spelling.
+	Head     string
+	Detached bool
+	// Upstream is "# branch.upstream", kept ONLY when "# branch.ab"
+	// followed it. git prints the upstream's name whenever one is
+	// configured but the ab counts only when that ref actually exists;
+	// a configured-but-gone upstream (the remote branch was deleted)
+	// therefore reads as no upstream, which is what the old
+	// `rev-parse @{upstream}` answer said and what the push dialog needs.
+	Upstream      string
+	Ahead, Behind int
+	Entries       []porcelainEntry
+}
+
+// parsePorcelainV2 reads `git status --porcelain=v2 --branch -z` output.
+// Pure: split out from loadGitStatus so the format is pinned without
+// forking git.
+//
+// The -z stream is NUL-separated tokens (diagram of one of each kind):
+//
+//	# branch.head main                      header: "# <key> <value>"
+//	1 .M N... 100644 100644 100644 <hH> <hI> <path>          ordinary
+//	2 R. N... 100644 100644 100644 <hH> <hI> R100 <path>     renamed …
+//	<origPath>                                                … its source
+//	u UU N... <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>      unmerged
+//	? <path>                                                 untracked
+//
+// The fields before the path never contain spaces, so splitting the
+// first N fields off leaves the path whole even when it has spaces.
+func parsePorcelainV2(out []byte) porcelainStatus {
+	var p porcelainStatus
+	upstream, haveAB := "", false
+	tokens := strings.Split(string(out), "\x00")
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		if len(tok) < 3 {
+			continue // the trailing empty token, or junk
+		}
+		switch tok[0] {
+		case '#':
+			key, val, _ := strings.Cut(strings.TrimPrefix(tok, "# "), " ")
+			switch key {
+			case "branch.head":
+				if val == "(detached)" {
+					p.Detached = true
+				} else {
+					p.Head = val
+				}
+			case "branch.upstream":
+				upstream = val
+			case "branch.ab":
+				haveAB = true
+				p.Ahead, p.Behind = parseBranchAB(val)
+			}
+		case '1':
+			if f := strings.SplitN(tok, " ", 9); len(f) == 9 {
+				p.Entries = append(p.Entries, porcelainEntry{XY: v1XY(f[1]), Path: f[8]})
+			}
+		case '2':
+			// The source path is the NEXT token. It is consumed even
+			// when this line turns out malformed: left in the stream, a
+			// source named "1 a b …" or "? x" would be read as an entry
+			// of its own.
+			orig := ""
+			if i+1 < len(tokens) {
+				i++
+				orig = tokens[i]
+			}
+			if f := strings.SplitN(tok, " ", 10); len(f) == 10 {
+				p.Entries = append(p.Entries, porcelainEntry{XY: v1XY(f[1]), Path: f[9], Orig: orig})
+			}
+		case 'u':
+			if f := strings.SplitN(tok, " ", 11); len(f) == 11 {
+				p.Entries = append(p.Entries, porcelainEntry{XY: v1XY(f[1]), Path: f[10], Unmerged: true})
+			}
+		case '?':
+			p.Entries = append(p.Entries, porcelainEntry{XY: "??", Path: tok[2:]})
+		}
+		// '!' (ignored) lines appear only with --ignored, which the
+		// snapshot never passes; anything else is a newer git's line
+		// type and is skipped rather than guessed at.
 	}
-	if !strings.HasPrefix(s, `"`) {
-		return s
+	if haveAB {
+		p.Upstream = upstream
 	}
-	if unq, err := strconv.Unquote(s); err == nil {
-		return unq
+	return p
+}
+
+// v1XY respells a v2 XY pair in v1's alphabet: v2 writes '.' for an
+// unmodified side where v1 writes a space.
+func v1XY(xy string) string {
+	return strings.ReplaceAll(xy, ".", " ")
+}
+
+// parseBranchAB decodes the "# branch.ab" value, "+<ahead> -<behind>".
+// The signs are part of the spelling, not of the numbers (behind is
+// printed "-3" and means three commits behind). Malformed input reads as
+// level, the same degrade the rest of the snapshot uses.
+func parseBranchAB(val string) (ahead, behind int) {
+	f := strings.Fields(val)
+	if len(f) != 2 {
+		return 0, 0
 	}
-	return s
+	ahead, _ = strconv.Atoi(strings.TrimPrefix(f[0], "+"))
+	behind, _ = strconv.Atoi(strings.TrimPrefix(f[1], "-"))
+	return ahead, behind
+}
+
+// pathSets turns the entries into the snapshot's three absolute-path
+// sets.
+//
+//   - dirty: every entry, and both sides of a rename, so the user sees
+//     both tree rows tinted.
+//   - staged: entries whose index side (X) is not ' ' (unmodified) or
+//     '?' (untracked). Unmerged entries count, because their X is a
+//     letter: v1's reading, kept so "Commit staged" and "Unstage file"
+//     light up during a conflict exactly as they always have.
+//   - conflicted: the 'u' entries.
+//
+// All three are non-nil, empty when nothing matches, so callers can
+// treat absence of a key as "no" without a nil check.
+func (p porcelainStatus) pathSets(toplevel string) (dirty, staged, conflicted map[string]bool) {
+	dirty, staged, conflicted = map[string]bool{}, map[string]bool{}, map[string]bool{}
+	for _, e := range p.Entries {
+		paths := []string{e.Path}
+		if e.Orig != "" {
+			paths = append(paths, e.Orig)
+		}
+		isStaged := len(e.XY) == 2 && e.XY[0] != ' ' && e.XY[0] != '?'
+		for _, rel := range paths {
+			if rel == "" {
+				continue
+			}
+			abs := filepath.Join(toplevel, rel)
+			dirty[abs] = true
+			if isStaged {
+				staged[abs] = true
+			}
+		}
+		if e.Unmerged && e.Path != "" {
+			conflicted[filepath.Join(toplevel, e.Path)] = true
+		}
+	}
+	return dirty, staged, conflicted
 }
 
 // dirtyFolderSet rolls a set of dirty file paths up to every ancestor

@@ -22,12 +22,31 @@
 // Diffs refresh on file open, after every save, and on the existing
 // 10-second tick (refreshTreeNow), so external changes (a git commit
 // in another pane clearing the gutter) appear within a tick.
+//
+// THE TICK SKIPS WHAT CANNOT HAVE CHANGED (N-127 part d). `git diff`
+// with no revision compares the WORK TREE with the INDEX, so its answer
+// for a path is a function of two files: the path itself and the
+// repository's index. Each diff records both files' disk stamps
+// (diffStamp: mtime, size, inode) as they stood BEFORE git ran, and the
+// tick skips a path whose two stamps still match. A commit, a checkout,
+// a `git add`, a stash, an edit from another pane — every one rewrites
+// the file or the index, so every one still re-diffs. HEAD moving alone
+// (`reset --soft`, a fetch) changes nothing this diff reads, so it
+// rightly doesn't.
+//
+// A stamp younger than editor.RacyGranule is never recorded, git's own
+// "racily clean" rule: a second write inside the filesystem clock's tick
+// can keep the mtime AND the size, and the skip would then hide it. Only
+// the TICK consults the stamps; open, save and git-command refreshes
+// always ask git, and record what they asked about.
 
 package app
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/rohanthewiz/ced/internal/editor"
@@ -190,19 +209,73 @@ func loadFileDiff(rootDir, path string) []diffHunk {
 // gitDiffEvent carries one file's freshly-computed hunks from the
 // background goroutine to the main loop — the same messaging pattern
 // every other background job here uses (never mutate App off-loop).
+// stamp / stamped carry the disk versions the diff was asked about (see
+// the file header); stamped=false means "don't trust a skip on this".
 type gitDiffEvent struct {
-	when  time.Time
-	path  string
-	hunks []diffHunk
+	when    time.Time
+	path    string
+	hunks   []diffHunk
+	stamp   diffStamp
+	stamped bool
 }
 
 // When satisfies the tcell.Event interface.
 func (e *gitDiffEvent) When() time.Time { return e.when }
 
+// diffStamp is what a path's gutter diff was computed against: the
+// file's own disk version and the repository index's. Equal stamps mean
+// `git diff -- path` would print the same thing again.
+type diffStamp struct {
+	file, index editor.DiskStamp
+}
+
+// same reports whether two stamps describe the same pair of versions.
+func (s diffStamp) same(o diffStamp) bool {
+	return s.file.Same(o.file) && s.index.Same(o.index)
+}
+
+// diffStampFor stats path and the repository index and returns their
+// stamps, ok=false when a skip could not be trusted: no git dir known
+// yet (the first snapshot hasn't landed), either stat failed (an
+// untracked path's diff is empty anyway, and a missing index means git
+// has nothing to compare), or either mtime is younger than the racy
+// window. Main loop: it reads a.gitDir.
+func (a *App) diffStampFor(path string, now time.Time) (diffStamp, bool) {
+	if a.gitDir == "" || path == "" {
+		return diffStamp{}, false
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return diffStamp{}, false
+	}
+	ii, err := os.Stat(filepath.Join(a.gitDir, "index"))
+	if err != nil {
+		return diffStamp{}, false
+	}
+	cutoff := now.Add(-editor.RacyGranule)
+	if !fi.ModTime().Before(cutoff) || !ii.ModTime().Before(cutoff) {
+		return diffStamp{}, false
+	}
+	return diffStamp{file: editor.StampOf(fi), index: editor.StampOf(ii)}, true
+}
+
 // requestFileDiff computes path's diff on a goroutine and posts the
 // result. Fire-and-forget: a dropped event (screen shutting down)
-// just means the gutter waits for the next tick.
+// just means the gutter waits for the next tick. Always asks git; the
+// stamps it takes first are recorded when the answer lands, so the next
+// tick can skip this path if nothing moves.
 func (a *App) requestFileDiff(path string) {
+	if path == "" || a.screen == nil {
+		return
+	}
+	stamp, ok := a.diffStampFor(path, time.Now())
+	a.requestFileDiffStamped(path, stamp, ok)
+}
+
+// requestFileDiffStamped launches the diff with stamps already taken —
+// taken BEFORE git runs, so a write that lands while it runs leaves a
+// stamp that no longer matches and the next tick asks again.
+func (a *App) requestFileDiffStamped(path string, stamp diffStamp, stamped bool) {
 	if path == "" || a.screen == nil {
 		return
 	}
@@ -210,17 +283,35 @@ func (a *App) requestFileDiff(path string) {
 	root := a.rootDir
 	go func() {
 		hunks := loadFileDiff(root, path)
-		_ = scr.PostEvent(&gitDiffEvent{when: time.Now(), path: path, hunks: hunks})
+		_ = scr.PostEvent(&gitDiffEvent{when: time.Now(), path: path, hunks: hunks, stamp: stamp, stamped: stamped})
 	}()
 }
 
 // requestOpenTabDiffs refreshes the diff of every open file tab.
 // Called from the 10-second tick so gutters track external git
-// activity (commits, checkouts in another pane) without a save.
+// activity (commits, checkouts in another pane) without a save. A tab
+// whose file and index stamps match the ones its current hunks were
+// computed against is skipped (the file header's rule); stamps of tabs
+// no longer open are dropped on the way.
 func (a *App) requestOpenTabDiffs() {
+	now := time.Now()
+	open := map[string]bool{}
 	for _, t := range a.tabs {
-		if t.Path != "" && !t.IsImage() {
-			a.requestFileDiff(t.Path)
+		if t.Path == "" || t.IsImage() {
+			continue
+		}
+		open[t.Path] = true
+		stamp, ok := a.diffStampFor(t.Path, now)
+		if ok {
+			if prev, had := a.fileDiffStamps[t.Path]; had && prev.same(stamp) {
+				continue
+			}
+		}
+		a.requestFileDiffStamped(t.Path, stamp, ok)
+	}
+	for p := range a.fileDiffStamps {
+		if !open[p] {
+			delete(a.fileDiffStamps, p)
 		}
 	}
 }
@@ -231,6 +322,16 @@ func (a *App) requestOpenTabDiffs() {
 func (a *App) handleGitDiff(e *gitDiffEvent) {
 	if a.fileDiffs == nil {
 		a.fileDiffs = map[string][]diffHunk{}
+	}
+	// Record what this answer was computed against — or forget, when
+	// the stamps couldn't be trusted, so the next tick asks again.
+	if e.stamped {
+		if a.fileDiffStamps == nil {
+			a.fileDiffStamps = map[string]diffStamp{}
+		}
+		a.fileDiffStamps[e.path] = e.stamp
+	} else {
+		delete(a.fileDiffStamps, e.path)
 	}
 	// A disk diff replaces whatever a hunk revert had made exact for the
 	// buffer (hunkview.go): these hunks are measured on the saved file.

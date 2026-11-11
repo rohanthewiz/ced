@@ -1719,6 +1719,14 @@ type App struct {
 
 	// treeRefreshStop signals the background tree-refresh goroutine to exit.
 	treeRefreshStop chan struct{}
+	// treeRefreshEvery is the running tick's period (treeRefreshInterval,
+	// or the slower unfocused pace); zero while no tick runs. unfocused
+	// records that the terminal last reported focus OUT, which is what
+	// makes the next focus-in (or keystroke) refresh at once. Both are
+	// tickpace.go's; the zero value is "focused", so a terminal that
+	// never reports focus keeps the 10s tick.
+	treeRefreshEvery time.Duration
+	unfocused        bool
 
 	// Secondary-caret blink. caretBlinkStop signals the ticker goroutine
 	// to exit (nil = not running, which is the state whenever there are
@@ -1802,6 +1810,12 @@ type App struct {
 	gitHasStash    bool
 	gitStagedFiles map[string]bool
 
+	// gitSnap is the bookkeeping that keeps the snapshot those fields
+	// mirror off the main loop: one async scan in flight, a rerun flag,
+	// a launch sequence (gitsnapshot.go). Its zero value runs snapshots
+	// inline, which is what a directly built App (every test) gets.
+	gitSnap gitSnapState
+
 	// gitConflicted mirrors the same snapshot's unmerged paths — the
 	// repo is parked mid-cherry-pick / revert / merge / rebase with
 	// files still to resolve. A field for the same reason as the flags
@@ -1844,6 +1858,11 @@ type App struct {
 	// second revert trust the shifted hunks on a buffer the first one
 	// dirtied; handleGitDiff clears it, since a fresh diff is disk again.
 	fileDiffsRev map[string]int
+	// fileDiffStamps records, per path, the file's and the index's disk
+	// version that fileDiffs[path] was computed against, so the 10s tick
+	// can skip a `git diff` whose answer cannot have changed
+	// (gitdiff.go's diffStamp). Absent = unknown, diff again.
+	fileDiffStamps map[string]diffStamp
 
 	// The blame layer (gitblame.go). blameOn is the toggle; fileBlames
 	// holds the finished annotations per path; blameSeq is the
@@ -2111,6 +2130,11 @@ func New(rootDir string) (*App, error) {
 		hoveredMenuRow: -1,
 		sidebarShown:   true,
 		sidebarWidth:   defaultSidebarWidth,
+		// The real editor takes git snapshots off the main loop
+		// (gitsnapshot.go); a directly built App keeps them inline.
+		// Set here, before the startup refresh below, so even the
+		// first snapshot doesn't hold up the first frame.
+		gitSnap: gitSnapState{async: true},
 	}
 	a.setActiveFolder(tree.Root.Path)
 	a.loadUserConfig()
@@ -2253,78 +2277,26 @@ func (a *App) loadUserConfig() {
 	a.applyThemeName(cfg.Theme, false)
 }
 
-// refreshGitStatus re-runs `git status --porcelain` against the project
-// root and stamps the resulting dirty-paths sets onto the file tree, so
-// changed files render in the Modified color on the next draw. It's
-// cheap (a couple of forks) but not free — we only call it from the
-// 10-second tree-refresh tick and right after our own file operations,
-// not on every keystroke. A non-git project leaves the tree's dirty
-// maps empty, which the renderer treats as "everything clean".
-func (a *App) refreshGitStatus() {
-	if a.tree == nil {
-		return
-	}
-	st := loadGitStatus(a.rootDir)
-	a.gitIsRepo = st.IsRepo
-	a.gitHasStaged = st.HasStaged
-	a.gitHasStash = st.HasStash
-	a.gitStagedFiles = st.StagedFiles
-	a.gitConflicted = st.ConflictedFiles
-	a.gitConflictMarkerSizes = st.ConflictMarkerSizes
-	a.applyConflictMarkerSizes()
-	a.gitOp, a.gitDir = st.InProgress, st.GitDir
-	// The tracking facts follow the same snapshot, including the reset
-	// on a non-repo: a stale "↑3" outliving the folder it described
-	// would be a status bar lying about a repo the user has left.
-	a.gitUpstream = st.Upstream
-	a.gitAhead = st.Ahead
-	a.gitBehind = st.Behind
-	a.gitHasRemote = st.HasRemote
-	if !st.IsRepo {
-		a.tree.DirtyFiles = nil
-		a.tree.DirtyFolders = nil
-		a.tree.ConflictFiles, a.tree.ConflictFolders = nil, nil
-		a.gitBranch = ""
-	} else {
-		a.tree.DirtyFiles = st.DirtyFiles
-		a.tree.DirtyFolders = dirtyFolderSet(st.DirtyFiles, a.rootDir)
-		// Unmerged files in the error colour, folders rolled up the same
-		// way dirty ones are (conflictpanel.go's "parked repo" signal).
-		a.tree.ConflictFiles = st.ConflictedFiles
-		a.tree.ConflictFolders = dirtyFolderSet(st.ConflictedFiles, a.rootDir)
-		a.gitBranch = st.Branch
-	}
-	// The git panel mirrors the same status snapshot — refreshing it
-	// here (a no-op while collapsed) means every path that keeps the
-	// tree's dirty colors honest keeps the panel honest too: the 10s
-	// tick, saves, file ops, and finished git commands.
-	a.refreshGitPanelFiles()
-	// The log panel rides the same pipeline (no-op while collapsed), so
-	// a commit, cherry-pick, or outside-the-editor fetch shows up on the
-	// next tick without a dedicated refresh path.
-	a.refreshGitLogCommits()
-	// The Conflicts panel too, for the same reason: a resolve staged from
-	// a terminal, or a continue run there, shows up on the next tick.
-	// Shut, it still keeps the operation's record fresh while there is an
-	// operation (or a record of one to retire): the side names on every
-	// lens and separator label read it (conflictsides.go).
-	if a.conflictPanel.open {
-		a.refreshConflictPanel()
-	} else if a.gitOp != "" || a.conflictPanel.info.op != "" {
-		a.refreshConflictPanelInfo()
-	}
-}
-
 // startTreeRefresh launches a goroutine that posts a treeRefreshEvent every
 // treeRefreshInterval. The main event loop reacts by calling tree.Refresh,
 // which keeps the sidebar in sync with on-disk changes from outside the
 // editor (git, mv, another tmux pane, etc.).
 func (a *App) startTreeRefresh() {
+	a.startTreeRefreshEvery(treeRefreshInterval)
+}
+
+// startTreeRefreshEvery is startTreeRefresh at a chosen pace. The pace
+// changes with focus — slower while the pane is unfocused (tickpace.go) —
+// by stopping the goroutine and starting a new one, which also restarts
+// the period from now. treeRefreshEvery records the running pace so a
+// repeated focus report doesn't restart a tick that is already right.
+func (a *App) startTreeRefreshEvery(every time.Duration) {
 	a.treeRefreshStop = make(chan struct{})
+	a.treeRefreshEvery = every
 	stop := a.treeRefreshStop
 	scr := a.screen
 	go func() {
-		ticker := time.NewTicker(treeRefreshInterval)
+		ticker := time.NewTicker(every)
 		defer ticker.Stop()
 		for {
 			select {
@@ -2344,6 +2316,7 @@ func (a *App) stopTreeRefresh() {
 		close(a.treeRefreshStop)
 		a.treeRefreshStop = nil
 	}
+	a.treeRefreshEvery = 0
 }
 
 // Close releases the terminal back to the user. Always call this before exit.
@@ -2438,12 +2411,17 @@ func (a *App) handleEvent(ev tcell.Event) {
 		// Any key means the user is at the keyboard and has seen the
 		// stop that put the Conflicts panel up (conflictpanel.go).
 		a.conflictPanel.unseen = ""
+		// …and that it has focus, whatever the last focus report said
+		// (tickpace.go). Before handleKey, so a refresh it triggers lands
+		// before the key edits a buffer.
+		a.noteUserPresent()
 		a.handleKey(e)
 	case *tcell.EventPaste:
 		a.handlePaste(e)
 	case *tcell.EventMouse:
 		if e.Buttons()&(tcell.Button1|tcell.Button2|tcell.Button3) != 0 {
 			a.conflictPanel.unseen = "" // a click, not a pointer drifting by
+			a.noteUserPresent()
 		}
 		a.handleMouse(e)
 	case *tcell.EventFocus:
@@ -2451,6 +2429,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 		// *EventTime nil (unlike the key and mouse constructors), so
 		// calling When() on one of these panics.
 		a.autoSaveOnFocusChange(e.Focused)
+		// The refresh tick follows focus too (tickpace.go): a slower
+		// pace while the pane is unfocused, an immediate refresh and
+		// the normal pace on return.
+		a.treeRefreshOnFocusChange(e.Focused)
 	case *autoScrollEvent:
 		a.handleAutoScroll()
 	case *autoSaveEvent:
@@ -2461,6 +2443,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleProjectSearch(e)
 	case *treeRefreshEvent:
 		a.refreshTreeNow()
+	case *gitStatusEvent:
+		a.handleGitStatus(e)
 	case *remoteOpenEvent:
 		a.handleRemoteOpen(e)
 	case *caretBlinkEvent:
@@ -2698,9 +2682,25 @@ func (a *App) handleEvent(ev tcell.Event) {
 // instead of the individual refreshes; when each call site spelled out
 // the trio by hand, forgetting one was an easy stale-UI bug (the
 // formatter-install path really did miss the finder for a while).
+//
+// The git half is the ASYNC snapshot (gitsnapshot.go): the tree's dirty
+// colours catch up a moment later, when the answer lands, instead of the
+// loop waiting on git here.
 func (a *App) workspaceChanged() {
+	a.workspaceChangedGit(false)
+}
+
+// workspaceChangedGit is workspaceChanged with the choice of how the git
+// snapshot is taken: gitInline=true takes it on the loop and applies it
+// before returning (refreshGitStatusNow), for the one caller family that
+// reads it straight after — a finished git command (refreshTreeAfterGit).
+func (a *App) workspaceChangedGit(gitInline bool) {
 	a.tree.Refresh()
-	a.refreshGitStatus()
+	if gitInline {
+		a.refreshGitStatusNow()
+	} else {
+		a.refreshGitStatus()
+	}
 	a.invalidateFinder()
 }
 
@@ -2709,9 +2709,27 @@ func (a *App) workspaceChanged() {
 // tabs with disk (silent reload / dirty warning / DiskGone). Called
 // from the periodic event and from runCustomAction's success path so
 // a Copy-from-remote action's output is visible immediately instead
-// of after the next tick.
+// of after the next tick. The git snapshot is async, as in
+// workspaceChanged.
 func (a *App) refreshTreeNow() {
-	a.workspaceChanged()
+	a.refreshTreePipeline(false)
+}
+
+// refreshTreeAfterGit is refreshTreeNow for the end of a git command
+// ced ran (handleGitCmdDone, the conflict stop hook): the git snapshot
+// is taken INLINE, because what runs next — the command's onOK hook,
+// showConflictStop — reads gitOp, the conflict set and the upstream to
+// decide what to say ("Cherry-pick finished", raise the Conflicts panel,
+// offer a push). An async snapshot would hand those hooks the state from
+// BEFORE the command. The cost is two git forks after a command the
+// user already waited for (gitsnapshot.go's header has the trade).
+func (a *App) refreshTreeAfterGit() {
+	a.refreshTreePipeline(true)
+}
+
+// refreshTreePipeline is the body of refreshTreeNow / refreshTreeAfterGit.
+func (a *App) refreshTreePipeline(gitInline bool) {
+	a.workspaceChangedGit(gitInline)
 	a.reconcileOpenTabsWithDisk()
 	a.requestOpenTabDiffs()
 }

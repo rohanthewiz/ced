@@ -142,6 +142,11 @@ func inodeOf(info fs.FileInfo) uint64 {
 // the filesystem clock.
 const racyGranule = 2 * time.Second
 
+// RacyGranule is racyGranule for other packages that trust a DiskStamp
+// to mean "unchanged" — the app's gutter-diff skip (gitdiff.go) applies
+// the same rule: a stamp this fresh is not trusted.
+const RacyGranule = racyGranule
+
 // diskNow and diskReadFile are the clock and the file reader behind the
 // checks, package vars so tests can pin time and count reads. Nothing
 // outside tests may reassign them.

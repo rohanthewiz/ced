@@ -278,7 +278,10 @@ func (a *App) handleGitCmdDone(e *gitCmdDoneEvent) {
 		return
 	}
 	a.flash(e.label + " — done")
-	a.refreshTreeNow()
+	// INLINE git snapshot: the hooks below read what the command left
+	// behind (gitOp, the conflict set, the upstream). See
+	// refreshTreeAfterGit.
+	a.refreshTreeAfterGit()
 	// Last, so a hook that has more to say speaks over the generic
 	// flash rather than under it.
 	if e.onOK != nil {

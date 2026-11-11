@@ -95,7 +95,11 @@ The goals, in order:
   search box at its top is the command palette: just start typing and
   the menu filters itself into the matching commands.
 - **Live file tree** — auto-refreshes every 10 seconds so files added
-  or removed from disk show up without you doing anything.
+  or removed from disk show up without you doing anything. When your
+  terminal reports focus (tmux with `focus-events on`, cats, most GUI
+  terminals), it refreshes every 30 seconds while you're in another pane
+  and catches up the moment you come back. Git status runs in the
+  background, so the refresh never pauses your typing.
 - **External change detection** — if a file on disk changes underneath
   an open clean buffer, the editor reloads it; if your buffer is dirty,
   you get a heads-up; if the file is deleted, the tab is flagged once.

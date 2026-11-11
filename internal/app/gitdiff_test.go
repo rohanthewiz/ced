@@ -514,3 +514,178 @@ func TestMenu_GitChangeRows(t *testing.T) {
 		t.Fatalf("menu Next change should jump to line 4, got %d", tab.Cursor.Line)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Tick skip: diff stamps (N-127 part d)
+// -----------------------------------------------------------------------------
+
+// backdate sets each path's mtime ago into the past — older than the
+// racy window, so its stamp is trusted.
+func backdate(t *testing.T, ago time.Duration, paths ...string) {
+	t.Helper()
+	old := time.Now().Add(-ago)
+	for _, p := range paths {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatalf("chtimes %s: %v", p, err)
+		}
+	}
+}
+
+// stampedDiffApp opens a modified tracked file in a repo whose file and
+// index are both old enough to trust, and waits for the open's diff to
+// land with its stamp recorded.
+//
+// The ages are ordered on purpose, as they are in a settled repo: the
+// committed file (and so its index entry) oldest, the edit next, the
+// index file newest. An index file OLDER than one of its entries is
+// "racy" to git, and the next status or diff rewrites it — which would
+// move the very stamp under test.
+func stampedDiffApp(t *testing.T) (*App, string) {
+	t.Helper()
+	requireGit(t)
+	repo := initRepo(t)
+	file := filepath.Join(repo, "f.txt")
+	writeFileT(t, file, "one\ntwo\nthree\n")
+	backdate(t, 3*time.Hour, file)
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-q", "-m", "init")
+	writeFileT(t, file, "one\nTWO\nthree\n")
+	backdate(t, 2*time.Hour, file)
+	backdate(t, time.Hour, filepath.Join(repo, ".git", "index"))
+	a := newTestApp(t, repo)
+	a.refreshGitStatus() // inline: learns the git dir the stamps read
+	a.openFile(file)
+	pumpAppEvents(t, a, func() bool {
+		_, stamped := a.fileDiffStamps[file]
+		return len(a.fileDiffs[file]) > 0 && stamped
+	})
+	return a, file
+}
+
+// diffLaunched reports whether a gutter diff event shows up within a
+// window several times longer than one `git diff` takes, handling
+// whatever arrives.
+func diffLaunched(a *App) bool {
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if !a.screen.HasPendingEvent() {
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		ev := a.screen.PollEvent()
+		a.handleEvent(ev)
+		if _, ok := ev.(*gitDiffEvent); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRequestOpenTabDiffs_SkipsWhenFileAndIndexUnchanged: the tick asks
+// git again only when the file or the index moved. Unchanged → no fork,
+// the hunks stay; the file rewritten → a diff; the index rewritten (a
+// `git add`, here fresh enough to be racy) → a diff, whose answer is the
+// now-empty work-tree-vs-index diff.
+func TestRequestOpenTabDiffs_SkipsWhenFileAndIndexUnchanged(t *testing.T) {
+	a, file := stampedDiffApp(t)
+
+	a.requestOpenTabDiffs()
+	if diffLaunched(a) {
+		t.Fatal("tick re-diffed a file whose file and index stamps were unchanged")
+	}
+
+	// A different edit with a different, still-old mtime.
+	writeFileT(t, file, "one\nTWO\nTHREE\n")
+	backdate(t, 90*time.Minute, file)
+	a.requestOpenTabDiffs()
+	if !diffLaunched(a) {
+		t.Fatal("tick skipped a file that changed on disk")
+	}
+
+	gitRun(t, filepath.Dir(file), "add", "f.txt")
+	a.requestOpenTabDiffs()
+	if !diffLaunched(a) {
+		t.Fatal("tick skipped a file after the index changed")
+	}
+	if len(a.fileDiffs[file]) != 0 {
+		t.Errorf("after staging, hunks = %v, want none", a.fileDiffs[file])
+	}
+}
+
+// TestDiffStampFor_TrustRules: no git dir known, a missing file, and a
+// fresh (racy) mtime on either file all refuse a stamp; old enough on
+// both gives one.
+func TestDiffStampFor_TrustRules(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	writeCommit(t, repo, "f.txt", "x\n", "init")
+	file := filepath.Join(repo, "f.txt")
+	index := filepath.Join(repo, ".git", "index")
+	a := newTestApp(t, repo)
+	now := time.Now()
+
+	if _, ok := a.diffStampFor(file, now); ok {
+		t.Error("stamp given before the git dir is known")
+	}
+	a.refreshGitStatus()
+	if _, ok := a.diffStampFor(file, now); ok {
+		t.Error("stamp given for a just-written (racy) file")
+	}
+	backdate(t, time.Hour, file)
+	if _, ok := a.diffStampFor(file, now); ok {
+		t.Error("stamp given while the index is racy")
+	}
+	backdate(t, time.Hour, index)
+	if _, ok := a.diffStampFor(file, now); !ok {
+		t.Error("no stamp for an old file and an old index")
+	}
+	if _, ok := a.diffStampFor(filepath.Join(repo, "missing.txt"), now); ok {
+		t.Error("stamp given for a missing file")
+	}
+}
+
+// TestHandleGitDiff_RecordsOrForgetsTheStamp: an answer asked with
+// trusted stamps records them; one asked without forgets any older
+// record, so the next tick asks again.
+func TestHandleGitDiff_RecordsOrForgetsTheStamp(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	st := diffStamp{file: editor.DiskStamp{Size: 3}}
+	a.handleGitDiff(&gitDiffEvent{path: "/p/f.go", stamp: st, stamped: true})
+	if got, ok := a.fileDiffStamps["/p/f.go"]; !ok || !got.same(st) {
+		t.Fatalf("stamp not recorded: %+v %v", got, ok)
+	}
+	a.handleGitDiff(&gitDiffEvent{path: "/p/f.go"})
+	if _, ok := a.fileDiffStamps["/p/f.go"]; ok {
+		t.Error("an unstamped answer kept the old stamp")
+	}
+}
+
+// TestRequestOpenTabDiffs_DropsStampsOfClosedTabs: the stamp map tracks
+// open tabs only.
+func TestRequestOpenTabDiffs_DropsStampsOfClosedTabs(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.fileDiffStamps = map[string]diffStamp{"/gone.go": {}}
+	a.requestOpenTabDiffs()
+	if len(a.fileDiffStamps) != 0 {
+		t.Errorf("stamps = %v, want none", a.fileDiffStamps)
+	}
+}
+
+// TestDiffStamp_Same: both halves must match.
+func TestDiffStamp_Same(t *testing.T) {
+	at := time.Unix(1000, 0)
+	a := diffStamp{file: editor.DiskStamp{ModTime: at, Size: 1}, index: editor.DiskStamp{ModTime: at, Size: 9}}
+	b := a
+	if !a.same(b) {
+		t.Error("identical stamps differ")
+	}
+	b.index.Size = 10
+	if a.same(b) {
+		t.Error("an index change went unnoticed")
+	}
+	b = a
+	b.file.ModTime = at.Add(time.Second)
+	if a.same(b) {
+		t.Error("a file change went unnoticed")
+	}
+}

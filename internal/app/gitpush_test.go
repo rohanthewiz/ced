@@ -555,45 +555,54 @@ func initRepoWithRemote(t *testing.T) string {
 	return dir
 }
 
-// TestLoadGitTracking_EndToEnd exercises the real upstream read: a
-// freshly-pushed branch is level, a new local commit puts it one ahead,
-// and the column order (behind, then ahead) is the thing easiest to get
-// backwards.
-func TestLoadGitTracking_EndToEnd(t *testing.T) {
+// TestLoadGitStatus_TrackingEndToEnd exercises the real upstream read
+// through the snapshot (status's "# branch.upstream" / "# branch.ab"
+// headers since N-127): a freshly-pushed branch is level, a new local
+// commit puts it one ahead, a branch with no upstream reports nothing,
+// and an upstream whose remote branch was deleted reads as none — what
+// the old `rev-parse @{upstream}` read said, and what the push dialog
+// relies on.
+func TestLoadGitStatus_TrackingEndToEnd(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git not on PATH")
 	}
 	dir := initRepoWithRemote(t)
 
-	up, ahead, behind := loadGitTracking(dir)
-	if up != "origin/main" {
-		t.Errorf("upstream = %q, want origin/main", up)
+	st := loadGitStatus(dir)
+	if st.Upstream != "origin/main" {
+		t.Errorf("upstream = %q, want origin/main", st.Upstream)
 	}
-	if ahead != 0 || behind != 0 {
-		t.Errorf("fresh push: ahead=%d behind=%d, want 0/0", ahead, behind)
+	if st.Ahead != 0 || st.Behind != 0 {
+		t.Errorf("fresh push: ahead=%d behind=%d, want 0/0", st.Ahead, st.Behind)
 	}
 
 	writeFileT(t, filepath.Join(dir, "f.txt"), "two\n")
 	gitRun(t, dir, "commit", "-q", "-am", "second")
-	if _, ahead, behind = loadGitTracking(dir); ahead != 1 || behind != 0 {
-		t.Errorf("after one local commit: ahead=%d behind=%d, want 1/0", ahead, behind)
+	if st = loadGitStatus(dir); st.Ahead != 1 || st.Behind != 0 {
+		t.Errorf("after one local commit: ahead=%d behind=%d, want 1/0", st.Ahead, st.Behind)
+	}
+
+	// Behind: rewind main one commit while origin/main keeps it.
+	gitRun(t, dir, "push", "-q")
+	gitRun(t, dir, "reset", "-q", "--hard", "HEAD~1")
+	if st = loadGitStatus(dir); st.Ahead != 0 || st.Behind != 1 {
+		t.Errorf("after rewinding: ahead=%d behind=%d, want 0/1", st.Ahead, st.Behind)
 	}
 
 	// A branch with no upstream reports nothing rather than guessing.
 	gitRun(t, dir, "checkout", "-q", "-b", "orphan")
-	if up, ahead, behind = loadGitTracking(dir); up != "" || ahead != 0 || behind != 0 {
-		t.Errorf("untracked branch = (%q, %d, %d), want empty", up, ahead, behind)
+	if st = loadGitStatus(dir); st.Upstream != "" || st.Ahead != 0 || st.Behind != 0 {
+		t.Errorf("untracked branch = (%q, %d, %d), want empty", st.Upstream, st.Ahead, st.Behind)
 	}
-}
+	if !st.HasRemote {
+		t.Error("untracked branch in a repo with a remote must still report HasRemote")
+	}
 
-// TestParseTrackingCounts pins the column order without forking git.
-func TestParseTrackingCounts(t *testing.T) {
-	ahead, behind := parseTrackingCounts([]byte("2\t5\n"))
-	if ahead != 5 || behind != 2 {
-		t.Errorf("got ahead=%d behind=%d, want ahead=5 behind=2 (left is behind)", ahead, behind)
-	}
-	if a, b := parseTrackingCounts([]byte("garbage")); a != 0 || b != 0 {
-		t.Errorf("malformed output should degrade to 0/0, got %d/%d", a, b)
+	// Upstream configured, remote branch gone.
+	gitRun(t, dir, "config", "branch.orphan.remote", "origin")
+	gitRun(t, dir, "config", "branch.orphan.merge", "refs/heads/nosuch")
+	if st = loadGitStatus(dir); st.Upstream != "" || st.Ahead != 0 || st.Behind != 0 {
+		t.Errorf("gone upstream = (%q, %d, %d), want empty", st.Upstream, st.Ahead, st.Behind)
 	}
 }
 

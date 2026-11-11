@@ -94,6 +94,7 @@ internal/icons/               Nerd Font detection + glyphs
 internal/app/
   app.go                      Event loop, layout, rendering
   inputburst.go               One frame per wheel/motion burst
+  tickpace.go                 Refresh tick paced by focus (10s / 30s, focus-in refresh)
   modal.go leader.go whichkey.go  Modal slot; leader table + namespaces; which-key band
   altchords.go                In-surface Alt chord tables (prompts, find bar, dialogs)
   metakeys.go nav.go          ⌘ layer; back/forward history
@@ -110,6 +111,7 @@ internal/app/
   copilot*.go chatcomposer.go chatagent.go chatarchive.go summarize.go gonotes.go
   mcp.go skills.go plugins.go plugincmd.go plugindeco.go
   git*.go compare.go           Git panel/log/commit/receipt/status; compare panel
+  gitsnapshot.go              Async git status snapshot (coalesced, seq-checked)
   diffview.go comparerevert.go  Shared diff layer (split/ws/steppers); compare hunk revert
   gitrestore.go               Restore one file to HEAD (tree/tab/≡ Git rows)
   gitconflict.go gitopstate.go  Conflict picker + stop hook; parked-op / unmerged reads
@@ -337,6 +339,30 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   silent reload; dirty + changed → warn; deleted → `DiskGone`.
   A formatter run in flight suppresses it (`formatRunBegin/End`, per-path
   count).
+- **Tick pace follows focus (tickpace.go)**: 10s focused, 30s
+  (`treeRefreshUnfocusedInterval`) after CSI O — SLOWER, never stopped
+  (a cats/tmux pane beside an agent is unfocused but watched). Focus-in
+  (or a key / button press while "out") runs `refreshTreeNow` at once and
+  restores 10s. `paceTreeRefresh` only RESTARTS a running tick, never
+  starts one. No focus reports → today's 10s.
+- **Git status snapshot is OFF the loop (gitsnapshot.go)**:
+  `refreshGitStatus` launches one coalesced goroutine (`flightSeq`,
+  `rerun`, a 30s lost-answer relaunch) and applies on `gitStatusEvent`
+  — the default for every caller. `refreshGitStatusNow` /
+  `refreshTreeAfterGit` (inline) ONLY where the next line reads the
+  snapshot: `handleGitCmdDone` (its onOK hooks) and the conflict stop
+  hook. Every launch takes a seq; only the latest applies. A directly
+  built App (`gitSnap.async` off; `New` sets it) runs inline — tests
+  that need async set it and pump. The snapshot is two forks
+  (gitstatus.go: rev-parse with the stash `--glob`, `status
+  --porcelain=v2 --branch -z`); the git panel takes its rows from it
+  (`setGitPanelFiles`), and its own read (`loadGitStatusFiles`) shares
+  `parsePorcelainV2`. XY codes stay in v1's spelling.
+- **Gutter diffs on the tick are stamp-gated (gitdiff.go)**: a path is
+  re-diffed only when its file or the index stamp moved
+  (`diffStamp`, taken BEFORE git runs, recorded on arrival); stamps
+  younger than `editor.RacyGranule` are never recorded. Open / save /
+  git-command diffs always run.
 - **state.json writes merge** (`session.Update`: re-read, apply, save):
   never dump the store loaded at startup — other instances share the
   file. A corrupt file is set aside as `state.json.bad`, never saved over.

@@ -772,7 +772,7 @@ func (a *App) requestFileBlame(t *editor.Tab) {
 	a.blameSeq[t.Path]++
 	seq := a.blameSeq[t.Path]
 	rev := t.EditRev
-	contents := t.Buffer.String()
+	contents := blameContents(t)
 	scr, root, path := a.screen, a.rootDir, t.Path
 	go func() {
 		fb := loadFileBlame(root, path, contents, time.Now())
@@ -781,6 +781,16 @@ func (a *App) requestFileBlame(t *editor.Tab) {
 		}
 		_ = scr.PostEvent(&gitBlameEvent{when: time.Now(), path: path, seq: seq, blame: fb})
 	}()
+}
+
+// blameContents is the buffer as `git blame --contents -` must see it:
+// in the FILE's encoding. git compares these lines to history byte for
+// byte, and a Windows-1252 file's é is E9 there, not C3 A9 — sent as
+// UTF-8, every non-ASCII line would read "not committed". Lossy is right
+// for git's eyes only: a line holding a character the encoding can't
+// write is new text anyway (editor.EncodeLossy).
+func blameContents(t *editor.Tab) string {
+	return string(editor.EncodeLossy(t.Encoding, t.Buffer.String()))
 }
 
 // handleGitBlame installs a finished blame. Results are dropped when a

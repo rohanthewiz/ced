@@ -214,3 +214,18 @@ func TestProject_HonoursRegex(t *testing.T) {
 		t.Errorf("bad pattern produced hits: %+v", bad)
 	}
 }
+
+// TestProject_CP1252FileReadsLikeItsTab pins the decode: a Latin-1 file's
+// é matches an accented query, the row shows the text, and the column
+// counts the runes its tab shows — so a project-wide replace lands where
+// the row said (editor/encoding.go).
+func TestProject_CP1252FileReadsLikeItsTab(t *testing.T) {
+	root, paths := seedTree(t, map[string]string{"fr.txt": "un caf\xe9 noir\n"})
+	hits, _ := Project(root, paths, Options{Query: "noir"})
+	if len(hits) != 1 || hits[0].Col != 8 || hits[0].Text != "un café noir" {
+		t.Fatalf("hits = %+v", hits)
+	}
+	if accented, _ := Project(root, paths, Options{Query: "café"}); len(accented) != 1 {
+		t.Fatalf("accented query found %d hits", len(accented))
+	}
+}

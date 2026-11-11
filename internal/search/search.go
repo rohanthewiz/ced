@@ -172,7 +172,12 @@ func searchFile(path string, match *editor.Matcher, maxBytes int64) []Hit {
 	if err != nil || looksBinary(data) {
 		return nil
 	}
-	buf := editor.NewBuffer(string(data))
+	// Decoded by the rule a tab opens with (editor/encoding.go): a
+	// Windows-1252 file's hits then sit at the columns its tab shows, so
+	// a project-wide replace lands where the row said, and a query with
+	// an accent finds it.
+	text, _ := editor.DecodeBytes(data)
+	buf := editor.NewBuffer(text)
 	matches := match.All(buf)
 	if len(matches) == 0 {
 		return nil

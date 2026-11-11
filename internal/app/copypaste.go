@@ -466,6 +466,13 @@ func (a *App) startPaste(destDir string) {
 		a.flash(fmt.Sprintf("Paste failed: %s no longer exists", strings.Join(missing, ", ")))
 		return
 	}
+	// Snapshotted before the "Pasting…" flash so a refusal is the only
+	// thing the user reads, not a start followed by a stop.
+	overlay, oerr := a.dirtyBufferOverlay(a.fileClipPaths)
+	if oerr != nil {
+		a.flash("Paste failed: " + oerr.Error())
+		return
+	}
 	if len(missing) > 0 {
 		// Partial sets are reported rather than silently narrowed — the
 		// count in the success flash would otherwise be the only clue.
@@ -473,7 +480,7 @@ func (a *App) startPaste(destDir string) {
 	} else {
 		a.flash("Pasting " + fileClipLabel(a.fileClipPaths) + "…")
 	}
-	a.runCopyPlan(plan, a.dirtyBufferOverlay(a.fileClipPaths), "")
+	a.runCopyPlan(plan, overlay, "")
 }
 
 // dirtyBufferOverlay snapshots, ON THE MAIN LOOP, the unsaved content of
@@ -484,7 +491,14 @@ func (a *App) startPaste(destDir string) {
 // Snapshotted rather than saved: a save would run format-on-save and the
 // plugin hooks, and leave the original tab clean — side effects nobody
 // asked a copy for. The original stays exactly as dirty as it was.
-func (a *App) dirtyBufferOverlay(srcs []string) map[string][]byte {
+//
+// The error is a buffer its own save would refuse: a Windows-1252 file
+// holding a character the code page can't write (editor/encoding.go).
+// The copy is refused too, naming the file — writing the disk bytes
+// instead would copy something other than what the user is looking at,
+// and writing UTF-8 would hand them a file in a different encoding
+// without saying so.
+func (a *App) dirtyBufferOverlay(srcs []string) (map[string][]byte, error) {
 	var out map[string][]byte
 	for _, t := range a.tabs {
 		if t == nil || !t.Dirty || t.Path == "" {
@@ -497,12 +511,16 @@ func (a *App) dirtyBufferOverlay(srcs []string) map[string][]byte {
 				if out == nil {
 					out = map[string][]byte{}
 				}
-				out[filepath.Clean(t.Path)] = t.EncodedBytes()
+				data, err := t.EncodedBytes()
+				if err != nil {
+					return nil, fmt.Errorf("%s: %w", filepath.Base(t.Path), err)
+				}
+				out[filepath.Clean(t.Path)] = data
 				break
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 // runCopyPlan copies plan off the main loop and posts ONE pasteDoneEvent

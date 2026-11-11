@@ -239,6 +239,15 @@ func (a *App) handleGitDiff(e *gitDiffEvent) {
 		delete(a.fileDiffs, e.path)
 		return
 	}
+	// git hands back the file's BYTES; the buffer holds text. Decoded
+	// once here, on arrival, so the popup, the change view and above all
+	// a revert (which writes the "-" lines into the buffer) all read the
+	// file the way its tab does (encoding.go's decodeDiffLine).
+	enc := ""
+	if t := a.tabByPath(e.path); t != nil {
+		enc = t.Encoding
+	}
+	decodeHunkBodies(enc, e.hunks)
 	a.fileDiffs[e.path] = e.hunks
 }
 

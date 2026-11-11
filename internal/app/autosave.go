@@ -241,9 +241,18 @@ func (a *App) autoSaveDepartingTab(idx int) {
 // background save. Write errors DO flash — silently failing to save
 // is the one thing an auto-save feature can never do, because the
 // user has stopped thinking about saving at all.
+//
+// The one exception is an encoding refusal (a Windows-1252 file holding
+// a character it can't write, encoding.go). It is not a failure of the
+// disk but a decision only the user can make, the status bar already
+// shows it in red, and the next explicit save asks it. A flash here
+// would repeat after every typing pause until they answered.
 func (a *App) autoSaveTab(idx int) bool {
 	tab := a.tabs[idx]
 	if err := tab.Save(); err != nil {
+		if isUnencodableErr(err) {
+			return false
+		}
 		a.flash("Auto-save failed: " + err.Error())
 		return false
 	}

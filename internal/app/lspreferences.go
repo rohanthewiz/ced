@@ -245,7 +245,10 @@ func readContextLines(path string) []string {
 	if err != nil {
 		return nil
 	}
-	return diff.SplitLines(string(data))
+	// Decoded the way the file's tab would be (editor/encoding.go), so a
+	// row from a closed Windows-1252 file reads like the open one.
+	text, _ := editor.DecodeBytes(data)
+	return diff.SplitLines(text)
 }
 
 // handleLSPReferences opens the result list on the main loop.

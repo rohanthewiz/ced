@@ -55,6 +55,7 @@ internal/editor/
   undo.go                     Snapshot stack: coalescing, byte budget
   fileio.go                   Open guards, line-ending/BOM round-trip, atomic save
   diskstamp.go                Disk version: (mtime,size,inode) stamp + content sum
+  encoding.go                 Non-UTF-8 files held as Windows-1252; control-rune stand-ins
   highlight.go syntax.go      Chroma → style grid; re-lex settle policy + grid patch
   markdown*.go                Markdown preview: flag, row cache, blocks, inline spans
   softwrap.go                 Soft-wrap layout, row-unit scroll/hit-test/Up-Down
@@ -120,6 +121,7 @@ internal/app/
   terminal.go termdiag.go runexec.go openineditor.go
   hostopen.go openterminal.go entrycmd.go  Open in Finder / terminal; {{DIR_ENTRY}} shell command
   autosave.go format.go validate.go syntax.go zipops.go
+  encoding.go                 Convert-to-UTF-8 question (save/≡/status), diff-line decode
   copypaste.go copyto.go      File clipboard Copy/Paste; Copy to… a typed folder (one engine)
   copyref.go                  Copy reference: `<abs path>:<line>` (editor/tab right-click, ≡ File)
   folder.go favorites.go favmanage.go recentlocations.go remote.go
@@ -282,6 +284,24 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   in-place (no O_TRUNC — truncate after a good write); ENOSPC & co. return
   the error with the original intact. `WriteFileAtomic` is exported for
   other writers — don't copy it.
+- **Encoding (editor/encoding.go, app/encoding.go)**: bytes that aren't
+  valid UTF-8 are decoded as WINDOWS-1252 (`Tab.Encoding = "cp1252"`)
+  and re-encoded on save — a one-to-one table, so ANY byte string
+  round-trips; the buffer is always valid UTF-8. No other encodings are
+  guessed. A rune the code page can't hold makes `encode` / Save /
+  `EncodedBytes` refuse with `*editor.UnencodableError` (nothing written,
+  never a substitute): explicit saves turn it into the "Save as UTF-8?"
+  confirm (`offerUTF8Save`, resumes the caller's gesture), auto-save
+  skips SILENTLY, copies refuse. Every door to `ConvertToUTF8` confirms
+  (≡ File row, status ` · cp1252` segment — red `cp1252 ✗` alert while
+  `Tab.Unencodable()`); it is not an undo step and forgets the saved
+  baseline. Bytes from disk/git that are compared with or written INTO
+  a buffer are decoded the tab's way: `editor.DecodeBytes` (compare disk
+  side, agent reads, references, project search), `decodeDiffLine`
+  (gutter hunks — a revert writes "-" lines), and blame sends
+  `blameContents` (`EncodeLossy`). The in-process formatter refuses
+  non-UTF-8. Render paints C0/DEL/C1 controls as one-cell stand-ins
+  (`␛`, `▯`), never raw.
 - **Disk versions (diskstamp.go)**: "did the file change?" is
   `Tab.DiskChanged` — (mtime, size, inode) stamp, ANY difference, then a
   sha256 content check so a touch is not a change; a stamp younger than
@@ -1431,9 +1451,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   terminal rows spends the above-the-fold budget.
 - **Adding a menu row means updating the pins** — a README menu-reference
   row first, then the layout counts:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 192 group
-  actions + 15 headers (209), 36 splits, height 251, dividers
-  `[2, 5, 248]`; also the Git fold height (35 rows + 8 splits = 43) in
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 193 group
+  actions + 15 headers (210), 36 splits, height 252, dividers
+  `[2, 5, 249]`; also the Git fold height (35 rows + 8 splits = 43) in
   `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.

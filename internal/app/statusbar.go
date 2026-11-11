@@ -55,6 +55,11 @@ type statusSegment struct {
 	// place that knows what each span IS; a clickable segment without
 	// one simply gets no label.
 	tip string
+	// alert paints the segment as a red badge (statusAlertStyle) — for a
+	// fact that is a problem, not a mode: today only the "cp1252 ✗"
+	// encoding note (encoding.go). Kept to the segment's own cells, so
+	// a separator before it stays in the bar's colours.
+	alert bool
 }
 
 // statusLeftSegments builds the left-hand run of segments: what file
@@ -107,6 +112,10 @@ func (a *App) statusLeftSegments() []statusSegment {
 			tip: "Go to line…"},
 		statusSegment{text: fmt.Sprintf(" · %d lines", tab.Buffer.LineCount())},
 	)
+	// The file's encoding, only when it is NOT UTF-8 (encoding.go): a
+	// fact about the file like the line count beside it, and the place
+	// auto-save's silent "can't write this" skip shows up, in red.
+	segs = append(segs, a.encodingStatusSegments(tab)...)
 	if s := a.caretStatusSuffix(); s != "" {
 		segs = append(segs, statusSegment{text: s})
 	}
@@ -322,7 +331,7 @@ func (a *App) drawStatusBar() {
 	}
 	x := sx + sw - rightWidth
 	for _, seg := range right {
-		drawAt(a.screen, x, sy, seg.text, style)
+		drawAt(a.screen, x, sy, seg.text, a.statusSegStyle(seg, style))
 		if seg.onClick != nil {
 			seg.rect = btnRect{x: x, y: sy, w: runeLen(seg.text)}
 			a.statusSegs = append(a.statusSegs, seg)
@@ -347,13 +356,22 @@ func (a *App) drawStatusBar() {
 		if w > avail {
 			w = avail
 		}
-		drawStatusText(a.screen, x, sy, avail, seg.text, style)
+		drawStatusText(a.screen, x, sy, avail, seg.text, a.statusSegStyle(seg, style))
 		if seg.onClick != nil {
 			seg.rect = btnRect{x: x, y: sy, w: w}
 			a.statusSegs = append(a.statusSegs, seg)
 		}
 		x += w
 	}
+}
+
+// statusSegStyle is the style one segment is drawn in: the bar's own
+// unless the segment is an alert.
+func (a *App) statusSegStyle(seg statusSegment, base tcell.Style) tcell.Style {
+	if seg.alert {
+		return a.statusAlertStyle()
+	}
+	return base
 }
 
 // statusBarClick routes a left-click on the status-bar row to the

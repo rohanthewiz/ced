@@ -328,6 +328,11 @@ func builtinMenuGroups() []menuGroup {
 			// parse plus whatever the language server and plugins last
 			// said, on request. The ≡ door of the tab menu's row.
 			{label: "Validate file", action: (*App).menuValidateFile, enabled: (*App).hasSavableTab},
+			// The way out of a file held as Windows-1252 (encoding.go):
+			// ask, then write UTF-8 from the next save. In the content run
+			// because it is about the bytes a save writes. A UTF-8 file
+			// flashes that it already is, rather than the row hiding.
+			{label: "Convert file to UTF-8…", action: (*App).menuConvertToUTF8, enabled: (*App).hasSavableTab},
 			// Revert and the auto-save switch close the content run: Revert
 			// is the save's inverse (reload what is on disk), and auto-save
 			// is the preference that governs Save. They used to sit after the
@@ -4939,6 +4944,16 @@ func (a *App) saveTabAt(idx int) bool {
 		return false
 	}
 	if err := tab.Save(); err != nil {
+		// A Windows-1252 file holding a character it can't write is a
+		// question, not a failure (encoding.go). Resumed by pointer: the
+		// index may name another tab by the time the answer comes.
+		if a.offerUTF8Save(tab, err, func(app *App) {
+			if i := app.tabIndexOf(tab); i >= 0 {
+				app.saveTabAt(i)
+			}
+		}) {
+			return false
+		}
 		a.flash(fmt.Sprintf("Save failed: %v", err))
 		return false
 	}
@@ -5483,6 +5498,11 @@ func (a *App) menuSaveAndClose() {
 		return
 	}
 	if err := tab.Save(); err != nil {
+		// Same question as saveTabAt; a Yes re-runs the whole gesture,
+		// the saveGuard rule above.
+		if a.offerUTF8Save(tab, err, (*App).menuSaveAndClose) {
+			return
+		}
 		a.flash(fmt.Sprintf("Save failed: %v", err))
 		return
 	}

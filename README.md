@@ -148,6 +148,10 @@ The goals, in order:
   from the terminal window entirely. Undo history survives all of it.
   Toggle it in `≡`; change the pause with `"autosavedelay": "10s"` in
   `~/.config/ced/config.json`.
+- **Files that aren't UTF-8 stay intact** — a Latin-1 or Windows-1252
+  file opens readable and saves back byte for byte, and no file is ever
+  rewritten with replacement characters. See
+  [Files that aren't UTF-8](#files-that-arent-utf-8).
 - **AI, optional** — inline ghost-text completions from GitHub Copilot,
   plus a chat panel that talks to Copilot, Claude Code, or Gemini over
   ACP: your code as context, and file edits you approve one at a time.
@@ -793,6 +797,7 @@ still clickable and says why (install a binary, export `$EDITOR`).
 | `Save` | `esc s` | Save the active tab (Go files are formatted as they save). |
 | `Format file` | | Run the file's formatter now — the only way non-Go files are formatted. See [Formatting](#formatting). |
 | `Validate file` | | Check the file now: ced's own JSON / CSV / PostgreSQL (`.pgsql`, `.psql`) parse plus what the language server and plugins last reported. |
+| `Convert file to UTF-8…` | | After asking, write a file that was read as Windows-1252 as UTF-8 from its next save. See [Files that aren't UTF-8](#files-that-arent-utf-8). |
 | `Revert file` | | Put the buffer back to how it was when you opened it (Undo recovers it). |
 | `Disable auto-save` / `Enable auto-save` | | Save dirty tabs after an idle pause (`"autosave"`, `"autosavedelay"`). |
 | `Save & close tab` | | Save, then close. |
@@ -1319,6 +1324,39 @@ search modes, the Conflicts panel's Continue / Skip / Abort). A label
 disappears when you move off the button, click, or press a key. It
 needs a terminal that reports mouse motion; where none is reported,
 every button still works and no label ever appears.
+
+### Files that aren't UTF-8
+
+ced reads a file as UTF-8 when its bytes are valid UTF-8, which is
+nearly always. When they aren't — an old source file with Latin-1
+comments, a Java `.properties` file, a spreadsheet export — it reads
+the file as **Windows-1252** instead and writes it back the same way.
+The status bar shows ` · cp1252` while such a file is active.
+
+Nothing is lost by this, whatever the file really is. Windows-1252 has a
+character for every byte value, so every byte you don't edit is written
+back exactly. A Latin-1 or Windows-1252 file reads correctly. A file in
+another encoding (Shift-JIS, say) shows garbled text where its non-ASCII
+characters are, but it is still saved byte for byte.
+
+The one thing Windows-1252 can't hold is a character outside it — `→`,
+`✓`, Chinese text, emoji. If you type one:
+
+- **Save** asks *Convert the file to UTF-8 and save it?*, naming the
+  character and its line. Say no to keep the file as it is (delete the
+  character, then save).
+- **Auto-save** skips the file, and the status bar shows a red
+  `cp1252 ✗` until you decide.
+
+To convert on purpose, use `≡` → **File** → *Convert file to UTF-8…* or
+click ` · cp1252` in the status bar. Either one asks first. The file
+stays as it is on disk until its next save, and **Undo** does not reverse
+the conversion. To back out before that save, close the tab without
+saving.
+
+ced never guesses at other encodings. Control characters (`ESC`, a
+stray carriage return) show as a visible stand-in such as `␛` or `␍`
+rather than being sent to your terminal.
 
 ### Soft wrap
 

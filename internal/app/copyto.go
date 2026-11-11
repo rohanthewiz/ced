@@ -175,8 +175,9 @@ func (a *App) copyToTyped(paths []string, value string) {
 // otherwise turn into a directory nobody meant to make.
 //
 // The copy is planned FIRST, so a copy that would be refused anyway
-// (a folder into itself, every source gone) is refused before the user
-// is asked to create somewhere for it to land.
+// (a folder into itself, every source gone, an unsaved buffer its own
+// encoding can't write) is refused before the user is asked to create
+// somewhere for it to land.
 func (a *App) confirmCreateCopyDest(paths []string, dest string) {
 	plan, missing, err := planCopyInto(paths, dest)
 	if err != nil {
@@ -185,6 +186,13 @@ func (a *App) confirmCreateCopyDest(paths []string, dest string) {
 	}
 	if len(plan) == 0 {
 		a.flash(copyToGoneMessage(paths, missing))
+		return
+	}
+	// A dirty buffer the copy can't write (encoding) is a refusal too,
+	// and refusals come before the question — startCopyTo asks again
+	// after the confirm, since the buffer can change while it is open.
+	if _, oerr := a.dirtyBufferOverlay(paths); oerr != nil {
+		a.flash("Copy failed: " + oerr.Error())
 		return
 	}
 	what := copyToWhat(paths)
@@ -219,6 +227,11 @@ func (a *App) startCopyTo(paths []string, destDir string) {
 		a.flash(copyToGoneMessage(paths, missing))
 		return
 	}
+	overlay, oerr := a.dirtyBufferOverlay(paths)
+	if oerr != nil {
+		a.flash("Copy failed: " + oerr.Error())
+		return
+	}
 	// Recorded where the copy RUNS (the search-history rule), in display
 	// form: "~/backup" reads better in the dropdown than the home path
 	// spelled out, and expandHome turns it back on the way in. Relative
@@ -233,7 +246,7 @@ func (a *App) startCopyTo(paths []string, destDir string) {
 	} else {
 		a.flash("Copying " + copyToWhat(paths) + " to " + where + "…")
 	}
-	a.runCopyPlan(plan, a.dirtyBufferOverlay(paths), destDir)
+	a.runCopyPlan(plan, overlay, destDir)
 }
 
 // copyToGoneMessage is the refusal when no source survived to be copied.

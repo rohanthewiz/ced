@@ -52,6 +52,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/ced/internal/editor"
@@ -647,6 +648,13 @@ func formatFileInPlace(path string) error {
 	src, err := os.ReadFile(path)
 	if err != nil {
 		return err
+	}
+	// The in-process passes (JSON, SQL) work on UTF-8 text; a file ced
+	// holds as Windows-1252 (editor/encoding.go) is refused rather than
+	// handed to code that would read its high bytes as U+FFFD. JSON is
+	// UTF-8 by definition, so this only ever meets a legacy .sql file.
+	if !utf8.Valid(src) {
+		return fmt.Errorf("%s isn't UTF-8 — the built-in formatter only rewrites UTF-8 files", filepath.Base(path))
 	}
 	out, ok, err := format.InProcessFormat(path, src)
 	if err != nil || !ok {

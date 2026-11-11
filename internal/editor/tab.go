@@ -98,6 +98,20 @@ type Tab struct {
 	LineEnding string
 	BOM        bool
 
+	// Encoding is the byte encoding every save writes: "" for UTF-8, or
+	// EncodingCP1252 for a file whose bytes were not valid UTF-8 when it
+	// was read. The buffer always holds valid UTF-8 either way. Set by
+	// readTextFile; changed only by ConvertToUTF8 and the reloads. See
+	// encoding.go for why Windows-1252 is the one fallback.
+	Encoding string
+
+	// unencKnown / unencRev / unencEnc / unencErr memoise Unencodable
+	// (encoding.go) on the revision and encoding they were measured at.
+	unencKnown bool
+	unencRev   int
+	unencEnc   string
+	unencErr   *UnencodableError
+
 	// DiskGone is set when the most recent disk check found the file
 	// missing. It exists so we only flash the "deleted on disk" warning
 	// once, instead of re-flashing every reconcile tick.
@@ -337,6 +351,7 @@ func NewTab(path string) (*Tab, error) {
 		StyleStale: true,
 		BOM:        r.bom,
 		LineEnding: r.ending,
+		Encoding:   r.encoding,
 		// Highlighting cost scales with file size, so past a point it is
 		// cheaper — and much better to use — with no colors at all.
 		SyntaxOff: len(r.text) > MaxHighlightBytes,
@@ -407,7 +422,13 @@ func (t *Tab) Save() error {
 	}
 	// Atomic (temp + rename) rather than a truncating in-place write, and
 	// re-encoded into the byte form the file arrived in. See fileio.go.
-	data := t.encode()
+	// An encode refusal (a rune Windows-1252 can't hold, encoding.go)
+	// returns BEFORE anything touches the disk; the *UnencodableError is
+	// passed up as-is so the app can offer the conversion.
+	data, err := t.encode()
+	if err != nil {
+		return err
+	}
 	info, err := writeFileAtomic(t.Path, data)
 	if err != nil {
 		return err
@@ -492,6 +513,10 @@ func (t *Tab) Reload() error {
 	t.Buffer = NewBuffer(text)
 	t.BOM = r.bom
 	t.LineEnding = r.ending
+	// Re-detected, not sticky: the disk is the authority here, and a
+	// file someone converted to UTF-8 behind us must stop being written
+	// back as Windows-1252 (and the reverse).
+	t.Encoding = r.encoding
 	t.Cursor = t.Buffer.Clamp(t.Cursor)
 	t.Anchor = t.Cursor // drop any selection — line indices may have shifted.
 	t.Carets = nil      // …and with them every secondary caret, for the same reason.
@@ -595,7 +620,7 @@ func (t *Tab) ReloadAsEdit() (changed bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	text, bom, ending := r.text, r.bom, r.ending
+	text, bom, ending, enc := r.text, r.bom, r.ending, r.encoding
 	// The write is ours either way, so the tab adopts its stamp whether or
 	// not the bytes moved. Skipping this on the unchanged path would leave
 	// the tab looking like "someone else wrote your file" to the reconcile
@@ -606,7 +631,10 @@ func (t *Tab) ReloadAsEdit() (changed bool, err error) {
 		// Encoding can still have been normalised out from under us even
 		// when the text matches, so those are adopted too — but nothing
 		// user-visible changed, so no undo step and no EditRev bump.
-		t.BOM, t.LineEnding = bom, ending
+		// The encoding is one of those: a tool that rewrote a
+		// Windows-1252 file as UTF-8 with the same text leaves a file the
+		// next save must write as UTF-8.
+		t.BOM, t.LineEnding, t.Encoding = bom, ending, enc
 		// The disk was just read and equals the buffer, so it is a known
 		// baseline even though nothing moved.
 		t.markSaved()
@@ -630,7 +658,7 @@ func (t *Tab) ReloadAsEdit() (changed bool, err error) {
 	// Secondary carets were positioned against the text being replaced.
 	t.Carets = nil
 	t.Buffer = NewBuffer(text)
-	t.BOM, t.LineEnding = bom, ending
+	t.BOM, t.LineEnding, t.Encoding = bom, ending, enc
 	// The buffer matches the file again, so the tab is clean — an
 	// auto-save that re-wrote it a moment later would be writing the same
 	// bytes back. The formatted text becomes the saved baseline, so an
@@ -1411,6 +1439,12 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 					glyph := r
 					if r == '\t' {
 						glyph = ' '
+					} else if IsControlRune(r) {
+						// A control rune is never sent to the terminal
+						// raw — some are introducers in their 8-bit form
+						// (encoding.go's controlStandIn). Same cell, same
+						// style, a visible stand-in.
+						glyph = controlStandIn(r)
 					}
 					for cell := 0; cell < width; cell++ {
 						sc := visualCol - scrollVisual + cell

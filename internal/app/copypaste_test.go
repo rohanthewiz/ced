@@ -781,14 +781,17 @@ func TestDirtyBufferOverlay_OnlyDirtyTabsUnderTheSources(t *testing.T) {
 			tab.InsertString("edit ")
 		}
 	}
-	got := a.dirtyBufferOverlay([]string{filepath.Join(root, "pkg")})
+	got, err := a.dirtyBufferOverlay([]string{filepath.Join(root, "pkg")})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 {
 		t.Fatalf("overlay = %v, want only in.txt", got)
 	}
 	if string(got[in]) != "edit disk\n" {
 		t.Fatalf("overlay[in] = %q, want the buffer", got[in])
 	}
-	if a.dirtyBufferOverlay([]string{filepath.Join(root, "nowhere")}) != nil {
+	if none, _ := a.dirtyBufferOverlay([]string{filepath.Join(root, "nowhere")}); none != nil {
 		t.Fatal("no dirty tab under the sources should give a nil overlay")
 	}
 }

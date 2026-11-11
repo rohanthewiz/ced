@@ -462,7 +462,10 @@ func TestEncodedBytes_IsWhatASaveWouldWrite(t *testing.T) {
 	tab.Anchor = tab.Cursor
 	tab.InsertRune('!')
 
-	got := tab.EncodedBytes()
+	got, err := tab.EncodedBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := string(utf8BOM) + "one!\r\ntwo\r\n"
 	if string(got) != want {
 		t.Fatalf("EncodedBytes = %q, want %q", got, want)
@@ -475,7 +478,7 @@ func TestEncodedBytes_IsWhatASaveWouldWrite(t *testing.T) {
 	}
 	// A fresh slice each call: mutating one must not reach the next.
 	got[len(got)-1] = 'X'
-	if again := tab.EncodedBytes(); string(again) != want {
+	if again, _ := tab.EncodedBytes(); string(again) != want {
 		t.Fatalf("EncodedBytes shares memory between calls: %q", again)
 	}
 }

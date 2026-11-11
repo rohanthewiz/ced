@@ -67,6 +67,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/diff"
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 const (
@@ -442,7 +443,11 @@ func readCompareFile(abs string) (string, error) {
 			return "", errCompare(filepath.Base(abs) + " looks like a binary file")
 		}
 	}
-	return string(b), nil
+	// Decoded by the rule the editor opens files with (a Windows-1252
+	// file reads as its text, not as bytes), so "compare with saved copy"
+	// of such a file shows only the real edits.
+	text, _ := editor.DecodeBytes(b)
+	return text, nil
 }
 
 // errCompare is a tiny error type so the messages above read as

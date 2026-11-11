@@ -294,7 +294,9 @@ func (a *App) attachContent(at chatAttach, limit int) (body string, truncated bo
 		if isBinaryContent(data) {
 			return "", false, fmt.Errorf("binary file")
 		}
-		lines = strings.Split(string(data), "\n")
+		// Decoded the way the file's tab would be (editor/encoding.go).
+		text, _ := editor.DecodeBytes(data)
+		lines = strings.Split(text, "\n")
 	}
 	if at.ranged() {
 		from, to := at.lineFrom-1, at.lineTo

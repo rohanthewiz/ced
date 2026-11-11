@@ -77,6 +77,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
@@ -590,7 +591,10 @@ func (a *App) chatFSRead(path string, line, limit int) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		lines = strings.Split(string(data), "\n")
+		// The agent gets the file's TEXT: a Windows-1252 file decoded the
+		// way its tab would be, not bytes JSON would turn into U+FFFD.
+		text, _ := editor.DecodeBytes(data)
+		lines = strings.Split(text, "\n")
 	}
 	if line > 0 {
 		if line > len(lines) {

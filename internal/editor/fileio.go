@@ -41,7 +41,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 )
 
@@ -74,17 +73,19 @@ const (
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 
 // diskRead is what one guarded read of a file reports: the decoded text,
-// whether it carried a BOM, the dominant line ending, and the identity of
-// the version read — the stamp from the stat taken BEFORE the read and the
+// whether it carried a BOM, the dominant line ending, the encoding the
+// bytes were read in ("" = UTF-8, encoding.go), and the identity of the
+// version read — the stamp from the stat taken BEFORE the read and the
 // sum of the raw bytes (diskstamp.go). exists is false for a missing path,
 // which NewTab treats as a new, empty file.
 type diskRead struct {
-	text   string
-	bom    bool
-	ending string
-	stamp  DiskStamp
-	sum    [32]byte
-	exists bool
+	text     string
+	bom      bool
+	ending   string
+	encoding string
+	stamp    DiskStamp
+	sum      [32]byte
+	exists   bool
 }
 
 // readTextFile reads path and reports the decoded text, whether it
@@ -138,7 +139,12 @@ func readTextFile(path string) (diskRead, error) {
 		// more mixed every time it's edited.
 		data = bytes.ReplaceAll(data, []byte(lineEndingCRLF), []byte(lineEndingLF))
 	}
-	r.text = string(data)
+	// Decoded LAST, on the bytes the buffer will hold: the BOM and CRLF
+	// steps above are pure ASCII, the same bytes in either encoding. Not
+	// valid UTF-8 → Windows-1252, which round-trips any byte string
+	// (encoding.go). The sum above stays on the RAW bytes — it identifies
+	// the file on disk, not the text we made of it.
+	r.text, r.encoding = DecodeBytes(data)
 	return r, nil
 }
 
@@ -167,29 +173,39 @@ func detectLineEnding(data []byte) string {
 }
 
 // encode serialises the buffer back into the byte form the file had when
-// it was opened: BOM if it had one, and its own line ending. Without this
-// every save of a CRLF file would rewrite it as LF and show the whole
-// file as changed in git.
-func (t *Tab) encode() []byte {
-	text := t.Buffer.String()
+// it was opened: its encoding, BOM if it had one, and its own line
+// ending. Without this every save of a CRLF file would rewrite it as LF
+// and show the whole file as changed in git.
+//
+// The encoding step runs FIRST, on the LF text, so an *UnencodableError's
+// line and column count the buffer the user sees rather than CRLF bytes;
+// the ending and BOM are ASCII and go on after. A refusal returns no
+// bytes at all — there is no partial or substituted form to write.
+func (t *Tab) encode() ([]byte, error) {
+	body, err := EncodeAs(t.Encoding, t.Buffer.String())
+	if err != nil {
+		return nil, err
+	}
 	if t.LineEnding == lineEndingCRLF {
-		text = strings.ReplaceAll(text, lineEndingLF, lineEndingCRLF)
+		body = bytes.ReplaceAll(body, []byte(lineEndingLF), []byte(lineEndingCRLF))
 	}
 	if !t.BOM {
-		return []byte(text)
+		return body, nil
 	}
-	return append(append([]byte(nil), utf8BOM...), text...)
+	return append(append([]byte(nil), utf8BOM...), body...), nil
 }
 
 // EncodedBytes is the buffer exactly as a save would write it — encode
-// with the file's own BOM and line ending — WITHOUT writing it.
+// with the file's own encoding, BOM and line ending — WITHOUT writing it.
+// The error is the save's own refusal (*UnencodableError): a buffer Save
+// would refuse to write is one a copy must not write either.
 //
 // Exported for the app's file copy (app/copypaste.go): copying a file
 // whose tab holds unsaved edits copies what the user is looking at, and
 // a second serialiser out there would be the one that forgot CRLF. The
 // slice is freshly allocated, so it can be handed to another goroutine
 // while the buffer keeps changing.
-func (t *Tab) EncodedBytes() []byte {
+func (t *Tab) EncodedBytes() ([]byte, error) {
 	return t.encode()
 }
 

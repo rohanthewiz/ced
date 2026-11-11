@@ -352,18 +352,6 @@ plus the LSP work done in the seeding session itself
   and build runes / styles for the visible window only; the wrapped
   layout needs the same treatment.
 
-- **N-131** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **Undo depth collapses on big files and depends on WHERE you edit.**
-  Each step is a whole-buffer header copy (16 bytes × lines) charged
-  to the 32MB budget, and `snapshotCost` compares index by index, so a
-  line insert or delete near the top charges every shifted line's
-  bytes. Measured, structural edits: 50k lines → 41 steps survive,
-  200k → 10, 400k → 5; on a 6,000-line, 437KB file of distinct lines
-  (the size of app.go) 61 steps survive near the top against 330 near
-  the end. The trim is silent. Fix: delta undo records (line range,
-  removed lines, inserted lines), so memory and accounting are both
-  O(change); `pushUndoEntry` stays the single write path.
-
 - **N-132** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Find allocates per line per keystroke.** `SetFindQuery("gamma")`
   measured 6 ms at 10k lines, 49 ms / 79MB at 100k, 181 ms / 317MB at
@@ -413,6 +401,11 @@ plus the LSP work done in the seeding session itself
   (the ` · cp1252` segment with a tip, a red `cp1252 ✗` badge while the
   buffer holds a character the file can't save); what remains here is
   the undo-trim half, waiting on N-131.
+  2026-11-10 (`2026-1110-1946-n131-delta-undo`): N-131 landed, so the
+  undo-trim half is unblocked — and smaller than it was: entries are
+  deltas now, so a trim needs 500 steps or 32MB of genuinely large steps
+  (multi-megabyte pastes, a file of very long lines). Still silent when
+  it happens; the flash on the first dropped step is what's left.
 
 - **N-140** · raised `2026-1110-1909-n127-git-status-off-loop` · value low
   **What still forks on the main loop when the snapshot lands.**
@@ -901,6 +894,46 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-10, `2026-1110-1946-n131-delta-undo` —
+  **N-131** undo entries are DELTAS, not buffer copies (undo.go, header
+  flipped): an `undoStep` holds line hunks (start line, removed lines,
+  inserted lines, all private copies) plus the caret at both ends, so
+  memory and the budget's accounting are O(change). The mutators are
+  untouched — `pushUndo` still comes first and the edit follows any way
+  it likes: pushUndo OPENS a step (caret only), and the next push / Undo /
+  Redo SETTLES it by diffing `undoBase` (one private header copy, the
+  buffer at the last checkpoint) against the buffer. `lineHunks`: prefix /
+  suffix trim (pointer compares on untouched lines), index-aligned runs
+  when the counts match, one span when a side is small, and
+  `internal/diff`'s patience differ for a large shifted middle (multi-caret
+  Enter, a formatter run, resolve-all) — the compare panel's own differ,
+  not a second one. A change no pushUndo announced is filed as its own
+  step and drops redo; every step is verified (`hunksFit`) before it is
+  applied, and a misfit drops the history instead of writing. Cost
+  (`stepCost`) = hunk headers + the REMOVED text on the undo stack /
+  INSERTED text on redo (each string charged to the one entry that alone
+  holds it), re-stamped when a step changes stacks. `UndoDepth` counts the
+  open step, so settling never moves it (the workspace-edit journal reads
+  it). Same-shape hunks patch the buffer in place; others rebuild once.
+  Checked: `TestUndoDepth_BigFileKeepsTheWholeHistory` (300 line inserts
+  in a 20k-line file) FAILS on the old code — 24 steps survive at the top,
+  103 at the end — and keeps all 300 in both places now, unwinding to the
+  exact file; `TestStepCost_IndependentOfFileSizeAndPosition` (one
+  inserted line costs the same in 10 and 100k lines, top or end);
+  `TestApplyHunks_RoundTripsRandomEdits` (2000 random edit sets, forward
+  and backward, in-place and rebuild paths);
+  `TestLineHunks_ShiftedMiddleUsesTheDiffer`,
+  `TestUndo_ScatteredMultiEditIsOneCheapStep`,
+  `TestSettle_UnannouncedChangeIsItsOwnStep`,
+  `TestUndo_RefusesAStepThatDoesNotFit`, `TestUndoHunks_DoNotAliasTheBuffer`.
+  Probe before the change (400 structural edits): 6k lines 71 top / 335
+  end, 50k 8 / 41, 200k 2 / 10. One app fixture
+  (`TestCompareRevertHunk_RestoresTheSavedCopy`) wrote `Buffer.Lines`
+  directly — an unannounced change, now its own step — and edits through
+  `ApplyMultiEdit` instead. Real binary (run-ced, a 20k-line file): 60
+  Enters near the top, then 60 `Esc u` → back to the original line count,
+  clean, disk untouched (the old code kept ~24 of those steps).
 
 - closed 2026-11-10, `2026-1110-1909-n127-git-status-off-loop` —
   **N-127** the git status snapshot is off the main loop and two forks

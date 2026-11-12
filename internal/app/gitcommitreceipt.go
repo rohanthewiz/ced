@@ -198,6 +198,13 @@ type receiptContent struct {
 	// — a link hard-wrapped across two rows is one no terminal can
 	// detect and no reader can copy by selecting.
 	width int
+	// window is how long this receipt stays up unattended; 0 means the
+	// commit receipt's own rule (commitReceiptWindow: longer with a
+	// button). A push receipt sets pushReceiptFor. It lives on the
+	// CONTENT, not the state, so a commit receipt replacing a push one
+	// cannot inherit the push's window — the same reason pushBranch and
+	// link live here.
+	window time.Duration
 }
 
 // commitReceiptState is the whole feature's state. Empty hash and head
@@ -372,11 +379,16 @@ func commitReceiptBody(msg string, width int) []string {
 }
 
 // commitReceiptWindow is how long the receipt on screen stays up
-// unattended: the longer commitReceiptPushFor while it offers a button
-// to act on — a push, or a push's link — else commitReceiptFor. Read at every arm — the first one in
+// unattended. A receipt that names its own window (receiptContent.window
+// — the push receipt's pushReceiptFor) gets exactly that. Otherwise the
+// longer commitReceiptPushFor while it offers a button to act on, else
+// commitReceiptFor. Read at every arm — the first one in
 // openGitReceipt and the re-arm when the pointer leaves the box — so a
-// held-then-released push receipt gets its full longer window back.
+// held-then-released receipt gets its full window back.
 func (a *App) commitReceiptWindow() time.Duration {
+	if a.commitReceipt.window > 0 {
+		return a.commitReceipt.window
+	}
 	if a.commitReceiptHasButtons() {
 		return commitReceiptPushFor
 	}

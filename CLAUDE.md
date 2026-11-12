@@ -1030,7 +1030,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (`pushReceiptWidth`) so a PR URL is never hard-wrapped. The first URL
   on a `remote:` line (never the `To <url>` line) is the link →
   `[ Open link ]` (`browserArgv` via `hostRunAsync`) / `[ Copy link ]`
-  (OSC 52), click only, longer window. Output is remembered
+  (OSC 52), click only. The push receipt has its OWN window,
+  `pushReceiptFor` 45s, link or not (`receiptContent.window`, read first
+  by `commitReceiptWindow`; content, so a commit receipt replacing it
+  never inherits it). Output is remembered
   (`App.lastPush`) even when the panel declines; ≡ Git "Show last push
   output" reopens it. A COMMIT receipt carries `[ Push <branch>… ]` (click only,
   keys still pass through) under the Actions row's condition

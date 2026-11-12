@@ -5,9 +5,9 @@
 // Copyright: 2026 Rohan Allison. All rights reserved.
 // =============================================================================
 
-// gitpushreceipt.go shows git's own output for a few seconds after a push
-// from the push dialog succeeds — the commit receipt's twin, drawn in the
-// same panel (gitcommitreceipt.go).
+// gitpushreceipt.go shows git's own output for 45 seconds
+// (pushReceiptFor) after a push from the push dialog succeeds — the
+// commit receipt's twin, drawn in the same panel (gitcommitreceipt.go).
 //
 // Why git's output rather than a summary ced composes: the flash already
 // says "Push main → origin/main — done", and what the user wants next is
@@ -38,8 +38,10 @@
 // receipt's 12-line body) is capped only by the WINDOW, it widens to its
 // longest line so the URL stays on one row (a URL hard-wrapped across two
 // rows is one the terminal cannot detect and a reader cannot select), and
-// a link the remote printed gets "[ Open link ]  [ Copy link ]" buttons
-// and the longer window a receipt with a button earns. The output is also
+// a link the remote printed gets "[ Open link ]  [ Copy link ]" buttons.
+// It stays up for its own pushReceiptFor (45s) rather than the commit
+// receipt's 7s/20s — output read line by line needs a reading window,
+// link or no link. The output is also
 // remembered (App.lastPush) so ≡ Git "Show last push output" can bring
 // the receipt back after it has gone — it is dismissed by any key, and
 // the link is still wanted after the user has typed something.
@@ -54,8 +56,20 @@ package app
 
 import (
 	"strings"
+	"time"
 	"unicode"
 )
+
+// pushReceiptFor is the push receipt's unattended window, with or
+// without a link. Much longer than either commit-receipt window
+// (commitReceiptFor / commitReceiptPushFor) because a push receipt is
+// READ, not glanced at: it can run to a screenful of git and remote
+// output, and the line that matters — the PR link, a `[new branch]`,
+// whatever else the remote printed — is usually the last one. Pushes
+// are also rare enough that a box parked over the code for a while
+// costs little, and every key and click still closes it early, so the
+// extra time only matters to a user who has stopped to read.
+const pushReceiptFor = 45 * time.Second
 
 // receiptOpenLinkLabel and receiptCopyLinkLabel are the push receipt's
 // link buttons. Constants because the geometry (commitReceiptLinkBtns)
@@ -111,6 +125,10 @@ func (a *App) openPushReceipt(head string, out []byte) {
 		lines: pushReceiptBody(out, width-4, pushReceiptMaxLines(a.height)),
 		link:  pushReceiptLink(src),
 		width: width,
+		// Its own window rather than the commit receipt's button rule:
+		// a push receipt is long-form reading whether or not the remote
+		// printed a link (see pushReceiptFor).
+		window: pushReceiptFor,
 	})
 }
 

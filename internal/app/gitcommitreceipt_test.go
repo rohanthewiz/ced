@@ -330,8 +330,8 @@ func TestCommitReceipt_PushButtonOnlyWithATarget(t *testing.T) {
 // TestCommitReceipt_PushOfferGetsTheLongerWindow pins the window length:
 // a commit receipt offering "[ Push <branch>… ]" stays up for
 // commitReceiptPushFor so the push isn't a race, while a receipt without
-// the button (no remote, or a push receipt replacing it) keeps the plain
-// commitReceiptFor.
+// the button (no remote) keeps the plain commitReceiptFor. A push receipt
+// replacing it takes its own pushReceiptFor, not either commit window.
 func TestCommitReceipt_PushOfferGetsTheLongerWindow(t *testing.T) {
 	if commitReceiptPushFor <= commitReceiptFor {
 		t.Fatalf("push window %v should be longer than the plain %v",
@@ -352,8 +352,8 @@ func TestCommitReceipt_PushOfferGetsTheLongerWindow(t *testing.T) {
 	}
 
 	a.showPushReceipt("main → origin/main", []byte("Everything up-to-date\n"))
-	if got := a.commitReceiptWindow(); got != commitReceiptFor {
-		t.Errorf("push receipt: window = %v, want %v", got, commitReceiptFor)
+	if got := a.commitReceiptWindow(); got != pushReceiptFor {
+		t.Errorf("push receipt: window = %v, want %v", got, pushReceiptFor)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 )
@@ -111,6 +112,50 @@ func TestPushReceipt_ReplacesACommitReceipt(t *testing.T) {
 	a.closeCommitReceipt()
 	if a.commitReceiptOpen() || a.commitReceipt.title != "" {
 		t.Error("closing should clear the push receipt's title and head too")
+	}
+}
+
+// TestPushReceipt_OwnFortyFiveSecondWindow pins the push receipt's
+// unattended window: 45s (pushReceiptFor) whether or not the remote
+// printed a link, and on the ≡ Git "Show last push output" reopen too —
+// while a commit receipt replacing it goes back to its own 7s/20s rule
+// rather than inheriting the push's window.
+func TestPushReceipt_OwnFortyFiveSecondWindow(t *testing.T) {
+	if pushReceiptFor != 45*time.Second {
+		t.Fatalf("pushReceiptFor = %v, want 45s", pushReceiptFor)
+	}
+	a := newTestApp(t, t.TempDir())
+
+	a.showPushReceipt("main → origin/main", []byte(samplePushOutput))
+	if a.commitReceipt.link != "" {
+		t.Fatal("fixture: the plain push output should carry no link")
+	}
+	if got := a.commitReceiptWindow(); got != pushReceiptFor {
+		t.Errorf("push without a link: window = %v, want %v", got, pushReceiptFor)
+	}
+
+	a.showPushReceipt("x → origin/x", []byte(samplePRPushOutput))
+	if got := a.commitReceiptWindow(); got != pushReceiptFor {
+		t.Errorf("push with a link: window = %v, want %v", got, pushReceiptFor)
+	}
+
+	a.closeCommitReceipt()
+	a.menuGitLastPush()
+	if got := a.commitReceiptWindow(); got != pushReceiptFor {
+		t.Errorf("reopened push receipt: window = %v, want %v", got, pushReceiptFor)
+	}
+
+	// The commit receipt's rule is untouched: no remote → plain window,
+	// a push target → the button window. Neither is the push's 45s.
+	a.gitIsRepo, a.gitBranch = true, "main"
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	if got := a.commitReceiptWindow(); got != commitReceiptFor {
+		t.Errorf("commit receipt after a push: window = %v, want %v", got, commitReceiptFor)
+	}
+	a.gitHasRemote = true
+	a.handleGitCommitReceipt(receiptEvent(receiptHash, "subject"))
+	if got := a.commitReceiptWindow(); got != commitReceiptPushFor {
+		t.Errorf("commit receipt with push offer: window = %v, want %v", got, commitReceiptPushFor)
 	}
 }
 
@@ -273,8 +318,8 @@ func TestPushReceipt_ShowsEverythingAndKeepsTheLinkWhole(t *testing.T) {
 // TestPushReceipt_LinkButtons pins the two buttons end to end through
 // handleMouse: offered only when the remote printed a link, Copy puts
 // the link on the clipboard (the flash names it), Open hands it to the
-// desktop opener — and either click closes the receipt. A receipt with
-// buttons gets the longer window.
+// desktop opener — and either click closes the receipt. A link does not
+// change the push receipt's window (pushReceiptFor either way).
 func TestPushReceipt_LinkButtons(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
 	a.showPushReceipt("main → origin/main", []byte(samplePushOutput))
@@ -283,8 +328,8 @@ func TestPushReceipt_LinkButtons(t *testing.T) {
 	}
 
 	a.showPushReceipt("x → origin/x", []byte(samplePRPushOutput))
-	if got := a.commitReceiptWindow(); got != commitReceiptPushFor {
-		t.Errorf("link receipt window = %v, want %v", got, commitReceiptPushFor)
+	if got := a.commitReceiptWindow(); got != pushReceiptFor {
+		t.Errorf("link receipt window = %v, want %v", got, pushReceiptFor)
 	}
 	a.draw()
 	a.screen.Show()

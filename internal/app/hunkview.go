@@ -193,8 +193,9 @@ func (a *App) menuShowHunkAtCaret() {
 	a.openHunkView(t, h)
 }
 
-// hasHunkAtCaret gates the editor right-click row: the clicked line (the
-// click already moved the caret there) is part of a change.
+// hasHunkAtCaret gates the "Show change…" row of the editor right-click's
+// Git… picker: the clicked line (the click already moved the caret
+// there) is part of a change.
 func (a *App) hasHunkAtCaret() bool {
 	t := a.activeTabPtr()
 	if t == nil {

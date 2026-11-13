@@ -1876,7 +1876,11 @@ type App struct {
 	blameBands bool
 	fileBlames map[string]*fileBlame
 	blameSeq   map[string]int
-	blameTimer *time.Timer
+	// blameLanded is, per path, the seq whose FULL pass has been handled
+	// — what lets a two-pass request's window answer, arriving late, see
+	// that it was overtaken by its own full answer (handleGitBlame).
+	blameLanded map[string]int
+	blameTimer  *time.Timer
 	blameSig   string
 	// blamePending is a "Blame this line…" asked before any blame for
 	// that file existed — answered when the load lands.

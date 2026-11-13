@@ -12,6 +12,7 @@ package app
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/rohanthewiz/ced/internal/cats"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/filetree"
+	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/readme"
 )
 
@@ -688,45 +690,97 @@ func TestTreeContext_ScrollsWhenTallerThanTheWindow(t *testing.T) {
 	}
 }
 
-// TestEditorContextNewBranchRow pins the right-click repo rows: absent
-// outside a git work tree (no dead rows), "Git status…" then "New
-// branch…" last inside one, and activating New branch closes the popup
-// and opens the same "New branch" prompt as the ≡ Git row.
-func TestEditorContextNewBranchRow(t *testing.T) {
+// openEditorGitPicker right-clicks local (lx, ly), runs the popup's
+// "Git…" row and returns the picker it opened.
+func openEditorGitPicker(t *testing.T, a *App, lx, ly int) *paletteModal {
+	t.Helper()
+	m := openEditorContextAt(t, a, lx, ly)
+	i := contextRowIndex(m, "Git…")
+	if i < 0 {
+		t.Fatalf("no Git… row; rows: %v", labelsOf(m))
+	}
+	m.hover = i
+	m.activate(a)
+	pm, ok := a.modal.(*paletteModal)
+	if !ok {
+		t.Fatalf("modal after the Git… row = %T, want the picker", a.modal)
+	}
+	return pm
+}
+
+// TestEditorContextGitRow pins the right-click repo door (N-081): absent
+// outside a git work tree (no dead rows), ONE "Git…" row last inside
+// one — the four git verbs no longer sit in the popup themselves — and
+// its picker is titled with the clicked line, ends Git status then New
+// branch, and New branch opens the same prompt as the ≡ Git row.
+func TestEditorContextGitRow(t *testing.T) {
 	root := t.TempDir()
 	p := writeStatusTestFile(t, root, "br.txt", "alpha\n")
 	a := newTestApp(t, root)
 	a.openFile(p)
 
 	m := openEditorContextAt(t, a, 1, 0)
-	if i := contextRowIndex(m, "New branch"); i >= 0 {
-		t.Fatalf("New branch offered outside a repo: %v", labelsOf(m))
+	if i := contextRowIndex(m, "Git"); i >= 0 {
+		t.Fatalf("Git… offered outside a repo: %v", labelsOf(m))
 	}
 	a.closeModal()
 
 	a.gitIsRepo = true
 	m = openEditorContextAt(t, a, 1, 0)
-	i := contextRowIndex(m, "New branch")
-	if i != len(m.items)-1 {
-		t.Fatalf("New branch row at %d, want last; rows: %v", i, labelsOf(m))
+	if i := contextRowIndex(m, "Git…"); i != len(m.items)-1 {
+		t.Fatalf("Git… row at %d, want last; rows: %v", i, labelsOf(m))
 	}
-	if s := contextRowIndex(m, "Git status"); s != i-1 {
-		t.Fatalf("Git status row at %d, want just above New branch; rows: %v", s, labelsOf(m))
+	for _, folded := range []string{"Show change", "Blame this line", "Git status", "New branch"} {
+		if i := contextRowIndex(m, folded); i >= 0 {
+			t.Fatalf("%q still in the popup; it belongs in the Git… picker: %v", folded, labelsOf(m))
+		}
 	}
-	m.hover = i
-	m.activate(a)
-	pm, ok := a.modal.(*promptModal)
+	a.closeModal()
+
+	pm := openEditorGitPicker(t, a, 1, 0)
+	if pm.title != "Git · br.txt:1" {
+		t.Errorf("picker title = %q, want it to name the clicked line", pm.title)
+	}
+	rows := pickerRows(t, a)
+	if n := len(rows); n < 2 || rows[n-2] != "Git status…" || rows[n-1] != "New branch…" {
+		t.Fatalf("picker rows = %v, want …, Git status…, New branch…", rows)
+	}
+	pickByLabel(t, a, "New branch")
+	pr, ok := a.modal.(*promptModal)
 	if !ok {
-		t.Fatalf("modal after the row = %T, want the New branch prompt", a.modal)
+		t.Fatalf("modal after New branch = %T, want the New branch prompt", a.modal)
 	}
-	if pm.title != "New branch" {
-		t.Fatalf("prompt title = %q, want New branch", pm.title)
+	if pr.title != "New branch" {
+		t.Fatalf("prompt title = %q, want New branch", pr.title)
 	}
 }
 
-// TestEditorContextGitStatusRow runs the right-click "Git status…" row
-// against a real repo: the popup gives up the modal slot first, so the
-// report (which declines an occupied slot) lands in the info modal.
+// TestEditorGitPicker_UntitledBuffer pins the picker's shape on a buffer
+// with no file: no line to name in the title, and no Blame row — an
+// untitled buffer has no history — but the two repo rows remain.
+func TestEditorGitPicker_UntitledBuffer(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.gitIsRepo = true
+	tab, _ := editor.NewTab("")
+	a.tabs = append(a.tabs, tab)
+	a.activeTab = 0
+	a.editorGitPicker(tab)
+	pm, ok := a.modal.(*paletteModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the picker", a.modal)
+	}
+	if pm.title != "Git" {
+		t.Errorf("title = %q, want plain Git", pm.title)
+	}
+	if got := strings.Join(pickerRows(t, a), " | "); got != "Git status… | New branch…" {
+		t.Errorf("rows = %q, want only the repo rows", got)
+	}
+}
+
+// TestEditorContextGitStatusRow runs "Git status…" from the right-click
+// Git… picker against a real repo: the popup and then the picker give up
+// the modal slot first, so the report (which declines an occupied slot)
+// lands in the info modal.
 func TestEditorContextGitStatusRow(t *testing.T) {
 	if !gitAvailable() {
 		t.Skip("git not on PATH")
@@ -737,13 +791,8 @@ func TestEditorContextGitStatusRow(t *testing.T) {
 	a.refreshGitStatus()
 	a.openFile(p)
 
-	m := openEditorContextAt(t, a, 1, 0)
-	i := contextRowIndex(m, "Git status")
-	if i < 0 {
-		t.Fatalf("no Git status row in a repo; rows: %v", labelsOf(m))
-	}
-	m.hover = i
-	m.activate(a)
+	openEditorGitPicker(t, a, 1, 0)
+	pickByLabel(t, a, "Git status")
 	pumpAppEvents(t, a, func() bool {
 		cm, ok := a.modal.(*confirmModal)
 		return ok && cm.info
@@ -798,28 +847,34 @@ func TestEditorContextToggleCommentRow(t *testing.T) {
 	}
 }
 
-// TestEditorContextBlameRow pins "Blame this line…": absent outside a
-// repo, and inside one it leads the git rows (Blame, Git status, New
-// branch).
-func TestEditorContextBlameRow(t *testing.T) {
+// TestEditorContextBlameFileRow pins the blame row of the right-click
+// Git… picker: "Blame this file" on a saved, unchanged line, leading the
+// picker (Blame, Git status, New branch); picking it turns the blame
+// column on, after which the same row reads "Hide blame" and turns it
+// back off — the Esc A toggle behind a pointer door.
+func TestEditorContextBlameFileRow(t *testing.T) {
 	root := t.TempDir()
 	p := writeStatusTestFile(t, root, "b.txt", "alpha\n")
 	a := newTestApp(t, root)
 	a.openFile(p)
-
-	m := openEditorContextAt(t, a, 1, 0)
-	if i := contextRowIndex(m, "Blame this line"); i >= 0 {
-		t.Fatalf("blame row offered outside a repo: %v", labelsOf(m))
-	}
-	a.closeModal()
-
 	a.gitIsRepo = true
-	m = openEditorContextAt(t, a, 1, 0)
-	b := contextRowIndex(m, "Blame this line")
-	s := contextRowIndex(m, "Git status")
-	n := contextRowIndex(m, "New branch")
-	if b < 0 || s != b+1 || n != s+1 {
-		t.Fatalf("git rows at blame=%d status=%d branch=%d, want consecutive; rows: %v", b, s, n, labelsOf(m))
+
+	openEditorGitPicker(t, a, 1, 0)
+	if got := strings.Join(pickerRows(t, a), " | "); got != "Blame this file | Git status… | New branch…" {
+		t.Fatalf("picker rows = %q, want Blame this file, Git status, New branch", got)
+	}
+	pickByLabel(t, a, "Blame this file")
+	if !a.blameOn {
+		t.Fatal("Blame this file should switch the blame column on")
+	}
+
+	openEditorGitPicker(t, a, 1, 0)
+	if rows := pickerRows(t, a); rows[0] != "Hide blame" {
+		t.Fatalf("with blame on the row = %q, want Hide blame", rows[0])
+	}
+	pickByLabel(t, a, "Hide blame")
+	if a.blameOn {
+		t.Fatal("Hide blame should switch the column off")
 	}
 }
 
@@ -925,6 +980,60 @@ func TestEditorContext_SplitRowsAreInert(t *testing.T) {
 	a.draw()
 	if r, _, _, _ := a.screen.GetContent(mx+5, cy); r != '┄' {
 		t.Errorf("split row paints %q at its label column, want the dotted rule", r)
+	}
+}
+
+// TestEditorContextSymbolRows pins the three LSP verbs N-081 brought into
+// the right-click menu: they sit in the LSP run in ≡ Code's order
+// (definition, references, symbol uses, implementation, type definition)
+// ahead of the rows that answer in place, they are live with a server up,
+// and each runs its ≡ Code verb at the CLICKED symbol — the request
+// reaches the server under its own method.
+func TestEditorContextSymbolRows(t *testing.T) {
+	a, fake, goPath := newLSPTestApp(t)
+	a.openFile(goPath)
+	a.draw()
+	tab := a.activeTabPtr()
+	_, _, ew, eh := a.editorRect()
+	// "main" in "func main() {" — line 2, col 6. The caret starts at the
+	// top of the file, so the right-click is what aims the verbs.
+	cx, cy, ok := tab.PosScreenCell(editor.Position{Line: 2, Col: 6}, ew, eh)
+	if !ok {
+		t.Fatal("line 2 is not on screen")
+	}
+
+	m := openEditorContextAt(t, a, cx, cy)
+	want := []string{
+		"Completions", "Go to definition", "Find references",
+		"Highlight symbol uses", "Go to implementation", "Go to type definition",
+		"Rename symbol…", "Hover info", "Code actions…",
+	}
+	if got := labelsOf(m); len(got) < len(want) || strings.Join(got[:len(want)], " | ") != strings.Join(want, " | ") {
+		t.Fatalf("LSP run = %v, want it to open with %v", got, want)
+	}
+	for _, row := range want[3:6] {
+		if !m.items[contextRowIndex(m, row)].usable(a) {
+			t.Errorf("%q is dimmed with a server up", row)
+		}
+	}
+	a.closeModal()
+
+	for _, tc := range []struct{ row, call string }{
+		{"Highlight symbol uses", "documentHighlight:main.go"},
+		{"Go to implementation", "locations:" + lsp.MethodImplementation + ":main.go"},
+		{"Go to type definition", "locations:" + lsp.MethodTypeDefinition + ":main.go"},
+	} {
+		tab.MoveCursorTo(editor.Position{}, false) // the click must re-aim it
+		m := openEditorContextAt(t, a, cx, cy)
+		m.hover = contextRowIndex(m, tc.row)
+		m.activate(a)
+		if a.modal != nil {
+			t.Fatalf("%s: modal %T still up after the row ran", tc.row, a.modal)
+		}
+		pumpAppEvents(t, a, func() bool { return slices.Contains(fake.callLog(), tc.call) })
+		if got := tab.Cursor; got != (editor.Position{Line: 2, Col: 6}) {
+			t.Errorf("%s: caret = %+v, want the clicked symbol", tc.row, got)
+		}
 	}
 }
 

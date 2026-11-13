@@ -16,7 +16,7 @@
 // one cell wide. The layer supplies the column; this file supplies what
 // goes in it and what a click on it means.
 //
-// Four decisions carry the design:
+// Five decisions carry the design:
 //
 //  1. **It blames the BUFFER, not the file on disk.** `git blame
 //     --contents -` takes the text on stdin, so the annotations line up
@@ -44,6 +44,14 @@
 //     a settle timer re-blames when it stops. The previous answer stays
 //     on screen meanwhile — blanking the column between keystrokes
 //     would be a flicker the user cannot switch off.
+//
+//  5. **A very long file is blamed what-you-see first.** Past
+//     blameWindowAbove lines, a first blame runs `-L` over the screens
+//     around the viewport beside the whole-file pass; the window lands
+//     in a fraction of the time and the rest of the file fills in when
+//     the full pass does (seconds, on a file with deep history). Lines
+//     still waiting show "…" rather than nothing, so the half-loaded
+//     column never reads as lines without an author.
 //
 // Two looks (userconfig "blamestyle", ≡ Git "Blame style" row), and
 // decision 3 only binds the compact one:
@@ -88,6 +96,26 @@ import (
 // context nobody is waiting on.
 const blameSettle = 900 * time.Millisecond
 
+// blameWindowAbove is the buffer length (lines) past which a FRESH blame
+// — nothing for the file on screen yet — is asked in two passes: the
+// lines around the viewport first (`git blame -L`), then the whole file,
+// the two running side by side. The window answers in a fraction of the
+// time, so the column appears at once and fills in for the pages the user
+// cannot see yet when the full pass lands.
+//
+// Gated on length because below it the window saves nothing and costs a
+// second fork. Measured 2026-11-13: ced's 6,274-line app.go blames whole
+// in 0.17s (a 45-line window: 0.12s); duckdb's 32,182-line gram.cpp
+// takes 3.4s whole and 0.14s for a mid-file window (1.85s for lines
+// 1–45, whose history is longest). History depth drives the cost more
+// than length does, but length is the one signal known before forking.
+const blameWindowAbove = 5000
+
+// blamePendingText marks a line a two-pass blame has not answered yet:
+// shown on the first row of each unanswered run, so a half-loaded column
+// reads as "coming" rather than as lines with no authorship.
+const blamePendingText = "…"
+
 // uncommittedHash is what git blame reports for a line that is not in
 // any commit yet — the all-zero object id.
 const uncommittedHash = "0000000000000000000000000000000000000000"
@@ -130,6 +158,15 @@ type fileBlame struct {
 	bandWidth int
 	bandDateW int
 	bands     []int
+
+	// partial marks the WINDOW pass of a two-pass blame (blameWindowAbove):
+	// only the lines around the viewport are answered, the rest are
+	// zero-value entries that at() reports as unknown. Every width above
+	// is measured over the window alone, so the column may change width
+	// once, when the full pass replaces this — the one exception to "the
+	// width is a property of the file", traded for a column that appears
+	// in a tenth of a second instead of several.
+	partial bool
 }
 
 // newFileBlame wraps parsed lines with everything both styles measure
@@ -145,13 +182,29 @@ func newFileBlame(lines []blameLine) *fileBlame {
 	}
 }
 
-// at returns the blame for a 0-based buffer line, ok=false past the end
-// of what git answered about (the buffer has grown since).
+// at returns the blame for a 0-based buffer line, ok=false for a line
+// git said nothing about: past the end of its answer (the buffer has
+// grown since), or outside the range a windowed pass asked for. The
+// parser leaves those as zero-value entries (empty Hash) — an uncommitted
+// line still has the all-zero hash — so "no hash" means "no answer", and
+// no caller can mistake a line not yet blamed for one not yet committed.
 func (fb *fileBlame) at(line int) (blameLine, bool) {
-	if fb == nil || line < 0 || line >= len(fb.lines) {
+	if fb == nil || line < 0 || line >= len(fb.lines) || fb.lines[line].Hash == "" {
 		return blameLine{}, false
 	}
 	return fb.lines[line], true
+}
+
+// pendingAt reports whether line is one a partial blame has not answered
+// yet but the full pass will: inside the buffer (n lines), outside the
+// window. Always false for a full blame — there, an unanswered line is
+// one git will never answer (the buffer grew past it).
+func (fb *fileBlame) pendingAt(line, n int) bool {
+	if fb == nil || !fb.partial || line < 0 || line >= n {
+		return false
+	}
+	_, ok := fb.at(line)
+	return !ok
 }
 
 // -----------------------------------------------------------------------------
@@ -725,11 +778,25 @@ func contrastRatio(a, b tcell.Color) float64 {
 // come back under the all-zero hash instead of shifting everything
 // below them onto the wrong commits.
 func loadFileBlame(rootDir, path, contents string, now time.Time) *fileBlame {
+	return loadFileBlameRange(rootDir, path, contents, now, 0, 0)
+}
+
+// loadFileBlameRange is loadFileBlame limited to lines lo..hi (1-based,
+// inclusive — git's `-L` spelling) when lo > 0: the window pass of a
+// two-pass blame. git stops walking history once every line in the range
+// is attributed, which is where the time goes on a long file. The result
+// is marked partial; the porcelain carries FINAL line numbers, so the
+// parser already puts each answer at its own line and leaves the rest
+// empty.
+func loadFileBlameRange(rootDir, path, contents string, now time.Time, lo, hi int) *fileBlame {
 	if rootDir == "" || path == "" {
 		return nil
 	}
-	cmd := exec.Command("git", "-C", rootDir, "blame", "--porcelain",
-		"--contents", "-", "--", path)
+	args := []string{"-C", rootDir, "blame", "--porcelain", "--contents", "-"}
+	if lo > 0 {
+		args = append(args, "-L", strconv.Itoa(lo)+","+strconv.Itoa(hi))
+	}
+	cmd := exec.Command("git", append(args, "--", path)...)
 	cmd.Stdin = strings.NewReader(contents)
 	out, err := cmd.Output()
 	if err != nil {
@@ -739,16 +806,20 @@ func loadFileBlame(rootDir, path, contents string, now time.Time) *fileBlame {
 	if len(lines) == 0 {
 		return nil
 	}
-	return newFileBlame(lines)
+	fb := newFileBlame(lines)
+	fb.partial = lo > 0
+	return fb
 }
 
 // gitBlameEvent carries one finished blame back to the main loop,
-// stamped with the request sequence it was born under.
+// stamped with the request sequence it was born under. partial marks the
+// window pass of a two-pass request; both passes share one seq.
 type gitBlameEvent struct {
-	when  time.Time
-	path  string
-	seq   int
-	blame *fileBlame
+	when    time.Time
+	path    string
+	seq     int
+	blame   *fileBlame
+	partial bool
 }
 
 // When satisfies the tcell.Event interface.
@@ -762,6 +833,20 @@ func (e *gitBlameEvent) When() time.Time { return e.when }
 // Callers gate on blameOn where the request is AMBIENT (a tab opening,
 // a save); the one deliberate caller — "Blame this line…" on a file
 // nobody has blamed — does not, which is why the check is not in here.
+//
+// A long file with nothing on screen yet gets TWO passes under one seq
+// (blameWindow): the viewport's neighbourhood and the whole file, on two
+// goroutines so the full pass is not queued behind the window.
+//
+//	request ──seq n──┬─► git blame -L lo,hi ──► partial ─┐  usually first
+//	                 └─► git blame (whole)  ──► full ────┤
+//	                                                     ▼
+//	                                   handleGitBlame: full always wins;
+//	                                   a partial after its full is dropped
+//
+// A re-blame (typing settled, a save) asks the whole file only: the
+// previous answer stays on screen meanwhile, so there is no empty column
+// for a window to fill.
 func (a *App) requestFileBlame(t *editor.Tab) {
 	if t == nil || t.Path == "" || t.IsImage() || a.screen == nil {
 		return
@@ -774,13 +859,43 @@ func (a *App) requestFileBlame(t *editor.Tab) {
 	rev := t.EditRev
 	contents := blameContents(t)
 	scr, root, path := a.screen, a.rootDir, t.Path
-	go func() {
-		fb := loadFileBlame(root, path, contents, time.Now())
+	run := func(lo, hi int) {
+		fb := loadFileBlameRange(root, path, contents, time.Now(), lo, hi)
 		if fb != nil {
 			fb.rev = rev
 		}
-		_ = scr.PostEvent(&gitBlameEvent{when: time.Now(), path: path, seq: seq, blame: fb})
-	}()
+		_ = scr.PostEvent(&gitBlameEvent{when: time.Now(), path: path, seq: seq, blame: fb, partial: lo > 0})
+	}
+	if lo, hi, ok := a.blameWindow(t); ok && a.fileBlames[path] == nil {
+		go run(lo, hi)
+	}
+	go run(0, 0)
+}
+
+// blameWindow is the range a window pass asks for, 1-based inclusive:
+// one screen above the viewport, the viewport, one screen below — so a
+// page or two of scrolling stays annotated while the full pass runs.
+// ok=false for a buffer at or under blameWindowAbove lines.
+//
+// ScrollY is a LINE index even under soft wrap, and a wrapped screen
+// shows fewer lines than it has rows, so ScrollY + viewH over-covers the
+// viewport rather than missing any of it.
+func (a *App) blameWindow(t *editor.Tab) (lo, hi int, ok bool) {
+	n := t.Buffer.LineCount()
+	if n <= blameWindowAbove {
+		return 0, 0, false
+	}
+	// git counts lines by their terminators: a buffer ending in "\n"
+	// splits into a trailing "" that is no line to git, and a range
+	// reaching it is refused ("file has only N lines").
+	if t.Buffer.Lines[n-1] == "" {
+		n--
+	}
+	_, _, _, viewH := a.editorRect()
+	viewH = max(viewH, 1)
+	lo = max(t.ScrollY-viewH, 0) + 1
+	hi = min(t.ScrollY+2*viewH, n)
+	return lo, hi, lo <= hi
 }
 
 // blameContents is the buffer as `git blame --contents -` must see it:
@@ -798,12 +913,27 @@ func blameContents(t *editor.Tab) string {
 // every answer describes one exact revision of the buffer, so a slow
 // early one landing last would annotate today's lines with yesterday's
 // authorship — the one failure mode this feature must not have.
+//
+// The two passes of a windowed request share a seq, so seq alone cannot
+// order them: the FULL pass always wins, and blameLanded records that it
+// has, so a window pass arriving after its own full answer is dropped
+// rather than shrinking the column back to a few screens. A window that
+// failed (nil) is ignored — the full pass decides whether there is blame.
 func (a *App) handleGitBlame(e *gitBlameEvent) {
 	if a.blameSeq[e.path] != e.seq {
 		return
 	}
+	if e.partial && (e.blame == nil || a.blameLanded[e.path] == e.seq) {
+		return
+	}
 	if a.fileBlames == nil {
 		a.fileBlames = map[string]*fileBlame{}
+	}
+	if !e.partial {
+		if a.blameLanded == nil {
+			a.blameLanded = map[string]int{}
+		}
+		a.blameLanded[e.path] = e.seq
 	}
 	if e.blame == nil {
 		delete(a.fileBlames, e.path)
@@ -814,9 +944,15 @@ func (a *App) handleGitBlame(e *gitBlameEvent) {
 	// A question asked before there was an answer: "Blame this line…" on
 	// a file nobody had blamed yet parked the line here rather than
 	// making the user press the row twice, once to load and once to ask.
+	// A window pass answers it only if the line is inside the window;
+	// otherwise the question waits for the full pass, which always
+	// settles it (an answer, or nothing to say).
 	if p := a.blamePending; p != nil && p.path == e.path {
-		a.blamePending = nil
-		if b, ok := e.blame.at(p.line); ok {
+		b, ok := e.blame.at(p.line)
+		if ok || !e.partial {
+			a.blamePending = nil
+		}
+		if ok {
 			a.revealBlameCommit(b)
 		}
 	}
@@ -995,8 +1131,9 @@ func (s gitBlameSource) Annotations(t *editor.Tab, th theme.Theme, firstLine, la
 		return 0, nil
 	}
 	fb := s.app.fileBlames[t.Path]
+	n := t.Buffer.LineCount()
 	if s.app.blameBands {
-		return blameBandAnnotations(fb, th, firstLine, lastLine)
+		return blameBandAnnotations(fb, th, firstLine, lastLine, n)
 	}
 	if fb == nil || fb.width == 0 {
 		return 0, nil
@@ -1004,7 +1141,8 @@ func (s gitBlameSource) Annotations(t *editor.Tab, th theme.Theme, firstLine, la
 	out := make(map[int]editor.LineAnnotation, lastLine-firstLine+1)
 	for line := max(firstLine, 0); line <= lastLine; line++ {
 		b, ok := fb.at(line)
-		if !ok || b.Hash == "" {
+		if !ok {
+			blamePendingMark(out, fb, th, line, firstLine, n)
 			continue
 		}
 		if line > firstLine {
@@ -1028,14 +1166,17 @@ func (s gitBlameSource) Annotations(t *editor.Tab, th theme.Theme, firstLine, la
 // suppression here — the band color is what marks the boundary, so the
 // blank rows compact needs to make boundaries visible would only hide
 // who wrote the line the reader is looking at.
-func blameBandAnnotations(fb *fileBlame, th theme.Theme, firstLine, lastLine int) (int, map[int]editor.LineAnnotation) {
+//
+// n is the buffer's line count, for the pending marks of a partial blame.
+func blameBandAnnotations(fb *fileBlame, th theme.Theme, firstLine, lastLine, n int) (int, map[int]editor.LineAnnotation) {
 	if fb == nil || fb.bandWidth == 0 {
 		return 0, nil
 	}
 	out := make(map[int]editor.LineAnnotation, lastLine-firstLine+1)
 	for line := max(firstLine, 0); line <= lastLine; line++ {
 		b, ok := fb.at(line)
-		if !ok || b.Hash == "" {
+		if !ok {
+			blamePendingMark(out, fb, th, line, firstLine, n)
 			continue
 		}
 		ann := editor.LineAnnotation{Text: blameBandText(b, fb.bandDateW, fb.bandWidth), FG: th.Text}
@@ -1051,6 +1192,22 @@ func blameBandAnnotations(fb *fileBlame, th theme.Theme, firstLine, lastLine int
 		out[line] = ann
 	}
 	return fb.bandWidth, out
+}
+
+// blamePendingMark writes the "not answered yet" mark for line into out
+// when a partial blame (the window pass) has not reached it: on the FIRST
+// row of each unanswered run in view only, like compact's run labels — a
+// column of ellipses down every off-window row would be louder than the
+// answers. Muted and bandless in both styles: a mark of absence, not an
+// annotation. Shared by both painters so the two looks agree on it.
+func blamePendingMark(out map[int]editor.LineAnnotation, fb *fileBlame, th theme.Theme, line, firstLine, n int) {
+	if !fb.pendingAt(line, n) {
+		return
+	}
+	if line > max(firstLine, 0) && fb.pendingAt(line-1, n) {
+		return // inside a run already marked above.
+	}
+	out[line] = editor.LineAnnotation{Text: " " + blamePendingText, FG: th.Muted}
 }
 
 // -----------------------------------------------------------------------------
@@ -1191,6 +1348,16 @@ func (a *App) menuBlameCommit() {
 	b, ok := a.blameForCursor()
 	if ok {
 		a.revealBlameCommit(b)
+		return
+	}
+	// A window pass is on screen and the caret's line is outside it: the
+	// full pass is already running (a partial is only ever installed
+	// while its full pass is out — the full answer replaces or deletes
+	// it), so park the question for it. Asking again would bump the seq
+	// and throw that pass away, restarting the slowest part of the wait.
+	if fb := a.fileBlames[t.Path]; fb != nil && fb.partial {
+		a.blamePending = &blamePendingReveal{path: t.Path, line: t.Cursor.Line}
+		a.flash("Blaming " + t.DisplayName() + "…")
 		return
 	}
 	// Nothing known about this file yet. Ask git, and park the question

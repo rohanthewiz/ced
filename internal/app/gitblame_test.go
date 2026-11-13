@@ -1001,3 +1001,281 @@ func TestParseBlamePorcelain_DisambiguatesSharedGivenNames(t *testing.T) {
 		t.Fatalf("the full name must survive for the click flash, got %q", lines[2].Full)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Two-pass blame for long files
+// -----------------------------------------------------------------------------
+
+// windowOf is the fixture transcript as a WINDOW pass that answered only
+// lines lo..hi (0-based, inclusive): everything else zero-value, the
+// shape `git blame -L` leaves after the parser places lines by number.
+func windowOf(lo, hi int) *fileBlame {
+	lines := parseBlamePorcelain([]byte(blamePorcelain), blameNow)
+	for i := range lines {
+		if i < lo || i > hi {
+			lines[i] = blameLine{}
+		}
+	}
+	fb := newFileBlame(lines)
+	fb.partial = true
+	return fb
+}
+
+// TestFileBlameAt_UnansweredLineIsUnknown pins the rule the window pass
+// leans on: a line git said nothing about is UNKNOWN (ok=false), never
+// a blank answer a caller could take for "not committed" — while a line
+// that really is uncommitted (the all-zero hash) still answers. pendingAt
+// is true only for a partial blame's unanswered lines inside the buffer.
+func TestFileBlameAt_UnansweredLineIsUnknown(t *testing.T) {
+	fb := windowOf(1, 2)
+	fb.lines[2].Hash = uncommittedHash
+	if _, ok := fb.at(0); ok {
+		t.Error("line 0 is outside the window, want unknown")
+	}
+	if b, ok := fb.at(1); !ok || b.Author != "Rohan" {
+		t.Errorf("line 1 = %+v ok=%v, want Rohan's answer", b, ok)
+	}
+	if b, ok := fb.at(2); !ok || b.committed() {
+		t.Errorf("an uncommitted line must still answer, got %+v ok=%v", b, ok)
+	}
+	for _, tc := range []struct {
+		line int
+		want bool
+	}{{0, true}, {1, false}, {3, true}, {4, true}, {5, false}, {-1, false}} {
+		if got := fb.pendingAt(tc.line, 5); got != tc.want {
+			t.Errorf("pendingAt(%d) = %v, want %v", tc.line, got, tc.want)
+		}
+	}
+	fb.partial = false
+	if fb.pendingAt(0, 5) {
+		t.Error("a FULL blame has nothing pending: an unanswered line there is one git will never answer")
+	}
+}
+
+// TestBlameWindow_LongFilesAroundTheViewport pins the window pass's
+// range: none at or under blameWindowAbove lines; otherwise a screen
+// above the viewport through a screen below, 1-based for `-L`, clamped
+// at the top and at git's last line — which is not the buffer's trailing
+// "" when the file ends in a newline.
+func TestBlameWindow_LongFilesAroundTheViewport(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	_, _, _, viewH := a.editorRect()
+	tab, _ := editor.NewTab("")
+
+	tab.Buffer = editor.NewBuffer(strings.Repeat("x\n", blameWindowAbove-1) + "x") // exactly the threshold
+	if _, _, ok := a.blameWindow(tab); ok {
+		t.Fatalf("%d lines got a window pass, want only past the threshold", tab.Buffer.LineCount())
+	}
+
+	tab.Buffer = editor.NewBuffer(strings.Repeat("x\n", 6000)) // 6000 lines + the trailing ""
+	if lo, hi, ok := a.blameWindow(tab); !ok || lo != 1 || hi != 2*viewH {
+		t.Errorf("top of file: %d..%d ok=%v, want 1..%d", lo, hi, ok, 2*viewH)
+	}
+	tab.ScrollY = 3000
+	if lo, hi, _ := a.blameWindow(tab); lo != 3000-viewH+1 || hi != 3000+2*viewH {
+		t.Errorf("mid file: %d..%d, want %d..%d", lo, hi, 3000-viewH+1, 3000+2*viewH)
+	}
+	tab.ScrollY = 5990
+	if _, hi, _ := a.blameWindow(tab); hi != 6000 {
+		t.Errorf("end of file: hi = %d, want git's last line 6000 (not the trailing \"\")", hi)
+	}
+}
+
+// TestHandleGitBlame_FullPassWinsOverTheWindow pins the ordering of a
+// two-pass request's answers, which share a seq: a window lands when
+// nothing better is there, the full answer replaces it, a window that
+// arrives AFTER its full answer is dropped (also when the full answer
+// was "no blame"), and a failed window deletes nothing.
+func TestHandleGitBlame_FullPassWinsOverTheWindow(t *testing.T) {
+	a, tab := blameFixture(t)
+	path := tab.Path
+	full := newFileBlame(parseBlamePorcelain([]byte(blamePorcelain), blameNow))
+
+	// The usual order: window, then full.
+	a.fileBlames = nil
+	a.blameSeq = map[string]int{path: 1}
+	win := windowOf(2, 3)
+	a.handleGitBlame(&gitBlameEvent{path: path, seq: 1, blame: win, partial: true})
+	if a.fileBlames[path] != win {
+		t.Fatal("the window answer should show while the full pass runs")
+	}
+	a.handleGitBlame(&gitBlameEvent{path: path, seq: 1, blame: full})
+	if a.fileBlames[path] != full {
+		t.Fatal("the full answer replaces the window")
+	}
+
+	// Full first: the late window must not shrink the column back.
+	a.fileBlames = nil
+	a.blameSeq[path] = 2
+	a.handleGitBlame(&gitBlameEvent{path: path, seq: 2, blame: full})
+	a.handleGitBlame(&gitBlameEvent{path: path, seq: 2, blame: windowOf(2, 3), partial: true})
+	if a.fileBlames[path] != full {
+		t.Fatal("a window arriving after its full answer must be dropped")
+	}
+
+	// A failed window deletes nothing; the full pass decides.
+	a.blameSeq[path] = 3
+	a.handleGitBlame(&gitBlameEvent{path: path, seq: 3, blame: nil, partial: true})
+	if a.fileBlames[path] != full {
+		t.Fatal("a failed window pass must not delete the column")
+	}
+
+	// Full says "no blame", then the window lands: still no blame.
+	a.blameSeq[path] = 4
+	a.handleGitBlame(&gitBlameEvent{path: path, seq: 4, blame: nil})
+	a.handleGitBlame(&gitBlameEvent{path: path, seq: 4, blame: windowOf(2, 3), partial: true})
+	if a.fileBlames[path] != nil {
+		t.Fatal("a window after a failed full pass must not resurrect the column")
+	}
+}
+
+// TestHandleGitBlame_ParkedLineWaitsForItsPass pins the parked "Blame
+// this line…" question across two passes: a window that covers the line
+// answers it; one that doesn't leaves it parked for the full pass.
+func TestHandleGitBlame_ParkedLineWaitsForItsPass(t *testing.T) {
+	a, tab := blameFixture(t)
+	path := tab.Path
+	a.gitLog.open = true // reveal into an open panel; no git fork
+	a.fileBlames = nil
+	a.blameSeq = map[string]int{path: 1}
+
+	a.blamePending = &blamePendingReveal{path: path, line: 0}
+	a.handleGitBlame(&gitBlameEvent{path: path, seq: 1, blame: windowOf(2, 3), partial: true})
+	if a.blamePending == nil {
+		t.Fatal("a window that does not cover the line must leave the question parked")
+	}
+	a.handleGitBlame(&gitBlameEvent{path: path, seq: 1, blame: newFileBlame(parseBlamePorcelain([]byte(blamePorcelain), blameNow))})
+	if a.blamePending != nil || !strings.HasPrefix(a.statusMsg, "1111111 ") {
+		t.Fatalf("the full pass should answer it: pending=%+v flash=%q", a.blamePending, a.statusMsg)
+	}
+
+	a.blameSeq[path] = 2
+	a.fileBlames = nil
+	a.blamePending = &blamePendingReveal{path: path, line: 2}
+	a.handleGitBlame(&gitBlameEvent{path: path, seq: 2, blame: windowOf(2, 3), partial: true})
+	if a.blamePending != nil || !strings.HasPrefix(a.statusMsg, "2222222 ") {
+		t.Fatalf("a window that covers the line answers at once: pending=%+v flash=%q", a.blamePending, a.statusMsg)
+	}
+}
+
+// TestMenuBlameCommit_WaitsForTheRunningFullPass: with a window on
+// screen and the caret outside it, the ≡ row parks the question rather
+// than asking again — a new request would bump the seq and throw away
+// the full pass already running, restarting the slowest part.
+func TestMenuBlameCommit_WaitsForTheRunningFullPass(t *testing.T) {
+	a, tab := blameFixture(t)
+	a.fileBlames[tab.Path] = windowOf(2, 3)
+	a.blameSeq = map[string]int{tab.Path: 7}
+	tab.MoveCursorTo(editor.Position{Line: 0}, false)
+
+	a.menuBlameCommit()
+	if a.blameSeq[tab.Path] != 7 {
+		t.Fatalf("seq moved to %d: the running full pass was thrown away", a.blameSeq[tab.Path])
+	}
+	if p := a.blamePending; p == nil || p.line != 0 {
+		t.Fatalf("pending = %+v, want the caret line parked", p)
+	}
+	if !strings.HasPrefix(a.statusMsg, "Blaming ") {
+		t.Errorf("flash = %q, want the Blaming… note", a.statusMsg)
+	}
+}
+
+// TestBlameAnnotations_MarkUnansweredRuns pins the half-loaded column in
+// both styles: the first row of each run the window pass has not
+// answered carries a muted "…", the rest of the run stays blank, and the
+// answered lines paint as usual — so the gap reads as "coming", not as
+// lines with no author.
+func TestBlameAnnotations_MarkUnansweredRuns(t *testing.T) {
+	for _, bands := range []bool{false, true} {
+		a, tab := blameFixture(t)
+		a.blameBands = bands
+		a.fileBlames[tab.Path] = windowOf(2, 2) // lines 0-1 and 3 unanswered
+		_, out := (gitBlameSource{app: a}).Annotations(tab, a.theme, 0, 3)
+
+		for _, line := range []int{0, 3} {
+			got, ok := out[line]
+			if !ok || strings.TrimSpace(got.Text) != blamePendingText || got.FG != a.theme.Muted {
+				t.Errorf("bands=%v line %d = %+v (ok=%v), want a muted %q", bands, line, got, ok, blamePendingText)
+			}
+		}
+		if got, ok := out[1]; ok {
+			t.Errorf("bands=%v line 1 = %+v, want blank inside the marked run", bands, got)
+		}
+		if got := out[2]; !strings.Contains(got.Text, "Ada") {
+			t.Errorf("bands=%v line 2 = %q, want Ada's answer", bands, got.Text)
+		}
+	}
+}
+
+// TestRequestFileBlame_LongFileTwoPassesEndToEnd runs the two passes
+// against a real repository: a file past blameWindowAbove, blamed fresh,
+// posts a WINDOW answer (the top screens, partial) and a FULL one under
+// one seq, and whichever order they land in, the full answer is what
+// stays.
+func TestRequestFileBlame_LongFileTwoPassesEndToEnd(t *testing.T) {
+	if !gitAvailable() {
+		t.Skip("git not on PATH")
+	}
+	repo := initRepo(t)
+	path := filepath.Join(repo, "long.txt")
+	var sb strings.Builder
+	for i := range blameWindowAbove + 200 {
+		fmt.Fprintf(&sb, "line %d\n", i)
+	}
+	writeFileT(t, path, sb.String())
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-q", "-m", "long")
+
+	a := newTestApp(t, repo)
+	a.gitIsRepo = true
+	tab := openTabAtPath(t, a, path)
+	a.blameOn = true
+	a.requestFileBlame(tab)
+
+	var got []*gitBlameEvent
+	deadline := time.Now().Add(10 * time.Second)
+	for len(got) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("got %d blame answers within 10s, want 2", len(got))
+		}
+		if !a.screen.HasPendingEvent() {
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		if e, ok := a.screen.PollEvent().(*gitBlameEvent); ok {
+			got = append(got, e)
+		}
+	}
+	var win, full *gitBlameEvent
+	for _, e := range got {
+		if e.seq != a.blameSeq[path] {
+			t.Fatalf("answer seq %d, want both under the request's %d", e.seq, a.blameSeq[path])
+		}
+		if e.partial {
+			win = e
+		} else {
+			full = e
+		}
+	}
+	if win == nil || full == nil {
+		t.Fatalf("want one window and one full answer, got partial flags %v, %v", got[0].partial, got[1].partial)
+	}
+	if !win.blame.partial {
+		t.Error("the window answer must be marked partial")
+	}
+	if _, ok := win.blame.at(0); !ok {
+		t.Error("the window should cover the top of the file (the viewport)")
+	}
+	if _, ok := win.blame.at(blameWindowAbove); ok {
+		t.Error("the window should not reach the far end of the file")
+	}
+	if b, ok := full.blame.at(blameWindowAbove + 199); !ok || full.blame.partial || b.Summary != "long" {
+		t.Errorf("the full answer should cover the last line: %+v ok=%v", b, ok)
+	}
+	for _, e := range got {
+		a.handleGitBlame(e)
+	}
+	if a.fileBlames[path] != full.blame {
+		t.Fatal("the full answer must be what stays, whatever order they landed in")
+	}
+}

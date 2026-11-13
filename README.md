@@ -62,10 +62,11 @@ The goals, in order:
   the gutter (green added, blue changed, red `▁` where lines were
   removed). Rest the pointer on a bar — or click it — and a popup shows
   that change's diff; the scroll wheel scrolls it when it's long.
-  Click inside the popup (or right-click the line → *Show change…*, or
-  ≡ Git → *Show change at caret…*) for the change view: the diff, the
-  original lines in place, and **Revert change** (`alt+r`), which puts
-  the original back as one `Undo`-able edit without saving.
+  Click inside the popup (or right-click the line → *Git…* →
+  *Show change…*, or ≡ Git → *Show change at caret…*) for the change
+  view: the diff, the original lines in place, and **Revert change**
+  (`alt+r`), which puts the original back as one `Undo`-able edit
+  without saving.
   **◂ Prev** / **Next ▸** (`alt+p` / `alt+n`) walk the file's changes
   without leaving the view, and **Side by side** (`alt+s`) puts git's
   lines beside the file's. `Esc h` / `Esc H` jump between changes.
@@ -962,7 +963,7 @@ Needs a language server for the file — see
 | `Next change` | `esc h` | Jump to the next changed block in this file. |
 | `Previous change` | `esc H` | Jump to the previous one. |
 | `Show change at caret…` | | The change view: the block's diff, the original, and **Revert change**. |
-| `Show blame` / `Hide blame` | `esc A` | The blame column. |
+| `Show blame` / `Hide blame` | `esc A` | The blame column. On a very long file (over 5,000 lines) the screens around you come first and the rest fills in — lines still waiting show `…`. |
 | `Blame this line…` | | The commit that last touched the caret's line. |
 | `Show file's uncommitted changes` | | The git panel, on this file's diff. |
 | `Show file's git history` | | The git log, filtered to this file. |
@@ -1138,6 +1139,9 @@ except for the rows whose answer is a view of the file or an edit to it
 | `Completions` | always | Completions at the caret (language server). |
 | `Go to definition` | always | Jump to where the symbol under the caret is defined. |
 | `Find references` | always | List every use of the symbol. |
+| `Highlight symbol uses` | always | Underline every use of the symbol in this file, writes marked. |
+| `Go to implementation` | always | Jump to (or list) the symbol's implementations. |
+| `Go to type definition` | always | Jump to the definition of the symbol's type. |
 | `Rename symbol…` | always | Rename it across the project. |
 | `Hover info` | always | The symbol's type and docs, and any diagnostics on the line. |
 | `Code actions…` | always | The language server's fixes and refactors for this spot. |
@@ -1159,10 +1163,7 @@ except for the rows whose answer is a view of the file or an edit to it
 | `Label bookmark…` | a bookmarked line | Give the bookmark a name. |
 | `Copy reference (path:line)` | a saved file | Put `<absolute path>:<line>` for the clicked line on the system clipboard. |
 | `Search project for "<word>"` | a word under the caret | Find in project for that word (or a one-line selection). |
-| `Show change…` | a changed line, in a repository | The change bar's diff for this line, with **Revert**. |
-| `Blame this line…` | a saved file, in a repository | The commit that last touched the line. |
-| `Git status…` | in a repository | `git status`, in full. |
-| `New branch…` | in a repository | Create a branch and switch to it. |
+| `Git…` | in a repository | A picker: *Show change…* (on a changed line — the change bar's diff, with **Revert**), *Blame this file* / *Hide blame* (a saved file — the blame column, as `Esc A`), *Git status…*, *New branch…*. |
 
 The right-click puts the caret where you clicked first, so every
 language-server row aims at the symbol you clicked — unless you clicked

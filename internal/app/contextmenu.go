@@ -48,6 +48,8 @@
 package app
 
 import (
+	"path/filepath"
+
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/editor"
@@ -197,11 +199,27 @@ func (a *App) tryEditorContextClick(x, y int) bool {
 // would search for, and the predicates read live state anyway.
 func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 	items := []editorContextItem{
-		// The LSP verbs, in the ≡ Code group's order — same vocabulary,
-		// new door. All already aim at the caret the click just placed.
+		// The LSP verbs — same vocabulary as ≡ Code, new door. All already
+		// aim at the caret the click just placed. The question-asking rows
+		// keep ≡ Code's relative order (definition, references, symbol
+		// uses, then definition's two siblings) so a position learned in
+		// one list holds in the other; the three that answer or change
+		// in place (rename, hover, code actions) close the run as before.
+		//
+		// "Highlight symbol uses", "Go to implementation" and "Go to type
+		// definition" (N-081) were ≡ Code rows only, though they aim at
+		// the clicked symbol exactly as definition does. Their three rows
+		// are mostly paid for by folding the git rows into one "Git…" row
+		// at the foot of the menu: in a repository the popup is the length
+		// it was on a changed line and one row longer elsewhere.
+		// "Find incoming calls…" stays a ≡ row: it is references with the
+		// non-calls taken out, a refinement rather than a new question.
 		{label: "Completions", action: (*App).menuCompletion, enabled: (*App).hasLSPActions},
 		{label: "Go to definition", action: (*App).menuGoToDefinition, enabled: (*App).hasLSPActions},
 		{label: "Find references", action: (*App).menuFindReferences, enabled: (*App).hasLSPActions},
+		{label: "Highlight symbol uses", action: (*App).menuHighlightSymbol, enabled: (*App).hasLSPActions},
+		{label: "Go to implementation", action: (*App).menuGoToImplementation, enabled: (*App).hasLSPActions},
+		{label: "Go to type definition", action: (*App).menuGoToTypeDefinition, enabled: (*App).hasLSPActions},
 		{label: "Rename symbol…", action: (*App).menuRenameSymbol, enabled: (*App).hasLSPActions},
 		{label: "Hover info", action: (*App).menuHoverInfo, enabled: (*App).hasLSPActions},
 		{label: "Code actions…", action: (*App).menuCodeActions, enabled: (*App).hasCodeActions},
@@ -340,44 +358,26 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 			enabled: (*App).hasProjectSearch,
 		})
 	}
-	// The repo rows: Git status (gitstatusreport.go) and New branch
-	// (gitcmd.go), right-click twins of the ≡ Git rows of the same names
-	// (New branch is also the Switch branch picker's "+ New branch…") —
-	// same verbs, so the report, the prompt and git's own refusals are
-	// identical at every door. Appended only inside a work tree, for the
-	// cats rows' reason: rows that are dead in every non-repo folder don't
-	// earn a slot in a popup this small. Last, because they act on the
-	// repo rather than on the spot in the text every row above aims at;
-	// the read-only report leads, the one that changes HEAD closes the
-	// list. activate closes the popup before running a row, so the prompt
-	// opens in a free modal slot and the status report (which declines an
-	// occupied slot) finds it empty.
+	// The repo rows, folded into ONE "Git…" row that opens them as a
+	// picker (editorGitPicker, below). Appended only inside a work tree,
+	// for the cats rows' reason: a row that is dead in every non-repo
+	// folder doesn't earn a slot in a popup this small. Last, because what
+	// it leads to is mostly about the repo rather than the spot in the
+	// text every row above aims at.
 	//
-	// "Blame this line…" (gitblame.go) leads the block: it is the one git
-	// row about the clicked LINE — the caret is already there, so it shows
-	// that line's commit without switching the blame column on. A saved
-	// file only; an untitled buffer has no history to blame.
-	//
-	// "Show change…" (hunkview.go) goes first of all, and only when the
-	// clicked line is part of a change: it is the same question the
-	// change bar answers, asked of the line rather than of a one-cell
-	// gutter target.
+	// Folded (N-081) to pay for the three LSP rows added at the top: the
+	// git rows were up to four (Show change, Blame, Git status, New
+	// branch), and the symbol verbs are what a right-click on code is
+	// reaching for more often. A picker rather than a nested popup: it is
+	// the sanctioned choose-one-from-a-list surface (openPicker), it needs
+	// no new chassis, and on a changed line its first — highlighted — row
+	// is Show change, so the one git question that IS about the clicked
+	// line costs a click (or Enter) more than before, nothing else.
 	items = append(items, editorCtxSplit())
 	if a.hasGitRepo() {
-		if a.hasHunkAtCaret() {
-			items = append(items, editorContextItem{
-				label: "Show change…", action: (*App).menuShowHunkAtCaret, enabled: alwaysTrue,
-			})
-		}
-		if tab.Path != "" {
-			items = append(items, editorContextItem{
-				label: "Blame this line…", action: (*App).menuBlameCommit, enabled: alwaysTrue,
-			})
-		}
-		items = append(items,
-			editorContextItem{label: "Git status…", action: (*App).menuGitStatus, enabled: alwaysTrue},
-			editorContextItem{label: "New branch…", action: (*App).menuGitNewBranch, enabled: alwaysTrue},
-		)
+		items = append(items, editorContextItem{
+			label: "Git…", action: func(app *App) { app.editorGitPicker(tab) }, enabled: alwaysTrue,
+		})
 	}
 	// A click inside a live merge conflict leads with the ways to settle
 	// it (conflictview.go) — the right-click twin of the lens, and the one
@@ -388,6 +388,73 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 		items = append(append(rows, editorCtxSplit()), items...)
 	}
 	return trimCtxSplits(items, func(it editorContextItem) bool { return it.split })
+}
+
+// editorGitPickerItems are the rows behind the right-click "Git…" row
+// (N-081 folded the popup's git rows here): the clicked line's change,
+// the file's blame, then the two about the repo.
+//
+//   - "Show change…" (hunkview.go) — only when the clicked line is part
+//     of a change: the question the change bar answers, asked of the line
+//     rather than of a one-cell gutter target. Leading, so on a changed
+//     line the picker opens with it highlighted.
+//   - "Blame this file" / "Hide blame" (gitblame.go) — the blame column,
+//     the Esc A / ≡ Git "Show blame" toggle, labelled by what the pick
+//     does. It replaced "Blame this line…": one line's commit is a click
+//     on the column once it is up, and the column answers every other
+//     line too, which a right-click on code is as likely to be after. A
+//     very long file comes back screen-first (blameWindowAbove), so
+//     asking for the whole file costs no wait. The layer is global like
+//     its other doors: it stays on across tab switches. A saved file
+//     only; an untitled buffer has no history to blame. ≡ Git keeps
+//     "Blame this line…" as the keyboard twin of clicking the column.
+//   - "Git status…" (gitstatusreport.go) and "New branch…" (gitcmd.go) —
+//     twins of the ≡ Git rows of the same names (New branch is also the
+//     Switch branch picker's "+ New branch…"): the read-only report
+//     first, the one that changes HEAD last.
+//
+// Every row calls the ≡ row's own verb, so the report, the prompt and
+// git's refusals are identical at every door. Rows are omitted rather
+// than dimmed — a picker has no dim state (tabGroupActionsPicker's rule).
+// The picker closes before a row runs (runSelected), so the New branch
+// prompt opens in a free slot and the status report, which declines an
+// occupied one, finds it empty. The caret is still where the right-click
+// put it, so Show change aims at the clicked line.
+func (a *App) editorGitPickerItems(tab *editor.Tab) []paletteItem {
+	var items []paletteItem
+	if a.hasHunkAtCaret() {
+		items = append(items, paletteItem{label: "Show change…", run: (*App).menuShowHunkAtCaret})
+	}
+	if tab != nil && tab.Path != "" {
+		items = append(items, paletteItem{label: blameFileLabel(a.blameOn), run: (*App).menuToggleBlame})
+	}
+	return append(items,
+		paletteItem{label: "Git status…", run: (*App).menuGitStatus},
+		paletteItem{label: "New branch…", run: (*App).menuGitNewBranch},
+	)
+}
+
+// blameFileLabel is the Git… picker's blame row, read as the action the
+// pick performs (the toggle convention of blameToggleLabel). "Hide
+// blame" matches the ≡ Git row's wording for the same state, so the two
+// doors agree once the column is up.
+func blameFileLabel(on bool) string {
+	if on {
+		return "Hide blame"
+	}
+	return "Blame this file"
+}
+
+// editorGitPicker opens editorGitPickerItems. The title names the clicked
+// line ("Git · main.go:42"): the palette is centred, away from the code
+// the popup was anchored on, and Show change needs a referent for "the
+// line". An untitled buffer has no name to give, so it gets plain "Git".
+func (a *App) editorGitPicker(tab *editor.Tab) {
+	title := "Git"
+	if tab != nil && tab.Path != "" {
+		title += " · " + filepath.Base(tab.Path) + ":" + itoa(tab.Cursor.Line+1)
+	}
+	a.openPicker(title, a.editorGitPickerItems(tab))
 }
 
 // contextSearchWord is what the search row would look for: a single-line

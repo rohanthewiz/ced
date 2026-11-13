@@ -472,8 +472,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   Case-sensitive whole-word; `caretQuery` decides whole-word from the
   range. Quiet for lone matches, punctuation, one-rune selections,
   multi-caret. `applyWordHighlight` is the single write path.
-- **Symbol uses (symbolhl.go, lsphighlight.go)**: a VERB (≡ Code), never
-  on caret move; replaces the word highlight while live; dies with
+- **Symbol uses (symbolhl.go, lsphighlight.go)**: a VERB (≡ Code +
+  editor right-click), never on caret move; replaces the word highlight while live; dies with
   `EditRev`; writes underlined; Esc clears.
 - **Brace matching (bracket.go)**: always on, no toggle. Skips brackets
   whose grid color is syn-string/syn-comment (degrades to "code" with no
@@ -676,7 +676,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - Leaders: Esc-d definition, Esc-i hover, Esc-I signature, Esc-D
   symbols, Esc-R references, Esc-c code actions, Esc-E rename.
   Implementation / type definition / incoming calls / workspace symbols
-  are ≡ Code rows only.
+  have NO leader (≡ Code rows; implementation, type definition and
+  symbol uses are also editor right-click rows, N-081).
 - Tests: `a.lsp.dead = true` + `lspLookPath` pinned; inject
   `fakeLSPConn` via `a.lspInstall(lspGoServerID, fake)`;
   `useRealLSPBinaries` for the two real-gopls tests.
@@ -773,7 +774,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   only when the hunk's place verifies), `[ Revert change ]` alt+r /
   `[ Close ]` (default). Doors: that click, ≡ Git "Show change at
   caret…" (gated `hasDiffHunks`, flashes off a change), editor
-  right-click "Show change…" (changed lines only, first git row).
+  right-click "Git…" picker's "Show change…" (changed lines only, its
+  first row).
   "Original" = the gutter's baseline, the INDEX. Revert edits the
   BUFFER as one undo step (`ApplyMultiEdit`), never saves, no confirm.
   The hunk is VERIFIED before writing: "+" lines must sit at Start..End;
@@ -1059,6 +1061,16 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   age once per run. Switching style never turns the layer on. Author
   label = given name; surname letters only where two authors in the
   FILE share it (`disambiguateBlameAuthors`, in the parser) — no knob.
+  TWO PASSES for a FRESH blame of a file over `blameWindowAbove` (5000)
+  lines: `-L` around the viewport (`blameWindow`, a screen either side)
+  beside the whole file, one seq, two goroutines. The FULL pass always
+  wins (`blameLanded`: a window after its full answer is dropped; a nil
+  window deletes nothing). A window is `fileBlame.partial`; `at` reports
+  unanswered (empty-Hash) lines as unknown, never as uncommitted;
+  unanswered runs paint a muted `…` on their first row. A partial means
+  a full pass is out — `menuBlameCommit` parks, never re-asks. Re-blames
+  (settle, save) are whole-file only. Doors: Esc-A, ≡ Git, editor
+  right-click Git… "Blame this file" / "Hide blame".
 - Git log (Esc-L): tool window; capped 400; SCOPE (gitlogscope.go)
   defaults to the CURRENT branch (no rev = HEAD, follows a switch),
   else `--all` (`gitLogScopeAll`) or a FULL refname, session-only,

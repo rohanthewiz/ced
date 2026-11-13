@@ -360,34 +360,35 @@ func TestMenuShowHunkAtCaret_OffAChangeFlashes(t *testing.T) {
 	}
 }
 
-// TestEditorContextShowChangeRow: the right-click row is offered only on
-// a changed line, first of the git rows, and opens the view.
+// TestEditorContextShowChangeRow: the right-click Git… picker offers
+// "Show change…" only on a changed line, as its FIRST row (so the
+// picker opens with it highlighted), and it opens the view.
 func TestEditorContextShowChangeRow(t *testing.T) {
 	a, tab, _ := hunkViewTestApp(t)
 	a.gitIsRepo = true
 	a.draw()
 
-	m := openEditorContextAt(t, a, localXForCol(t, a, tab, 0), 0) // line 0: unchanged
-	if i := contextRowIndex(m, "Show change"); i >= 0 {
-		t.Fatalf("Show change offered on an unchanged line: %v", labelsOf(m))
+	openEditorGitPicker(t, a, localXForCol(t, a, tab, 0), 0) // line 0: unchanged
+	for _, row := range pickerRows(t, a) {
+		if strings.HasPrefix(row, "Show change") {
+			t.Fatalf("Show change offered on an unchanged line: %v", pickerRows(t, a))
+		}
 	}
 	a.closeModal()
 
-	ex, ey, ew, eh := a.editorRect()
+	_, _, ew, eh := a.editorRect()
 	cx, cy, ok := tab.PosScreenCell(editor.Position{Line: 1}, ew, eh)
 	if !ok {
 		t.Fatal("line 1 is not on screen")
 	}
-	if !a.tryEditorContextClick(ex+cx, ey+cy) {
-		t.Fatal("right-click on line 1 declined")
+	pm := openEditorGitPicker(t, a, cx, cy)
+	if rows := pickerRows(t, a); len(rows) < 2 || rows[0] != "Show change…" || rows[1] != "Blame this file" {
+		t.Fatalf("picker rows = %v, want Show change… first, then Blame this file", rows)
 	}
-	m = a.modal.(*editorContextModal)
-	i := contextRowIndex(m, "Show change")
-	if i < 0 || i != contextRowIndex(m, "Blame this line")-1 {
-		t.Fatalf("Show change at %d, want just before Blame; rows: %v", i, labelsOf(m))
+	if pm.selected != 0 {
+		t.Errorf("picker opened on row %d, want Show change (0)", pm.selected)
 	}
-	m.hover = i
-	m.activate(a)
+	pickByLabel(t, a, "Show change")
 	if _, ok := a.modal.(*hunkViewModal); !ok {
 		t.Fatalf("modal after the row = %T, want the change view", a.modal)
 	}

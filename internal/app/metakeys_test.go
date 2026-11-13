@@ -549,6 +549,23 @@ func TestMetaLineMotionExtendsSelection(t *testing.T) {
 	}
 }
 
+// ⌘⇧← is the other half: select back to the start of the line, the
+// anchor staying where the caret was. Arrives as `CSI 1;10D` (super +
+// shift) from a kitty-protocol host — cats hands it down verbatim to a
+// kitty pane rather than translating it the way it turns ⌘← into Home.
+func TestMetaLineMotionExtendsSelectionLeft(t *testing.T) {
+	armMetaHost(t)
+	a := metaLineTab(t)
+
+	a.handleKey(metaArrowEv(tcell.KeyLeft, true))
+
+	tab := a.activeTabPtr()
+	if tab.Anchor.Col != 5 || tab.Cursor.Col != 0 {
+		t.Fatalf("Cmd+Shift+Left selected %d..%d, want 5..0",
+			tab.Anchor.Col, tab.Cursor.Col)
+	}
+}
+
 // Outside a host known to report Command distinctly the chord is not
 // ours, and the arrow does what a bare arrow does. That is the whole
 // point of the gate: a terminal folding Option into Meta must not turn

@@ -37,18 +37,9 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-143**
+**Next ID: N-144**
 
 ## Open
-
-- **N-081** · raised `2026-1021-2049-editor-context-rows-change-view` · value low
-  The editor right-click menu carries six LSP verbs; "Go to
-  implementation", "Go to type definition" and "Highlight symbol uses"
-  aim at the symbol under the caret just the same but are ≡ Code rows
-  only. Suggested this session alongside the rows that shipped; not
-  picked. If they go in, fold the git rows (Show change, Blame, Git
-  status, New branch) into one "Git…" picker row to keep the popup
-  short.
 
 - **N-095** · raised `2026-1026-1545-find-click-to-line-esc-back` · value low
   The find bar's Esc now goes back to where the bar opened, so there is
@@ -423,6 +414,18 @@ plus the LSP work done in the seeding session itself
   measure-then-break pass — the writer streams today. Split out of
   N-069 when its routine-body half shipped. Revisit only if someone hits
   it; any change must keep the re-lex token check (`sameSQLTokens`).
+
+- **N-143** · raised `2026-1113-1713-n081-editor-ctx-lsp-rows-blame-file` · value low
+  The two-pass blame (gitblame.go decision 5) is triggered by LINE COUNT
+  (`blameWindowAbove`, 5000) and asks one window, around the viewport at
+  request time. Two gaps it leaves: a shorter file with deep history
+  still blames in one slow pass (cost follows history more than length),
+  and the window at the TOP of a long file is itself the slow end
+  (duckdb gram.cpp: 1.85s for lines 1–45 vs 0.14s mid-file); scrolling
+  past the window while the full pass runs shows `…` until it lands.
+  Options if it bites: start the window only when the full pass has not
+  answered within ~300ms (adapts to real cost), and/or re-ask a window
+  for a viewport that moved off the first one.
 
 ## Validate
 
@@ -895,6 +898,21 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-13, `2026-1113-1713-n081-editor-ctx-lsp-rows-blame-file` —
+  **N-081** the editor right-click menu gained
+  "Highlight symbol uses", "Go to implementation" and "Go to type
+  definition" (in ≡ Code's relative order, before Rename / Hover / Code
+  actions), and its git rows folded into ONE "Git…" row that opens a
+  picker (`editorGitPicker`, contextmenu.go) titled with the clicked line:
+  Show change… (changed lines only, first), Blame this file / Hide blame
+  (saved files; the Esc A toggle — replaced "Blame this line…" at the
+  user's ask), Git status…, New branch…. Alongside, a fresh blame of a
+  file over 5,000 lines runs `-L` around the viewport beside the
+  whole-file pass (gitblame.go decision 5; duckdb's 32k-line gram.cpp:
+  3.4s whole vs 0.14s for a mid-file window). In a repo the popup is the
+  length it was on a changed line, one row longer elsewhere. "Find
+  incoming calls…" stays ≡-only. Checked in the real binary with gopls up.
 
 - closed 2026-11-13, `2026-1113-1614-n069-sql-routine-bodies` —
   **N-069** (routine-body half; wrapping split out as N-142) the

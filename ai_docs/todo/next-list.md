@@ -37,16 +37,9 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-142**
+**Next ID: N-143**
 
 ## Open
-
-- **N-069** · raised `2026-1016-1651-postgres-sql-formatting` · value low
-  ced's in-process SQL formatter (sqlfmt.go) deliberately does not wrap
-  long lines and does not look inside `$$` PL/pgSQL bodies (a second
-  language, a string to the SQL grammar). A long DDL line or a messy
-  function body stays as written. Revisit only if someone hits it; any
-  change must keep the re-lex token check (`sameSQLTokens`).
 
 - **N-081** · raised `2026-1021-2049-editor-context-rows-change-view` · value low
   The editor right-click menu carries six LSP verbs; "Go to
@@ -422,6 +415,14 @@ plus the LSP work done in the seeding session itself
   log and the op-info reads the snapshot's pattern (goroutine +
   seq-checked event), and skip the finder rebuild when the tree refresh
   found no change.
+
+- **N-142** · raised `2026-1113-1614-n069-sql-routine-bodies` · value low
+  ced's in-process SQL formatter (sqlfmt.go) still does not wrap long
+  lines: a long DDL line, call or IN list stays as written. Wrapping
+  needs a width policy (fixed 80? the file's longest line?) and a
+  measure-then-break pass — the writer streams today. Split out of
+  N-069 when its routine-body half shipped. Revisit only if someone hits
+  it; any change must keep the re-lex token check (`sameSQLTokens`).
 
 ## Validate
 
@@ -894,6 +895,22 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-13, `2026-1113-1614-n069-sql-routine-bodies` —
+  **N-069** (routine-body half; wrapping split out as N-142) the
+  in-process SQL formatter lays out `$$` routine bodies (sqlbody.go):
+  CREATE FUNCTION / PROCEDURE `AS $$` and DO blocks whose LANGUAGE
+  (anywhere in the statement, outside parens; DO defaults to plpgsql) is
+  `sql` or `plpgsql`. SQL bodies use the file layout at the statement's
+  depth; PL/pgSQL adds a block stack keyed on a statement's FIRST word
+  (DECLARE / BEGIN / EXCEPTION / IF / ELSIF / ELSE / CASE / WHEN / LOOP /
+  FOR / WHILE / END, `<<label>>`), with THEN / LOOP ending headers, and
+  embedded queries (RETURN QUERY, FOR … IN, cursor FOR) one level in.
+  `SELECT … INTO` / `RETURNING … INTO` became a clause; `%TYPE` glued.
+  `sameSQLTokens` recurses into bodies (body-ness read from the source
+  stream only); a body that won't lex, holds a `\` line, or whose blocks
+  don't pair up is kept verbatim rather than refusing the file. Labels
+  keep their spelling; body keywords join the case vote.
 
 - closed 2026-11-10, `2026-1110-1946-n131-delta-undo` —
   **N-131** undo entries are DELTAS, not buffer copies (undo.go, header

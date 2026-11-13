@@ -137,9 +137,10 @@ func TestFormatSQL_CreateTableColumnList(t *testing.T) {
 }
 
 // TestFormatSQL_OtherStatementsKeepTheirLines pins the non-query rule:
-// DDL keeps the author's line breaks (re-indented one level), a GRANT
-// whose SELECT is a privilege is not broken like a query, and a dollar
-// body is copied verbatim.
+// DDL keeps the author's line breaks (re-indented one level), and a GRANT
+// whose SELECT is a privilege is not broken like a query. The function's
+// PL/pgSQL body is laid out at column 0 in the file's own two-space unit
+// (sqlbody_test.go pins bodies in detail).
 func TestFormatSQL_OtherStatementsKeepTheirLines(t *testing.T) {
 	src := "CREATE FUNCTION add(a int)\nRETURNS int\nLANGUAGE plpgsql\nAS $$\nBEGIN\n  RETURN a+1;\nEND;\n$$;\n" +
 		"GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO app;"
@@ -149,7 +150,7 @@ func TestFormatSQL_OtherStatementsKeepTheirLines(t *testing.T) {
   LANGUAGE plpgsql
   AS $$
 BEGIN
-  RETURN a+1;
+  RETURN a + 1;
 END;
 $$;
 GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA public TO app;
@@ -298,6 +299,17 @@ func TestSameSQLTokens(t *testing.T) {
 	d, _ := lexSQL("select 'X' from T, u")
 	if sameSQLTokens(a, d) {
 		t.Error("extra tokens not reported")
+	}
+	// A routine body is compared as SQL; any other dollar string as data.
+	e, _ := lexSQL("DO $$BEGIN NULL; END$$;")
+	f, _ := lexSQL("DO $$\nbegin\n    null;\nend\n$$;")
+	if !sameSQLTokens(e, f) {
+		t.Error("re-laid routine body reported as a change")
+	}
+	g, _ := lexSQL("SELECT $q$a  b$q$;")
+	h, _ := lexSQL("SELECT $q$a b$q$;")
+	if sameSQLTokens(g, h) {
+		t.Error("whitespace inside a data dollar string not reported")
 	}
 }
 

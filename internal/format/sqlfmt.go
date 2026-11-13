@@ -57,10 +57,21 @@
 // list is the one DDL shape laid out (one column per line), since that is
 // the layout every Postgres codebase converges on.
 //
-// What the pass deliberately does NOT do: wrap long lines, align, or
-// look inside a $$ function body. Wrapping needs a width policy the file
-// cannot express; a PL/pgSQL body is a second language whose blocks the
-// author has already laid out, and it is a string to the SQL grammar.
+// What the pass deliberately does NOT do: wrap long lines or align.
+// Wrapping needs a width policy the file cannot express.
+//
+// # Routine bodies
+//
+// A `$$ … $$` token is a string to the SQL grammar, but when it is the
+// body of a CREATE FUNCTION / PROCEDURE (`AS $$`) or a DO block whose
+// LANGUAGE is `sql` or `plpgsql`, it is laid out too (sqlbody.go): an SQL
+// body by this same layout, a PL/pgSQL body by the same layout plus a
+// block stack for DECLARE / BEGIN / IF / LOOP / CASE / EXCEPTION. Any
+// other dollar string — a C function's, a plperl body, a `$q$` handed to
+// EXECUTE — is data and stays byte-for-byte. The safety net reaches
+// inside: a body is compared token-for-token like the file around it
+// (sameSQLTokens recurses), and a body the layout cannot place is kept
+// verbatim rather than refusing the whole file.
 //
 // # The file keeps its conventions
 //
@@ -297,7 +308,11 @@ func matchSQLParens(toks []sqlToken) ([]int, error) {
 
 // sameSQLTokens reports whether two token streams are the same SQL:
 // same kinds, same text — words compared case-insensitively, everything
-// else byte-for-byte.
+// else byte-for-byte. The one exception is a routine body (see
+// routineBodyLang), whose text may differ in layout: it is compared as
+// SQL in its own right, by this same function, so the contract holds all
+// the way down. Whether a dollar token IS a body is decided from a's
+// stream alone, so a layout bug can never vouch for itself.
 func sameSQLTokens(a, b []sqlToken) bool {
 	if len(a) != len(b) {
 		return false
@@ -306,11 +321,17 @@ func sameSQLTokens(a, b []sqlToken) bool {
 		if a[i].kind != b[i].kind {
 			return false
 		}
-		if a[i].kind == sqlWord {
+		switch {
+		case a[i].kind == sqlWord:
 			if !strings.EqualFold(a[i].text, b[i].text) {
 				return false
 			}
-		} else if a[i].text != b[i].text {
+		case a[i].text == b[i].text:
+		case a[i].kind == sqlDollar && routineBodyLang(a, i) != "":
+			if !sameRoutineBody(a[i].text, b[i].text) {
+				return false
+			}
+		default:
 			return false
 		}
 	}
@@ -338,9 +359,32 @@ func detectSQLStyle(src []byte) sqlStyle {
 // detectSQLStyleTokens is detectSQLStyle for an already-lexed source.
 func detectSQLStyleTokens(text string, toks []sqlToken) sqlStyle {
 	st := sqlStyle{indent: DetectIndent([]byte(text))}
-	upper, lower := 0, 0
+	upper, lower := sqlCaseVotes(toks, false)
+	st.caseKnown = upper+lower > 0
+	st.upper = upper >= lower
+	return st
+}
+
+// sqlCaseVotes counts the keywords spelled in upper and in lower case,
+// routine bodies included (a file of functions is mostly body, and the
+// body is re-cased with the file's vote). pl adds the PL/pgSQL words.
+func sqlCaseVotes(toks []sqlToken, pl bool) (upper, lower int) {
 	for i, t := range toks {
-		if !sqlIsKeyword(toks, i) {
+		if t.kind == sqlDollar {
+			if lang := routineBodyLang(toks, i); lang != "" {
+				if _, body, ok := splitDollar(t.text); ok {
+					if bt, err := lexSQL(body); err == nil {
+						u, l := sqlCaseVotes(bt, lang == "plpgsql")
+						upper, lower = upper+u, lower+l
+					}
+				}
+			}
+			continue
+		}
+		if pl && plIsLabel(toks, i) {
+			continue
+		}
+		if !sqlIsKeyword(toks, i) && !(pl && plIsKeyword(toks, i)) {
 			continue
 		}
 		// Mixed-case spellings (`Select`) are no evidence either way.
@@ -351,9 +395,7 @@ func detectSQLStyleTokens(text string, toks []sqlToken) sqlStyle {
 			lower++
 		}
 	}
-	st.caseKnown = upper+lower > 0
-	st.upper = upper >= lower
-	return st
+	return upper, lower
 }
 
 // sqlIsKeyword reports whether toks[i] is a word the formatter re-cases
@@ -513,6 +555,9 @@ func (w *sqlWriter) blank() {
 func (w *sqlWriter) put(text string, space bool) {
 	switch {
 	case w.empty:
+		// Only a routine body starts indented (its first line sits at the
+		// statement's depth); a whole file starts at zero.
+		w.b.WriteString(strings.Repeat(w.unit, w.indent))
 	case w.nl > 0:
 		w.b.WriteString(strings.Repeat("\n", w.nl))
 		w.b.WriteString(strings.Repeat(w.unit, w.indent))
@@ -549,17 +594,55 @@ type sqlLayout struct {
 	// stmtStart: the next token begins a statement; blank lines before
 	// it are kept (collapsed to one).
 	stmtStart bool
+
+	// base is the depth statements start at: 0 for a file, the enclosing
+	// statement's depth for a routine body (sqlbody.go).
+	base int
+	// pl turns on the PL/pgSQL block layout (sqlbody.go); the fields
+	// below are its state and stay zero otherwise.
+	pl bool
+	// blocks is the open DECLARE / BEGIN / IF / LOOP / CASE nesting.
+	blocks []plBlock
+	// plHead is the word that ends the block header being written
+	// ("THEN" after IF / ELSIF / WHEN, "LOOP" after FOR / WHILE, "WHEN"
+	// after a statement CASE), "" outside one. plHeadDepth is the
+	// header's own depth, and plHeadOpen the block it opens (plNone for
+	// ELSIF / WHEN, which continue the block they sit in).
+	plHead      string
+	plHeadDepth int
+	plHeadOpen  plKind
+	// plLabel walks a `<<label>>`: 1 after `<<`, 2 after the name.
+	plLabel int
+	// plBad records a body the block layout could not follow (an END
+	// with nothing open, a header that never ended); the caller then
+	// keeps the body verbatim.
+	plBad bool
 }
 
 // layoutSQL runs the layout over toks and returns the text, ending in
 // exactly one newline.
 func layoutSQL(toks []sqlToken, match []int, unit string, upper bool) string {
+	return newSQLLayout(toks, match, unit, upper, 0, false).run()
+}
+
+// newSQLLayout prepares a layout whose statements start at depth base;
+// pl turns on the PL/pgSQL block layout. A file is (0, false); routine
+// bodies are the other combinations (sqlbody.go).
+func newSQLLayout(toks []sqlToken, match []int, unit string, upper bool, base int, pl bool) *sqlLayout {
 	l := &sqlLayout{
 		toks: toks, match: match, upper: upper,
-		w:    &sqlWriter{unit: unit, empty: true},
+		w:    &sqlWriter{unit: unit, empty: true, indent: base},
 		prev: -1, stmtStart: true,
+		base: base, pl: pl, plHeadOpen: plNone,
 	}
 	l.resetStmt()
+	return l
+}
+
+// run lays out every token and returns the text, ending in exactly one
+// newline.
+func (l *sqlLayout) run() string {
+	toks := l.toks
 	for i := range toks {
 		switch toks[i].kind {
 		case sqlLineComment, sqlBlockComment:
@@ -581,9 +664,10 @@ func layoutSQL(toks []sqlToken, match []int, unit string, upper bool) string {
 // top returns the innermost frame.
 func (l *sqlLayout) top() *sqlFrame { return l.stack[len(l.stack)-1] }
 
-// resetStmt starts a fresh statement frame.
+// resetStmt starts a fresh statement frame at the depth statements
+// start at — inside a PL/pgSQL block, the block's body depth.
 func (l *sqlLayout) resetStmt() {
-	l.stack = []*sqlFrame{{kind: frameStmt, broken: true, first: true, breakAt: -1, prevSig: -1}}
+	l.stack = []*sqlFrame{{kind: frameStmt, base: l.plDepth(), broken: true, first: true, breakAt: -1, prevSig: -1}}
 }
 
 // endStmt closes the statement after token i was written.
@@ -614,9 +698,10 @@ func (l *sqlLayout) meta(i int) {
 // plus one blank line if the source had any.
 func (l *sqlLayout) boundary(t sqlToken) {
 	if l.w.empty {
+		l.w.indent = l.top().base
 		return
 	}
-	l.w.line(0)
+	l.w.line(l.top().base)
 	if t.nlBefore >= 2 {
 		l.w.blank()
 	}
@@ -693,6 +778,11 @@ func (l *sqlLayout) code(i int) {
 		l.boundary(t)
 		l.stmtStart, l.mustBreak = false, false
 	}
+	// PL/pgSQL block words and header ends are placed by the block
+	// layout; everything else in a body is ordinary SQL from here on.
+	if l.pl && l.plCode(i) {
+		return
+	}
 	fr := l.top()
 	up := ""
 	if t.kind == sqlWord {
@@ -710,6 +800,13 @@ func (l *sqlLayout) code(i int) {
 			fr.createHead = up == "CREATE"
 		} else if !fr.query && sqlQueryStarters[up] && (fr.explain || l.prevIsWord(fr, "AS")) {
 			fr.query, fr.first = true, true
+			brk = fr.base
+		} else if !fr.query && sqlQueryStarters[up] && l.plQueryStarts(fr) {
+			// RETURN QUERY / FOR … IN / OPEN … FOR: the query is a block
+			// one level into its statement, so the LOOP or `;` that ends
+			// the statement stands out at the statement's own depth.
+			fr.query, fr.first = true, true
+			fr.base++
 			brk = fr.base
 		}
 	}
@@ -767,14 +864,10 @@ func (l *sqlLayout) code(i int) {
 		w.line(brk)
 	}
 
-	text := t.text
-	if sqlIsKeyword(l.toks, i) {
-		if l.upper {
-			text = strings.ToUpper(text)
-		} else {
-			text = strings.ToLower(text)
-		}
-	}
+	// Keywords re-cased; a routine body laid out at its STATEMENT's
+	// depth (the usual `AS $$` / body / `$$;` shape), however deep the AS
+	// line went (sqlbody.go).
+	text := l.spell(i)
 	space := !w.atStart() && l.needSpace(i)
 	unaryNow := t.kind == sqlOp && (t.text == "-" || t.text == "+") && l.unaryPosition()
 	w.put(text, space)
@@ -836,6 +929,15 @@ func (l *sqlLayout) clauseWord(i int, fr *sqlFrame, up string) int {
 		return startBody("FROM", next)
 	case (up == "GROUP" || up == "ORDER") && nextUp == "BY":
 		return startBody(up+" BY", sqlNextSig(toks, next))
+	case up == "INTO" && (fr.clause == "SELECT" || fr.clause == "RETURNING"):
+		// PL/pgSQL's SELECT … INTO x and RETURNING … INTO x (and the
+		// table-creating SELECT INTO): a clause of its own, not one more
+		// select item. INSERT / MERGE INTO never get here (no clause yet).
+		j := next
+		if nextUp == "STRICT" {
+			j = sqlNextSig(toks, next)
+		}
+		return startBody("INTO", j)
 	case sqlBodyClauses[up]:
 		// SET included: at a query's own level it only ever opens an
 		// assignment list (UPDATE, ON CONFLICT DO UPDATE, MERGE). The
@@ -924,7 +1026,8 @@ func (l *sqlLayout) after(i int, fr *sqlFrame, up string) {
 		if fr.commaBreak && (fr.kind == frameList || fr.clause != "") {
 			w.line(fr.commaIndent)
 		}
-	case up == "CASE":
+	case up == "CASE" && fr.prevWord != "END":
+		// (PL/pgSQL's `END CASE` closes a statement, it opens nothing.)
 		broken := fr.kind != frameInline && (fr.kind != frameCase || fr.broken)
 		l.stack = append(l.stack, &sqlFrame{kind: frameCase, broken: broken, base: w.indent + 1, close: w.indent, breakAt: -1, prevSig: -1})
 	case up == "END" && fr.kind == frameCase:
@@ -986,7 +1089,7 @@ func (l *sqlLayout) unaryPosition() bool {
 	case sqlPunct:
 		return p.text == "(" || p.text == "," || p.text == "[" || p.text == ":="
 	case sqlWord:
-		return sqlIsKeyword(l.toks, l.prev) && !sqlValueWords[strings.ToUpper(p.text)]
+		return l.isKeyword(l.prev) && !sqlValueWords[strings.ToUpper(p.text)]
 	}
 	return false
 }
@@ -1024,9 +1127,19 @@ func (l *sqlLayout) needSpace(i int) bool {
 	if t.kind == sqlPsqlVar {
 		return t.spaceBefore
 	}
+	// `users.id%TYPE`, `t%ROWTYPE`: one type spelling, glued. Only after
+	// an operand, so the % can never merge into a preceding operator.
+	if t.kind == sqlOp && t.text == "%" && (p.kind == sqlWord || p.kind == sqlQuotedIdent) {
+		if n := sqlNextSig(l.toks, i); n >= 0 && sqlIsTypeSuffix(l.toks[n]) {
+			return false
+		}
+	}
+	if p.kind == sqlOp && p.text == "%" && sqlIsTypeSuffix(t) {
+		return false
+	}
 	if t.kind == sqlPunct && t.text == "(" {
 		switch {
-		case p.kind == sqlWord && sqlIsKeyword(l.toks, l.prev) && !sqlCallable[strings.ToUpper(p.text)]:
+		case p.kind == sqlWord && l.isKeyword(l.prev) && !sqlCallable[strings.ToUpper(p.text)]:
 			return true
 		case p.kind == sqlWord, p.kind == sqlQuotedIdent, p.kind == sqlPunct && (p.text == ")" || p.text == "]"):
 			// `varchar(10)` vs `INSERT INTO t (a)`: only the author knows

@@ -816,7 +816,15 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   keyword case change, ENFORCED by re-lexing the output
   (`sameSQLTokens`) — never weaken that check. Clause layout only for
   DML/`AS SELECT`/EXPLAIN; other statements keep their line breaks.
-  Verbatim: $$ bodies, strings, comments, COPY data, psql `\` lines.
+  Verbatim: strings, comments, COPY data, psql `\` lines, and $$ strings
+  that are not a routine body. ROUTINE BODIES (sqlbody.go:
+  `routineBodyLang` — CREATE FUNCTION/PROCEDURE `AS $$` or DO, LANGUAGE
+  sql/plpgsql found anywhere in the statement outside parens, DO defaults
+  to plpgsql) are laid out at the statement's depth; PL/pgSQL adds a block
+  stack keyed on the word a statement STARTS with. `sameSQLTokens`
+  RECURSES into a body (body-ness decided from the source stream alone);
+  a body that won't lex/pair up is kept VERBATIM, never refuses the file.
+  Labels keep their spelling (`plIsLabel`); body keywords join the case vote.
   Adjacent string literals keep a newline (grammar). Keyword case and
   indent by vote (no keywords → upper; no indent → 4 spaces). Only
   re-case `sqlKeywords` (reserved + rare-as-column); column-ish words go

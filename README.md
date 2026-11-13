@@ -2171,8 +2171,14 @@ file** (a dirty buffer is saved first). That covers:
   each clause keyword (`SELECT`, `FROM`, `WHERE`, …) on its own line with
   its body indented one item per line, breaks `AND`/`OR` in `WHERE` and
   join conditions, indents subqueries and `CREATE TABLE` columns, and
-  leaves other DDL with your own line breaks. Function bodies (`$$ … $$`),
-  strings, comments and `COPY … FROM stdin` data are never touched. The
+  leaves other DDL with your own line breaks. Function, procedure and
+  `DO` bodies (`$$ … $$`) written in `sql` or `plpgsql` are formatted
+  too: an SQL body like any query, a PL/pgSQL body with its `DECLARE` /
+  `BEGIN` / `IF` / `LOOP` / `CASE` / `EXCEPTION` blocks indented and the
+  SQL inside them laid out. A body in any other language, a `$q$` string
+  handed to `EXECUTE`, and a body whose blocks don't pair up are left as
+  you wrote them. Strings, comments and `COPY … FROM stdin` data are
+  never touched. The
   file's **indentation and keyword case are kept** (a lower-case file
   stays lower-case; no keywords at all → upper case), and the external
   tools are told the same unless the repo configures them

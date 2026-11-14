@@ -50,6 +50,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
@@ -243,6 +244,7 @@ func (a *App) catsInit() {
 	}
 	caps, scr := a.cats.caps, a.screen
 	go func() {
+		defer crash.Recover()
 		caps = caps.Probe()
 		var self uint32
 		selfOK := false

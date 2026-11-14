@@ -43,6 +43,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/theme"
@@ -273,6 +274,7 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 	gen := sv.gen
 	initOptions := def.initOptions
 	go func() {
+		defer crash.Recover()
 		// onNotify runs on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
 			if lspPostServerNote(scr, id, method, params) {
@@ -659,6 +661,7 @@ func (a *App) menuGoToDefinition() {
 	pos := lspPosFor(t, from)
 	a.lspFlushChange(t) // definition must resolve against what's on screen
 	go func() {
+		defer crash.Recover()
 		locs, err := client.Definition(path, pos)
 		_ = scr.PostEvent(&lspDefinitionEvent{
 			when: time.Now(), fromPath: path, fromPos: from, locs: locs, err: err,
@@ -836,6 +839,7 @@ func (a *App) menuHoverInfo() {
 	pos := lspPosFor(t, t.Cursor)
 	a.lspFlushChange(t)
 	go func() {
+		defer crash.Recover()
 		h, err := client.HoverAt(path, pos)
 		text, markdown := "", false
 		if h != nil {

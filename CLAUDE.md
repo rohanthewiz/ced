@@ -89,10 +89,12 @@ internal/theme/               Theme struct, palette derivation, builtins, loader
                               contrast.go (WCAG ratio + hue-keeping lift)
 internal/readme/              README.md as sections/tables/code spans (test-only consumer)
 internal/userconfig/          ~/.config/ced/config.json + other config paths
+internal/crash/               Goroutine panic guard (Recover/SetHandler); rescue folders
 internal/clipboard/           OSC 52 with tmux passthrough
 internal/icons/               Nerd Font detection + glyphs
 internal/app/
   app.go                      Event loop, layout, rendering
+  crashsafety.go              Panic / SIGHUP / SIGTERM / tty-loss exits: rescue, Fini, re-panic
   inputburst.go               One frame per wheel/motion burst
   tickpace.go                 Refresh tick paced by focus (10s / 30s, focus-in refresh)
   modal.go leader.go whichkey.go  Modal slot; leader table + namespaces; which-key band
@@ -182,8 +184,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `internal/readme` — don't hand-roll another parser.
 - **newTestApp stubs every host side effect** (LSP/Copilot/chat dead,
   `lspLookPath`/`chatLookPath` never-found, builtin formatters nil,
-  plugin/skill/theme/chat-archive/history/session/favorites paths at temp
-  dirs, `pluginShell` refusing, `editorEnv` empty, `gonotesCreate`
+  plugin/skill/theme/chat-archive/history/session/favorites/rescue paths at
+  temp dirs, exit note discarded, `pluginShell` refusing, `editorEnv` empty, `gonotesCreate`
   refusing, rc.grsh disabled, tree auto-fit off). New integrations that
   touch the machine need a package-var seam pinned there. Tests build
   `App` directly, so menu sections start expanded and inlay hints off.
@@ -198,6 +200,16 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - **Events only.** Goroutines never mutate UI state; they post custom
   tcell events handled on the main loop. Blocking server→client requests
   post an event with a buffered reply channel and wait.
+- **Every goroutine starts with `defer crash.Recover()`**
+  (`TestEveryGoroutineRecovers`: first statement of the func literal, or of
+  the named func/closure a `go` calls — unique name in its package). It
+  hands the panic to the main loop (`crashEvent`), never swallows it.
+  Unattended exits (crashsafety.go — panic, SIGHUP/SIGTERM, tcell
+  `EventError`) write dirty buffers to `~/.config/ced/recover/`
+  (`crash.Rescue`), NEVER over the user's file; a signal first flushes
+  auto-save under the focus-out rule (no modal/menu, `autoSavable` +
+  `autoSaveGuard`, plain `Save`) and exits through Close. The signal
+  watcher is torn down LAST in Close.
 - **Generation-check async results** (seq/gen counters) for anything
   that opens a panel or writes files; drop stale answers. Anything that
   merely moves a cursor checks path/EditRev.
@@ -377,6 +389,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - **state.json writes merge** (`session.Update`: re-read, apply, save):
   never dump the store loaded at startup — other instances share the
   file. A corrupt file is set aside as `state.json.bad`, never saved over.
+  The tab LIST is also written when it changes (`sessionAfterEvent`,
+  quiet; armed by New after `restoreSession`, unarmed in tests) — not on
+  switches or cursor moves.
 - **config.json is read per key**: a bad value costs only that key
   (default kept, named in the error); JSON booleans mean on/off.
 
@@ -858,6 +873,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 ### Auto-save (app/autosave.go)
 - Debounce on the sum of EditRevs; default ON; silent; quiet format;
   defers while a modal/menu is open; skips tabs changed on disk.
+- CAPPED (N-118): a run of edits is saved at most `autoSaveMaxWait` (30s,
+  never below the delay) after it began (`autoSaveDirtySince`, ended by
+  every save pass and by nothing being dirty). The modal deferral
+  re-arms with the PLAIN interval — a capped zero would spin.
 - `"autosavedelay"` (default 5s, clamped [500ms, 5m]), no ≡ row; read
   via `autoSaveInterval()`.
 - Focus-out and tab switch flush through `autoSaveTabIfEligible`. Focus
@@ -1559,7 +1578,7 @@ old SpiceEdit `website/`.
 - `Ctrl+` editor shortcuts.
 - A config file / dotfile beyond the existing `~/.config/ced/` files
   (config.json, mcp.json, state.json, favorites.json, themes/, skills/,
-  plugins/, chats/, rc.grsh) and `<repo>/.ced/`. Each exists because it
+  plugins/, chats/, recover/, rc.grsh) and `<repo>/.ced/`. Each exists because it
   holds something ced cannot know for you.
 - A HOST plugin system (Go .so plugins, embedded interpreter, stable
   editor API). Plugins stay "a command line plus where its stdout goes".

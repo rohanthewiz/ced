@@ -98,6 +98,8 @@ import (
 	"unicode"
 
 	"github.com/gdamore/tcell/v2"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 const (
@@ -303,6 +305,7 @@ func (a *App) loadCherryPickCommits(m *cherryPickModal) {
 	}
 	scr, root, source, seq := a.screen, a.rootDir, m.source, m.seq
 	go func() {
+		defer crash.Recover()
 		l, err := listCherryPickCommits(root, source)
 		e := &cherryPickLoadEvent{when: time.Now(), seq: seq,
 			commits: l.commits, capped: l.capped, mergesHidden: l.mergesHidden}

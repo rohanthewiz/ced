@@ -55,6 +55,7 @@ import (
 	"path/filepath"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/session"
 	"github.com/rohanthewiz/ced/internal/userconfig"
@@ -172,6 +173,7 @@ func (a *App) openCatsTerminalAt(dir string) {
 	spawn := catsSpawn{Cwd: dir, Line: "cd " + catsShellQuote(dir) + "\n"}
 	where := displayPath(dir)
 	go func() {
+		defer crash.Recover()
 		if _, err := catsSpawnSibling(client, self, cats.SplitVertical, spawn); err != nil {
 			catsPostNotice(scr, "Terminal split failed: "+err.Error())
 			return

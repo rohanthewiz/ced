@@ -65,6 +65,7 @@ import (
 	"strings"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
@@ -172,6 +173,7 @@ func (a *App) openInEditor(path string) {
 	spawn := catsSpawn{Cwd: a.rootDir, Line: line}
 	name := editorDisplayName()
 	go func() {
+		defer crash.Recover()
 		if _, err := catsSpawnSibling(client, self, cats.SplitHorizontal, spawn); err != nil {
 			catsPostNotice(scr, "Open in "+name+" failed: "+err.Error())
 			return

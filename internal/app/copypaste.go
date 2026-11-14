@@ -55,6 +55,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
@@ -533,6 +534,7 @@ func (a *App) dirtyBufferOverlay(srcs []string) (map[string][]byte, error) {
 func (a *App) runCopyPlan(plan []copyPlanItem, overlay map[string][]byte, into string) {
 	scr := a.screen
 	go func() {
+		defer crash.Recover()
 		var err error
 		done, buffered := 0, 0
 		last, lastSrc := "", ""

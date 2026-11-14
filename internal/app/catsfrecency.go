@@ -41,6 +41,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/session"
 )
 
@@ -68,6 +69,7 @@ func (a *App) catsPollRecents() {
 		self = &id
 	}
 	go func() {
+		defer crash.Recover()
 		res, err := client.PathList("", self, true)
 		if err != nil {
 			return // the picker falls back to ced's own list
@@ -142,6 +144,7 @@ func (a *App) catsOpenProjectInTab(dir string) {
 	params := catsProjectTabParams(exe, dir)
 	shown := displayPath(dir)
 	go func() {
+		defer crash.Recover()
 		if _, err := client.TabCreate(params); err != nil {
 			catsPostNotice(scr, "New tab failed: "+err.Error())
 			return

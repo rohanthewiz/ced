@@ -635,6 +635,20 @@ func FavoritesPath() string { return configFilePath("favorites.json") }
 // apart.
 func PluginsDir() string { return configFilePath("plugins") }
 
+// RecoverDir returns the canonical rescue directory:
+// $XDG_CONFIG_HOME/ced/recover, falling back to ~/.config/ced/recover
+// (or "" when no config location resolves).
+//
+// It holds the unsaved buffers of an editor that ended without being
+// able to ask — a panic, a SIGTERM, a terminal that hung up — one
+// folder per rescue (internal/crash). It earns its place by the rule
+// every file here follows: it holds something ced cannot know for you,
+// the only copy of edits that never reached their file. Beside the
+// config rather than in the repository, so a crash never leaves
+// untracked files in a checkout, and one home means one place to look.
+// Nothing reads it at startup; it is written only on those exits.
+func RecoverDir() string { return configFilePath("recover") }
+
 // Load reads and parses the config file at path, returning a Config
 // with defaults filled in for any missing or blank fields.
 //

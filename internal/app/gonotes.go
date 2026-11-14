@@ -45,6 +45,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/gonotes"
 )
 
@@ -278,6 +279,7 @@ func (a *App) startNoteSend(at chatAttach, title string, private bool) {
 		return
 	}
 	go func() {
+		defer crash.Recover()
 		res, err := gonotesCreate(note)
 		_ = scr.PostEvent(&gonotesDoneEvent{when: time.Now(), title: note.Title, res: res, err: err})
 	}()

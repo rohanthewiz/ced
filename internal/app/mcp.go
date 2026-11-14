@@ -49,6 +49,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/ced/internal/clipboard"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/mcp"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 )
@@ -263,6 +264,7 @@ func (a *App) mcpStartConnect(name string) {
 	scr := a.screen
 	root := a.rootDir
 	go func() {
+		defer crash.Recover()
 		onExit := func(error) {
 			_ = scr.PostEvent(&mcpExitEvent{when: time.Now(), name: s.Name, seq: seq})
 		}
@@ -823,6 +825,7 @@ func (a *App) mcpRunTool(server, tool string, args map[string]any) {
 	client, seq, scr := c.client, c.seq, a.screen
 	a.flash("MCP " + server + " · " + tool + ": running…")
 	go func() {
+		defer crash.Recover()
 		res, err := client.CallTool(tool, args)
 		_ = scr.PostEvent(&mcpToolResultEvent{when: time.Now(), name: server, tool: tool,
 			seq: seq, result: res, err: err})

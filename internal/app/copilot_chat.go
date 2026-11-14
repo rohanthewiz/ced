@@ -64,6 +64,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/mcp"
 	"github.com/rohanthewiz/ced/internal/userconfig"
@@ -424,6 +425,7 @@ func (a *App) chatEnsureStarted() {
 	// applies to the next connection (like the write capability).
 	mcpServers := a.mcpEnabledServers()
 	go func() {
+		defer crash.Recover()
 		// Both callbacks run on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
 			if method != "session/update" {
@@ -817,6 +819,7 @@ func (a *App) chatSendPrompt(text string) {
 		"prompt":    blocks,
 	}
 	go func() {
+		defer crash.Recover()
 		var res struct {
 			StopReason string `json:"stopReason"`
 		}
@@ -1559,6 +1562,7 @@ func (a *App) chatSetModel(m chatModel) {
 	sid := a.chat.sessionID
 	scr := a.screen
 	go func() {
+		defer crash.Recover()
 		err := client.CallWithTimeout("session/set_model",
 			map[string]any{"sessionId": sid, "modelId": m.id},
 			nil, chatSessionTimeout)

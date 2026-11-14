@@ -33,6 +33,7 @@ package app
 import (
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 )
 
@@ -218,6 +219,7 @@ func (a *App) startCaretBlink() {
 	stop := a.caretBlinkStop
 	scr := a.screen
 	go func() {
+		defer crash.Recover()
 		ticker := time.NewTicker(caretBlinkInterval)
 		defer ticker.Stop()
 		for {

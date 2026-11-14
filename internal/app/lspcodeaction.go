@@ -57,6 +57,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
 )
@@ -155,6 +156,7 @@ func (a *App) menuCodeActions() {
 	a.lsp.actionSeq++
 	seq := a.lsp.actionSeq
 	go func() {
+		defer crash.Recover()
 		acts, err := client.CodeActions(path, rng, diags)
 		_ = scr.PostEvent(&lspCodeActionsEvent{
 			when: time.Now(), seq: seq, path: path,
@@ -321,6 +323,7 @@ func (a *App) runServerCommand(path string, cmd *lsp.Command) {
 	}
 	a.flash(title + "…")
 	go func() {
+		defer crash.Recover()
 		err := client.ExecuteCommand(cmd.Command, cmd.Arguments)
 		_ = scr.PostEvent(&lspCommandEvent{when: time.Now(), title: title, err: err})
 	}()

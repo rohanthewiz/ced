@@ -47,6 +47,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/userconfig"
@@ -394,6 +395,7 @@ func (a *App) copilotRequestCompletion(t *editor.Tab) {
 		"formattingOptions": map[string]any{"tabSize": tabSize, "insertSpaces": insertSpaces},
 	}
 	go func() {
+		defer crash.Recover()
 		var res copilotInlineResult
 		err := client.Call("textDocument/inlineCompletion", params, &res)
 		_ = scr.PostEvent(&copilotCompletionEvent{
@@ -504,6 +506,7 @@ func (a *App) copilotAcceptGhost() bool {
 		client := a.copilot.client
 		cmd := *item.Command
 		go func() {
+			defer crash.Recover()
 			_ = client.Call("workspace/executeCommand",
 				map[string]any{"command": cmd.Command, "arguments": cmd.Arguments}, nil)
 		}()

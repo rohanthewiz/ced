@@ -43,6 +43,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // catsCaptureLines bounds how much scrollback is asked for. Enough to hold a
@@ -116,6 +117,7 @@ func (a *App) catsCapturePane(p cats.PaneInfo) {
 	client, scr := a.cats.client, a.screen
 	id, label := p.Pane, catsPaneCompareLabel(p)
 	go func() {
+		defer crash.Recover()
 		text, err := client.Capture(id, cats.CaptureRecent, catsCaptureLines, true)
 		if err != nil {
 			catsPostNotice(scr, "Capture failed: "+err.Error())

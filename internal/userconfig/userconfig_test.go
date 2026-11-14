@@ -588,6 +588,19 @@ func TestPluginsDir_SharesTheConfigDirectory(t *testing.T) {
 	}
 }
 
+// TestRecoverDir_SharesTheConfigDirectory pins that crash rescues land
+// beside every other ced config file — the one home the exit note and
+// the README point at.
+func TestRecoverDir_SharesTheConfigDirectory(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got, want := RecoverDir(), filepath.Join("/xdg", "ced", "recover"); got != want {
+		t.Errorf("RecoverDir() = %q, want %q", got, want)
+	}
+	if filepath.Dir(RecoverDir()) != filepath.Dir(DefaultPath()) {
+		t.Error("recover dir drifted out of the config directory")
+	}
+}
+
 // TestFavoritesPath_SharesTheConfigDirectory is the same smoke test the
 // other config locations get: favorites.json must resolve beside every
 // other ced config file, which is the whole point of routing it through
@@ -1688,12 +1701,12 @@ func TestDiagNoteKey(t *testing.T) {
 // included, since `open -a Ghostty` is not `open -a ghostty`.
 func TestLoadTerminal(t *testing.T) {
 	cases := map[string]string{
-		`{}`:                                        TerminalAuto,
-		`{"terminal":""}`:                           TerminalAuto,
-		`{"terminal":"Auto"}`:                       TerminalAuto,
-		`{"terminal":" TMUX "}`:                     TerminalTmux,
-		`{"terminal":"ced"}`:                        TerminalCed,
-		`{"terminal":"cats"}`:                       TerminalCats,
+		`{}`:                    TerminalAuto,
+		`{"terminal":""}`:       TerminalAuto,
+		`{"terminal":"Auto"}`:   TerminalAuto,
+		`{"terminal":" TMUX "}`: TerminalTmux,
+		`{"terminal":"ced"}`:    TerminalCed,
+		`{"terminal":"cats"}`:   TerminalCats,
 		`{"terminal":"  open -a Ghostty {{DIR}} "}`: "open -a Ghostty {{DIR}}",
 	}
 	for body, want := range cases {

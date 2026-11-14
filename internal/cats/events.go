@@ -39,6 +39,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // Event names (cats internal/app/events.go).
@@ -205,6 +207,7 @@ func (s *Stream) Close() {
 // run is the reconnect loop: connect, pump until the connection dies, wait
 // out the backoff, repeat — until Close.
 func (s *Stream) run() {
+	defer crash.Recover() // the goroutine Subscribe starts
 	defer close(s.done)
 	delay := reconnectMin
 	for {

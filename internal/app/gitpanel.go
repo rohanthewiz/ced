@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
@@ -441,6 +442,7 @@ func (a *App) requestGitPanelDiff(f gitPanelFile) {
 	root := a.rootDir
 	ws := a.diffIgnoreWS
 	go func() {
+		defer crash.Recover()
 		lines, side := loadGitPanelDiff(root, f, ws)
 		_ = scr.PostEvent(&gitPanelDiffEvent{when: time.Now(), path: f.Path, lines: lines, side: side, ws: ws})
 	}()

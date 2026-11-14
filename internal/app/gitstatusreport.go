@@ -36,6 +36,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // gitStatusReportBodyWidth caps a report line at the info modal's usable
@@ -99,6 +101,7 @@ func (a *App) menuGitStatus() {
 	scr := a.screen
 	root := a.rootDir
 	go func() {
+		defer crash.Recover()
 		out, err := exec.Command("git", append([]string{"-C", root}, gitStatusReportArgs...)...).CombinedOutput()
 		_ = scr.PostEvent(&gitStatusReportEvent{when: time.Now(), out: out, err: err})
 	}()

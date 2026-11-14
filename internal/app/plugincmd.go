@@ -43,6 +43,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/plugins"
 )
@@ -226,6 +227,7 @@ func (a *App) execPluginCommand(p plugins.Plugin, c plugins.Command, promptValue
 	scr := a.screen
 	dir := a.rootDir
 	go func() {
+		defer crash.Recover()
 		stdout, stderr, err := pluginShell(dir, c.Command, env, stdin)
 		ev.when = time.Now()
 		ev.stdout, ev.stderr, ev.err = stdout, stderr, err

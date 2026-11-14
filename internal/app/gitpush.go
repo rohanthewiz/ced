@@ -68,6 +68,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // Layout. Width is wider than the other modals (60 for the form, 54 for
@@ -428,6 +430,7 @@ func (a *App) fetchGitPushHeads(remote string) {
 	}
 	scr, root := a.screen, a.rootDir
 	go func() {
+		defer crash.Recover()
 		cmd := exec.Command("git", "-C", root, "ls-remote", "--heads", remote)
 		cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
 		var heads []string

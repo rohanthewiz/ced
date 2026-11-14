@@ -401,3 +401,106 @@ func TestAutoSaveToggleLabel(t *testing.T) {
 		t.Errorf("disabled label = %q, want Enable auto-save", got)
 	}
 }
+
+// TestAutoSaveWait_CapsASteadyRun pins the N-118 cap: while edits keep
+// coming, the countdown shrinks so the run is saved no later than
+// autoSaveMaxWait after it began — and never goes negative.
+func TestAutoSaveWait_CapsASteadyRun(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	now := time.Now()
+
+	if got := a.autoSaveWait(now); got != defaultAutoSaveDelay {
+		t.Fatalf("no run in progress: wait = %v, want the plain %v", got, defaultAutoSaveDelay)
+	}
+	a.autoSaveDirtySince = now.Add(-28 * time.Second)
+	if got := a.autoSaveWait(now); got != 2*time.Second {
+		t.Fatalf("28s into a run: wait = %v, want 2s", got)
+	}
+	a.autoSaveDirtySince = now.Add(-time.Hour)
+	if got := a.autoSaveWait(now); got != 0 {
+		t.Fatalf("past the cap: wait = %v, want 0", got)
+	}
+}
+
+// TestAutoSaveWait_NeverBelowTheUsersOwnDelay pins that the cap honours
+// a long "autosavedelay": a user who asked for two minutes alone gets a
+// save every two minutes of steady typing, not every thirty seconds.
+func TestAutoSaveWait_NeverBelowTheUsersOwnDelay(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.autoSaveDelay = 2 * time.Minute
+	now := time.Now()
+	a.autoSaveDirtySince = now.Add(-40 * time.Second)
+
+	if got, want := a.autoSaveWait(now), 80*time.Second; got != want {
+		t.Fatalf("wait = %v, want %v (the cap is the user's delay, not 30s)", got, want)
+	}
+}
+
+// TestAutoSaveAfterEvent_StartsAndEndsTheRun pins the run's bookends:
+// the first edit starts it, and a buffer that turns clean by any route
+// (an explicit save here) ends it.
+func TestAutoSaveAfterEvent_StartsAndEndsTheRun(t *testing.T) {
+	a, _ := autoSaveFixture(t)
+	tab := a.tabs[0]
+	tab.InsertRune('x')
+	a.autoSaveAfterEvent()
+	started := a.autoSaveDirtySince
+	if started.IsZero() {
+		t.Fatal("the first edit should start the run")
+	}
+	tab.InsertRune('y')
+	a.autoSaveAfterEvent()
+	if !a.autoSaveDirtySince.Equal(started) {
+		t.Fatal("a later edit restarted the run — the cap would never be reached")
+	}
+
+	// An explicit save clears Dirty without moving EditRev: the run must
+	// end on the dirty flag, not wait for the signature to change.
+	if err := tab.Save(); err != nil {
+		t.Fatal(err)
+	}
+	a.autoSaveAfterEvent()
+	if !a.autoSaveDirtySince.IsZero() {
+		t.Fatal("a clean buffer should end the run")
+	}
+}
+
+// TestHandleAutoSave_EndsTheRunEvenWhenATabCannotSave pins the guard
+// against a save storm: a tab the pass can't write (a disk conflict)
+// stays dirty, and a run left in the past would arm a zero wait on every
+// later keystroke and re-save every other dirty tab per key.
+func TestHandleAutoSave_EndsTheRunEvenWhenATabCannotSave(t *testing.T) {
+	a, target := autoSaveFixture(t)
+	a.tabs[0].InsertString("// edited\n")
+	// Someone else rewrites the file: the guard refuses the save.
+	if err := os.WriteFile(target, []byte("package other\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a.autoSaveDirtySince = time.Now().Add(-time.Hour)
+
+	a.handleAutoSave()
+
+	if !a.tabs[0].Dirty {
+		t.Fatal("fixture: the conflicted tab should have been skipped")
+	}
+	if !a.autoSaveDirtySince.IsZero() {
+		t.Fatal("the run should end at every save pass, written or not")
+	}
+}
+
+// TestHandleAutoSave_ModalDeferralDoesNotSpin pins the deferral's wait:
+// past the cap, a re-arm through autoSaveWait would be zero, and with a
+// modal held open the timer would fire, defer, and re-fire in a loop.
+func TestHandleAutoSave_ModalDeferralDoesNotSpin(t *testing.T) {
+	a, _ := autoSaveFixture(t)
+	a.tabs[0].InsertString("// edited\n")
+	a.autoSaveDirtySince = time.Now().Add(-time.Hour)
+	a.modal = &confirmModal{}
+
+	a.handleAutoSave()
+	time.Sleep(50 * time.Millisecond)
+
+	if a.screen.HasPendingEvent() {
+		t.Fatal("the deferral re-armed a zero wait: an autoSaveEvent is already queued")
+	}
+}

@@ -47,6 +47,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/plugins"
 	"github.com/rohanthewiz/ced/internal/theme"
@@ -131,6 +132,7 @@ func (a *App) pluginsOnEvent(ev plugins.Event, tab *editor.Tab) {
 				continue
 			}
 			go func() {
+				defer crash.Recover()
 				stdout, stderr, err := pluginShell(dir, h.Command, env, "")
 				_ = scr.PostEvent(&pluginHookDoneEvent{
 					when: time.Now(), seq: seq,
@@ -145,6 +147,7 @@ func (a *App) pluginsOnEvent(ev plugins.Event, tab *editor.Tab) {
 			}
 			key := providerKey(p, d)
 			go func() {
+				defer crash.Recover()
 				stdout, stderr, _ := pluginShell(dir, d.Command, env, "")
 				// stdout AND stderr: `go vet` and a good half of the Go
 				// toolchain report findings on stderr, so a provider

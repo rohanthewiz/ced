@@ -51,6 +51,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 )
 
@@ -159,6 +160,7 @@ func (a *App) catsClipRead(use catsClipUse) {
 		tab, rev = t, t.EditRev
 	}
 	go func() {
+		defer crash.Recover()
 		d, err := client.ClipboardRead()
 		if err != nil {
 			catsPostNotice(scr, "Clipboard: "+catsClipError(err))

@@ -66,6 +66,8 @@ package app
 
 import (
 	"time"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // gitSnapshotStale is how long an in-flight async snapshot may run before
@@ -160,6 +162,7 @@ func (a *App) launchGitStatus() {
 	a.gitSnap.rerun = false
 	seq, root, scr := a.gitSnap.seq, a.rootDir, a.screen
 	go func() {
+		defer crash.Recover()
 		st := loadGitStatus(root)
 		_ = scr.PostEvent(&gitStatusEvent{when: time.Now(), seq: seq, root: root, st: st})
 	}()

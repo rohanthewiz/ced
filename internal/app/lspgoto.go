@@ -48,6 +48,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
 )
@@ -139,6 +140,7 @@ func (a *App) lspGoTo(fetch lspLocFetch, noun, heading string, alwaysList bool) 
 	a.lsp.refSeq++
 	seq := a.lsp.refSeq
 	go func() {
+		defer crash.Recover()
 		locs, err := fetch(client, path, pos)
 		// Context lines are only needed for a list, and reading them is
 		// file IO, so it happens here — but only when there is a list.

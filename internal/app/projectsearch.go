@@ -56,6 +56,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/history"
@@ -196,6 +197,7 @@ func (a *App) startFolderSearch(query string, opts editor.FindOptions, dir strin
 	scr, root := a.screen, a.rootDir
 	a.flash(fmt.Sprintf("Searching %d files for %q%s…", len(paths), query, findOptionsNote(opts)))
 	go func() {
+		defer crash.Recover()
 		hits, truncated := search.Project(root, paths, search.Options{Query: query, FindOptions: opts})
 		_ = scr.PostEvent(&projectSearchEvent{
 			when: time.Now(), seq: seq, dir: dir, query: query, opts: opts,

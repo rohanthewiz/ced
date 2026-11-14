@@ -196,6 +196,16 @@ func newTestApp(t *testing.T, root string) *App {
 	prevChatDir := chatArchiveDirFn
 	chatArchiveDirFn = func() string { return filepath.Join(chatHome, "chats") }
 	t.Cleanup(func() { chatArchiveDirFn = prevChatDir })
+	// Crash rescues (crashsafety.go) go to a throwaway directory and the
+	// exit note to nowhere: a test of the panic or signal path must not
+	// leave folders of fixture text in the developer's real
+	// ~/.config/ced/recover, nor print into the test output. Rescue
+	// tests read recoverDirFn() and swap exitNoteOut for a buffer.
+	recoverHome := t.TempDir()
+	prevRecoverDir, prevExitNote := recoverDirFn, exitNoteOut
+	recoverDirFn = func() string { return filepath.Join(recoverHome, "recover") }
+	exitNoteOut = io.Discard
+	t.Cleanup(func() { recoverDirFn, exitNoteOut = prevRecoverDir, prevExitNote })
 	// The GoNotes capture posts to a server outside ced entirely, so
 	// pin the seam at a refusal: without it a developer running GoNotes
 	// on the default port would have every test that exercises the

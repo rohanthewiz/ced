@@ -54,6 +54,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/session"
 )
 
@@ -216,6 +217,7 @@ func (s *Server) Path() string { return s.path }
 // own goroutine so a client that asked to wait can block for as long as
 // the user takes without stalling the next one.
 func (s *Server) accept() {
+	defer crash.Recover() // the goroutine Listen starts
 	for {
 		conn, err := s.ln.Accept()
 		if err != nil {
@@ -237,6 +239,7 @@ func (s *Server) accept() {
 // for a wait request — hold the line open until the editor says it is
 // done with the file.
 func (s *Server) serve(conn net.Conn) {
+	defer crash.Recover() // one goroutine per connection (accept)
 	defer func() {
 		s.mu.Lock()
 		delete(s.conns, conn)

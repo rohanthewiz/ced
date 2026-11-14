@@ -93,6 +93,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // commitReceiptFor is how long the panel stays up unattended. Long
@@ -244,6 +246,7 @@ func (a *App) requestCommitReceipt() {
 	scr := a.screen
 	root := a.rootDir
 	go func() {
+		defer crash.Recover()
 		out, err := exec.Command("git", "-C", root,
 			"log", "-1", "--no-color", "--format="+commitReceiptFormat).Output()
 		_ = scr.PostEvent(&gitCommitReceiptEvent{when: time.Now(), out: out, err: err})

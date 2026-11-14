@@ -36,6 +36,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // callTimeout bounds how long a Call waits for the server's response.
@@ -313,8 +315,13 @@ func (c *Client) Close() {
 		// enough.
 		proc := c.cmd
 		go func() {
+			defer crash.Recover()
 			done := make(chan struct{})
-			go func() { _ = proc.Wait(); close(done) }()
+			go func() {
+				defer crash.Recover()
+				_ = proc.Wait()
+				close(done)
+			}()
 			select {
 			case <-done:
 			case <-time.After(2 * time.Second):
@@ -371,6 +378,7 @@ func marshalParams(params any) json.RawMessage {
 // to the pending Call it answers, the notification callback, or the
 // server-request auto-responder.
 func (c *Client) readLoop() {
+	defer crash.Recover() // the goroutine every constructor launches
 	var loopErr error
 	for {
 		m, err := c.read()
@@ -456,6 +464,7 @@ func (c *Client) respondToServer(m *message) {
 		// out of order is legal — and send is writeMu-serialised, so
 		// concurrent replies can't interleave bytes.
 		go func() {
+			defer crash.Recover()
 			res, err := c.onRequest(m.Method, m.Params)
 			switch {
 			case errors.Is(err, ErrRequestUnhandled):

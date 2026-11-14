@@ -35,6 +35,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // State is the high-level phase of the finder's index build. UI
@@ -94,6 +96,7 @@ func (f *Finder) Rebuild(onDone func()) {
 	f.mu.Unlock()
 
 	go func() {
+		defer crash.Recover()
 		defer f.running.Store(0)
 		paths, viaGit, err := BuildIndex(root)
 		f.mu.Lock()

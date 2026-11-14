@@ -46,6 +46,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
@@ -96,6 +97,7 @@ func (a *App) hostRunAsync(dir string, argv []string, what string) {
 	// may still be starting, and a read there would race that write.
 	scr, run := a.screen, hostRun
 	go func() {
+		defer crash.Recover()
 		start := time.Now()
 		out, err := run(dir, argv)
 		if err == nil || time.Since(start) > hostFailWindow {

@@ -40,6 +40,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/filetree"
 )
 
@@ -285,6 +286,7 @@ func (a *App) startZip(src string) {
 	a.flash("Zipping " + filepath.Base(src) + "…")
 	scr := a.screen
 	go func() {
+		defer crash.Recover()
 		err := createZip(src, dest)
 		_ = scr.PostEvent(&zipDoneEvent{when: time.Now(), dest: dest, err: err})
 	}()
@@ -325,6 +327,7 @@ func (a *App) startZipSet(srcs []string) {
 	scr := a.screen
 	paths := append([]string(nil), srcs...)
 	go func() {
+		defer crash.Recover()
 		err := createZipMulti(paths, base, dest)
 		_ = scr.PostEvent(&zipDoneEvent{when: time.Now(), dest: dest, err: err})
 	}()

@@ -84,6 +84,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/theme"
 	"github.com/rohanthewiz/ced/internal/userconfig"
@@ -859,7 +860,12 @@ func (a *App) requestFileBlame(t *editor.Tab) {
 	rev := t.EditRev
 	contents := blameContents(t)
 	scr, root, path := a.screen, a.rootDir, t.Path
-	run := func(lo, hi int) {
+	// Always run as a goroutine (both go statements below), so it
+	// carries the guard itself. A name of its own, not `run`: the
+	// goroutine pin (crash.TestEveryGoroutineRecovers) resolves a `go`
+	// call by name within the package, and another `run` closure exists.
+	blamePass := func(lo, hi int) {
+		defer crash.Recover()
 		fb := loadFileBlameRange(root, path, contents, time.Now(), lo, hi)
 		if fb != nil {
 			fb.rev = rev
@@ -867,9 +873,9 @@ func (a *App) requestFileBlame(t *editor.Tab) {
 		_ = scr.PostEvent(&gitBlameEvent{when: time.Now(), path: path, seq: seq, blame: fb, partial: lo > 0})
 	}
 	if lo, hi, ok := a.blameWindow(t); ok && a.fileBlames[path] == nil {
-		go run(lo, hi)
+		go blamePass(lo, hi)
 	}
-	go run(0, 0)
+	go blamePass(0, 0)
 }
 
 // blameWindow is the range a window pass asks for, 1-based inclusive:

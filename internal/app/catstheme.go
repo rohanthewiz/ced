@@ -79,6 +79,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
 
@@ -249,6 +250,7 @@ func (a *App) catsPollTheme() {
 	a.cats.themePolledAt = now
 	client, scr := a.cats.client, a.screen
 	go func() {
+		defer crash.Recover()
 		res, err := client.ConfigGet()
 		if err != nil {
 			return // a host that will not answer keeps whatever theme we have

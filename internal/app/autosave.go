@@ -14,6 +14,16 @@
 //	edit → EditRev bump → autoSaveAfterEvent re-arms timer
 //	                       └─ idle autoSaveInterval ─► autoSaveEvent → save dirty tabs
 //
+// A debounce alone never fires while the typing doesn't stop, so it is
+// CAPPED: a run of unsaved edits is saved at most autoSaveMaxWait after
+// it began, pause or no pause (autoSaveWait).
+//
+//	edits:   x x x x x x x x x x x x x x x x x x x x x x x x x x x
+//	debounce:  ↻ ↻ ↻ ↻ … (re-armed by each edit, never fires)
+//	cap:     ├───────────── autoSaveMaxWait ─────────────┤ save
+//	         dirtySince                                    (dirtySince reset;
+//	                                                        next edit restarts it)
+//
 // The timer is not the only trigger. Leaving — the terminal window losing
 // focus, or switching to another tab — flushes what is pending straight
 // away (autoSaveOnFocusChange, autoSaveDepartingTab), which is what lets
@@ -63,6 +73,16 @@ import (
 // written and never read.
 const defaultAutoSaveDelay = userconfig.DefaultAutoSaveDelay
 
+// autoSaveMaxWait caps how long a run of edits can stay unsaved while
+// the user keeps typing (N-118). Without it the debounce is re-armed by
+// every keystroke and a steady typist is never saved — exactly the
+// session a crash costs the most. Thirty seconds is six default pauses:
+// rare enough to stay out of the way, short enough that a kill -9 costs
+// a sentence rather than an afternoon. Never shorter than the user's own
+// "autosavedelay" (autoSaveWait), which states how long they want left
+// alone.
+const autoSaveMaxWait = 30 * time.Second
+
 // autoSaveInterval is the resolved idle window: the user's configured
 // value, or the shipped default when nothing has been resolved onto this
 // App yet (tests build App as a struct literal, where the zero value
@@ -104,24 +124,60 @@ func (a *App) autoSaveAfterEvent() {
 			dirty = true
 		}
 	}
+	if !dirty {
+		// Everything was saved some other way (an explicit save, an
+		// undo back to the saved text): the run is over. Checked before
+		// the signature, because a save clears Dirty without moving any
+		// EditRev — the sum alone would never notice.
+		a.autoSaveDirtySince = time.Time{}
+	}
 	if sig == a.autoSaveSig {
 		return
 	}
 	a.autoSaveSig = sig
-	if dirty {
-		a.armAutoSave()
+	if !dirty {
+		return
 	}
+	if a.autoSaveDirtySince.IsZero() {
+		a.autoSaveDirtySince = time.Now()
+	}
+	a.armAutoSave()
+}
+
+// autoSaveWait is how long the countdown armed at now should run: the
+// idle interval, cut short so it fires no later than autoSaveMaxWait
+// after the run of edits began. The cap is never below the interval
+// itself — a user who asked for a two-minute pause gets saves every two
+// minutes of steady typing, not every thirty seconds.
+func (a *App) autoSaveWait(now time.Time) time.Duration {
+	wait := a.autoSaveInterval()
+	if a.autoSaveDirtySince.IsZero() {
+		return wait
+	}
+	limit := max(autoSaveMaxWait, wait)
+	left := a.autoSaveDirtySince.Add(limit).Sub(now)
+	return max(min(wait, left), 0)
 }
 
 // armAutoSave (re)starts the idle countdown. Restarting on every
 // further edit is what makes it a debounce — the save only fires
-// after a genuine pause, never mid-burst.
+// after a genuine pause — until the cap (autoSaveWait) says the run of
+// edits has waited long enough.
 func (a *App) armAutoSave() {
+	a.armAutoSaveIn(a.autoSaveWait(time.Now()))
+}
+
+// armAutoSaveIn (re)starts the countdown with an explicit wait. The
+// modal deferral uses it with the plain interval: once the cap has
+// passed, autoSaveWait answers zero, and a deferral re-armed with that
+// would spin — fire, find the modal still up, re-arm at zero — for as
+// long as the modal stays open.
+func (a *App) armAutoSaveIn(wait time.Duration) {
 	if a.autoSaveTimer != nil {
 		a.autoSaveTimer.Stop()
 	}
 	scr := a.screen
-	a.autoSaveTimer = time.AfterFunc(a.autoSaveInterval(), func() {
+	a.autoSaveTimer = time.AfterFunc(wait, func() {
 		_ = scr.PostEvent(&autoSaveEvent{when: time.Now()})
 	})
 }
@@ -145,9 +201,15 @@ func (a *App) handleAutoSave() {
 		return
 	}
 	if a.modal != nil || a.menuOpen {
-		a.armAutoSave()
+		a.armAutoSaveIn(a.autoSaveInterval())
 		return
 	}
+	// The run of edits ends here, saved or not: a tab the pass below
+	// can't write (a disk conflict, an encoding refusal) stays dirty,
+	// and keeping the old start would put the cap in the past — every
+	// later keystroke would arm a zero wait and re-save every other
+	// dirty tab per key. The next edit starts a fresh run.
+	a.autoSaveDirtySince = time.Time{}
 	saved := false
 	for i := range a.tabs {
 		if a.autoSaveTabIfEligible(i) {

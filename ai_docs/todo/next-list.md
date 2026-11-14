@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-144**
+**Next ID: N-145**
 
 ## Open
 
@@ -133,26 +133,6 @@ plus the LSP work done in the seeding session itself
   npm package also installs a `pyright-langserver` alias, so an
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
-
-- **N-118** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **No crash safety.** No `recover()` and no `os/signal` anywhere in
-  non-test code; `main.go` calls `a.Close()` only after `Run` returns.
-  A panic (main loop or any of ~74 `go func` sites), SIGTERM, or SIGHUP
-  from a killed tmux pane skips `Close`: unsaved edits, the tab list
-  (`recordSession`) and history (`writeHistory`) are lost, and a panic
-  or SIGTERM leaves the terminal in raw mode / alt screen / mouse 1003
-  / kitty keyboard with the trace printed into the alt screen.
-  Auto-save is a pure debounce (autosave.go:107-127 re-arms on every
-  edit, :147-150 while a modal or menu is up), so steady typing is
-  never saved. Read, not run. Four parts: (a) recover in `Run` plus a
-  `safeGo` wrapper for goroutines: write dirty buffers
-  (`EncodedBytes`) to a recovery folder, `screen.Fini()`, re-panic;
-  (b) `signal.Notify(SIGHUP, SIGTERM)` posting a quit event through the
-  normal `Close` path; (c) a max wait on auto-save (force a save after
-  ~30s of continuous dirtiness); (d) `recordSession` on tab open and
-  close. Decide where recovery files live: `<repo>/.ced/recover/` is
-  inside an existing dotdir; outside a repository it needs a home
-  under `~/.config/ced/`, which the "no new dotfiles" rule must allow.
 
 - **N-121** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Smaller data-safety fixes, each contained.** Close a part by
@@ -426,6 +406,19 @@ plus the LSP work done in the seeding session itself
   Options if it bites: start the window only when the full pass has not
   answered within ~300ms (adapts to real cost), and/or re-ask a window
   for a viewport that moved off the first one.
+
+- **N-144** · raised `2026-1113-1801-n118-crash-safety` · value low
+  **Rescued edits have no in-editor door.** A panic, SIGTERM or hangup
+  writes dirty buffers to `~/.config/ced/recover/<stamp>-<project>/`
+  (internal/crash/rescue.go) and says where in a line printed after
+  Fini — which nobody sees when the pane was killed. The only way back
+  is to know the folder exists. Nothing reads it at startup (and must
+  not flash there: startup notes are HELD for a ≡ label). Options: a ≡
+  File row "Recovered edits…" (picker of rescue folders for THIS root,
+  newest first, rows open the rescued copy or compare it with the
+  original via the compare panel), its label carrying a count only when
+  a rescue for this root exists. Raise priority if a rescue is ever
+  actually lost.
 
 ## Validate
 
@@ -898,6 +891,26 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-13, `2026-1113-1801-n118-crash-safety` —
+  **N-118** crash safety, all four parts (crashsafety.go, internal/crash).
+  (a) `Run`, `New`, `OpenFile` and `RevealPath` defer `recoverRun`:
+  rescue dirty buffers, record session (only once armed) + history,
+  `Fini`, exit note, re-panic. Every goroutine starts with
+  `defer crash.Recover()` (88 sites; pinned repo-wide by
+  `TestEveryGoroutineRecovers`), which hands the panic to the main loop
+  as a `crashEvent` and rescues itself after 3s if the loop is wedged.
+  (b) SIGHUP/SIGTERM → `signalQuitEvent` → auto-save flush under the
+  focus-out rule, rescue the rest, normal Close; tcell's `EventError`
+  (tty read failed — previously ignored, leaving an editor with no input)
+  takes the same path. (c) auto-save capped at 30s from a run's first
+  edit (never below the user's delay). (d) the tab list is written on
+  every open/close (`sessionAfterEvent`). Rescues land in
+  `~/.config/ced/recover/<stamp>-<project>/` (user's call; `recover/`
+  added to CLAUDE.md's allowed config entries) with an INDEX.txt, never
+  over the user's file, pruned after 14 days. Checked in the real binary:
+  SIGTERM, PTY hangup with auto-save on, kill -9, and a goroutine panic
+  (scratch build). In-editor door for rescues raised as N-144.
 
 - closed 2026-11-13, `2026-1113-1713-n081-editor-ctx-lsp-rows-blame-file` —
   **N-081** the editor right-click menu gained

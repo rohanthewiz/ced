@@ -50,6 +50,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
 )
@@ -151,6 +152,7 @@ func (a *App) startRename(path string, pos editor.Position, askRev int, oldName,
 	seq := a.lsp.renameSeq
 	a.flash(fmt.Sprintf("Renaming %s → %s…", oldName, newName))
 	go func() {
+		defer crash.Recover()
 		edit, err := client.Rename(path, lspPos, newName)
 		_ = scr.PostEvent(&lspRenameEvent{
 			when: time.Now(), seq: seq,

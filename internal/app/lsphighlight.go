@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
 )
@@ -72,6 +73,7 @@ func (a *App) menuHighlightSymbol() {
 	a.lspFlushChange(t)
 	path, rev, pos := t.Path, t.EditRev, lspPosFor(t, t.Cursor)
 	go func() {
+		defer crash.Recover()
 		uses, err := client.DocumentHighlights(path, pos)
 		_ = scr.PostEvent(&lspHighlightEvent{
 			when: time.Now(), path: path, rev: rev, word: word, uses: uses, err: err,

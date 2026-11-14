@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 )
 
@@ -83,6 +84,7 @@ func (a *App) catsPollPanes() {
 	a.cats.panesPolledAt = now
 	client, scr := a.cats.client, a.screen
 	go func() {
+		defer crash.Recover()
 		panes, err := client.PaneList()
 		if err != nil {
 			return // keep whatever we have; a stale name beats a blank bar
@@ -169,6 +171,7 @@ func (a *App) catsFocusPane(p cats.PaneInfo) {
 	client, scr := a.cats.client, a.screen
 	id := p.Pane
 	go func() {
+		defer crash.Recover()
 		if err := client.PaneFocus(id); err != nil {
 			catsPostNotice(scr, "Focus failed: "+err.Error())
 		}
@@ -323,6 +326,7 @@ func (a *App) catsSendQuoteTo(p cats.PaneInfo, quote string) {
 	client, scr := a.cats.client, a.screen
 	id, who := p.Pane, catsPaneWho(p)
 	go func() {
+		defer crash.Recover()
 		if err := client.PaneSendInput(id, quote, false); err != nil {
 			catsPostNotice(scr, "Send failed: "+err.Error())
 			return
@@ -349,6 +353,7 @@ func (a *App) menuCatsAskChat() {
 	}
 	client, scr := a.cats.client, a.screen
 	go func() {
+		defer crash.Recover()
 		if err := client.ChatSend(quote); err != nil {
 			catsPostNotice(scr, "Chat send failed: "+err.Error())
 			return

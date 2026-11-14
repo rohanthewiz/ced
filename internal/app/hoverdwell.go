@@ -51,6 +51,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 )
 
@@ -200,6 +201,7 @@ func (a *App) handleHoverDwellTick(e *hoverDwellEvent) {
 	ax, ay := a.hoverDwell.x, a.hoverDwell.y
 	a.lspFlushChange(t) // the answer must describe what is on screen
 	go func() {
+		defer crash.Recover()
 		h, err := client.HoverAt(path, lpos)
 		text, markdown := "", false
 		if h != nil {

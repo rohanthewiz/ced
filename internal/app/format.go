@@ -55,6 +55,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/format"
 )
@@ -529,6 +530,7 @@ func (a *App) execFormatterChain(tabPath string, cmds [][]string, quiet bool) {
 		a.flash(label + "…")
 	}
 	go func() {
+		defer crash.Recover()
 		var err error
 		for _, argv := range cmds {
 			if len(argv) == 0 {
@@ -619,6 +621,7 @@ func (a *App) execInProcessFormat(tabPath string, quiet bool) bool {
 		a.flash(label + "…")
 	}
 	go func() {
+		defer crash.Recover()
 		err := formatFileInPlace(tabPath)
 		_ = scr.PostEvent(&formatDoneEvent{
 			when:    time.Now(),

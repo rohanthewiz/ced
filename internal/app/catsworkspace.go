@@ -62,6 +62,7 @@ import (
 	"strings"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/session"
 )
 
@@ -115,6 +116,7 @@ func (a *App) catsGoToFolder(dir string) {
 	params := catsProjectTabParams(exe, dir)
 	shown := displayPath(dir)
 	go func() {
+		defer crash.Recover()
 		panes, err := client.PaneList()
 		if err != nil {
 			catsPostNotice(scr, "Recent folder: cats did not answer: "+err.Error())

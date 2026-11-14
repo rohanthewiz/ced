@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
@@ -400,6 +401,7 @@ func (a *App) gitPanelSuggestCommit(files []gitPanelFile, trailer bool) {
 	root := a.rootDir
 	targets := append([]gitPanelFile(nil), files...)
 	go func() {
+		defer crash.Recover()
 		diff := loadCommitDiff(root, targets)
 		_ = scr.PostEvent(&gitCommitDiffEvent{when: time.Now(), files: targets, diff: diff, trailer: trailer})
 	}()

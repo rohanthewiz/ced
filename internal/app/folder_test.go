@@ -811,3 +811,101 @@ func TestSession_TabGroupsSurviveRecordAndRestore(t *testing.T) {
 		t.Errorf("groups with no tabs = %+v, want the api folder group", c.tabGroups)
 	}
 }
+
+// TestSessionAfterEvent_RecordsOpensAndCloses pins N-118's part (d): with
+// the record armed, opening a tab and closing one each reach state.json
+// at once — an exit that never reaches Close still reopens the right
+// tabs.
+func TestSessionAfterEvent_RecordsOpensAndCloses(t *testing.T) {
+	root := t.TempDir()
+	one := filepath.Join(root, "one.txt")
+	if err := os.WriteFile(one, []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, root)
+	seedSessionStore(a)
+	a.armSessionTabs()
+
+	a.openFile(one)
+	a.sessionAfterEvent()
+	disk, err := session.Load(sessionStatePathFn())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, ok := disk.Find(root); !ok || len(e.Tabs) != 1 || e.Tabs[0].Path != one {
+		t.Fatalf("after open, state.json holds %+v, want one.txt", e)
+	}
+
+	a.closeTab(0)
+	a.sessionAfterEvent()
+	disk, _ = session.Load(sessionStatePathFn())
+	if e, _ := disk.Find(root); len(e.Tabs) != 0 {
+		t.Fatalf("after close, state.json still holds %+v", e.Tabs)
+	}
+}
+
+// TestSessionAfterEvent_UnarmedWritesNothing pins the arming: a directly
+// built App (and New, until restoreSession is done) must not write
+// state.json on its own.
+func TestSessionAfterEvent_UnarmedWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	one := filepath.Join(root, "one.txt")
+	if err := os.WriteFile(one, []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, root)
+	seedSessionStore(a)
+
+	a.openFile(one)
+	a.sessionAfterEvent()
+
+	if _, err := os.Stat(sessionStatePathFn()); !os.IsNotExist(err) {
+		t.Fatalf("unarmed record wrote state.json (%v)", err)
+	}
+}
+
+// TestSessionAfterEvent_SwitchingTabsWritesNothing pins the scope: only a
+// change of the tab LIST is written — a switch or a cursor move would
+// turn the shared state file into per-keystroke churn.
+func TestSessionAfterEvent_SwitchingTabsWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	one := filepath.Join(root, "one.txt")
+	two := filepath.Join(root, "two.txt")
+	for _, p := range []string{one, two} {
+		if err := os.WriteFile(p, []byte("x\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := newTestApp(t, root)
+	seedSessionStore(a)
+	a.openFile(one)
+	a.openFile(two)
+	a.armSessionTabs()
+
+	a.switchToTab(0)
+	a.activeTabPtr().MoveCursorTo(editor.Position{Line: 0, Col: 1}, false)
+	a.sessionAfterEvent()
+
+	if _, err := os.Stat(sessionStatePathFn()); !os.IsNotExist(err) {
+		t.Fatalf("a tab switch wrote state.json (%v)", err)
+	}
+}
+
+// TestSessionTabsMatch covers the allocation-free comparison, untitled
+// tabs (never recorded) included.
+func TestSessionTabsMatch(t *testing.T) {
+	mk := func(p string) *editor.Tab { tab, _ := editor.NewTab(p); return tab }
+	tabs := []*editor.Tab{mk("/p/a"), mk(""), mk("/p/b")}
+	if !sessionTabsMatch(tabs, []string{"/p/a", "/p/b"}) {
+		t.Error("same named tabs should match, untitled ignored")
+	}
+	if sessionTabsMatch(tabs, []string{"/p/b", "/p/a"}) {
+		t.Error("a reorder should not match")
+	}
+	if sessionTabsMatch(tabs, []string{"/p/a"}) || sessionTabsMatch(tabs, []string{"/p/a", "/p/b", "/p/c"}) {
+		t.Error("a different count should not match")
+	}
+	if got := sessionTabPaths(tabs, nil); len(got) != 2 || got[0] != "/p/a" || got[1] != "/p/b" {
+		t.Errorf("sessionTabPaths = %v", got)
+	}
+}

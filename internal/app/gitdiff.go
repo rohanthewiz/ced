@@ -49,6 +49,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
@@ -282,6 +283,7 @@ func (a *App) requestFileDiffStamped(path string, stamp diffStamp, stamped bool)
 	scr := a.screen
 	root := a.rootDir
 	go func() {
+		defer crash.Recover()
 		hunks := loadFileDiff(root, path)
 		_ = scr.PostEvent(&gitDiffEvent{when: time.Now(), path: path, hunks: hunks, stamp: stamp, stamped: stamped})
 	}()

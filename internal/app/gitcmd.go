@@ -30,6 +30,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // gitCmdDoneEvent carries one finished git command from the background
@@ -133,6 +135,7 @@ func (a *App) runGitCmdFull(label string, env []string, onFail func(*App, *gitCm
 	scr := a.screen
 	root := a.rootDir
 	go func() {
+		defer crash.Recover()
 		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
 		cmd.Env = env
 		out, err := cmd.CombinedOutput()
@@ -188,6 +191,7 @@ func (a *App) runGitApplyPatch(label, patch string, args ...string) {
 	scr := a.screen
 	root := a.rootDir
 	go func() {
+		defer crash.Recover()
 		dir := gitToplevel(root)
 		if dir == "" {
 			dir = root
@@ -246,6 +250,7 @@ func (a *App) runGitCmdSeqHook(label string, env []string, onFail func(*App, *gi
 	scr := a.screen
 	root := a.rootDir
 	go func() {
+		defer crash.Recover()
 		for _, args := range cmds {
 			cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
 			cmd.Env = env

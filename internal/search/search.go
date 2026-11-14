@@ -38,6 +38,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 )
 
@@ -125,6 +126,7 @@ func Project(rootDir string, paths []string, opts Options) (hits []Hit, truncate
 	for range workers {
 		wg.Add(1)
 		go func() {
+			defer crash.Recover()
 			defer wg.Done()
 			for rel := range jobs {
 				found := searchFile(filepath.Join(rootDir, rel), matcher, maxBytes)

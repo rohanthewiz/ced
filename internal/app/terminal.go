@@ -46,6 +46,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rohanthewiz/grsh"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
@@ -408,6 +409,7 @@ func (a *App) submitTermCommand() {
 	// closure touches nothing else and reports back via the event.
 	sess, scr := a.term.sess, a.screen
 	go func() {
+		defer crash.Recover()
 		err := sess.Eval(src)
 		_ = scr.PostEvent(&termDoneEvent{when: time.Now(), err: err})
 	}()

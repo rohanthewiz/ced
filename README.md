@@ -150,9 +150,21 @@ The goals, in order:
   [Formatting](#formatting).
 - **Auto-save** — dirty buffers are written after you pause for five
   seconds, and immediately when you leave: switch tabs, or click away
-  from the terminal window entirely. Undo history survives all of it.
+  from the terminal window entirely. Typing that never pauses is still
+  saved every 30 seconds (or every pause, if you set a longer one).
+  Undo history survives all of it.
   Toggle it in `≡`; change the pause with `"autosavedelay": "10s"` in
   `~/.config/ced/config.json`.
+- **Crashes and killed panes don't lose your edits** — if ced crashes,
+  gets `SIGTERM`, or loses its terminal (a killed tmux pane, a dropped
+  SSH session), it hands the terminal back in a usable state and writes
+  unsaved buffers to a rescue folder under `~/.config/ced/recover/`, with
+  an `INDEX.txt` naming each buffer's file. A crash never writes over
+  your own files. When the pane is killed or ced gets `SIGTERM` with
+  auto-save on, it first saves what auto-save would, and only the rest
+  is rescued. The tab list is saved as tabs open and close, so the right
+  tabs come back even after `kill -9`. Rescue folders older than two
+  weeks are deleted the next time ced writes one.
 - **Files that aren't UTF-8 stay intact** — a Latin-1 or Windows-1252
   file opens readable and saves back byte for byte, and no file is ever
   rewritten with replacement characters. See
@@ -2905,7 +2917,7 @@ ced doesn't know is kept untouched when a ≡ row rewrites the file.
 | --- | --- | --- |
 | `"icons"` | `auto` / `on` / `off` | Nerd Font icons in the file tree; `auto` uses them when a Nerd Font is detected. Hand-edited. |
 | `"autosave"` | `on` / `off` | Save dirty tabs after an idle pause. ≡ File → *Disable auto-save*. |
-| `"autosavedelay"` | `"5s"`, or any duration / bare seconds | How long that pause is, clamped to 500ms – 5m. Hand-edited. |
+| `"autosavedelay"` | `"5s"`, or any duration / bare seconds | How long that pause is, clamped to 500ms – 5m. Steady typing is still saved every 30s, or every pause if it's longer. Hand-edited. |
 | `"termdock"` | — | Retired: still parses, ignored. Where each panel docks is per project now (see [Tool windows](#tool-windows)). |
 | `"findalldock"` | `top` / `right` | Where the Find-all list docks. ≡ View, or the list's own dock button. |
 | `"blamestyle"` | `bands` / `compact` | The blame column's look. ≡ Git → *Blame style: …*. |
@@ -2933,7 +2945,9 @@ Other files beside it each hold one thing ced can't know for you:
 `mcp.json` ([MCP servers](#8-mcp-servers-more-tools-for-your-agent)),
 `favorites.json` ([favorites](#favorite-locations)), `state.json`
 (recent folders, per-project tabs and layout), `themes/`, `skills/`,
-`plugins/`, `chats/`, `actions.json` ([custom actions](#custom-actions-open-remote-files-on-your-laptop))
+`plugins/`, `chats/`, `recover/` (unsaved edits rescued when ced crashed
+or was killed, one folder per rescue),
+`actions.json` ([custom actions](#custom-actions-open-remote-files-on-your-laptop))
 and `rc.grsh` (sourced by the terminal panel).
 
 ## Project layout

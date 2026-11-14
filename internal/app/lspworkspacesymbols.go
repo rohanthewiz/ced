@@ -45,6 +45,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/history"
 	"github.com/rohanthewiz/ced/internal/lsp"
 )
@@ -126,6 +127,7 @@ func (a *App) startWorkspaceSymbols(query string) {
 	seq := a.lsp.symSeq
 	a.flash(fmt.Sprintf("Finding symbols matching %q…", query))
 	go func() {
+		defer crash.Recover()
 		var all []lsp.WorkspaceSymbol
 		var firstErr error
 		for _, c := range clients {

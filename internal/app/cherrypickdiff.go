@@ -77,6 +77,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 const (
@@ -218,6 +220,7 @@ func (m *cherryPickModal) ensureDiff(a *App) {
 	d.pending[c.hash] = true
 	scr, root, hash := a.screen, a.rootDir, c.hash
 	go func() {
+		defer crash.Recover()
 		lines := loadCherryPickDiff(root, hash)
 		_ = scr.PostEvent(&cherryPickDiffEvent{when: time.Now(), m: m, hash: hash, lines: lines})
 	}()

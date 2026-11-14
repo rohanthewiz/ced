@@ -71,6 +71,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 )
 
@@ -157,6 +158,7 @@ func (a *App) catsSplitTab(t *editor.Tab, direction, arrow string, move bool) {
 	self := a.catsSelfPane()
 	shown := filepath.Base(path)
 	go func() {
+		defer crash.Recover()
 		if _, err := catsSpawnSibling(client, self, direction, spawn); err != nil {
 			catsPostNotice(scr, "Split failed: "+err.Error())
 			return

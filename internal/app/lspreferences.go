@@ -49,6 +49,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/diff"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
@@ -135,6 +136,7 @@ func (a *App) menuFindReferences() {
 	seq := a.lsp.refSeq
 	a.flash(fmt.Sprintf("Finding references to %q…", word))
 	go func() {
+		defer crash.Recover()
 		locs, err := client.References(path, pos, true)
 		refs, truncated := collectRefLines(locs)
 		_ = scr.PostEvent(&lspReferencesEvent{

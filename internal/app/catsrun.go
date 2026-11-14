@@ -72,6 +72,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/cats"
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // catsRunWait bounds one run's wait. It is cats' own per-wait cap
@@ -130,6 +131,7 @@ func (a *App) menuCatsTerminal() {
 		spawn.Line = "cd " + catsShellQuote(a.rootDir) + "\n"
 	}
 	go func() {
+		defer crash.Recover()
 		if _, err := catsSpawnSibling(client, self, cats.SplitVertical, spawn); err != nil {
 			catsPostNotice(scr, "Terminal split failed: "+err.Error())
 			return
@@ -296,6 +298,7 @@ func (a *App) catsRun(cmd string) {
 	self := a.catsSelfPane()
 	reuse, reuseOK := a.cats.runPane, a.cats.runPaneOK
 	go func() {
+		defer crash.Recover()
 		pane, err := catsRunPane(client, self, reuse, reuseOK)
 		if err != nil {
 			catsPostRunDone(scr, "Run failed: "+err.Error(), false, 0, false)

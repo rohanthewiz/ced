@@ -29,6 +29,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 
 	"github.com/rohanthewiz/ced/internal/clipboard"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/customactions"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/filetree"
@@ -1749,6 +1750,11 @@ type App struct {
 	autoSaveTimer   *time.Timer
 	autoSaveSig     int
 	autoSaveDelay   time.Duration
+	// autoSaveDirtySince is when the current run of unsaved edits began
+	// — the first edit after the last auto-save attempt — or zero while
+	// nothing is pending. It caps the debounce: steady typing that never
+	// pauses still gets a save every autoSaveMaxWait (autoSaveWait).
+	autoSaveDirtySince time.Time
 
 	// formatRuns counts formatter runs in flight per file path, so the
 	// reconcile tick can tell ced's own pending write from an external
@@ -1881,7 +1887,7 @@ type App struct {
 	// that it was overtaken by its own full answer (handleGitBlame).
 	blameLanded map[string]int
 	blameTimer  *time.Timer
-	blameSig   string
+	blameSig    string
 	// blamePending is a "Blame this line…" asked before any blame for
 	// that file existed — answered when the load lands.
 	blamePending *blamePendingReveal
@@ -2072,6 +2078,16 @@ type App struct {
 	// the header comment in folder.go.
 	nextRoot string
 
+	// sessionTabs is the tab list as last written to state.json, so the
+	// after-event check can record the session the moment a tab opens or
+	// closes rather than only at Close. See folder.go's sessionAfterEvent.
+	sessionTabs sessionTabsState
+
+	// crash is the crash-safety bookkeeping: the goroutine-panic handler,
+	// the SIGHUP/SIGTERM watcher, the once-only rescue, and the note
+	// printed after Fini. See crashsafety.go.
+	crash crashState
+
 	quit bool
 }
 
@@ -2140,6 +2156,15 @@ func New(rootDir string) (*App, error) {
 		// first snapshot doesn't hold up the first frame.
 		gitSnap: gitSnapState{async: true},
 	}
+	// Crash safety first, before anything below can start a goroutine
+	// (git status, the finder index, the tree tick): a goroutine's panic
+	// needs a handler to hand it to, and a SIGTERM during a slow startup
+	// must still restore the terminal. The deferred recover covers New
+	// itself — a panic while restoring the session would otherwise leave
+	// the terminal in raw mode on the alternate screen. See
+	// crashsafety.go.
+	a.installCrashSafety()
+	defer a.recoverRun()
 	a.setActiveFolder(tree.Root.Path)
 	a.loadUserConfig()
 	// Record the visit before anything else can fail: this is what makes
@@ -2188,6 +2213,10 @@ func New(rootDir string) (*App, error) {
 	// (or main's command-line open) creates is handed its own by wireTab.
 	a.loadBookmarks()
 	a.restoreSession()
+	// From here on the tab list is written whenever a tab opens or closes
+	// (folder.go). Armed only now, so the restore above doesn't rewrite
+	// state.json once per tab — or, if it panicked half-way, with half.
+	a.armSessionTabs()
 	// Identify ourselves to the hosting terminal (OSC 7 cwd + OSC 2
 	// title — see hostident.go). After restoreSession so the first
 	// title names the restored active file rather than flashing the
@@ -2300,6 +2329,7 @@ func (a *App) startTreeRefreshEvery(every time.Duration) {
 	stop := a.treeRefreshStop
 	scr := a.screen
 	go func() {
+		defer crash.Recover()
 		ticker := time.NewTicker(every)
 		defer ticker.Stop()
 		for {
@@ -2370,11 +2400,23 @@ func (a *App) Close() {
 	if a.screen != nil {
 		a.screen.Fini()
 	}
+	// After Fini, so it lands on the normal screen: where an unattended
+	// exit (a signal, a dead terminal) put the edits it rescued.
+	if a.crash.exitNote != "" {
+		fmt.Fprintln(exitNoteOut, a.crash.exitNote)
+	}
+	// LAST — see teardownCrashSafety for why the signal handler outlives
+	// the terminal restore.
+	a.teardownCrashSafety()
 }
 
 // Run is the editor's main event loop. It blocks on PollEvent, dispatches
 // each event, redraws, and exits when a.quit is set.
 func (a *App) Run() error {
+	// A panic anywhere in the loop — or one a goroutine handed over as a
+	// crashEvent — rescues the dirty buffers and restores the terminal
+	// before the process dies. See crashsafety.go.
+	defer a.recoverRun()
 	a.width, a.height = a.screen.Size()
 	a.draw()
 	a.screen.Show()
@@ -2441,6 +2483,12 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleAutoScroll()
 	case *autoSaveEvent:
 		a.handleAutoSave()
+	case *crashEvent:
+		a.handleCrashEvent(e)
+	case *signalQuitEvent:
+		a.handleSignalQuit(e)
+	case *tcell.EventError:
+		a.handleTTYError(e)
 	case *syntaxSettleEvent:
 		a.handleSyntaxSettle()
 	case *projectSearchEvent:
@@ -2630,6 +2678,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// Same trick for auto-save: any event that mutated a buffer
 	// re-arms the idle countdown. See autosave.go.
 	a.autoSaveAfterEvent()
+	// And the session's tab list: an open or a close is written now, not
+	// at Close, so an exit that never reaches Close still reopens the
+	// right tabs. A slice compare when nothing changed. See folder.go.
+	a.sessionAfterEvent()
 	// And for syntax highlighting: an intra-line edit defers the re-lex,
 	// so something has to wake the loop when the typing stops or the new
 	// text would keep the old colors until the next unrelated event.
@@ -4667,6 +4719,7 @@ func (a *App) startAutoScroll(dir int) {
 	stop := a.autoScrollStop
 	scr := a.screen
 	go func() {
+		defer crash.Recover()
 		ticker := time.NewTicker(autoScrollTick)
 		defer ticker.Stop()
 		for {
@@ -4800,7 +4853,14 @@ func (a *App) welcomeIfQuiet() {
 // file the user named on the command line ("ced foo.go"). Thin
 // wrapper around openFile so internal callers keep using the lowercase
 // name and the public surface stays small.
-func (a *App) OpenFile(path string) { a.openFile(path) }
+//
+// It runs between New and Run, outside both of their recovers, so it
+// carries its own: a panic opening the command-line file must still hand
+// the terminal back.
+func (a *App) OpenFile(path string) {
+	defer a.recoverRun()
+	a.openFile(path)
+}
 
 // openFile opens the file at path in a new tab — or switches to it if it is
 // already open in another tab. Errors are surfaced as a flash message.
@@ -5468,6 +5528,7 @@ func (a *App) execCustomAction(act customactions.Action, promptValues map[string
 	a.flash(act.Label + "…")
 	scr := a.screen
 	go func() {
+		defer crash.Recover()
 		started := time.Now()
 		cmd := exec.Command("sh", "-c", act.Command)
 		cmd.Env = env

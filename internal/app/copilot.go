@@ -54,6 +54,7 @@ import (
 	"time"
 
 	"github.com/rohanthewiz/ced/internal/clipboard"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/userconfig"
@@ -305,6 +306,7 @@ func (a *App) copilotEnsureStarted() {
 	scr := a.screen
 	root := a.rootDir
 	go func() {
+		defer crash.Recover()
 		// onNotify runs on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
 			if method != "didChangeStatus" {
@@ -510,6 +512,7 @@ func (a *App) copilotBeginSignIn() {
 	client := a.copilot.client
 	scr := a.screen
 	go func() {
+		defer crash.Recover()
 		var res copilotSignInResult
 		err := client.Call("signIn", map[string]any{}, &res)
 		_ = scr.PostEvent(&copilotSignInEvent{when: time.Now(), res: res, err: err})
@@ -563,6 +566,7 @@ func (a *App) copilotConfirmSignIn(code, uri string, cmd copilotCommand) {
 	client := a.copilot.client
 	scr := a.screen
 	go func() {
+		defer crash.Recover()
 		var st copilotAuthStatus
 		err := client.CallWithTimeout("workspace/executeCommand",
 			map[string]any{"command": cmd.Command, "arguments": cmd.Arguments},
@@ -599,6 +603,7 @@ func (a *App) copilotSignOut() {
 	client := a.copilot.client
 	scr := a.screen
 	go func() {
+		defer crash.Recover()
 		err := client.Call("signOut", map[string]any{}, nil)
 		_ = scr.PostEvent(&copilotSignOutDoneEvent{when: time.Now(), err: err})
 	}()
@@ -722,5 +727,8 @@ func openBrowser(url string) {
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}
-	go func() { _ = cmd.Run() }()
+	go func() {
+		defer crash.Recover()
+		_ = cmd.Run()
+	}()
 }

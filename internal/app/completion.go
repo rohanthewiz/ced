@@ -59,6 +59,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/finder"
 	"github.com/rohanthewiz/ced/internal/icons"
@@ -390,6 +391,7 @@ func (a *App) completionRequest(t *editor.Tab, ctx lsp.CompletionContext, manual
 	path, rev, pos := t.Path, t.EditRev, t.Cursor
 	lspPos := lspPosFor(t, pos)
 	go func() {
+		defer crash.Recover()
 		items, incomplete, err := client.Completion(path, lspPos, ctx)
 		_ = scr.PostEvent(&lspCompletionEvent{
 			when: time.Now(), seq: seq, path: path, rev: rev, pos: pos,
@@ -702,6 +704,7 @@ func (a *App) completionResolveSelected() {
 	a.completion.asked[idx] = true
 	seq, raw, scr := a.completion.seq, item.Raw, a.screen
 	go func() {
+		defer crash.Recover()
 		enriched, err := client.ResolveCompletion(raw)
 		if err != nil || enriched == nil {
 			return

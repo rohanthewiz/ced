@@ -101,11 +101,7 @@ func (a *App) loadSessionStore() {
 // folder looks like the feature doesn't work rather than like the config
 // directory is read-only.
 func (a *App) updateSessionStore(fn func(*session.Store)) {
-	if a.sessionStore == nil {
-		return
-	}
-	fn(a.sessionStore)
-	setAside, err := session.Update(sessionStatePathFn(), fn)
+	setAside, err := a.writeSessionStore(fn)
 	switch {
 	case err != nil:
 		a.flash("session: " + err.Error())
@@ -114,10 +110,24 @@ func (a *App) updateSessionStore(fn func(*session.Store)) {
 	}
 }
 
+// writeSessionStore is updateSessionStore without the flash: both
+// copies updated, the outcome returned. The after-event tab record uses
+// it directly — a read-only config directory was already reported by the
+// startup write, and saying so again on every tab open would be nagging.
+func (a *App) writeSessionStore(fn func(*session.Store)) (setAside string, err error) {
+	if a.sessionStore == nil {
+		return "", nil
+	}
+	fn(a.sessionStore)
+	return session.Update(sessionStatePathFn(), fn)
+}
+
 // recordSession captures the open tabs and their cursors into the store
 // and writes it out. Called from Close, so it runs on both exits — a
 // plain quit and a folder switch — without either path having to
-// remember.
+// remember. sessionAfterEvent also writes it whenever a tab opens or
+// closes, so the exits that never reach Close (a crash, a kill -9) still
+// reopen the right tabs, if not the latest cursors.
 //
 // Untitled tabs and image previews are skipped by trimTabs / this loop
 // respectively: neither has a file to reopen, and an image tab restored
@@ -126,6 +136,15 @@ func (a *App) recordSession() {
 	if a.sessionStore == nil {
 		return
 	}
+	e := a.sessionEntry()
+	a.updateSessionStore(func(s *session.Store) { s.Record(e) })
+}
+
+// sessionEntry builds this folder's entry from live state: the named
+// tabs with their cursors and scroll, the tool-window layout and the tab
+// groups. Shared by recordSession and the after-event record so the two
+// writes can never disagree about what a session is.
+func (a *App) sessionEntry() session.Entry {
 	e := session.Entry{Root: a.rootDir}
 	active := 0
 	for i, t := range a.tabs {
@@ -160,7 +179,82 @@ func (a *App) recordSession() {
 	// Tab groups ride the same write; membership is stored by path and
 	// re-resolved against whichever tabs come back (tabgroups.go).
 	e.Groups = a.encodeTabGroups()
-	a.updateSessionStore(func(s *session.Store) { s.Record(e) })
+	return e
+}
+
+// sessionTabsState is what sessionAfterEvent compares against: the
+// paths of the named tabs, in order, as last written — and whether the
+// check is armed at all.
+type sessionTabsState struct {
+	// armed turns the after-event record on. New arms it once
+	// restoreSession is done; a directly built App (tests) stays
+	// unarmed, so no test writes state.json behind its own back.
+	armed bool
+	// seen is the tab list the last write recorded.
+	seen []string
+}
+
+// armSessionTabs snapshots the current tab list and turns the
+// after-event record on. Called by New after restoreSession: the tabs it
+// reopened are already what state.json says, so they are the baseline,
+// not a change to write back.
+func (a *App) armSessionTabs() {
+	a.sessionTabs.armed = true
+	a.sessionTabs.seen = sessionTabPaths(a.tabs, a.sessionTabs.seen[:0])
+}
+
+// sessionAfterEvent records the session when the tab list changed —
+// a tab opened, closed, renamed or reordered — since the last write
+// (N-118). Before this the list was written only at Close, so any exit
+// that skipped Close reopened the folder with the tabs of the session
+// BEFORE.
+//
+// Detected by comparison rather than hooked into each open/close path
+// (the autoSaveSig trick): tabs change through openFile, closeTab, close
+// others, remote opens, Save as, group arrangement… and one compare here
+// can't miss a door the way N hooks can. Cursor moves and tab switches
+// don't count — writing state.json on every switch would be churn for a
+// detail Close still records.
+//
+// Quiet on failure (writeSessionStore): the startup write already
+// flashed whatever is wrong with the state file.
+func (a *App) sessionAfterEvent() {
+	if !a.sessionTabs.armed || a.sessionStore == nil {
+		return
+	}
+	if sessionTabsMatch(a.tabs, a.sessionTabs.seen) {
+		return
+	}
+	a.sessionTabs.seen = sessionTabPaths(a.tabs, a.sessionTabs.seen[:0])
+	e := a.sessionEntry()
+	_, _ = a.writeSessionStore(func(s *session.Store) { s.Record(e) })
+}
+
+// sessionTabPaths appends the paths recordSession would store — named
+// tabs only, in order — to dst.
+func sessionTabPaths(tabs []*editor.Tab, dst []string) []string {
+	for _, t := range tabs {
+		if t != nil && t.Path != "" {
+			dst = append(dst, t.Path)
+		}
+	}
+	return dst
+}
+
+// sessionTabsMatch reports whether tabs' named paths are exactly seen,
+// without allocating — it runs after every event, mouse motion included.
+func sessionTabsMatch(tabs []*editor.Tab, seen []string) bool {
+	i := 0
+	for _, t := range tabs {
+		if t == nil || t.Path == "" {
+			continue
+		}
+		if i >= len(seen) || seen[i] != t.Path {
+			return false
+		}
+		i++
+	}
+	return i == len(seen)
 }
 
 // restoreSession reopens the tabs this folder had when it was last

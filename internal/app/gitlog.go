@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
@@ -343,6 +344,7 @@ func (a *App) requestGitLogDetail(c gitLogCommit) {
 	root := a.rootDir
 	ws := a.diffIgnoreWS
 	go func() {
+		defer crash.Recover()
 		lines := loadGitLogDetail(root, c.Hash, ws)
 		_ = scr.PostEvent(&gitLogShowEvent{when: time.Now(), hash: c.Hash, lines: lines, ws: ws})
 	}()

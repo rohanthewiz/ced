@@ -72,6 +72,8 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // gitLogFilterDebounce is the pause after typing that fires the search.
@@ -361,6 +363,7 @@ func (a *App) gitLogFilterRun() {
 	a.gitLog.filter.running = true
 	scr, root := a.screen, a.rootDir
 	go func() {
+		defer crash.Recover()
 		commits, truncated := loadGitLogQuery(root, args)
 		_ = scr.PostEvent(&gitLogFilterEvent{
 			when: time.Now(), seq: seq, query: text,

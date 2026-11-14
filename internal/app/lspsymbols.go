@@ -35,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/lsp"
 )
 
@@ -68,6 +69,7 @@ func (a *App) menuGoToSymbol() {
 	// the list, which reads as the feature being broken.
 	a.lspFlushChange(t)
 	go func() {
+		defer crash.Recover()
 		syms, err := client.DocumentSymbols(path)
 		_ = scr.PostEvent(&lspSymbolsEvent{
 			when: time.Now(), path: path, syms: syms, err: err,

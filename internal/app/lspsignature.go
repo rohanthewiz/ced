@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/lsp"
 )
 
@@ -78,6 +79,7 @@ func (a *App) menuSignatureHelp() {
 	// report that they are not inside a call at all.
 	a.lspFlushChange(t)
 	go func() {
+		defer crash.Recover()
 		sig, err := client.SignatureHelpAt(path, pos)
 		_ = scr.PostEvent(&lspSignatureEvent{when: time.Now(), path: path, sig: sig, err: err})
 	}()

@@ -53,6 +53,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/userconfig"
@@ -110,6 +111,7 @@ func (a *App) inlayAfterEvent() {
 	scr, path, rev := a.screen, t.Path, t.EditRev
 	rng := lsp.Range{End: lsp.Position{Line: t.Buffer.LineCount()}}
 	go func() {
+		defer crash.Recover()
 		hints, err := client.InlayHints(path, rng)
 		_ = scr.PostEvent(&lspInlayEvent{when: time.Now(), path: path, rev: rev, hints: hints, err: err})
 	}()

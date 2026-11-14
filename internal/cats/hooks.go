@@ -49,6 +49,8 @@ import (
 	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/rohanthewiz/ced/internal/crash"
 )
 
 // Hook API methods (cats' pane.report_agent* API).
@@ -176,6 +178,7 @@ func (r *Reporter) Release() {
 // send writes one request and does not wait for the reply. Every failure is
 // swallowed — see the file comment.
 func (r *Reporter) send(req hookRequest) {
+	defer crash.Recover() // always started as a goroutine (ReportState)
 	line, err := json.Marshal(req)
 	if err != nil {
 		return

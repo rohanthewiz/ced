@@ -79,6 +79,10 @@ var favoritesPathFn = userconfig.FavoritesPath
 // follows, minus the silence — the user typed a name and deserves to
 // know it missed).
 func (a *App) RevealPath(path string) {
+	// main calls this between New and Run, outside both recovers (the
+	// OpenFile reason): a panic here must still hand the terminal back.
+	// Nested inside Run it is harmless — the rescue runs once.
+	defer a.recoverRun()
 	if path == "" {
 		return
 	}

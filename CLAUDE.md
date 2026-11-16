@@ -115,6 +115,7 @@ internal/app/
   copilot*.go chatcomposer.go chatagent.go chatarchive.go summarize.go gonotes.go
   mcp.go skills.go plugins.go plugincmd.go plugindeco.go
   git*.go compare.go           Git panel/log/commit/receipt/status; compare panel
+  gitcommitall.go             Commit all changes (Esc G): save tabs, add -A, commit the folder
   gitsnapshot.go              Async git status snapshot (coalesced, seq-checked)
   diffview.go comparerevert.go  Shared diff layer (split/ws/steppers); compare hunk revert
   gitrestore.go               Restore one file to HEAD (tree/tab/≡ Git rows)
@@ -256,7 +257,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - **Esc side effects never consume the key** (ghost text, carets, tree
   filter, compare-paste arm, project-find tints) so `Esc s` still saves.
 - **Leader keys**: the flat table is out of mnemonic letters — new verbs
-  get a ≡ row (palette comes free), no leader. `Esc [`, `Esc ]`, `P`,
+  get a ≡ row (palette comes free), no leader (`Esc G` commit-all was
+  the user's explicit ask). Still free: `y J K Q U V W X Y` (`l` is
+  left free on purpose — leader.go's 'j' note). `Esc [`, `Esc ]`, `P`,
   `N`, `\`, `^`, `_`, `#` CANNOT be bound (terminal escape introducers).
   Menu `shortcut` hints are display-only — rebinding a key means updating
   both leader table and hint.
@@ -1070,7 +1073,18 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `-x` dropped with `--no-commit`. Refused (panel shown) while an op is
   parked. Alt chords a/x/s/b are the button twins.
 - Commit of a selection stages first (`gitCommitFiles`, `runGitCmdSeq`);
-  every commit goes through `gitCommitFiles`.
+  every commit prompt submits through `gitCommitScope` → `gitCommitFiles`
+  or `gitCommitAll` (the only two that arm the receipt). `commitScope`
+  (files / index / `all`) rides the ✦ round trip (`gitCommitDiffEvent.all`,
+  `commitSuggestReq.all`) so a draft reopens the prompt it came from.
+- **Commit all (gitcommitall.go, `Esc G`, ≡ Git "Commit all changes…")**:
+  refused outside a repo / while an op is parked (Conflicts panel shown);
+  saves dirty tabs INSIDE the root first, at prompt OPEN (`saveTabAt`,
+  guard resume = the whole gesture), then a FRESH `loadGitStatusFiles`
+  for the count / ✦ diff; Enter = `add -A -- <root>` + `commit -- <root>`
+  — pathspec is the FOLDER, never the counted list (staged renames,
+  late changes), so nothing outside the project is committed or
+  unstaged. The prompt is the confirmation; no ⌘ chord (⌘K is cats').
 - Agent-drafted messages: a visible chat turn claimed by generation +
   transcript mark (`commitSuggestReq`); draft only pre-fills. The
   start-up queue holds ONE prompt: a draft ask (✦ commit / ✦ note title /
@@ -1564,9 +1578,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   terminal rows spends the above-the-fold budget.
 - **Adding a menu row means updating the pins** — a README menu-reference
   row first, then the layout counts:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 195 group
-  actions + 15 headers (212), 36 splits, height 254, dividers
-  `[2, 5, 251]`; also the Git fold height (36 rows + 8 splits = 44) in
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 196 group
+  actions + 15 headers (213), 36 splits, height 255, dividers
+  `[2, 5, 252]`; also the Git fold height (37 rows + 8 splits = 45) in
   `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.

@@ -259,6 +259,12 @@ func leaderBindings() []leaderBinding {
 		// primary surface is dragging the panel header, same as the
 		// sidebar splitter.
 		{key: 'g', action: (*App).menuToggleGitPanel, label: "Git panel"},
+		// 'G' commits every change in the project (gitcommitall.go) —
+		// the shifted twin of the panel that lists those changes, the
+		// way 'T' is the tree's: 'g' shows what changed, 'G' records it.
+		// Safe on a single keystroke because it only opens the commit
+		// prompt; nothing is written to the repository until Enter there.
+		{key: 'G', action: (*App).menuGitCommitAll, label: "Commit all changes"},
 		// 'L' for the git Log — shifted because lowercase 'l' is too
 		// close to the common typing flow after a stray Esc, and the
 		// h/H, o/O pairs already teach that shift means "the other git

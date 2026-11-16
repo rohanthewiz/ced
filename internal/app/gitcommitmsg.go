@@ -81,13 +81,43 @@ func gitCommitLabel(files []gitPanelFile) string {
 	return gitPanelTargetLabel(files)
 }
 
+// commitScope is what one commit prompt will commit. It exists so the
+// prompt, the ✦ draft round trip (gitCommitDiffEvent → commitSuggestReq
+// → the reopened prompt) and the final git command all carry ONE answer
+// to "commit what?", instead of each re-deriving it:
+//
+//	files set, all false  the panel's targets — stage them, commit them
+//	                      (gitCommitFiles' pathspec form)
+//	files nil, all false  the index as it stands ("Commit staged")
+//	all true              every change under the project folder
+//	                      (gitcommitall.go); files is then the list the
+//	                      prompt counted and the agent is shown, NOT the
+//	                      commit's pathspec — the folder is
+//
+// A value type: it is captured by closures and copied onto events, and
+// nothing may mutate a scope another surface is still holding.
+type commitScope struct {
+	files []gitPanelFile
+	all   bool
+}
+
+// label names the scope in the prompt title, the chat ask and the
+// "nothing to describe" flash — one phrasing per scope, the
+// gitCommitLabel rule extended to the "all" form.
+func (s commitScope) label() string {
+	if s.all {
+		return "all changes (" + plural(len(s.files), "file", "files") + ")"
+	}
+	return gitCommitLabel(s.files)
+}
+
 // openCommitPrompt asks for the message and commits on Enter — the
 // entry point for a message the user is going to TYPE. initial
 // pre-fills the field (empty from every caller here; see
 // openCommitPromptDraft for the agent's). promptModal rejects an empty
 // submit, so there's no empty-message guard here.
 func (a *App) openCommitPrompt(files []gitPanelFile, initial string) {
-	a.openCommitPromptWith(files, initial, false, a.commitTrailer)
+	a.openCommitPromptWith(commitScope{files: files}, initial, false, a.commitTrailer)
 }
 
 // openCommitPromptDraft is the same prompt over a message the AGENT
@@ -101,12 +131,12 @@ func (a *App) openCommitPrompt(files []gitPanelFile, initial string) {
 // switched the chip off and then asked for a re-draft has already
 // answered this question.
 func (a *App) openCommitPromptDraft(files []gitPanelFile, draft string, trailer bool) {
-	a.openCommitPromptWith(files, draft, true, trailer)
+	a.openCommitPromptWith(commitScope{files: files}, draft, true, trailer)
 }
 
-// openCommitPromptWith is the shared body. drafted says whether the
-// message came from the agent; trailer is the attribution decision for
-// THIS commit.
+// openCommitPromptWith is the shared body. scope is what Enter commits
+// (commitScope); drafted says whether the message came from the agent;
+// trailer is the attribution decision for THIS commit.
 //
 // The ✦ AI button sits on the button row of every commit prompt in a
 // repository. It is the survey's terminal state (gitpanelwalk.go): the
@@ -126,8 +156,8 @@ func (a *App) openCommitPromptDraft(files []gitPanelFile, draft string, trailer 
 // the only honest arrangement for a verdict that is DISCOVERED by
 // trying: an agent nobody has started yet is not yet known to be
 // missing.
-func (a *App) openCommitPromptWith(files []gitPanelFile, initial string, drafted, trailer bool) {
-	title := "Commit " + gitCommitLabel(files)
+func (a *App) openCommitPromptWith(scope commitScope, initial string, drafted, trailer bool) {
+	title := "Commit " + scope.label()
 	// Captured by the closures below, so the chip, the ✦ re-draft and
 	// the commit all read ONE value — and it is a per-invocation copy:
 	// the chip qualifies this commit and never writes the preference
@@ -137,7 +167,7 @@ func (a *App) openCommitPromptWith(files []gitPanelFile, initial string, drafted
 		if drafted && trailerOn {
 			msg = commitMsgWithTrailer(msg, commitTrailerLine(app.chatAgent()))
 		}
-		app.gitCommitFiles(files, msg)
+		app.gitCommitScope(scope, msg)
 	}
 	if !a.canSuggestCommitMsg() {
 		a.openPrompt(title, "message", initial, commit)
@@ -163,7 +193,7 @@ func (a *App) openCommitPromptWith(files []gitPanelFile, initial string, drafted
 				return
 			}
 			app.closeModal()
-			app.gitPanelSuggestCommit(files, trailerOn)
+			app.suggestCommitFor(scope, trailerOn)
 		},
 	}}
 	// The chip appears only where it tells the truth: on a drafted
@@ -259,11 +289,12 @@ func (a *App) menuToggleCommitTrailer() {
 // the row safe to use on a half-staged tree.
 //
 // Both spellings arm the commit receipt (gitcommitreceipt.go) as their
-// success hook, and this is the single place that does — every commit
-// in the editor comes through here, so a new commit surface gets the
-// receipt for free rather than having to remember it. The hook is a
-// method expression: the git plumbing carries a plain func(*App) and
-// knows nothing about what a receipt is.
+// success hook, and this function and its "all" sibling (gitCommitAll,
+// right below) are the only places that do — every commit in the editor
+// comes through gitCommitScope into one of the two, so a new commit
+// surface gets the receipt for free rather than having to remember it.
+// The hook is a method expression: the git plumbing carries a plain
+// func(*App) and knows nothing about what a receipt is.
 func (a *App) gitCommitFiles(files []gitPanelFile, msg string) {
 	if len(files) == 0 {
 		a.runGitCmdOK("Commit", (*App).requestCommitReceipt, "commit", "-m", msg)
@@ -274,6 +305,46 @@ func (a *App) gitCommitFiles(files []gitPanelFile, msg string) {
 	a.runGitCmdSeqOK("Commit "+what, (*App).requestCommitReceipt, [][]string{
 		append([]string{"add", "--"}, paths...),
 		append([]string{"commit", "-m", msg, "--"}, paths...),
+	})
+}
+
+// gitCommitScope is the one door a commit prompt submits through: it
+// routes a scope to the git spelling that commits exactly that.
+func (a *App) gitCommitScope(scope commitScope, msg string) {
+	if scope.all {
+		a.gitCommitAll(msg)
+		return
+	}
+	a.gitCommitFiles(scope.files, msg)
+}
+
+// gitCommitAll commits every change under the project folder: `add -A`
+// then `commit`, both limited to the folder, as ONE sequence (one flash,
+// one failure modal, the receipt on success — gitCommitFiles' terms).
+//
+// The pathspec is the FOLDER, not the list of files the prompt counted,
+// and that is the point of a separate spelling:
+//
+//   - A staged rename is listed under its new path only
+//     (gitPanelFilesFrom), so a per-file commit would record the new
+//     file and leave the old one's deletion behind in the index. The
+//     folder covers both halves.
+//   - A file that changed after the prompt opened (an agent in the next
+//     pane, a formatter landing) is still "all changes" when Enter is
+//     pressed; a list frozen at open would silently skip it.
+//   - The folder, not the repository: the panel reviews the project ced
+//     has open (loadGitStatusFiles' rule), so in a monorepo opened on a
+//     subfolder, "all" never sweeps in a sibling project's work — and
+//     `commit -- <folder>` leaves anything staged outside it staged.
+//
+// `-A` (not `add .`) is what makes deletions part of "all": a removed
+// file is a change, and committing around it would leave the tree dirty
+// after a commit that promised everything.
+func (a *App) gitCommitAll(msg string) {
+	root := a.rootDir
+	a.runGitCmdSeqOK("Commit all changes", (*App).requestCommitReceipt, [][]string{
+		{"add", "-A", "--", root},
+		{"commit", "-m", msg, "--", root},
 	})
 }
 
@@ -292,6 +363,11 @@ type commitSuggestReq struct {
 	seq   int
 	mark  int
 
+	// all is commitScope.all riding the round trip: a draft asked from
+	// the commit-all prompt must reopen as a commit-all prompt, not as a
+	// commit of the file list the agent happened to be shown.
+	all bool
+
 	// trailer is the attribution decision the prompt will reopen with.
 	// It travels WITH the request, like files, so a user who switched
 	// the chip off and then asked for another draft is not asked again
@@ -307,6 +383,12 @@ type gitCommitDiffEvent struct {
 	files   []gitPanelFile
 	diff    string
 	trailer bool // carried through to commitSuggestReq — see there
+	all     bool // commitScope.all, carried through likewise
+}
+
+// scope reassembles the commitScope the request was made for.
+func (e *gitCommitDiffEvent) scope() commitScope {
+	return commitScope{files: e.files, all: e.all}
 }
 
 // When satisfies the tcell.Event interface.
@@ -378,6 +460,15 @@ func (a *App) menuGitSuggestCommit() {
 // from every entry point except the prompt's own ✦ button, which passes
 // the chip's current value instead (openCommitPromptWith).
 func (a *App) gitPanelSuggestCommit(files []gitPanelFile, trailer bool) {
+	a.suggestCommitFor(commitScope{files: files}, trailer)
+}
+
+// suggestCommitFor is gitPanelSuggestCommit for any commitScope — the
+// commit prompt's ✦ button calls it directly, so a draft asked from the
+// commit-all prompt comes back to a commit-all prompt. The diff is
+// always collected for scope.files (for "all", the list the prompt
+// counted): the agent describes what the user was shown.
+func (a *App) suggestCommitFor(scope commitScope, trailer bool) {
 	if !a.gitIsRepo {
 		return
 	}
@@ -399,11 +490,14 @@ func (a *App) gitPanelSuggestCommit(files []gitPanelFile, trailer bool) {
 	a.flash("Asking " + a.chatAgent().name + " for a commit message…")
 	scr := a.screen
 	root := a.rootDir
-	targets := append([]gitPanelFile(nil), files...)
+	// Copied before the goroutine: the slice is the caller's, and the
+	// event must describe the scope as it was when the user asked.
+	targets := append([]gitPanelFile(nil), scope.files...)
+	all := scope.all
 	go func() {
 		defer crash.Recover()
 		diff := loadCommitDiff(root, targets)
-		_ = scr.PostEvent(&gitCommitDiffEvent{when: time.Now(), files: targets, diff: diff, trailer: trailer})
+		_ = scr.PostEvent(&gitCommitDiffEvent{when: time.Now(), files: targets, diff: diff, trailer: trailer, all: all})
 	}()
 }
 
@@ -414,7 +508,7 @@ func (a *App) gitPanelSuggestCommit(files []gitPanelFile, trailer bool) {
 // eventual answer back to this commit.
 func (a *App) handleGitCommitDiff(e *gitCommitDiffEvent) {
 	if strings.TrimSpace(e.diff) == "" {
-		a.flash("Nothing to describe — no diff for " + gitCommitLabel(e.files))
+		a.flash("Nothing to describe — no diff for " + e.scope().label())
 		return
 	}
 	// Re-checked here, not only at the ask: the diff comes back from a
@@ -427,7 +521,7 @@ func (a *App) handleGitCommitDiff(e *gitCommitDiffEvent) {
 	}
 	a.chatAppendMsg(chatMsg{
 		role: chatRoleUser,
-		text: "Suggest a commit message for " + gitCommitLabel(e.files),
+		text: "Suggest a commit message for " + e.scope().label(),
 	})
 	switch {
 	case a.chatReady():
@@ -436,6 +530,7 @@ func (a *App) handleGitCommitDiff(e *gitCommitDiffEvent) {
 			seq:     a.chat.connSeq,
 			mark:    len(a.chat.msgs),
 			trailer: e.trailer,
+			all:     e.all,
 		}
 		a.chatSendPrompt(commitSuggestPrompt(e.files, e.diff))
 	case a.chat.starting:
@@ -471,6 +566,7 @@ func (a *App) handleGitCommitDiff(e *gitCommitDiffEvent) {
 			seq:     a.chat.connSeq,
 			mark:    len(a.chat.msgs),
 			trailer: e.trailer,
+			all:     e.all,
 		}
 	default:
 		a.chatAppendMsg(chatMsg{role: chatRoleInfo, text: a.chatAgent().name + " chat is not running — " + chatAgentRetryHint + " to restart"})
@@ -582,7 +678,9 @@ func (a *App) chatCommitSuggestDone(e *chatTurnDoneEvent) {
 		a.flash("Commit message suggested — see the chat panel")
 		return
 	}
-	a.openCommitPromptDraft(req.files, subject, req.trailer)
+	// Reopened through the scope, not openCommitPromptDraft's file form,
+	// so a commit-all request comes back as a commit-all prompt.
+	a.openCommitPromptWith(commitScope{files: req.files, all: req.all}, subject, true, req.trailer)
 }
 
 // chatAgentTextSince returns the agent prose written after transcript

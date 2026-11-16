@@ -660,6 +660,7 @@ within half a second tap one of the letters below.
 | `Esc H`     | Previous change (git) |
 | `Esc A`     | Blame                |
 | `Esc g`     | Git panel            |
+| `Esc G`     | Commit all changes…  |
 | `Esc L`     | Git log              |
 | `Esc S`     | Search git history   |
 | `Esc a`     | AI prefix (table below) |
@@ -988,6 +989,7 @@ Needs a language server for the file — see
 | `Unstage file` | | Take it back out of the index. |
 | `Restore file (discard changes)…` | | Throw away the file's changes back to HEAD (asks first, sized). |
 | `Commit staged` | | Commit what's staged; prompts for the message. |
+| `Commit all changes…` | `esc G` | Save unsaved tabs, then commit every change in the project — new and deleted files too; prompts for the message (✦ AI draft works here as well). |
 | `Suggest commit message` | | Have the chat agent draft a message from the diff; it pre-fills the commit prompt. |
 | `AI commit trailer: on` / `AI commit trailer: off` | | Whether an agent-drafted message gets a `Co-Authored-By` trailer (`"commitmsgtrailer"`). |
 | `Push…` | | Push the current branch; git's output is shown afterwards. |

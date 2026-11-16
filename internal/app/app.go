@@ -833,6 +833,13 @@ func builtinMenuGroups() []menuGroup {
 			// snapshot — the verb's flash answers "nothing to restore".
 			{label: "Restore file (discard changes)…", action: (*App).menuGitRestoreFile, enabled: (*App).hasGitFileTab},
 			{splitAbove: true, label: "Commit staged", action: (*App).menuGitCommit, enabled: (*App).hasGitStaged},
+			// Everything in the project in one gesture (gitcommitall.go):
+			// saves unsaved tabs, then the same prompt as the row above
+			// with an `add -A` behind it. Enabled on any repo rather than
+			// gated on the snapshot's dirty set — the snapshot lags the
+			// files by up to a tick and knows nothing of unsaved tabs, so
+			// the verb looks for itself and flashes "Nothing to commit".
+			{label: "Commit all changes…", shortcut: "esc G", action: (*App).menuGitCommitAll, enabled: (*App).hasGitRepo},
 			// Keyboard twin of the panel's Suggest row — the chat agent
 			// drafts the message for the panel's selection, or for the
 			// index when nothing is ticked.

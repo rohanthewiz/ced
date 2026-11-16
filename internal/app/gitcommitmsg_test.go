@@ -183,6 +183,62 @@ func TestHandleGitCommitDiff_SendsTurn(t *testing.T) {
 	}
 }
 
+// TestCommitScope_Label pins the one phrasing per scope: the "all" form
+// counts the files it was shown (singular included), and the other two
+// forms are gitCommitLabel's, unchanged.
+func TestCommitScope_Label(t *testing.T) {
+	one := []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
+	two := append(one, gitPanelFile{Path: "/p/b.go", Rel: "b.go", Code: "??"})
+	cases := []struct {
+		scope commitScope
+		want  string
+	}{
+		{commitScope{files: two, all: true}, "all changes (2 files)"},
+		{commitScope{files: one, all: true}, "all changes (1 file)"},
+		{commitScope{files: one}, "a.go"},
+		{commitScope{files: two}, "2 files"},
+		{commitScope{}, "staged changes"},
+	}
+	for _, c := range cases {
+		if got := c.scope.label(); got != c.want {
+			t.Errorf("label(%+v) = %q, want %q", c.scope, got, c.want)
+		}
+	}
+}
+
+// TestCommitSuggest_KeepsTheAllScope pins the ✦ round trip from the
+// commit-all prompt: the "all" flag rides the diff event into the
+// pending request, and the agent's answer reopens a COMMIT-ALL prompt —
+// not a commit of the file list the agent was shown, which would leave a
+// staged rename's old half (or a file changed since) out of the commit.
+func TestCommitSuggest_KeepsTheAllScope(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	wireChat(a)
+	files := []gitPanelFile{{Path: "/p/a.go", Rel: "a.go", Code: " M"}}
+
+	a.handleGitCommitDiff(&gitCommitDiffEvent{when: time.Now(), files: files, diff: "@@ -1 +1 @@\n+new", all: true})
+	req := a.chat.commitSuggest
+	if req == nil || !req.all {
+		t.Fatalf("pending request = %+v, want all carried", req)
+	}
+	if ask := a.chat.msgs[0].text; !strings.Contains(ask, "all changes (1 file)") {
+		t.Errorf("transcript ask = %q, want the all scope named", ask)
+	}
+
+	a.chatAppendMsg(chatMsg{role: chatRoleAgent, text: "Add the thing"})
+	a.handleChatTurnDone(&chatTurnDoneEvent{when: time.Now(), seq: a.chat.connSeq})
+	pm, ok := a.modal.(*promptModal)
+	if !ok {
+		t.Fatalf("modal = %T, want the commit prompt", a.modal)
+	}
+	if !strings.Contains(pm.title, "Commit all changes") {
+		t.Errorf("reopened title = %q, want the commit-all prompt", pm.title)
+	}
+	if got := pm.field.String(); got != "Add the thing" {
+		t.Errorf("prefill = %q", got)
+	}
+}
+
 // TestHandleGitCommitDiff_QueuedBehindStartReopensPrompt pins the
 // first-use path: the ✦ button starts the agent and collects the diff in
 // one gesture, so the diff usually arrives while the handshake is still

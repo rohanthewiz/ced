@@ -896,6 +896,7 @@ still clickable and says why (install a binary, export `$EDITOR`).
 | `Hide matching word highlight` / `Show matching word highlight` | | The box around other visible uses of the word at the caret (`"wordhl"`). |
 | `Hide inlay hints` / `Show inlay hints` | | Language-server inlay hints at the ends of lines (`"inlayhints"`). |
 | `Hide diagnostic note` / `Show diagnostic note` | | The caret line's worst problem painted after its end (`"diagnote"`). |
+| `Stop spell-checking struct tags` / `Spell-check struct tags` | | Underline misspelled words in Go struct-tag names (`"spellcheck"`). See [Spelling in struct tags](#spelling-in-struct-tags). |
 | `Diff view: side by side` / `Diff view: unified` | | Layout of every diff pane (`"diffview"`). See [Diff views](#diff-views). |
 | `Diff view: ignore whitespace` / `Diff view: show whitespace changes` | | Hide whitespace-only changes in diff panes (this session only). |
 | `Diff view: next change` | | Step the last-used diff pane to its next change. |
@@ -945,7 +946,8 @@ still clickable and says why (install a binary, export `$EDITOR`).
 #### Code
 
 Needs a language server for the file — see
-[Code intelligence](#code-intelligence-language-servers).
+[Code intelligence](#code-intelligence-language-servers) — except
+`Fix spelling at caret…`, which is ced's own.
 
 | Row | Key | What it does |
 | --- | --- | --- |
@@ -966,6 +968,7 @@ Needs a language server for the file — see
 | `Show problems` / `Hide problems` | `esc !` | The problems list. |
 | `Next problem` | | Jump to the next diagnostic. |
 | `Previous problem` | | Jump to the previous one. |
+| `Fix spelling at caret…` | | Corrections for the misspelled struct-tag word at (or nearest) the caret, or add it to a dictionary. See [Spelling in struct tags](#spelling-in-struct-tags). |
 | `Restart language server` / `Restart language server (<server>)` | | Restart (or retry) the file's language server. |
 
 #### Git
@@ -1142,6 +1145,7 @@ except for the rows whose answer is a view of the file or an edit to it
 
 | Row | Shown | What it does |
 | --- | --- | --- |
+| `Fix spelling of "<word>"…` | a misspelled struct-tag word | Corrections for the word, or add it to your or the project's dictionary. See [Spelling in struct tags](#spelling-in-struct-tags). |
 | `Accept <side>` | inside a merge conflict | Keep one side of the conflict; `<side>` names it (`current`, `yours (main)`, …). |
 | `Accept both` | inside a merge conflict | Keep both sides, in file order. |
 | `Accept both, <side> first` | inside a merge conflict | Keep both, the lower side first. |
@@ -1405,6 +1409,61 @@ identifiers) and whole-word for the cursor case. A word that appears only
 once on screen isn't tinted — that's just where you already are. Turn the
 whole thing off from `≡` → **Hide matching word highlight**; it persists
 as `"wordhl": "off"` in `~/.config/ced/config.json`.
+
+### Spelling in struct tags
+
+A typo in a Go struct tag compiles cleanly and quietly breaks a wire
+format: `json:"usrNmae"` is a key no client will ever send. ced
+underlines misspelled words in the **names** of struct tags — every key,
+not just `json` (`yaml`, `xml`, `toml`, `db`, `bson`, `form`,
+`mapstructure`, `env`, …) — in the warning colour, with no gutter mark:
+
+```go
+type User struct {
+	Name    string `json:"usrNmae,omitempty" db:"user_name"`
+	Address string `json:"adress"`
+}
+```
+
+Here `Nmae` and `adress` are underlined; `usr` is too, until you add it
+to a dictionary. Names are split the way identifiers are written —
+`userName`, `user_name`, `user-name`, `UserName`, `server.port` — and
+each word is looked up on its own. It is built to be quiet on code.
+These are skipped, not checked:
+
+- words of one or two letters (`id`, `db`), acronyms (`ID`, `HTTP`,
+  `URLs`), and letters touching a digit (`utf8`, `sha256`, `oauth2`);
+- values that aren't names: `-`, `,omitempty`, gorm's
+  `column:x;type:varchar(100)`, `validate:"gte=0"`, prose in a
+  `description:"…"`;
+- run-together names made of real words (`firstname`, `createdat`,
+  `apikey`) — but not ones that only split into fragments, so
+  `pasword` and `existant` are still flagged;
+- in an all-caps name (`env:"DATABSE_URL"`), words shorter than five
+  letters, which are usually acronyms.
+
+The word you are typing isn't marked until you move on from it.
+
+**Right-click a marked word** and take **Fix spelling of "…"…** (or put
+the caret on its line and use `≡` → Code → **Fix spelling at caret…**)
+for a picker with:
+
+- **the corrections**, each shown as the whole corrected tag name
+  (`userName`) and written back in the word's own case — pick one and
+  it replaces the word as one undo step;
+- **Add "…" to my dictionary** — `~/.config/ced/dictionary.txt`, for
+  words that are yours everywhere;
+- **Add "…" to project dictionary** — `.ced/dictionary.txt` in the
+  project root, beside `format.json`, so it is committed and your
+  teammates get the same words;
+- **Stop spell-checking struct tags**.
+
+Both dictionaries are plain text, one word per line, `#` for comments;
+edit them in ced and saving reloads them. The word list itself (SCOWL
+English plus programming vocabulary) is built into ced, so the check
+works the same everywhere with nothing installed. Turn it off or on from
+`≡` → View → **Stop spell-checking struct tags**; it persists as
+`"spellcheck": "off"` in `~/.config/ced/config.json`.
 
 ### Find in file
 
@@ -2927,6 +2986,7 @@ ced doesn't know is kept untouched when a ≡ row rewrites the file.
 | `"wordhl"` | `on` / `off` | The box around other visible uses of the word at the caret. |
 | `"inlayhints"` | `on` / `off` | Language-server inlay hints at the ends of lines. |
 | `"diagnote"` | `on` / `off` | The caret line's worst problem, painted after its end. |
+| `"spellcheck"` | `on` / `off` | Underline misspelled words in Go struct-tag names (see *Spelling in struct tags*). |
 | `"copilot"` | `on` / `off` | Whether ced runs `copilot-language-server` at all (only when installed). |
 | `"suggestions"` | `on` / `off` | Copilot ghost-text completions while you type. |
 | `"chatagent"` | `copilot` / `claude` / `gemini` | The chat backend. ≡ AI → *Chat agent: …*. |

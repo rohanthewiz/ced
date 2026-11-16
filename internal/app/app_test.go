@@ -38,6 +38,7 @@ import (
 	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/mcp"
 	"github.com/rohanthewiz/ced/internal/readme"
+	"github.com/rohanthewiz/ced/internal/spell"
 	"github.com/rohanthewiz/ced/internal/theme"
 )
 
@@ -196,6 +197,19 @@ func newTestApp(t *testing.T, root string) *App {
 	prevChatDir := chatArchiveDirFn
 	chatArchiveDirFn = func() string { return filepath.Join(chatHome, "chats") }
 	t.Cleanup(func() { chatArchiveDirFn = prevChatDir })
+	// The struct-tag spell check (spellcheck.go) stays OFF here — the
+	// zero value — so no other feature's test paints spelling marks. Its
+	// machine-touching seams are pinned anyway, for the tests that turn
+	// it on and for those that call loadUserConfig (default on): the
+	// user word list and config.json go to a throwaway directory, and the
+	// loader is an empty stub, so a .go fixture never pays for the
+	// 90k-word gunzip. Spelling tests inject the dictionary they want.
+	spellHome := t.TempDir()
+	prevSpellDict, prevSpellCfg, prevSpellLoad := spellDictPathFn, spellConfigPathFn, spellLoadFn
+	spellDictPathFn = func() string { return filepath.Join(spellHome, "dictionary.txt") }
+	spellConfigPathFn = func() string { return filepath.Join(spellHome, "config.json") }
+	spellLoadFn = func(...string) (*spell.Dictionary, error) { return spell.New(), nil }
+	t.Cleanup(func() { spellDictPathFn, spellConfigPathFn, spellLoadFn = prevSpellDict, prevSpellCfg, prevSpellLoad })
 	// Crash rescues (crashsafety.go) go to a throwaway directory and the
 	// exit note to nowhere: a test of the panic or signal path must not
 	// leave folders of fixture text in the developer's real
@@ -410,10 +424,10 @@ func TestMenuButtonRect(t *testing.T) {
 // to (0,0) when the window is too small to fit it.
 func TestMenuModalRect_Centered(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	// The menu (141 rows fully expanded) outgrew the 40-row default sim
+	// The menu (254 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 252
+	a.height = 254
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -2286,19 +2300,19 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 252 {
-		t.Errorf("modalHeight = %d, want 252 (216 + 36 splits)", h)
+	if h != 254 {
+		t.Errorf("modalHeight = %d, want 254 (218 + 36 splits)", h)
 	}
 	if got := len(a.menuGeometry().splits); got != 36 {
 		t.Errorf("splits = %d, want 36", got)
 	}
-	if got := len(items); got != 210 {
-		t.Errorf("row count = %d, want 210 (2 top-zone + 193 group actions + 15 headers)", got)
+	if got := len(items); got != 212 {
+		t.Errorf("row count = %d, want 212 (2 top-zone + 195 group actions + 15 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (249) — headers separate the
+	// one setting off the headerless Quit group (251) — headers separate the
 	// sections, and splits (not dividers) the runs inside them.
-	wantDiv := []int{2, 5, 249}
+	wantDiv := []int{2, 5, 251}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2883,8 +2897,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 255 { // 252 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 255", h)
+	if h != 257 { // 254 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 257", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -3338,7 +3352,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 252
+	a.height = 254
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

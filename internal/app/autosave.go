@@ -322,6 +322,11 @@ func (a *App) autoSaveTab(idx int) bool {
 	}
 	a.requestFileDiff(tab.Path)
 	a.lspDidSave(tab)
+	// A spell-check word list edited by hand is usually written by THIS
+	// save, not an explicit one (auto-save is on by default), so the
+	// reload rides here too; a no-op for every other path and silent
+	// either way (spellcheck.go).
+	a.spellAfterSave(tab.Path)
 	a.runFormatOnSave(idx, true)
 	return true
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/spell"
 	"github.com/rohanthewiz/ced/internal/userconfig"
 )
 
@@ -502,5 +503,33 @@ func TestHandleAutoSave_ModalDeferralDoesNotSpin(t *testing.T) {
 
 	if a.screen.HasPendingEvent() {
 		t.Fatal("the deferral re-armed a zero wait: an autoSaveEvent is already queued")
+	}
+}
+
+// TestAutoSaveTab_ReloadsASpellDictionary: auto-save is how a hand-edited
+// word list usually reaches disk, so it re-reads the spell check's lists
+// just as an explicit save does — and a plain file's auto-save does not.
+func TestAutoSaveTab_ReloadsASpellDictionary(t *testing.T) {
+	a, tab := spellTestApp(t, "t.go", spellFixture)
+	calls := stubSpellLoad(t, spell.New("user"), nil)
+
+	tab.Dirty = true
+	a.autoSaveTab(a.tabIndexOf(tab))
+	if *calls != 0 || a.spell.loading {
+		t.Fatal("auto-saving a Go file reloaded the word lists")
+	}
+
+	dict := a.spellProjectDictPath()
+	if err := os.MkdirAll(filepath.Dir(dict), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFileT(t, dict, "# words\n")
+	a.openFile(dict)
+	dt := a.activeTabPtr()
+	dt.InsertString("nmae\n")
+	a.autoSaveTab(a.tabIndexOf(dt))
+	waitSpellDict(t, a)
+	if *calls != 1 {
+		t.Errorf("auto-saving the project dictionary: %d loads, want 1", *calls)
 	}
 }

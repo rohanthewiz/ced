@@ -23,6 +23,7 @@ import (
 	"github.com/rohanthewiz/ced/internal/filetree"
 	"github.com/rohanthewiz/ced/internal/lsp"
 	"github.com/rohanthewiz/ced/internal/readme"
+	"github.com/rohanthewiz/ced/internal/spell"
 )
 
 // openEditorContextAt right-clicks the editor at buffer-ish local
@@ -1168,7 +1169,8 @@ func readmeFormLiteralLen(form string) int {
 // editorMenuLabels is every row editorContextItems builds across states
 // chosen to reach them all: a merge conflict (plain and diff3) in a
 // repository with a change and a bookmark at the caret, a selection
-// inside cats with an agent pane beside it, and a Markdown file.
+// inside cats with an agent pane beside it, a Markdown file, and a
+// misspelled struct-tag word under the caret.
 func editorMenuLabels(t *testing.T) []string {
 	t.Helper()
 	var out []string
@@ -1207,6 +1209,16 @@ func editorMenuLabels(t *testing.T) []string {
 	md := filepath.Join(a.rootDir, "notes.md")
 	writeFileT(t, md, "# notes\n")
 	a.openFile(md)
+	collect(a)
+
+	// A misspelled struct-tag word under the caret, with the check on and
+	// a dictionary that knows the rest of the line.
+	a.spell.on = true
+	a.spell.dict = spell.New("user", "name")
+	tags := filepath.Join(a.rootDir, "tags.go")
+	writeFileT(t, tags, "package x\n\ntype T struct {\n\tN string `json:\"userNmae\"`\n}\n")
+	a.openFile(tags)
+	a.activeTabPtr().Cursor = editor.Position{Line: 3, Col: 22} // inside "Nmae" (cols 21–25)
 	collect(a)
 	return out
 }

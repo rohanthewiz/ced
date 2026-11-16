@@ -565,6 +565,10 @@ func builtinMenuGroups() []menuGroup {
 			// inlay notes' end-of-line slot, so its switch sits beside
 			// theirs, below the fold for the same budget reason.
 			{action: (*App).menuToggleDiagNote, enabled: alwaysTrue, labelFor: (*App).diagNoteToggleLabel},
+			// The struct-tag spell check's switch (spellcheck.go): ambient
+			// marks on the code, beside the other ambient switches and
+			// below the fold for the same budget reason.
+			{action: (*App).menuToggleSpellcheck, enabled: alwaysTrue, labelFor: (*App).spellcheckToggleLabel},
 			// ── Diff panes ──
 			// The diff panes' shared switches and stepper (diffview.go) —
 			// the ≡ twins of the ▲ ▼ split ws toolbar every diff panel
@@ -775,6 +779,11 @@ func builtinMenuGroups() []menuGroup {
 			{splitAbove: true, shortcut: "esc !", action: (*App).menuToggleProblems, enabled: alwaysTrue, labelFor: (*App).problemsToggleLabel},
 			{label: "Next problem", action: (*App).menuNextProblem, enabled: (*App).hasAnyDiagnostics},
 			{label: "Previous problem", action: (*App).menuPrevProblem, enabled: (*App).hasAnyDiagnostics},
+			// The struct-tag spell check's picker (spellfix.go), with the
+			// problem rows because a misspelled tag is the same question —
+			// "what is wrong here?" — asked of a different checker. Always
+			// enabled: every reason it can't run is flashed (spellfix.go).
+			{label: "Fix spelling at caret…", action: (*App).menuFixSpellingAtCaret, enabled: alwaysTrue},
 			// The LSP's deliberate retry gesture (lsprestart.go), the twin
 			// of re-picking the chat agent. Never dimmed: the file it is
 			// most wanted on is one whose server is dead or missing, and
@@ -1373,6 +1382,11 @@ type App struct {
 	// directly and keep the note without seeding a flag. setDiagNote is
 	// its single write path. See diagnote.go.
 	diagNoteOff bool
+
+	// spell is the struct-tag spell check: the "spellcheck" switch, the
+	// lazily loaded word list and its load bookkeeping. Off in a directly
+	// built App. See spellcheck.go.
+	spell spellState
 
 	// underlineColor is whether tab-group members get their underline in
 	// the group's colour (SGR 58), resolved once from "underlinecolor"
@@ -2278,6 +2292,7 @@ func (a *App) loadUserConfig() {
 	a.wordHLEnabled = cfg.WordHL
 	a.inlayEnabled = cfg.InlayHints
 	a.diagNoteOff = !cfg.DiagNote
+	a.spell.on = cfg.SpellCheck
 	a.applyWordHighlight() // no-op at startup; matters when the config is re-read
 	a.findAllDockRight = cfg.FindAllDock == userconfig.FindAllDockRight
 	a.blameBands = cfg.BlameStyle != userconfig.BlameStyleCompact
@@ -2531,6 +2546,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handlePluginEditTick(e)
 	case *validateEvent:
 		a.handleValidateTick(e)
+	case *spellDictEvent:
+		a.handleSpellDict(e)
 	case *zipDoneEvent:
 		a.handleZipDone(e)
 	case *gonotesDoneEvent:
@@ -2702,6 +2719,11 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// a kind ced validates, so an editor full of Go never wakes on it.
 	// See validate.go.
 	a.validateAfterEvent()
+	// And the struct-tag spell check's word list: loaded the first time a
+	// Go tab is active with the check on, never before — most sessions
+	// never open a struct, and the load gunzips ninety thousand words.
+	// See spellcheck.go.
+	a.spellAfterEvent()
 	// And the secondary carets' blink: armed while they exist, disarmed
 	// the moment they don't, so an idle single-caret editor never wakes
 	// on a timer. See multicaret.go.
@@ -4949,8 +4971,13 @@ func (a *App) wireTab(t *editor.Tab) {
 	// The blame source rides with them: it paints no spans and claims no
 	// mark cell, so its position in the precedence order is irrelevant —
 	// what it owns is the annotation column, which nothing else asks for.
+	// The struct-tag spell check sits just above git and below every
+	// diagnostic producer: it paints no gutter mark, and where a real
+	// diagnostic underlines the same cells, the diagnostic's colour should
+	// win. See spellcheck.go.
 	t.DecoSources = append(t.DecoSources,
 		gitDiffSource{app: a}, gitBlameSource{app: a},
+		spellSource{app: a},
 		validateSource{app: a},
 		pluginDecoSource{app: a}, lspDiagSource{app: a},
 		// Merge-conflict washes and lenses (conflictview.go). Last of
@@ -5053,6 +5080,9 @@ func (a *App) saveTabAt(idx int) bool {
 	// repaints — the save-to-preview loop that stands in for a settings
 	// modal (theme.go). A no-op for every other path.
 	a.themeAfterSave(tab.Path)
+	// Saving one of the spell check's word lists re-reads them, so a word
+	// added by hand stops being flagged at once (spellcheck.go).
+	a.spellAfterSave(tab.Path)
 	a.flash(fmt.Sprintf("Saved %s", filepath.Base(tab.Path)))
 	// Format-on-save runs after the disk write succeeds, so a broken
 	// formatter never blocks the user's save from landing. The

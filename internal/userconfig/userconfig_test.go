@@ -616,6 +616,18 @@ func TestFavoritesPath_SharesTheConfigDirectory(t *testing.T) {
 	}
 }
 
+// TestDictionaryPath_SharesTheConfigDirectory: the spell check's user
+// word list resolves beside every other ced config file.
+func TestDictionaryPath_SharesTheConfigDirectory(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got, want := DictionaryPath(), filepath.Join("/xdg", "ced", "dictionary.txt"); got != want {
+		t.Errorf("DictionaryPath() = %q, want %q", got, want)
+	}
+	if filepath.Dir(DictionaryPath()) != filepath.Dir(DefaultPath()) {
+		t.Error("dictionary.txt drifted out of the config directory")
+	}
+}
+
 // TestLoadWordHLInvalid mirrors the execmarks rule: a typo'd value is an
 // error the caller can flash, not a silent fallback.
 func TestLoadWordHLInvalid(t *testing.T) {
@@ -1692,6 +1704,49 @@ func TestDiagNoteKey(t *testing.T) {
 	data, _ := os.ReadFile(p)
 	if err != nil || cfg.DiagNote || !strings.Contains(string(data), "future-key") {
 		t.Errorf("round trip: cfg=%v err=%v file=%s", cfg.DiagNote, err, data)
+	}
+}
+
+// TestSpellCheckKey pins the spellcheck key end to end: on by default,
+// both values recognised, a typo REPORTED rather than ignored, and a save
+// that round-trips without dropping keys it does not model.
+func TestSpellCheckKey(t *testing.T) {
+	if !Defaults().SpellCheck {
+		t.Fatal("Defaults().SpellCheck = false, want true")
+	}
+	for body, want := range map[string]bool{
+		`{"spellcheck":"on"}`:  true,
+		`{"spellcheck":"off"}`: false,
+		`{"spellcheck":false}`: false, // JSON booleans mean on/off
+		`{}`:                   true,
+	} {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		cfg, err := Load(p)
+		if err != nil || cfg.SpellCheck != want {
+			t.Errorf("Load(%s) = %v, %v; want %v", body, cfg.SpellCheck, err, want)
+		}
+	}
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"spellcheck":"maybe"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Error("a bad value should be reported")
+	}
+
+	if err := os.WriteFile(p, []byte("{\n  \"future-key\": 42\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveSpellCheck(p, false); err != nil {
+		t.Fatalf("SaveSpellCheck: %v", err)
+	}
+	cfg, err := Load(p)
+	data, _ := os.ReadFile(p)
+	if err != nil || cfg.SpellCheck || !strings.Contains(string(data), "future-key") {
+		t.Errorf("round trip: cfg=%v err=%v file=%s", cfg.SpellCheck, err, data)
 	}
 }
 

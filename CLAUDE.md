@@ -88,6 +88,8 @@ internal/format/              format.json, trust store, builtin ladder, kinds.go
 internal/theme/               Theme struct, palette derivation, builtins, loader;
                               contrast.go (WCAG ratio + hue-keeping lift)
 internal/readme/              README.md as sections/tables/code spans (test-only consumer)
+internal/spell/               Struct-tag spell check: embedded SCOWL + extra/ident lists,
+                              ident.go (name splitter, compounds), structtag.go, suggest.go
 internal/userconfig/          ~/.config/ced/config.json + other config paths
 internal/crash/               Goroutine panic guard (Recover/SetHandler); rescue folders
 internal/clipboard/           OSC 52 with tmux passthrough
@@ -127,6 +129,7 @@ internal/app/
   autosave.go format.go validate.go syntax.go zipops.go
   encoding.go                 Convert-to-UTF-8 question (save/≡/status), diff-line decode
   copypaste.go copyto.go      File clipboard Copy/Paste; Copy to… a typed folder (one engine)
+  spellcheck.go spellfix.go   Struct-tag spelling: underline source + lazy load; picker
   copyref.go                  Copy reference: `<abs path>:<line>` (editor/tab right-click, ≡ File)
   folder.go favorites.go favmanage.go recentlocations.go remote.go
   openfile.go                 Open file… / ⌘O: typed path anywhere on disk, Tab completes
@@ -506,6 +509,37 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (path, rev), recorded BEFORE the answer. Error → `noInlay`; progress
   end clears the record. gopls needs `initOptions`
   (`TestInlay_EndToEndWithRealGopls`). ≡ View toggle `"inlayhints"`.
+- **Struct-tag spelling (internal/spell, spellcheck.go, spellfix.go)**:
+  reads ONLY the names in Go struct tags (`.go` files): every key, the
+  value up to its first comma, and only when identifier-shaped (ASCII
+  letters/digits/`_-.`) — gorm/validate mini-languages and prose are
+  never read. Line scanner (`spell.TagNames`), a span counts only if it
+  ALL parses as `key:"value"` pairs (the misaligned-backtick guard) —
+  don't swap in go/scanner (whole-file per frame). Names split per
+  convention (camel, acronym + plural `IDs`, `_ - .`); skipped: ≤2
+  letters, acronyms, pieces touching a digit/non-ASCII; SCREAMING names
+  check pieces ≥5. Run-together names pass as compounds of TWO tiers:
+  list words ≥4 letters, or TRUSTED words (ident.txt + user
+  dictionaries) at any length — never lower the 4 (`pasword` = pas+word;
+  `TestCheckIdent_FlagsTheMisspelledPiece`). Corrections: `SuggestPiece`
+  = Suggest's uncapped `candidates`, re-ranked by `identRank` (cost, then
+  dropped-letter supersequence), proper nouns/acronyms/<3 letters out,
+  re-cased to the piece, every candidate must itself pass. A
+  DecorationSource (underline + DiagWarning ink, NO gutter mark),
+  registered git < spell < validate; NOT a diagnostic (stays out of
+  `diagsFor`). Per frame, visible lines, nothing cached. The piece with
+  the primary caret at its END is not painted (typing); right-click and
+  the ≡ row ignore that. Dictionary loads LAZILY off-loop
+  (`spellAfterEvent`: check on + active Go tab), seq-checked, 30s
+  lost-answer relaunch, nil dict latches `dead` (≡ row clears it).
+  Words: `~/.config/ced/dictionary.txt` + `<root>/.ced/dictionary.txt`
+  (committed), plain text, lowercased on add, saving either reloads
+  (`spellAfterSave` beside `themeAfterSave` AND in `autoSaveTab` — auto-save
+  is how a hand edit usually lands). Picker = `openPicker`;
+  a pick re-reads the captured columns before `ApplyMultiEdit`. Doors:
+  right-click row (first, on a flagged word), ≡ Code "Fix spelling at
+  caret…", ≡ View toggle `"spellcheck"` (default on, off in a direct App;
+  newTestApp stubs `spellLoadFn` empty and pins the paths).
 
 ### Markdown preview (editor/markdown*.go, app/markdown.go)
 - A VIEW flag (`Tab.mdView`), not a Mode: buffer, undo, dirty, LSP etc.
@@ -1530,9 +1564,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   terminal rows spends the above-the-fold budget.
 - **Adding a menu row means updating the pins** — a README menu-reference
   row first, then the layout counts:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 193 group
-  actions + 15 headers (210), 36 splits, height 252, dividers
-  `[2, 5, 249]`; also the Git fold height (35 rows + 8 splits = 43) in
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 195 group
+  actions + 15 headers (212), 36 splits, height 254, dividers
+  `[2, 5, 251]`; also the Git fold height (36 rows + 8 splits = 44) in
   `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.
@@ -1577,8 +1611,9 @@ old SpiceEdit `website/`.
 
 - `Ctrl+` editor shortcuts.
 - A config file / dotfile beyond the existing `~/.config/ced/` files
-  (config.json, mcp.json, state.json, favorites.json, themes/, skills/,
-  plugins/, chats/, recover/, rc.grsh) and `<repo>/.ced/`. Each exists because it
+  (config.json, mcp.json, state.json, favorites.json, dictionary.txt,
+  themes/, skills/, plugins/, chats/, recover/, rc.grsh) and `<repo>/.ced/`
+  (format.json, dictionary.txt, history.bytdb). Each exists because it
   holds something ced cannot know for you.
 - A HOST plugin system (Go .so plugins, embedded interpreter, stable
   editor API). Plugins stay "a command line plus where its stdout goes".

@@ -379,6 +379,14 @@ func (a *App) editorContextItems(tab *editor.Tab) []editorContextItem {
 			label: "Git…", action: func(app *App) { app.editorGitPicker(tab) }, enabled: alwaysTrue,
 		})
 	}
+	// A click on a word the struct-tag spell check underlined leads with
+	// the way to fix it (spellfix.go) — the gesture every editor has taught
+	// for a squiggle, so the row goes where every editor puts it: first.
+	// Only on a flagged word; nowhere else would it be anything but a dead
+	// row. Its ≡ twin is Code "Fix spelling at caret…".
+	if row, ok := a.spellContextRow(tab); ok {
+		items = append([]editorContextItem{row, editorCtxSplit()}, items...)
+	}
 	// A click inside a live merge conflict leads with the ways to settle
 	// it (conflictview.go) — the right-click twin of the lens, and the one
 	// door to "both, incoming first" / "neither", which the lens has no

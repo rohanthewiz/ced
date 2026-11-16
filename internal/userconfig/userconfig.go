@@ -322,6 +322,16 @@ type Config struct {
 	// the pointer tooltip) than be told. Persisted by the ≡ View toggle.
 	DiagNote bool
 
+	// SpellCheck controls the struct-tag spell check (app/spellcheck.go):
+	// misspelled words in the names of Go struct tags (`json:"usrName"`)
+	// are underlined, and a picker offers corrections. Defaults to on — a
+	// typo in a tag compiles cleanly and breaks a wire format silently,
+	// and the check is quiet by design (it reads tag names only, and
+	// skips acronyms, abbreviations and anything near a digit). Off is
+	// here for the WordHL reason: it is ambient paint nobody asked for.
+	// Persisted by the ≡ View toggle and the picker's last row.
+	SpellCheck bool
+
 	// Copilot controls whether the editor runs the GitHub Copilot
 	// sidecar (copilot-language-server). Defaults to on because the
 	// binary is only ever spawned when the user has installed it —
@@ -456,7 +466,7 @@ const (
 // config file is present (or every field in it is blank). Centralised
 // so tests and the loader can't drift from each other.
 func Defaults() Config {
-	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, DiffView: DiffViewUnified, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, DiagNote: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true, Terminal: TerminalAuto, UnderlineColor: UnderlineColorAuto}
+	return Config{Icons: IconsAuto, AutoSave: true, AutoSaveDelay: DefaultAutoSaveDelay, TermDock: TermDockBottom, FindAllDock: FindAllDockTop, BlameStyle: BlameStyleBands, DiffView: DiffViewUnified, ExecMarks: true, TreeAutoFit: true, WordHL: true, InlayHints: true, DiagNote: true, SpellCheck: true, Copilot: true, Suggestions: true, ChatContext: true, ChatWrite: true, Plugins: true, Remote: true, Session: true, CommitMsgTrailer: true, Terminal: TerminalAuto, UnderlineColor: UnderlineColorAuto}
 }
 
 // fileFormat mirrors the on-disk JSON shape. We decode into this and
@@ -482,6 +492,7 @@ type fileFormat struct {
 	WordHL        string `json:"wordhl,omitempty"`
 	InlayHints    string `json:"inlayhints,omitempty"`
 	DiagNote      string `json:"diagnote,omitempty"`
+	SpellCheck    string `json:"spellcheck,omitempty"`
 	Copilot       string `json:"copilot,omitempty"`
 	Suggestions   string `json:"suggestions,omitempty"`
 	ChatModel     string `json:"chatmodel,omitempty"`
@@ -621,6 +632,18 @@ func ChatsDir() string { return configFilePath("chats") }
 // internal/favorites; this package only knows where the file is, so the
 // config locations can never drift apart.
 func FavoritesPath() string { return configFilePath("favorites.json") }
+
+// DictionaryPath returns the user's own word list for the struct-tag
+// spell check: $XDG_CONFIG_HOME/ced/dictionary.txt, falling back to
+// ~/.config/ced/dictionary.txt (or "" when no config location resolves).
+//
+// A plain text file, one word per line, rather than a key in config.json:
+// it is a list the user grows by hand as well as from the spelling picker
+// ("Add to my dictionary"), it can run to hundreds of lines, and a typo in
+// it must not cost every other setting. The project's own list lives
+// beside format.json in <root>/.ced/dictionary.txt, where it is committed
+// with the code its words describe; internal/spell reads both.
+func DictionaryPath() string { return configFilePath("dictionary.txt") }
 
 // PluginsDir returns the canonical plugins directory:
 // $XDG_CONFIG_HOME/ced/plugins, falling back to ~/.config/ced/plugins
@@ -850,6 +873,20 @@ func Load(path string) (Config, error) {
 		errs = append(errs, fmt.Errorf(
 			"%s: diagnote must be \"on\" or \"off\" (got %q)",
 			path, ff.DiagNote,
+		))
+	}
+
+	switch strings.ToLower(strings.TrimSpace(ff.SpellCheck)) {
+	case "":
+		// field omitted — keep default
+	case "on":
+		cfg.SpellCheck = true
+	case "off":
+		cfg.SpellCheck = false
+	default:
+		errs = append(errs, fmt.Errorf(
+			"%s: spellcheck must be \"on\" or \"off\" (got %q)",
+			path, ff.SpellCheck,
 		))
 	}
 
@@ -1194,6 +1231,16 @@ func SaveDiagNote(path string, on bool) error {
 		val = "off"
 	}
 	return saveKey(path, "diagnote", val)
+}
+
+// SaveSpellCheck persists the struct-tag spell check preference into
+// the config file at path. See saveKey for the round-trip guarantees.
+func SaveSpellCheck(path string, on bool) error {
+	val := "on"
+	if !on {
+		val = "off"
+	}
+	return saveKey(path, "spellcheck", val)
 }
 
 // SaveCopilot persists the Copilot-sidecar preference into the config

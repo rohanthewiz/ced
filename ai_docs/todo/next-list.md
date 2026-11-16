@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-145**
+**Next ID: N-149**
 
 ## Open
 
@@ -419,6 +419,25 @@ plus the LSP work done in the seeding session itself
   original via the compare panel), its label carrying a count only when
   a rescue for this root exists. Raise priority if a rescue is ever
   actually lost.
+
+- **N-146** · raised `2026-1116-1247-struct-tag-spellcheck` · value low
+  **`internal/spell` is duplicated between cats-todo and ced.** ced's
+  copy (spell.go, suggest.go, userdict.go + the SCOWL list, extra.txt)
+  was adapted from cats-todo's, which is `internal/` and can't be
+  imported. They already differ: ced's `Load` degrades on an unreadable
+  user file where cats-todo's refuses, `Add` trusts the word, and the
+  scan is split out as `candidates`. A fix to the ranking or the word
+  lists now lands twice. Options: a shared module
+  (`github.com/rohanthewiz/spell`) holding Dictionary / Suggest /
+  userdict + data, each editor keeping its own tokenizer (prose vs
+  ident.go/structtag.go). Raise if the two drift on a real bug.
+
+- **N-147** · raised `2026-1116-1247-struct-tag-spellcheck` · value low
+  **gofmt drift in eight pre-existing test files.** `gofmt -l` lists
+  internal/app/{contextmenu,diffselect,findalllive,metakeys,modals,
+  openfile,tabcontext}_test.go and internal/format/sqlvalidate_test.go
+  (contextmenu_test.go's is a trailing blank line already in HEAD
+  25717e1). Formatting only, the N-034 treatment.
 
 ## Validate
 
@@ -804,6 +823,23 @@ and `raised`.
   coming back shows it at once, and a ced pane beside an agent still
   picks up its writes while unfocused. Also that tmux WITHOUT
   `focus-events` keeps the 10s tick.
+
+- **N-145** · raised `2026-1116-1247-struct-tag-spellcheck` · value low
+  **Struct-tag spelling marks in a real terminal.** run-ced's emulator
+  records colour but not the underline attribute, so only the gold ink
+  was seen. Check in tmux and cats: the underline draws under a
+  misspelled tag word; it reads on gruvbox-dark and super-warm, where
+  DiagWarning sits close to the string colour (#fabd2f vs #b8bb26,
+  #ffcf6b vs #b6c25e, ~1.2–1.3:1 — the underline carries it); and the
+  right-click row arrives through tmux (Button2) — the ≡ Code row is the
+  twin if not.
+
+- **N-148** · raised `2026-1116-1247-struct-tag-spellcheck` · value low
+  **`TestOpenFinder_PopulatesResults` timed out (2s) under load.** It
+  failed once while two `make test` race suites ran at the same time
+  ("finder did not reach StateReady within 2s", finder_test.go:72);
+  it passed 3× alone and in a clean full run. Decide whether the 2s
+  deadline should be longer under `-race` (never a t.Skip).
 
 ## Roadmap
 

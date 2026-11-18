@@ -98,6 +98,7 @@ internal/icons/               Nerd Font detection + glyphs
 internal/app/
   app.go                      Event loop, layout, rendering
   crashsafety.go              Panic / SIGHUP / SIGTERM / tty-loss exits: rescue, Fini, re-panic
+  recovered.go                ≡ File "Recovered edits…": this project's rescues (crash.List), open / compare
   inputburst.go               One frame per wheel/motion burst
   tickpace.go                 Refresh tick paced by focus (10s / 30s, focus-in refresh)
   modal.go leader.go whichkey.go  Modal slot; leader table + namespaces; which-key band
@@ -1652,9 +1653,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   terminal rows spends the above-the-fold budget.
 - **Adding a menu row means updating the pins** — a README menu-reference
   row first, then the layout counts:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 199 group
-  actions + 16 headers (217), 36 splits, height 259, dividers
-  `[2, 5, 256]`; also the Git fold height (37 rows + 8 splits = 45) in
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 200 group
+  actions + 16 headers (218), 36 splits, height 260, dividers
+  `[2, 5, 257]`; also the Git fold height (37 rows + 8 splits = 45) in
   `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.

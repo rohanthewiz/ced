@@ -811,6 +811,7 @@ still clickable and says why (install a binary, export `$EDITOR`).
 | `Recent folders…` | | Two-pane picker: this repository's recent locations, and every folder ced has opened. |
 | `Manage favorites…` | | Add, rename, and remove [favorite locations](#favorite-locations), project and global. |
 | `Disable session restore` / `Enable session restore` | | Whether opening a folder reopens its tabs (`"session"`). |
+| `Recovered edits…` / `Recovered edits (<n>)…` | | Edits ced saved aside when it couldn't ask (a crash, a killed pane), newest first: open the rescued copy, compare it with the file, or read why it was written. The count says there are some. |
 | `Remote open: on` / `Remote open: off` / `Remote open: unavailable` | | Whether `ced --remote` / `--wait` in another pane can hand this editor a file (`"remote"`). |
 | `New file` / `New file (in <folder>)` | `esc n` | Create a file in the active folder. |
 | `New folder` / `New folder (in <folder>)` | | Create a folder in the active folder. |

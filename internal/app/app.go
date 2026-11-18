@@ -303,6 +303,10 @@ func builtinMenuGroups() []menuGroup {
 			// and the hand-off rows, a one-row run no split could place.
 			{label: "Manage favorites…", action: (*App).menuManageFavorites, enabled: alwaysTrue},
 			{action: (*App).menuToggleSession, enabled: alwaysTrue, labelFor: (*App).sessionToggleLabel},
+			// Rescued edits (recovered.go, N-144) — what ced saved aside
+			// when it could not ask, beside the row about what it reopens.
+			// The label's count is the only notice a rescue gets.
+			{action: (*App).menuRecoveredEdits, enabled: alwaysTrue, labelFor: (*App).recoveredEditsLabel},
 			// Whether another pane's `ced --remote` / `ced --wait` can
 			// hand this instance a file (remote.go). A workspace row, not
 			// a View one: what it scopes is which files this ROOT accepts.
@@ -1541,8 +1545,11 @@ type App struct {
 	// the Open config.json row's label.
 	flashLog      []flashEntry
 	configLoadErr string
-	statusUntil   time.Time
-	dragMode      string // "editor" while a drag-select is active.
+	// recovered caches this project's rescue listing for the ≡ row's
+	// label (recovered.go).
+	recovered   recoveredCache
+	statusUntil time.Time
+	dragMode    string // "editor" while a drag-select is active.
 	// dragSplitOffset is how far the press that started a seam drag
 	// landed from the seam's own column. The grab zone is three columns
 	// wide (splitter.go), so a drag that glued the divider to the cursor

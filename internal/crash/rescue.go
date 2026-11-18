@@ -42,6 +42,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -280,4 +281,73 @@ func indexText(now time.Time, reason, root string, n int, lines string) string {
 	b.WriteString("changed since. This folder is removed when ced writes a rescue more\n")
 	fmt.Fprintf(&b, "than %d days after this one.\n", int(KeepFor/(24*time.Hour)))
 	return b.String()
+}
+
+// Folder is one rescue read back (List): when and why it was written, the
+// project it belongs to, and the files it holds.
+type Folder struct {
+	Path    string
+	When    time.Time
+	Why     string
+	Project string
+	Files   []Rescued
+}
+
+// List reads the rescue folders under dir that belong to project root,
+// newest first — the in-editor door to them (N-144: a rescue's only
+// announcement used to be a line printed after the terminal was restored,
+// which nobody sees when the pane was killed). A folder is read from its
+// INDEX.txt, which Rescue writes last and which names the project and
+// every file. Folders without a readable index, or for another project,
+// are skipped. A missing dir is no rescues and no error.
+func List(dir, root string) ([]Folder, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	want := filepath.Clean(root)
+	var out []Folder
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		folder := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(filepath.Join(folder, IndexName))
+		if err != nil {
+			continue
+		}
+		f := parseIndex(folder, string(data))
+		if filepath.Clean(f.Project) != want || len(f.Files) == 0 {
+			continue
+		}
+		out = append(out, f)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].When.After(out[j].When) })
+	return out, nil
+}
+
+// parseIndex reads indexText's format back: the When / Why / Project
+// header lines and one "  <rel>  <-  <orig>" line per rescued file.
+func parseIndex(folder, text string) Folder {
+	f := Folder{Path: folder}
+	for _, line := range strings.Split(text, "\n") {
+		switch {
+		case strings.HasPrefix(line, "When:"):
+			f.When, _ = time.Parse("2006-01-02 15:04:05 -0700", strings.TrimSpace(strings.TrimPrefix(line, "When:")))
+		case strings.HasPrefix(line, "Why:"):
+			f.Why = strings.TrimSpace(strings.TrimPrefix(line, "Why:"))
+		case strings.HasPrefix(line, "Project:"):
+			f.Project = strings.TrimSpace(strings.TrimPrefix(line, "Project:"))
+		case strings.HasPrefix(line, "  ") && strings.Contains(line, "  <-  "):
+			rel, orig, _ := strings.Cut(strings.TrimSpace(line), "  <-  ")
+			if orig == origLabel("") {
+				orig = ""
+			}
+			f.Files = append(f.Files, Rescued{Orig: orig, File: filepath.Join(folder, rel)})
+		}
+	}
+	return f
 }

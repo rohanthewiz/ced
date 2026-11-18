@@ -197,3 +197,43 @@ func TestProjectLabel_IsFolderNameSafe(t *testing.T) {
 		}
 	}
 }
+
+// TestList_ReadsThisProjectsRescuesNewestFirst pins N-144's reader: the
+// folders Rescue wrote for a project come back newest first with their
+// reason and files (originals included, untitled as ""), and another
+// project's rescue is not listed.
+func TestList_ReadsThisProjectsRescuesNewestFirst(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(t.TempDir(), "proj")
+	t0 := time.Date(2026, 11, 13, 14, 25, 1, 0, time.Local)
+	if _, _, err := Rescue(dir, root, "SIGTERM", t0, []Buffer{
+		{Path: filepath.Join(root, "a.go"), Data: []byte("a")},
+		{Path: "", Data: []byte("u")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Rescue(dir, root, "ced crashed: boom", t0.Add(time.Hour), []Buffer{
+		{Path: filepath.Join(root, "sub", "b.go"), Data: []byte("b")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Rescue(dir, "/elsewhere", "SIGHUP", t0, []Buffer{{Path: "/elsewhere/c.go", Data: []byte("c")}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := List(dir, root)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("List = %d folders, %v; want this project's two", len(got), err)
+	}
+	if got[0].Why != "ced crashed: boom" || !got[0].When.Equal(t0.Add(time.Hour)) {
+		t.Errorf("newest first: got %q at %v", got[0].Why, got[0].When)
+	}
+	if len(got[1].Files) != 2 || got[1].Files[0].Orig != filepath.Join(root, "a.go") || got[1].Files[1].Orig != "" {
+		t.Errorf("files = %+v", got[1].Files)
+	}
+	if data, err := os.ReadFile(got[1].Files[0].File); err != nil || string(data) != "a" {
+		t.Errorf("rescued copy = %q, %v", data, err)
+	}
+	if none, err := List(filepath.Join(dir, "missing"), root); none != nil || err != nil {
+		t.Errorf("missing dir: %v, %v", none, err)
+	}
+}

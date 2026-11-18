@@ -95,19 +95,6 @@ plus the LSP work done in the seeding session itself
   answered within ~300ms (adapts to real cost), and/or re-ask a window
   for a viewport that moved off the first one.
 
-- **N-144** · raised `2026-1113-1801-n118-crash-safety` · value low
-  **Rescued edits have no in-editor door.** A panic, SIGTERM or hangup
-  writes dirty buffers to `~/.config/ced/recover/<stamp>-<project>/`
-  (internal/crash/rescue.go) and says where in a line printed after
-  Fini — which nobody sees when the pane was killed. The only way back
-  is to know the folder exists. Nothing reads it at startup (and must
-  not flash there: startup notes are HELD for a ≡ label). Options: a ≡
-  File row "Recovered edits…" (picker of rescue folders for THIS root,
-  newest first, rows open the rescued copy or compare it with the
-  original via the compare panel), its label carrying a count only when
-  a rescue for this root exists. Raise priority if a rescue is ever
-  actually lost.
-
 - **N-146** · raised `2026-1116-1247-struct-tag-spellcheck` · value low
   **`internal/spell` is duplicated between cats-todo and ced.** ced's
   copy (spell.go, suggest.go, userdict.go + the SCOWL list, extra.txt)
@@ -719,6 +706,22 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-18, `2026-1117-SESS7` —
+  **N-144** rescued edits have an in-editor door: ≡ File "Recovered
+  edits…" (recovered.go), after the session-restore toggle. `crash.List`
+  reads this project's rescue folders back from their INDEX.txt (when,
+  why, every file), newest first. The row's label carries the file count
+  when there are any — the notice, since nothing may flash at startup —
+  cached 5s because labels redraw every frame. A pick offers: open the
+  rescued copy; "Compare with <file>" (when the original exists: the
+  original opens as a tab and is compared against the rescued copy, so
+  the compare panel's [↺] chips restore rescued hunks one undo step at a
+  time); read the INDEX.txt. Nothing writes the user's file. With none,
+  the row flashes where rescues would be. README and menu pins updated.
+  `TestList_ReadsThisProjectsRescuesNewestFirst` (crash),
+  `TestRecoveredEditsLabel_CountsThisProjectsRescues`,
+  `TestMenuRecoveredEdits_ListsAndCompares`.
 
 - closed 2026-11-17, `2026-1117-SESS7` —
   **N-140** nothing forks on the loop when the snapshot lands, and the

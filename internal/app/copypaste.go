@@ -112,12 +112,12 @@ func (e *pasteDoneEvent) When() time.Time { return e.when }
 func copyFileContents(src, dst string, perm os.FileMode) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return notCreatedError{err}
 	}
 	defer in.Close()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
 	if err != nil {
-		return err
+		return notCreatedError{err}
 	}
 	defer func() {
 		if cerr := out.Close(); err == nil {
@@ -134,7 +134,7 @@ func copyFileContents(src, dst string, perm os.FileMode) (err error) {
 func writeNewFile(dst string, data []byte, perm os.FileMode) (err error) {
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
 	if err != nil {
-		return err
+		return notCreatedError{err}
 	}
 	defer func() {
 		if cerr := out.Close(); err == nil {
@@ -142,6 +142,35 @@ func writeNewFile(dst string, data []byte, perm os.FileMode) (err error) {
 		}
 	}()
 	_, err = out.Write(data)
+	return err
+}
+
+// notCreatedError marks a copy that failed BEFORE it created anything at
+// its destination — the O_EXCL create found the name taken, or the
+// source could not be opened. Nothing at dst is the copy's, so the
+// failed-paste cleanup must not remove it (N-121e: it used to RemoveAll
+// the destination whatever the failure, which deletes someone else's
+// file when the name was taken between planning and copying).
+type notCreatedError struct{ error }
+
+// Unwrap exposes the underlying error to errors.Is / errors.As.
+func (e notCreatedError) Unwrap() error { return e.error }
+
+// copyCreatedDest reports whether a failed copyTreeWith had created its
+// destination (so a partial copy is there to remove).
+func copyCreatedDest(err error) bool {
+	var nc notCreatedError
+	return !errors.As(err, &nc)
+}
+
+// ownedErr strips the notCreated mark from a CHILD's error: the child's
+// parent directory was created by this copy, so from the parent's caller
+// the destination IS ours and the partial tree must go.
+func ownedErr(err error) error {
+	var nc notCreatedError
+	if errors.As(err, &nc) {
+		return nc.error
+	}
 	return err
 }
 
@@ -170,12 +199,12 @@ func copyTree(src, dst string) error {
 func copyTreeWith(src, dst string, overlay map[string][]byte) (buffered int, err error) {
 	info, err := os.Lstat(src)
 	if err != nil {
-		return 0, err
+		return 0, notCreatedError{err}
 	}
 	switch {
 	case info.IsDir():
 		if err := os.Mkdir(dst, info.Mode().Perm()); err != nil {
-			return 0, err
+			return 0, notCreatedError{err}
 		}
 		entries, err := os.ReadDir(src)
 		if err != nil {
@@ -185,16 +214,19 @@ func copyTreeWith(src, dst string, overlay map[string][]byte) (buffered int, err
 			n, err := copyTreeWith(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()), overlay)
 			buffered += n
 			if err != nil {
-				return buffered, err
+				return buffered, ownedErr(err)
 			}
 		}
 		return buffered, nil
 	case info.Mode()&os.ModeSymlink != 0:
 		target, err := os.Readlink(src)
 		if err != nil {
-			return 0, err
+			return 0, notCreatedError{err}
 		}
-		return 0, os.Symlink(target, dst)
+		if err := os.Symlink(target, dst); err != nil {
+			return 0, notCreatedError{err}
+		}
+		return 0, nil
 	case info.Mode().IsRegular():
 		if data, ok := overlay[filepath.Clean(src)]; ok {
 			return 1, writeNewFile(dst, data, info.Mode().Perm())
@@ -543,11 +575,15 @@ func (a *App) runCopyPlan(plan []copyPlanItem, overlay map[string][]byte, into s
 			if cerr != nil {
 				// Remove the partial copy so a failed paste can't leave
 				// a half-populated folder wearing the destination's
-				// name. Safe: uniquePastePath guaranteed dest didn't
-				// exist before. Earlier items STAY — they are complete
-				// copies, and unwinding them would destroy files the
-				// user can see appearing in the tree.
-				_ = os.RemoveAll(p.dest)
+				// name — but ONLY what this copy created: uniquePastePath
+				// found the name free at planning time, and something
+				// may have taken it since (copyCreatedDest, N-121e).
+				// Earlier items STAY — they are complete copies, and
+				// unwinding them would destroy files the user can see
+				// appearing in the tree.
+				if copyCreatedDest(cerr) {
+					_ = os.RemoveAll(p.dest)
+				}
 				err = cerr
 				break
 			}

@@ -843,3 +843,59 @@ func TestBufferedNote(t *testing.T) {
 		}
 	}
 }
+
+// TestRunCopyPlan_FailureKeepsADestinationItDidNotCreate is N-121(e):
+// the destination name was free when the paste was planned, but
+// something took it before the copy ran. The O_EXCL create fails, and the
+// cleanup must leave the other writer's file alone — it used to
+// RemoveAll the destination whatever the failure.
+func TestRunCopyPlan_FailureKeepsADestinationItDidNotCreate(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.txt")
+	dest := filepath.Join(dir, "taken.txt")
+	if err := os.WriteFile(src, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("theirs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, dir)
+	a.runCopyPlan([]copyPlanItem{{src: src, dest: dest}}, nil, "")
+	if ev := waitForPasteEvent(t, a); ev.err == nil {
+		t.Fatal("copying onto a taken name succeeded")
+	}
+	if got, err := os.ReadFile(dest); err != nil || string(got) != "theirs" {
+		t.Errorf("the other writer's file = %q, %v; want it untouched", got, err)
+	}
+}
+
+// TestRunCopyPlan_FailureRemovesItsOwnPartialFolder is the other side:
+// a folder copy that fails PART WAY (an unreadable file inside) leaves no
+// half-populated folder under the destination's name.
+func TestRunCopyPlan_FailureRemovesItsOwnPartialFolder(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a 0000 file, so the copy cannot be made to fail this way")
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "srcdir")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(src, "z.txt")
+	if err := os.WriteFile(locked, []byte("z"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o644) })
+	dest := filepath.Join(dir, "copy")
+	a := newTestApp(t, dir)
+	a.runCopyPlan([]copyPlanItem{{src: src, dest: dest}}, nil, "")
+	if ev := waitForPasteEvent(t, a); ev.err == nil {
+		t.Fatal("a copy with an unreadable file succeeded")
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Errorf("the partial folder survived (%v)", err)
+	}
+}

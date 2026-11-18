@@ -92,13 +92,19 @@ plus the LSP work done in the seeding session itself
   `editor.DecodeBytes`), so its write-back is UTF-8 text that must be
   re-encoded with `editor.EncodeAs` (a refusal → ask, or write UTF-8
   and say so) — today it silently converts the file to UTF-8.
-  (e) A failed paste runs `os.RemoveAll(p.dest)` even when the failure
-  was "dest already exists" (copypaste.go:522-531). Fix: remove only
-  what ced's own Mkdir / O_EXCL create made.
-  (f) The dirty-close dialog captures a tab INDEX (app.go:5013-5023);
+  ~~(e) A failed paste runs `os.RemoveAll(p.dest)` even when the failure
+  was "dest already exists" (copypaste.go:522-531).~~ DONE 2026-11-17
+  (`2026-1117-SESS5`): a failure creating the destination ITSELF is a
+  `notCreatedError` (stripped once a parent the copy made is above it),
+  and only a destination the copy created is removed
+  (`TestRunCopyPlan_FailureKeepsADestinationItDidNotCreate`, fails
+  before; `…_FailureRemovesItsOwnPartialFolder`).
+  ~~(f) The dirty-close dialog captures a tab INDEX (app.go:5013-5023);
   a tab closing to its left under the dialog (the cats Move-to-split
-  answer) makes Discard close a different tab. Fix: capture
-  `*editor.Tab` and resolve with `tabIndexOf`, as tabcontext.go does.
+  answer) makes Discard close a different tab.~~ DONE 2026-11-17: the
+  callbacks resolve the `*editor.Tab` with `tabIndexOf`
+  (`TestRequestCloseTab_DiscardClosesTheSameTabAfterAShift`, fails
+  before).
   (g) Deleting a folder closes open dirty tabs inside it without a
   prompt, and the confirm does not mention them (fileops.go:218-230;
   read, not run).

@@ -783,6 +783,44 @@ func TestRequestCloseTab_DirtyOpensModal(t *testing.T) {
 	}
 }
 
+// TestRequestCloseTab_DiscardClosesTheSameTabAfterAShift is N-121(f): a
+// tab to the LEFT of the dirty one closes while the dialog is up (the
+// cats Move-to-split answer does this), so the dirty tab's index shifts.
+// Discard must still close the dirty tab — with a captured index it
+// closed its right-hand neighbour instead.
+func TestRequestCloseTab_DiscardClosesTheSameTabAfterAShift(t *testing.T) {
+	dir := t.TempDir()
+	var paths []string
+	for _, n := range []string{"a.txt", "dirty.txt", "c.txt"} {
+		p := filepath.Join(dir, n)
+		if err := os.WriteFile(p, []byte(n), 0644); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		paths = append(paths, p)
+	}
+	a := newTestApp(t, dir)
+	for _, p := range paths {
+		a.openFile(p)
+	}
+	a.tabs[1].Dirty = true
+
+	a.requestCloseTab(1)
+	m := dirtyOf(a)
+	if m == nil {
+		t.Fatal("dirty close modal should be open")
+	}
+	a.closeTab(0) // a.txt goes while the dialog is up
+	m.discard(a)
+
+	if len(a.tabs) != 1 || filepath.Base(a.tabs[0].Path) != "c.txt" {
+		var left []string
+		for _, tb := range a.tabs {
+			left = append(left, filepath.Base(tb.Path))
+		}
+		t.Fatalf("tabs left = %v, want [c.txt] (the dirty tab closed, its neighbour kept)", left)
+	}
+}
+
 // TestRequestCloseTab_CleanClosesImmediately closes a clean tab in one shot.
 func TestRequestCloseTab_CleanClosesImmediately(t *testing.T) {
 	dir := t.TempDir()

@@ -5171,17 +5171,26 @@ func (a *App) requestCloseTab(idx int) {
 	if name == "" || name == "." {
 		name = "untitled"
 	}
+	// The callbacks resolve the TAB, not the index they were opened with
+	// (N-121f): something can close a tab to this one's left while the
+	// dialog is up — the cats Move-to-split answer does — and a captured
+	// index would then make Discard close a DIFFERENT tab. A tab that is
+	// gone by then has nothing left to save or close.
 	a.openDirtyClose(
 		"Unsaved changes",
 		name+" has unsaved changes.",
 		func(app *App) {
 			// Save → close. saveTabAt flashes its own error, in which
 			// case we keep the tab around so the user can react.
-			if app.saveTabAt(idx) {
-				app.closeTab(idx)
+			if i := app.tabIndexOf(tab); i >= 0 && app.saveTabAt(i) {
+				app.closeTab(app.tabIndexOf(tab))
 			}
 		},
-		func(app *App) { app.closeTab(idx) },
+		func(app *App) {
+			if i := app.tabIndexOf(tab); i >= 0 {
+				app.closeTab(i)
+			}
+		},
 	)
 }
 

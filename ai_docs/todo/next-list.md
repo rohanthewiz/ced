@@ -751,7 +751,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-11-17, `2026-1117-SESS6` —
+- closed 2026-11-17, `2026-1117-2352-n132-n148-n134-n135-find-fastpath-help-menu` —
   **N-134** + **N-135** a ≡ Tools ▸ Help section (helpmenu.go):
   "Keyboard reference" (the `Esc ?` which-key band, closing the menu
   first), "Messages…" (every flash is logged — the last 50, a back-to-back
@@ -770,7 +770,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `TestOpenConfigLabel_HoldsTheLoadProblem`,
   `TestMenuKeyboardReference_OpensTheBand`.
 
-- closed 2026-11-17, `2026-1117-SESS6` —
+- closed 2026-11-17, `2026-1117-2352-n132-n148-n134-n135-find-fastpath-help-menu` —
   **N-148** `waitForFinderReady`'s deadline is now 10s
   (`finderReadyTimeout`), documented as a hang guard rather than a
   budget: the loop returns as soon as the index is ready, so only a
@@ -778,7 +778,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `git ls-files`) ever waits longer than 2s. No t.Skip. The finder tests
   pass under -race.
 
-- closed 2026-11-17, `2026-1117-SESS6` —
+- closed 2026-11-17, `2026-1117-2352-n132-n148-n134-n135-find-fastpath-help-menu` —
   **N-132** find has an ASCII fast path: `Matcher.Line` scans an ASCII
   line for an ASCII needle on BYTES (offsets are rune columns; A–Z folded
   per byte; same non-overlap and word-boundary rules as `matchCols`), so

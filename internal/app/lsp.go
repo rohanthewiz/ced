@@ -124,7 +124,7 @@ type lspState struct {
 	// pulls continue the count, so an answer for the old open can't
 	// match a new ask.
 	pullSeq map[string]int
-	timers    map[string]*time.Timer
+	timers  map[string]*time.Timer
 
 	// refSeq generations the references lookups (lspreferences.go). That
 	// verb is the only one whose answer OPENS A PANEL, so unlike

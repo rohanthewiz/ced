@@ -155,6 +155,33 @@ in file, `g` git panel, `L` git log, `` ` `` terminal, `w` close tab,
 the AI namespace, and the next key is read as an AI verb. The menu's
 shortcut column is the source of truth.
 
+## Through tmux (Linux container)
+
+The dev Mac has no tmux, but ced lives in tmux, and some behaviour is
+tmux's: Esc folded into Alt, mouse forwarding, OSC 52 passthrough.
+`tmux/` runs the same driver INSIDE tmux in a Linux container (docker,
+image `ced-tmux-harness` = golang:1.26.1 + tmux 3.5a, built on first use):
+
+```sh
+.claude/skills/run-ced/tmux/run.sh <project-dir> <out-dir> -text -cols 100 -rows 30 \
+  -script '2500@;300@{esc}p;500@main.go;700@{enter};800@SNAP;400@{esc}q;800@'
+.claude/skills/run-ced/tmux/checks.sh <scratch-dir>   # the scripted checks, PASS/FAIL
+```
+
+- ced and the driver are cross-compiled on the host (`GOOS=linux`) and
+  mounted in; the container never needs Go modules. `HARNESS_BIN` reuses
+  a build.
+- The driver's PTY is a tmux CLIENT (`ced-in-tmux`); `-snapcmd 'tmux -L
+  ced capture-pane -p'` makes `-text` print TMUX'S view of the pane, and
+  `-raw <out>/raw.bin` keeps every byte tmux wrote to its terminal — grep
+  it for `]52;` to see whether a copy got out.
+- `tmux.conf` = the recommended settings (mouse, focus-events,
+  set-clipboard on, allow-passthrough on); `TMUX_CONF=tmux-default.conf`
+  = an untouched tmux (only mouse on, no status line).
+- No status line, so a script's SGR mouse coordinates are the same cells
+  inside and outside tmux. Allow ~2.5s before the first key (container +
+  tmux start).
+
 ## Showing the user
 
 Terminal text in a reply loses every color, which is exactly what a

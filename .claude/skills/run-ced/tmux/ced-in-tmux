@@ -1,0 +1,7 @@
+#!/bin/sh
+# The capture driver runs "$bin ." on its PTY; this makes that PTY a tmux
+# CLIENT whose one pane runs ced, so every byte in both directions goes
+# through tmux exactly as it does for a user in a tmux session.
+# TMUX_CONF selects the config (tmux.conf or tmux-default.conf).
+conf="${TMUX_CONF:-/harness/tmux.conf}"
+exec tmux -L ced -f "$conf" new-session -s ced "/hbin/ced $*"

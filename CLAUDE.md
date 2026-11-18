@@ -1655,7 +1655,9 @@ make run / build / build-linux / install / tidy / clean
 make test          # go test ./... -race
 ```
 No dev server — it's a TUI; use the `run-ced` skill to drive the real
-binary.
+binary. Behaviour that is TMUX's (Esc→Alt folding, mouse forwarding,
+OSC 52 passthrough) is checked inside tmux in docker:
+`.claude/skills/run-ced/tmux/checks.sh <scratch>` (N-139).
 
 ## Releases (don't break this)
 

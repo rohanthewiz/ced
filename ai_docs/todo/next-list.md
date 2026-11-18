@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-151**
+**Next ID: N-152**
 
 ## Open
 
@@ -262,6 +262,20 @@ plus the LSP work done in the seeding session itself
   (~0.4MB per KB) on each settle. Decide a new cap (2–4MB?) after
   measuring a settle re-lex's allocation there.
 
+- **N-151** · raised `2026-1117-SESS4` · value medium
+  **Copy does nothing inside an untouched tmux.** clipboard.go sends OSC
+  52 ONLY wrapped in tmux's DCS passthrough when `$TMUX` is set, and tmux
+  3.3+ ships `allow-passthrough off`, so the sequence is dropped. Measured
+  with the N-139 harness (tmux 3.5a, only `mouse on` set): Copy reference
+  put nothing on the outer terminal; with `allow-passthrough on` it put
+  `/work/main.go:1` there. A plain OSC 52 from the pane is ALSO ignored
+  under the default `set-clipboard external`, but `printf … | tmux
+  load-buffer -w -` DOES reach the outer terminal (tmux emits the OSC 52
+  itself). The README says copy "works from inside a tmux session".
+  Fix: inside tmux, hand the text to `tmux load-buffer -w -` (tmux ≥ 3.2;
+  through a host-exec seam, off the loop) and keep the passthrough form
+  as the fallback; re-run `checks.sh` (both N-086 rows should pass).
+
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -409,6 +423,10 @@ and `raised`.
   DESATURATED red and the clean-tabs confirm opens on Yes: also check the
   dusty red still reads as "close the editor" (not as muted chrome) in a
   couple of themes, and that click + Enter quits.
+  2026-11-17 (`2026-1117-SESS4`, N-139 harness, tmux 3.5a): a scripted click on
+  ✕ through tmux's mouse forwarding opens "Close the editor?", and a click
+  on ≡ opens the menu — PASS. Still by hand: the dusty red by eye, cats,
+  click + Enter quitting.
 
 - **N-071** · raised `2026-1016-2111-recent-folders-local-and-workspace-routing` · value medium
   Recent folders' Tier-1 routing (catsworkspace.go) has only run against
@@ -431,6 +449,10 @@ and `raised`.
   flicker, a click or key dismisses it without being eaten, and the
   unpinned Find-all list's ⟳ ◇ ◨ labels draw ABOVE the list. Where no
   motion is reported, nothing appears and nothing breaks.
+  2026-11-17 (`2026-1117-SESS4`, N-139 harness, plain tmux 3.5a `mouse on`): a
+  motion report resting on ≡ shows "Action menu" after the dwell — PASS.
+  Still by hand: the other buttons, flicker across `Actions ▾`, the
+  Find-all list's labels, cats and macOS Terminal + tmux.
 
 - **N-078** · raised `2026-1020-1857-push-receipt-pr-link` · value medium
   The push receipt rework (ced 0.6.5) has run only in unit tests on a
@@ -443,6 +465,9 @@ and `raised`.
   last push output" brings it back. Also try ≡ Git "New branch…" (bad
   name → git's refusal modal; dirty tree → the "changes come along"
   hint).
+  2026-11-17 (`2026-1117-SESS4`, N-139 harness): OSC 52 through tmux reaches the
+  outer terminal ONLY with `allow-passthrough on`; an untouched tmux 3.5a
+  drops it — raised as N-151 ([ Copy link ] uses the same path).
 
 - **N-079** · raised `2026-1021-2049-editor-context-rows-change-view` · value low
   The change view (hunkview.go) ran in the real binary through run-ced
@@ -463,6 +488,10 @@ and `raised`.
   missing closing )" in red, `$1` replace (bar Replace / All and the
   list's "Replace in N") expands, and the `[regex: off]` chip on the
   find prompts flips with a click and alt+r.
+  2026-11-17 (`2026-1117-SESS4`, N-139 harness, tmux 3.5a): "Esc r" sent as one
+  write reaches the find bar as Alt+r through tmux's Esc folding and
+  toggles regex (not Redo): `(fmt` then shows "regex: missing closing )"
+  — PASS. Still by hand: the `.*` click, `$1` replace, the prompt chip.
 
 - **N-084** · raised `2026-1022-1932-diff-views-split-ws-steppers` · value low
   The diff views (diffview.go) ran in the real binary through run-ced
@@ -488,6 +517,11 @@ and `raised`.
   (run-ced PTY: a scripted drag across the git panel diff flashed "3
   lines copied"): check those three too, and that the git panel's hunk
   chips and the compare `[↺]` still answer a real click.
+  2026-11-17 (`2026-1117-SESS4`, N-139 harness, tmux 3.5a): a copy's OSC 52 (Copy
+  reference, `/work/main.go:1`) reaches the terminal OUTSIDE tmux with the
+  recommended config (allow-passthrough on) — PASS — and NOTHING reaches
+  it under an untouched tmux, whose default drops the passthrough DCS
+  ced sends: FAIL, raised as N-151. Drag-select itself not scripted.
 
 - **N-088** · raised `2026-1025-2017-cmd-up-down-l-g-chords` · value medium
   ⌘↑ / ⌘↓ (top / end of file, ⌘⇧ selecting; the markdown preview's top /
@@ -513,6 +547,10 @@ and `raised`.
   goes back to the starting tab; the seam's grip is visible against the
   theme, the drag tracks from where it was seized, and a pinned panel's
   seam drags too.
+  2026-11-17 (`2026-1117-SESS4`, N-139 harness, tmux 3.5a): press / drag / release
+  through tmux's mouse forwarding moves a seam (the tree's, 30 → ≥40) —
+  PASS for drag forwarding; the Find-all seam and the click-then-Esc
+  behaviour are still by hand.
 
 - **N-094** · raised `2026-1026-1159-find-all-live-prompt` · value medium
   Live Find-all prompt (findalllive.go): seen in run-ced's PTY (the hit
@@ -533,6 +571,10 @@ and `raised`.
   (an editor click while it is up makes Esc stay). Hand check in tmux
   and cats: the click lands on the line under the pointer in both docks,
   and the bar's Esc / click-then-Esc feel right in daily use.
+  2026-11-17 (`2026-1117-SESS4`, N-139 harness, tmux 3.5a): Alt+x through tmux's
+  Esc folding empties the Find-all prompt's field and does not arm the
+  Esc-x plugin leader — PASS. Still by hand: a real click on the ×,
+  feel on a large file, cats.
 
 - **N-096** · raised `2026-1027-1312-ai-draft-queued-claim` · value medium
   **First-use ✦ drafts with a real agent.** Fixed in `2026-1027-1312-ai-draft-queued-claim`: the commit
@@ -701,18 +743,6 @@ and `raised`.
   For scale, the suite takes 2m40s locally WITHOUT -race, 153s of it
   in `internal/app`.
 
-- **N-139** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **The hand checks have no harness.** About 25 Validate items above
-  wait on a real tmux, and there is no tmux on the dev machine;
-  run-ced's capture driver speaks to a bare PTY. Run that driver
-  THROUGH tmux in a Linux container (mouse on, `focus-events on`), so
-  the checks that are about tmux itself become scripted: Esc folded
-  into Alt (the alt+r / alt+x chords of N-082, N-084, N-094), OSC 52
-  passthrough (N-086, N-078), and clicks on chrome buttons (N-070,
-  N-073, N-090). What only an eye can judge (colours, glyph width)
-  and the cats / Terminal.app checks stay by hand. Each item this
-  covers gets its result recorded in place.
-
 - **N-141** · raised `2026-1110-1909-n127-git-status-off-loop` · value low
   **Focus pacing in a real cats and tmux.** The tick slows to 30s after
   CSI O and refreshes on CSI I (tickpace.go). Seen only through run-ced's
@@ -826,6 +856,20 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS4` —
+  **N-139** the hand checks that are about tmux itself are scripted:
+  `.claude/skills/run-ced/tmux/` runs the run-ced driver INSIDE tmux 3.5a
+  in a Linux container (image `ced-tmux-harness`, golang:1.26.1 + apt
+  tmux; ced and the driver cross-compiled and mounted). The driver gained
+  a Linux PTY (`pty_linux.go`), `-raw` (every byte the terminal got) and
+  `-snapcmd` (`tmux capture-pane -p` at SNAP). `checks.sh` runs nine
+  checks: 8 PASS — find bar Alt+r and prompt Alt+x through Esc folding
+  (N-082, N-094), clicks on ✕ and ≡ (N-070), the ≡ hover label (N-073),
+  a seam drag (N-090), OSC 52 out of tmux with allow-passthrough on
+  (N-086 / N-078); 1 FAIL — an untouched tmux drops ced's copy, raised as
+  N-151. Results recorded on each item; colours, glyph width, cats and
+  Terminal.app stay by hand. Documented in the run-ced SKILL.md.
 
 - closed 2026-11-17, `2026-1117-2313-n129-n128-syntax-classes-async-lex` —
   **N-128** structural edits no longer re-lex on the main loop. (a)

@@ -42,7 +42,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/mattn/go-runewidth"
 	"golang.org/x/sys/unix"
@@ -67,6 +66,8 @@ func main() {
 		cols     = flag.Int("cols", 150, "terminal columns")
 		rows     = flag.Int("rows", 44, "terminal rows")
 		helpScr  = flag.Bool("help-script", false, "explain the script syntax and exit")
+		raw      = flag.String("raw", "", "write EVERY byte the terminal received (the whole run) to this path")
+		snapCmd  = flag.String("snapcmd", "", "at SNAP, run this shell command and print its stdout as the -text output (e.g. tmux capture-pane -p)")
 	)
 	flag.Parse()
 
@@ -110,16 +111,28 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	data, err := run(*bin, *dir, home, *cols, *rows, steps)
+	data, all, snapOut, err := run(*bin, *dir, home, *cols, *rows, steps, *snapCmd)
 	if err != nil {
 		fail(err)
+	}
+	if *raw != "" {
+		if err := os.WriteFile(*raw, all, 0o644); err != nil {
+			fail(err)
+		}
 	}
 
 	sc := newScreen(*cols, *rows)
 	sc.feed(data)
 
 	if *text {
-		fmt.Print(sc.text())
+		// Under a multiplexer the screen is the multiplexer's to say:
+		// -snapcmd asks it (tmux capture-pane) instead of replaying the
+		// redraw stream through this emulator.
+		if *snapCmd != "" {
+			fmt.Print(snapOut)
+		} else {
+			fmt.Print(sc.text())
+		}
 	}
 	if *out != "" {
 		payload := sc.htmlFrag()
@@ -282,46 +295,15 @@ func expandKeys(s string) (string, error) {
 
 // --- PTY -------------------------------------------------------------
 
-// openPTY allocates a master/slave pty pair and sizes it. Darwin needs
-// the TIOCPTY* ioctl dance rather than grantpt(3); a zero-sized pty
-// makes tcell draw nothing, which is why the winsize is set on both ends.
-func openPTY(cols, rows int) (*os.File, *os.File, error) {
-	m, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
-	if err != nil {
-		return nil, nil, err
-	}
-	fd := int(m.Fd())
-	if err := unix.IoctlSetInt(fd, unix.TIOCPTYGRANT, 0); err != nil {
-		return nil, nil, fmt.Errorf("grant: %w", err)
-	}
-	if err := unix.IoctlSetInt(fd, unix.TIOCPTYUNLK, 0); err != nil {
-		return nil, nil, fmt.Errorf("unlock: %w", err)
-	}
-	var buf [128]byte
-	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd),
-		uintptr(unix.TIOCPTYGNAME), uintptr(unsafe.Pointer(&buf[0]))); errno != 0 {
-		return nil, nil, fmt.Errorf("ptsname: %v", errno)
-	}
-	end := bytes.IndexByte(buf[:], 0)
-	if end < 0 {
-		end = len(buf)
-	}
-	s, err := os.OpenFile(string(buf[:end]), os.O_RDWR|unix.O_NOCTTY, 0)
-	if err != nil {
-		return nil, nil, err
-	}
-	ws := &unix.Winsize{Row: uint16(rows), Col: uint16(cols)}
-	_ = unix.IoctlSetWinsize(fd, unix.TIOCSWINSZ, ws)
-	_ = unix.IoctlSetWinsize(int(s.Fd()), unix.TIOCSWINSZ, ws)
-	return m, s, nil
-}
-
 // run launches ced and plays the script, returning the bytes it painted
 // (up to the SNAP step, when there is one).
-func run(bin, dir, cfgHome string, cols, rows int, steps []step) ([]byte, error) {
+//
+// all is every byte received over the whole run (for -raw), and snapOut
+// what snapCmd printed at the SNAP step.
+func run(bin, dir, cfgHome string, cols, rows int, steps []step, snapCmd string) (snapData, all []byte, snapOut string, err error) {
 	m, s, err := openPTY(cols, rows)
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
 	defer m.Close()
 
@@ -337,7 +319,7 @@ func run(bin, dir, cfgHome string, cols, rows int, steps []step) ([]byte, error)
 	)
 	cmd.SysProcAttr = &unix.SysProcAttr{Setsid: true, Setctty: true}
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
 	s.Close() // the child owns it now; keeping it open would hide the EOF
 
@@ -365,6 +347,12 @@ func run(bin, dir, cfgHome string, cols, rows int, steps []step) ([]byte, error)
 			mu.Lock()
 			snap = append([]byte(nil), buf.Bytes()...)
 			mu.Unlock()
+			if snapCmd != "" {
+				c := exec.Command("sh", "-c", snapCmd)
+				c.Env = append(os.Environ(), "XDG_CONFIG_HOME="+cfgHome)
+				o, _ := c.Output()
+				snapOut = string(o)
+			}
 		}
 		if st.keys != "" {
 			if _, err := m.WriteString(st.keys); err != nil {
@@ -384,10 +372,11 @@ func run(bin, dir, cfgHome string, cols, rows int, steps []step) ([]byte, error)
 
 	mu.Lock()
 	defer mu.Unlock()
+	all = append([]byte(nil), buf.Bytes()...)
 	if snap != nil {
-		return snap, nil
+		return snap, all, snapOut, nil
 	}
-	return append([]byte(nil), buf.Bytes()...), nil
+	return all, all, snapOut, nil
 }
 
 // --- virtual screen --------------------------------------------------

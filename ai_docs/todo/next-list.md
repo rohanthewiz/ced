@@ -848,7 +848,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-11-17, `2026-1117-SESS1` —
+- closed 2026-11-17, `2026-1117-2243-n147-n122-n123-n126-detached-children-lsp-writer` —
   **N-123** a wedged language server no longer freezes the editor
   (internal/lsp/writer.go): every send queues a framed message for ONE
   writer goroutine per client, so Call / Notify never block on the pipe.
@@ -865,7 +865,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `TestEnqueue_OverflowFailsTheConnection`,
   `TestClose_DrainsQueuedFramesThenExit` (all -race, ×5).
 
-- closed 2026-11-17, `2026-1117-SESS1` —
+- closed 2026-11-17, `2026-1117-2243-n147-n122-n123-n126-detached-children-lsp-writer` —
   **N-126** all six bounds. (a) formatters 45s per command, detached;
   (b) plugins detached (group SIGTERM + WaitDelay) and gated per
   (command, file), a mid-run event parking one relaunch (both landed
@@ -880,7 +880,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   lines and over-long ones (`readCappedLine`). (f) was already done by
   N-118 (`EventError` → the signal path).
 
-- closed 2026-11-17, `2026-1117-SESS1` —
+- closed 2026-11-17, `2026-1117-2243-n147-n122-n123-n126-detached-children-lsp-writer` —
   **N-122** every git child goes through ONE constructor:
   `internal/child` (`Detach`: Setsid, a ctx cancel that SIGTERMs the
   whole process GROUP, `WaitDelay`; `GitEnv`: `GIT_TERMINAL_PROMPT=0`,
@@ -899,7 +899,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `TestDetach_DeadlineEndsTheWholeGroup` (`sleep 30 & sleep 30` returns
   at the deadline). N-126 (a) and (b) landed alongside.
 
-- closed 2026-11-17, `2026-1117-SESS1` —
+- closed 2026-11-17, `2026-1117-2243-n147-n122-n123-n126-detached-children-lsp-writer` —
   **N-147** `gofmt -w` on the eight drifted test files (trailing blank
   lines, two alignment runs). One doc comment was reworded first:
   gofmt's doc-comment pass turns `E''` into a typographic `E”`, so

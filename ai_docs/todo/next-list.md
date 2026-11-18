@@ -118,7 +118,7 @@ plus the LSP work done in the seeding session itself
   intra-line edit; (b) run the settle re-lex on a goroutine keyed by
   `EditRev`, posting the grid back, so the loop never blocks on
   Chroma. With N-129, `MaxHighlightBytes` (512KB) can be revisited.
-  2026-11-17 (`2026-1117-SESS2`): measured by `BenchmarkEnterThenRender`
+  2026-11-17 (`2026-1117-2301-n124-n101-n138-post-result-tsc-lsp-fuzz`): measured by `BenchmarkEnterThenRender`
   (editor/tab_test.go; 113 ms and 58MB per Enter+frame on a synthetic
   256KB file, vs `BenchmarkTypeThenRender` 0.9 ms) and
   `BenchmarkHighlight`. The fix owes a loose budget test (N-138).
@@ -639,7 +639,7 @@ and `raised`.
   a `tsc --version` check so 5.x/6.x `tsc` (no `--lsp`) is never spawned
   as a server. When it lands, the README's TypeScript note changes with
   it.
-  2026-11-17 (`2026-1117-SESS2`): **(2) is built; only the real-TS7
+  2026-11-17 (`2026-1117-2301-n124-n101-n138-post-result-tsc-lsp-fuzz`): **(2) is built; only the real-TS7
   check remains.** lspservers.go: the TypeScript entry tries
   `tsc --lsp --stdio` first, gated by a `tsc --version` ≥ 7 probe run on
   the start goroutine (`lspPickCandidate`; a 5/6 tsc falls through to
@@ -834,7 +834,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-11-17, `2026-1117-SESS2` —
+- closed 2026-11-17, `2026-1117-2301-n124-n101-n138-post-result-tsc-lsp-fuzz` —
   **N-138** benchmarks and fuzz targets now exist. (a) Benchmarks, all on
   synthetic input (256KB Go, 200×60): `BenchmarkHighlight`,
   `BenchmarkTabRender_CleanFrame`, `BenchmarkTabRender_OneLongLine`,
@@ -856,7 +856,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   mixed files. `newTestApp` takes `testing.TB` so benchmarks can build
   an App.
 
-- closed 2026-11-17, `2026-1117-SESS2` —
+- closed 2026-11-17, `2026-1117-2301-n124-n101-n138-post-result-tsc-lsp-fuzz` —
   **N-124** completion events are delivered reliably: `postResult`
   (postresult.go) posts, and while tcell's queue is full retries with a
   1ms→20ms backoff until taken or 1 minute passes (a closed / switched-away

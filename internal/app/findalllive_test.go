@@ -196,7 +196,7 @@ func TestFindAllLive_HitUnderThePromptIsCentered(t *testing.T) {
 
 	// Restart from a line whose next hit sits on a row the box covers.
 	m.handleKey(a, keyEv(tcell.KeyEsc, 0))
-	covered := py - ey // first editor row under the box
+	covered := py - ey                // first editor row under the box
 	line := covered + (4-covered%4)%4 // first hit line (every 4th) at or below it
 	if line >= py-ey+ph {
 		t.Fatalf("fixture: window %dx%d puts no hit under the prompt", a.width, a.height)
@@ -364,4 +364,3 @@ func TestFindAllLive_ReplacedRestoresViewAndFindState(t *testing.T) {
 		t.Errorf("find state: %q ×%d, want int ×%d", tab.FindQuery, len(tab.FindMatches), prior)
 	}
 }
-

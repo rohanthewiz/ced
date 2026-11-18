@@ -422,4 +422,3 @@ func TestREADME_TabMenuTableListsEveryRow(t *testing.T) {
 	}
 	pinRightClickREADME(t, "Tab", labels)
 }
-

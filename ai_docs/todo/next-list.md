@@ -432,13 +432,6 @@ plus the LSP work done in the seeding session itself
   userdict + data, each editor keeping its own tokenizer (prose vs
   ident.go/structtag.go). Raise if the two drift on a real bug.
 
-- **N-147** · raised `2026-1116-1247-struct-tag-spellcheck` · value low
-  **gofmt drift in eight pre-existing test files.** `gofmt -l` lists
-  internal/app/{contextmenu,diffselect,findalllive,metakeys,modals,
-  openfile,tabcontext}_test.go and internal/format/sqlvalidate_test.go
-  (contextmenu_test.go's is a trailing blank line already in HEAD
-  25717e1). Formatting only, the N-034 treatment.
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -927,6 +920,13 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS1` —
+  **N-147** `gofmt -w` on the eight drifted test files (trailing blank
+  lines, two alignment runs). One doc comment was reworded first:
+  gofmt's doc-comment pass turns `E''` into a typographic `E”`, so
+  sqlvalidate_test.go now says `E'\n' escapes`. `gofmt -l .` is empty;
+  the touched tests pass.
 
 - closed 2026-11-13, `2026-1113-1801-n118-crash-safety` —
   **N-118** crash safety, all four parts (crashsafety.go, internal/crash).

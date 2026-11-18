@@ -28,8 +28,8 @@ func openPathFixture(t *testing.T) (a *App, root, other string) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	seed := map[string]string{
-		filepath.Join(root, "sub", "a.go"):  "package sub\n",
-		filepath.Join(other, "notes.txt"): "outside\n",
+		filepath.Join(root, "sub", "a.go"): "package sub\n",
+		filepath.Join(other, "notes.txt"):  "outside\n",
 	}
 	for p, body := range seed {
 		if err := os.WriteFile(p, []byte(body), 0644); err != nil {

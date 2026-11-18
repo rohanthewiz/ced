@@ -14,7 +14,7 @@ import (
 )
 
 // TestValidateSQL_AcceptsValidPostgres pins the quiet case on the shapes
-// that make PostgreSQL lexing interesting: doubled quotes, E'' escapes,
+// that make PostgreSQL lexing interesting: doubled quotes, E'\n' escapes,
 // a $$ body full of quotes and parens, nested comments, a psql variable
 // and meta-command, and a COPY data block whose rows are not SQL at all.
 func TestValidateSQL_AcceptsValidPostgres(t *testing.T) {

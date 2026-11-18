@@ -1525,4 +1525,3 @@ func treeMenuLabels(t *testing.T) []string {
 func TestREADME_TreeMenuTableListsEveryRow(t *testing.T) {
 	pinRightClickREADME(t, "File tree", treeMenuLabels(t))
 }
-

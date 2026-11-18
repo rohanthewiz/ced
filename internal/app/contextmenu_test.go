@@ -1228,4 +1228,3 @@ func editorMenuLabels(t *testing.T) []string {
 func TestREADME_EditorMenuTableListsEveryRow(t *testing.T) {
 	pinRightClickREADME(t, "Editor", editorMenuLabels(t))
 }
-

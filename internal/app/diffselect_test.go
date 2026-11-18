@@ -324,4 +324,3 @@ func TestCherryPickDiffSel_DragCopiesInsideTheDialog(t *testing.T) {
 		t.Error("a press on the list left the preview highlight up")
 	}
 }
-

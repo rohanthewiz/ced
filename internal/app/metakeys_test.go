@@ -810,4 +810,3 @@ func TestREADME_CommandKeyTableListsEveryChord(t *testing.T) {
 		}
 	}
 }
-

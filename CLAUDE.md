@@ -728,7 +728,17 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   at 64MB; ndjson skips non-JSON-RPC lines and over-long ones. Servers
   mid-handshake sit in `a.lsp.handshakes` so `lspShutdown` closes them.
 - Several servers, ONE PER FILE by extension (lspservers.go; extensions
-  disjoint). Installing the binary is the opt-in. Every verb gets its
+  disjoint). Installing the binary is the opt-in.
+  Alternates may carry `lspCommandTraits` (keyed by argv[0], N-101):
+  `probe` (forks, so run on the START GOROUTINE via `lspPickCandidate`;
+  PATH lookups stay sync so "nothing installed" is still a silent sync
+  death), `pullDiagnostics` (ask `textDocument/diagnostic` after every
+  sync, newest `pullSeq` wins, the server's own publishes ignored),
+  `settings` (pushed by didChangeConfiguration after initialized; also
+  answers workspace/configuration). TypeScript: `tsc --lsp --stdio` only
+  when `tsc --version` ≥ 7, else typescript-language-server. The client
+  never DECLARES `textDocument.diagnostic` (a dual-model server could
+  stop pushing). Every verb gets its
   connection from `a.lspClientFor(path)`. Degradation is per server;
   `lspState.dead` is the global switch.
 - ≡ Code "Restart language server" is the retry; `lspServer.gen` drops

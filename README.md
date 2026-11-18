@@ -1874,27 +1874,30 @@ language's features and nothing else; the editor never nags about it.
 | Language | Server (first one found wins) | Files |
 | -------- | ----------------------------- | ----- |
 | Go | `gopls` | `.go` |
-| TypeScript / JavaScript | `typescript-language-server` | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` `.mts` `.cts` |
+| TypeScript / JavaScript | `tsc --lsp` (TypeScript 7+), `typescript-language-server` | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` `.mts` `.cts` |
 | Rust | `rust-analyzer` | `.rs` |
 | Python | `pyright-langserver`, `basedpyright-langserver`, `pylsp` | `.py` `.pyi` |
 | C / C++ | `clangd` | `.c` `.h` `.cc` `.cpp` `.cxx` `.hpp` `.hh` `.hxx` |
 | Zig | `zls` | `.zig` |
 
-**TypeScript: install it with TypeScript 6.**
+**TypeScript: either TypeScript 7 on its own, or the classic server
+with TypeScript 6.**
 
 ```sh
-npm install -g typescript-language-server typescript@6
+npm install -g typescript                                  # 7: tsc --lsp
+npm install -g typescript-language-server typescript@6     # or this
 ```
 
-`typescript-language-server` drives the `tsserver.js` that ships with
-TypeScript 6 and earlier. TypeScript 7, which is what a plain
-`npm install typescript` gives you now, is a native rewrite with no
-`tsserver.js`, and the server refuses to start on it. A TypeScript 6
-installed beside the server is enough: if a project's own
-`node_modules` holds TypeScript 7, the server falls back to that copy.
-TypeScript 7 brings its own language server (`tsc --lsp`), which ced
-doesn't use yet. If the server won't start, ≡ **Code ▸ Restart language
-server** shows its reason.
+TypeScript 7 (what a plain `npm install typescript` gives you now) is a
+native rewrite that brings its own language server, `tsc --lsp`. ced
+tries it first: when the `tsc` on your `PATH` reports version 7 or
+later, that is the server, with diagnostics and inlay hints. A `tsc`
+from TypeScript 5 or 6 has no `--lsp`, so ced skips it and uses
+`typescript-language-server`, which drives the `tsserver.js` that only
+TypeScript 6 and earlier ship. A TypeScript 6 installed beside that
+server is enough: if a project's own `node_modules` holds TypeScript 7,
+the server falls back to that copy. If neither starts, ≡ **Code ▸
+Restart language server** shows the reason.
 
 Everything below lives in the ≡ **Code** group, and so in the command
 palette:

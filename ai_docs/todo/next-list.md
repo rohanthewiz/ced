@@ -50,78 +50,6 @@ plus the LSP work done in the seeding session itself
   bar chord (Alt+Enter, say) that closes and keeps the caret, plus its
   hint word.
 
-- **N-101** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value medium
-  **typescript-language-server is dead over TypeScript 7, silently.**
-  npm's `typescript@latest` is 7.0.2 (the native port), which ships no
-  `lib/tsserver.js`. typescript-language-server 5.3.0 then reports
-  TypeScript "1.0.0, bundled" and answers an inlay request with no hints
-  plus an error `window/showMessage` ("Inlay Hints request failed.
-  Requires TypeScript 4.4+."). In the real binary, a `.ts` file with a
-  type error got NO diagnostic, no hints and no flash, where the same
-  file over TS 5.9 shows both. That's silent degradation working, but it
-  means a fresh `npm i -g typescript-language-server typescript` install
-  gives no TypeScript features. Decide: register TypeScript 7's own
-  language server, document "needs TS ≤ 5.x", or both.
-  2026-11-04 (`2026-1104-1442-n102-n093-return-hints-modal-replaced`):
-  the command line is found. TypeScript 7.0.2's own `tsc` IS a language
-  server: `tsc --lsp --stdio` (npm `typescript@7`, a native
-  `typescript-darwin-arm64` binary behind `bin/tsc`) answers
-  `initialize`, and validates strictly — it refuses a request missing
-  `processId` / `rootUri` / `capabilities`, which ced sends. TS 5.x's
-  `tsc` has no `--lsp`, so registering it means telling the two apart
-  (a `tsc --version` probe, or trying it after typescript-language-server
-  reports TypeScript "1.0.0, bundled") before spawning. Its inlay-hint
-  and diagnostics support is unchecked.
-  2026-11-06 (`2026-1106-1114-n110-n101-alt-chords-tsc-lsp`): **checked,
-  and the two routes are now concrete.** Probed with ced's own handshake
-  (a scratchpad script: ced's capability set, null
-  `workspace/configuration` answers, full-text didChange).
-  `tsc --lsp --stdio` (typescript-go 7.0.2) initializes and answers
-  hover in markdown, but **its diagnostics are PULL-only**: one EMPTY
-  publishDiagnostics on open, nothing after an edit or a save, while
-  `textDocument/diagnostic` answers (3 items, 5 after an edit). ced is
-  push-only, so it would show no diagnostics. **Its inlay hints ignore
-  `initializationOptions.preferences`** (0 hints). VS Code-shaped
-  settings (`typescript.inlayHints.parameterNames.enabled: "literals"`,
-  `variableTypes.enabled`, `functionLikeReturnTypes.enabled`) give 6,
-  pushed by `workspace/didChangeConfiguration` (which it registers for)
-  or answered to `workspace/configuration` (sections js/ts, typescript,
-  javascript, editor). Separately, **typescript-language-server 6.0.3**
-  (2026-11-02) now refuses TS7 at `initialize` with its own reason ("The
-  TypeScript of the workspace (TypeScript 7.0.2 …) provides no
-  tsserver.js. No other valid TypeScript installation was found"). Since
-  N-112 the ≡ Code "Restart language server" row shows that reason in
-  full; opening a file still fails silently. **tsls 6.0.3
-  over `typescript@6` (6.0.3) works with ced unchanged**: in the probe
-  and in the real binary (run-ced) it gave `✗ Type 'string' is not
-  assignable…`, the gutter ●, and `» name: "hi" · times: 3` notes. The
-  choice is now:
-  (1) document `npm i -g typescript-language-server typescript@6` in
-  the README's server table (cheap, works today; `typescript@latest` is
-  7);
-  (2) register `tsc --lsp --stdio`, which needs three pieces: pull
-  diagnostics (ask `textDocument/diagnostic` after each sync and feed
-  the same diags path), a per-server settings push after `initialized`,
-  and a `tsc --version` check (5.x/6.x `tsc` has no `--lsp`), ordered
-  ahead of tsls for TS7;
-  (3) both, with (1) now and (2) later.
-  2026-11-06 (`2026-1106-1133-n101-typescript6-docs`): **the user chose
-  (3).** (1) landed: the README's server table is followed by "install
-  it with TypeScript 6" (`npm install -g typescript-language-server
-  typescript@6`), why (no `tsserver.js` in 7), and the fallback. tsls
-  6.0.3 uses a TypeScript 6 installed BESIDE it when the project's own
-  `node_modules` holds 7 ("Using Typescript version (bundled) 6.0.3"),
-  seen in the probe and in the real binary (✗ diagnostic, `» name: "hi"
-  · times: 3`). lspservers.go's TypeScript entry carries the same note.
-  **What remains is (2), decided and ready to build:** register `tsc
-  --lsp --stdio` ahead of tsls for TypeScript 7, with pull diagnostics
-  (`textDocument/diagnostic` after each sync, into the same diags path),
-  a per-server VS Code-shaped settings push after `initialized`
-  (`typescript.inlayHints.*` via `workspace/didChangeConfiguration`), and
-  a `tsc --version` check so 5.x/6.x `tsc` (no `--lsp`) is never spawned
-  as a server. When it lands, the README's TypeScript note changes with
-  it.
-
 - **N-103** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value low
   **pyright is tried before basedpyright, so a machine with both gets no
   Python hints.** `lspservers.go` orders the Python commands "most
@@ -628,6 +556,96 @@ and `raised`.
   relaunch) and Chrome too. Chrome's own File > Open is the doubtful
   one; if Chrome keeps the chord, give ⌘O the help row's `†` and note it
   in metakeys.go / 20-keys.js as ⌘E is.
+
+- **N-101** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value medium
+  **typescript-language-server is dead over TypeScript 7, silently.**
+  npm's `typescript@latest` is 7.0.2 (the native port), which ships no
+  `lib/tsserver.js`. typescript-language-server 5.3.0 then reports
+  TypeScript "1.0.0, bundled" and answers an inlay request with no hints
+  plus an error `window/showMessage` ("Inlay Hints request failed.
+  Requires TypeScript 4.4+."). In the real binary, a `.ts` file with a
+  type error got NO diagnostic, no hints and no flash, where the same
+  file over TS 5.9 shows both. That's silent degradation working, but it
+  means a fresh `npm i -g typescript-language-server typescript` install
+  gives no TypeScript features. Decide: register TypeScript 7's own
+  language server, document "needs TS ≤ 5.x", or both.
+  2026-11-04 (`2026-1104-1442-n102-n093-return-hints-modal-replaced`):
+  the command line is found. TypeScript 7.0.2's own `tsc` IS a language
+  server: `tsc --lsp --stdio` (npm `typescript@7`, a native
+  `typescript-darwin-arm64` binary behind `bin/tsc`) answers
+  `initialize`, and validates strictly — it refuses a request missing
+  `processId` / `rootUri` / `capabilities`, which ced sends. TS 5.x's
+  `tsc` has no `--lsp`, so registering it means telling the two apart
+  (a `tsc --version` probe, or trying it after typescript-language-server
+  reports TypeScript "1.0.0, bundled") before spawning. Its inlay-hint
+  and diagnostics support is unchecked.
+  2026-11-06 (`2026-1106-1114-n110-n101-alt-chords-tsc-lsp`): **checked,
+  and the two routes are now concrete.** Probed with ced's own handshake
+  (a scratchpad script: ced's capability set, null
+  `workspace/configuration` answers, full-text didChange).
+  `tsc --lsp --stdio` (typescript-go 7.0.2) initializes and answers
+  hover in markdown, but **its diagnostics are PULL-only**: one EMPTY
+  publishDiagnostics on open, nothing after an edit or a save, while
+  `textDocument/diagnostic` answers (3 items, 5 after an edit). ced is
+  push-only, so it would show no diagnostics. **Its inlay hints ignore
+  `initializationOptions.preferences`** (0 hints). VS Code-shaped
+  settings (`typescript.inlayHints.parameterNames.enabled: "literals"`,
+  `variableTypes.enabled`, `functionLikeReturnTypes.enabled`) give 6,
+  pushed by `workspace/didChangeConfiguration` (which it registers for)
+  or answered to `workspace/configuration` (sections js/ts, typescript,
+  javascript, editor). Separately, **typescript-language-server 6.0.3**
+  (2026-11-02) now refuses TS7 at `initialize` with its own reason ("The
+  TypeScript of the workspace (TypeScript 7.0.2 …) provides no
+  tsserver.js. No other valid TypeScript installation was found"). Since
+  N-112 the ≡ Code "Restart language server" row shows that reason in
+  full; opening a file still fails silently. **tsls 6.0.3
+  over `typescript@6` (6.0.3) works with ced unchanged**: in the probe
+  and in the real binary (run-ced) it gave `✗ Type 'string' is not
+  assignable…`, the gutter ●, and `» name: "hi" · times: 3` notes. The
+  choice is now:
+  (1) document `npm i -g typescript-language-server typescript@6` in
+  the README's server table (cheap, works today; `typescript@latest` is
+  7);
+  (2) register `tsc --lsp --stdio`, which needs three pieces: pull
+  diagnostics (ask `textDocument/diagnostic` after each sync and feed
+  the same diags path), a per-server settings push after `initialized`,
+  and a `tsc --version` check (5.x/6.x `tsc` has no `--lsp`), ordered
+  ahead of tsls for TS7;
+  (3) both, with (1) now and (2) later.
+  2026-11-06 (`2026-1106-1133-n101-typescript6-docs`): **the user chose
+  (3).** (1) landed: the README's server table is followed by "install
+  it with TypeScript 6" (`npm install -g typescript-language-server
+  typescript@6`), why (no `tsserver.js` in 7), and the fallback. tsls
+  6.0.3 uses a TypeScript 6 installed BESIDE it when the project's own
+  `node_modules` holds 7 ("Using Typescript version (bundled) 6.0.3"),
+  seen in the probe and in the real binary (✗ diagnostic, `» name: "hi"
+  · times: 3`). lspservers.go's TypeScript entry carries the same note.
+  **What remains is (2), decided and ready to build:** register `tsc
+  --lsp --stdio` ahead of tsls for TypeScript 7, with pull diagnostics
+  (`textDocument/diagnostic` after each sync, into the same diags path),
+  a per-server VS Code-shaped settings push after `initialized`
+  (`typescript.inlayHints.*` via `workspace/didChangeConfiguration`), and
+  a `tsc --version` check so 5.x/6.x `tsc` (no `--lsp`) is never spawned
+  as a server. When it lands, the README's TypeScript note changes with
+  it.
+  2026-11-17 (`2026-1117-SESS2`): **(2) is built; only the real-TS7
+  check remains.** lspservers.go: the TypeScript entry tries
+  `tsc --lsp --stdio` first, gated by a `tsc --version` ≥ 7 probe run on
+  the start goroutine (`lspPickCandidate`; a 5/6 tsc falls through to
+  typescript-language-server). Per-command `lspCommandTraits`:
+  `pullDiagnostics` (ask `textDocument/diagnostic` after every didOpen /
+  didChange, newest `pullSeq` wins, the server's own publishes ignored)
+  and `settings` (`typescript` / `javascript` / `js/ts` inlay-hint blocks,
+  pushed by didChangeConfiguration after `initialized`, and the answer
+  to workspace/configuration). README's TypeScript note rewritten. Seen
+  end to end in the real binary against a STUB `tsc` shaped like the
+  probe (version 7, one empty publish on open, pull answers): settings
+  pushed, didOpen, pull, the ✗ diagnostic drawn, inlay hints asked.
+  **Check by hand** (installing packages was refused in this session):
+  `npm i -g typescript` (7.x), open a `.ts` file with a type error —
+  the ✗ note appears, follows edits (fix it → it goes), and `»` inlay
+  notes show; and with only a TypeScript 5/6 `tsc` plus
+  typescript-language-server on PATH, the latter still runs.
 
 - **N-104** · raised `2026-1028-1801-tab-bar-red-tint` · value low
   **The red-tinted tab strip by eye.** `tabbar-bg` (sidebar-bg + 8% err)

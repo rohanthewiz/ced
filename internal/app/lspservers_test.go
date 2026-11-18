@@ -11,6 +11,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rohanthewiz/ced/internal/lsp"
@@ -162,5 +163,83 @@ func TestLSPClientFor_RoutesByPath(t *testing.T) {
 	a.lsp.dead = true
 	if a.lspClientFor(goPath) != nil {
 		t.Error("the integration-wide switch outranks every server")
+	}
+}
+
+// TestTSCVersionHasLSP pins the probe's reading of `tsc --version`:
+// TypeScript 7 and later have --lsp, 5 and 6 don't, and anything
+// unreadable falls through to typescript-language-server.
+func TestTSCVersionHasLSP(t *testing.T) {
+	for out, want := range map[string]bool{
+		"Version 7.0.2\n": true,
+		"Version 8.1.0":   true,
+		"Version 6.0.3\n": false,
+		"Version 5.9.3":   false,
+		"":                false,
+		"tsc: not found":  false,
+	} {
+		if got := tscVersionHasLSP(out); got != want {
+			t.Errorf("%q → %v, want %v", out, got, want)
+		}
+	}
+}
+
+// TestLSPPickCandidate_TSCOnlyWhenItIsTypeScript7 pins the TypeScript
+// entry's order (N-101): tsc --lsp first, with its pull + settings
+// traits, but only when the probe says TypeScript 7; a TypeScript 5/6
+// tsc falls through to typescript-language-server, and with nothing
+// else installed the error names what was refused.
+func TestLSPPickCandidate_TSCOnlyWhenItIsTypeScript7(t *testing.T) {
+	prevLook, prevProbe := lspLookPath, lspTSCProbe
+	t.Cleanup(func() { lspLookPath, lspTSCProbe = prevLook, prevProbe })
+	lspLookPath = func(bin string) (string, error) { return "/bin/" + bin, nil }
+	def := lspServerByID("typescript-language-server")
+
+	lspTSCProbe = func(string) bool { return true }
+	c, err := lspPickCandidate(def.installedCommands())
+	if err != nil || c.bin != "tsc" || !c.traits.pullDiagnostics || c.traits.settings == nil {
+		t.Fatalf("TS7: got %+v, %v; want tsc with pull + settings", c, err)
+	}
+	if strings.Join(c.args, " ") != "--lsp --stdio" {
+		t.Errorf("tsc args = %v", c.args)
+	}
+
+	lspTSCProbe = func(string) bool { return false }
+	c, err = lspPickCandidate(def.installedCommands())
+	if err != nil || c.bin != "typescript-language-server" || c.traits.pullDiagnostics {
+		t.Fatalf("TS5: got %+v, %v; want typescript-language-server, push", c, err)
+	}
+
+	lspLookPath = func(bin string) (string, error) {
+		if bin == "tsc" {
+			return "/bin/tsc", nil
+		}
+		return "", errors.New("not found")
+	}
+	if _, err := lspPickCandidate(def.installedCommands()); err == nil || !strings.Contains(err.Error(), "tsc") {
+		t.Errorf("only a TS5 tsc: err = %v, want one naming tsc", err)
+	}
+}
+
+// TestLSPConfigAnswer_AnswersBySection pins the workspace/configuration
+// answer for a server with settings: whole sections, dotted paths into
+// them, a slashed section found as written, and {} for anything else.
+func TestLSPConfigAnswer_AnswersBySection(t *testing.T) {
+	params := []byte(`{"items":[{"section":"typescript"},{"section":"typescript.inlayHints.variableTypes"},{"section":"js/ts"},{"section":"editor"}]}`)
+	got := lspConfigAnswer(tsLSPSettings, params)
+	if len(got) != 4 {
+		t.Fatalf("got %d answers, want 4", len(got))
+	}
+	if got[0].(map[string]any)["inlayHints"] == nil {
+		t.Errorf("typescript section = %v", got[0])
+	}
+	if v := got[1].(map[string]any)["enabled"]; v != true {
+		t.Errorf("dotted section = %v", got[1])
+	}
+	if got[2].(map[string]any)["inlayHints"] == nil {
+		t.Errorf("js/ts section = %v", got[2])
+	}
+	if len(got[3].(map[string]any)) != 0 {
+		t.Errorf("unknown section = %v, want {}", got[3])
 	}
 }

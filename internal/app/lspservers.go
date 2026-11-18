@@ -47,9 +47,16 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/rohanthewiz/ced/internal/child"
 )
 
 // lspServerDef describes one language server: what to run and which
@@ -71,6 +78,39 @@ type lspServerDef struct {
 	// Today that is inlay hints (lspinlay.go): enabling them here costs
 	// nothing until a hint is requested.
 	initOptions map[string]any
+	// traits holds what one alternate command does differently from the
+	// others, keyed by its argv[0] (N-101). Most commands need nothing:
+	// absent means trust PATH, push diagnostics, no settings.
+	traits map[string]lspCommandTraits
+}
+
+// lspCommandTraits are the per-COMMAND facts that alternates for the same
+// files can differ by. `tsc --lsp` and typescript-language-server both
+// answer for .ts, but tsc 5/6 is not a server at all, and TS7's tsc
+// pulls its diagnostics and reads its settings the VS Code way.
+type lspCommandTraits struct {
+	// probe asks, OFF the main loop, whether the binary found on PATH
+	// really is this server; false falls through to the next command.
+	// nil trusts PATH.
+	probe func(binPath string) bool
+	// pullDiagnostics: the server doesn't publish after edits; ced asks
+	// textDocument/diagnostic after every sync, and ignores what it
+	// pushes (tsc's one empty publish on open would otherwise race the
+	// first pull's answer and erase it).
+	pullDiagnostics bool
+	// settings is pushed with workspace/didChangeConfiguration right
+	// after the handshake, and is the answer to workspace/configuration
+	// should the server ask (per item, by section).
+	settings map[string]any
+}
+
+// lspCandidate is one installed alternate: its resolved binary, args and
+// traits. lspEnsureStarted collects them on the main loop (a PATH lookup
+// each) and the start goroutine probes them in order.
+type lspCandidate struct {
+	bin    string
+	args   []string
+	traits lspCommandTraits
 }
 
 // lspServers is the registry. Order is irrelevant to lookup (extensions
@@ -131,9 +171,25 @@ var lspServers = []lspServerDef{
 		exts:     []string{".rs"},
 	},
 	{
-		id:       "typescript-language-server",
-		commands: [][]string{{"typescript-language-server", "--stdio"}},
-		exts:     []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"},
+		id: "typescript-language-server",
+		// TypeScript 7's own server first (N-101), then the classic one.
+		// A tsc on PATH is very often TypeScript 5 or 6, which has no
+		// --lsp: the probe asks `tsc --version` and falls through to
+		// typescript-language-server for anything below 7.
+		commands: [][]string{
+			{"tsc", "--lsp", "--stdio"},
+			{"typescript-language-server", "--stdio"},
+		},
+		exts: []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"},
+		traits: map[string]lspCommandTraits{
+			"tsc": {
+				// Read through the package var at call time so tests can
+				// stub the fork.
+				probe:           func(bin string) bool { return lspTSCProbe(bin) },
+				pullDiagnostics: true,
+				settings:        tsLSPSettings,
+			},
+		},
 		// Off by default here too. "literals" names only arguments whose
 		// text says nothing (`true`, `3`), not every identifier.
 		// initializationOptions.preferences IS the route that works: with
@@ -145,11 +201,11 @@ var lspServers = []lspServerDef{
 		// TypeScript 7 (the native rewrite, npm's `latest` since 7.0)
 		// doesn't ship. 6.0.3 refuses a TS7-only setup at initialize, and
 		// falls back to a TypeScript 6 installed beside it when only the
-		// project's node_modules holds 7. The README says to install
-		// `typescript@6` (N-101). TS7's own server, `tsc --lsp --stdio`,
-		// is not registered: its diagnostics are pull-only and its inlay
-		// hints read VS Code-shaped settings, neither of which ced speaks
-		// yet (N-101 lists the three pieces).
+		// project's node_modules holds 7. TS7's own server, `tsc --lsp
+		// --stdio`, is tried FIRST (see commands): its diagnostics are
+		// pull-only and its inlay hints ignore these preferences — it reads
+		// tsLSPSettings instead (lspCommandTraits). The preferences below
+		// are harmless to it.
 		initOptions: map[string]any{"preferences": map[string]any{
 			"includeInlayParameterNameHints":          "literals",
 			"includeInlayVariableTypeHints":           true,
@@ -161,6 +217,51 @@ var lspServers = []lspServerDef{
 		commands: [][]string{{"zls"}},
 		exts:     []string{".zig"},
 	},
+}
+
+// tsInlayHints is the VS Code-shaped inlay-hint block TypeScript 7's
+// server reads, the same choices as typescript-language-server's
+// preferences above: literal arguments named, variable and return types
+// shown. Probed on 2026-11-06: 0 hints without it, 6 with it.
+var tsInlayHints = map[string]any{
+	"inlayHints": map[string]any{
+		"parameterNames":          map[string]any{"enabled": "literals"},
+		"variableTypes":           map[string]any{"enabled": true},
+		"functionLikeReturnTypes": map[string]any{"enabled": true},
+	},
+}
+
+// tsLSPSettings is the whole settings object for `tsc --lsp`, by section.
+// "js/ts" is the unified section newer VS Code builds read; the server
+// was seen asking for it beside the two classic ones.
+var tsLSPSettings = map[string]any{
+	"typescript": tsInlayHints,
+	"javascript": tsInlayHints,
+	"js/ts":      tsInlayHints,
+}
+
+// lspTSCProbe reports whether the tsc at bin is TypeScript 7 or later,
+// the first with a language server. A package var so tests can pin it.
+// Detached and bounded like every child (internal/child): a broken node
+// install must not hang the start goroutine.
+var lspTSCProbe = func(bin string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "--version")
+	child.Detach(cmd)
+	out, err := cmd.Output()
+	return err == nil && tscVersionHasLSP(string(out))
+}
+
+// tscVersionHasLSP reads `tsc --version` output ("Version 7.0.2") and
+// reports whether its major version is 7 or more. Anything unreadable is
+// no: falling through to typescript-language-server is the safe answer.
+func tscVersionHasLSP(out string) bool {
+	v := strings.TrimSpace(out)
+	v = strings.TrimPrefix(v, "Version ")
+	major, _, _ := strings.Cut(v, ".")
+	n, err := strconv.Atoi(major)
+	return err == nil && n >= 7
 }
 
 // lspGoServerID names the Go entry. Tests install their fake connection
@@ -179,6 +280,10 @@ type lspServer struct {
 	client   lspConn
 	starting bool // async spawn+initialize in flight
 	dead     bool // unavailable: no binary, crashed, or failed to start
+	// pull marks a server that doesn't publish diagnostics, so ced asks
+	// after every sync (lspCommandTraits.pullDiagnostics, N-101). Set
+	// from the ready event: it belongs to the COMMAND that started.
+	pull bool
 	// noInlay is set once the server answers an inlay-hint request with
 	// an error — it does not speak the method, so stop asking.
 	noInlay bool
@@ -242,6 +347,85 @@ func (d *lspServerDef) resolveCommand() (bin string, args []string, ok bool) {
 		}
 	}
 	return "", nil, false
+}
+
+// installedCommands lists the alternates whose binary is on PATH, in
+// order, with their traits — what the start goroutine probes. Empty
+// means nothing is installed: the server is dead in silence, as with
+// resolveCommand (which answers the same question for one command).
+func (d *lspServerDef) installedCommands() []lspCandidate {
+	var out []lspCandidate
+	for _, argv := range d.commands {
+		if len(argv) == 0 {
+			continue
+		}
+		if _, err := lspLookPath(argv[0]); err == nil {
+			out = append(out, lspCandidate{bin: argv[0], args: argv[1:], traits: d.traits[argv[0]]})
+		}
+	}
+	return out
+}
+
+// lspPickCandidate returns the first candidate whose probe passes (or
+// that has none). Runs on the start goroutine: a probe forks. The error
+// names what was found and refused, for the Restart row's explanation.
+func lspPickCandidate(cands []lspCandidate) (lspCandidate, error) {
+	var refused []string
+	for _, c := range cands {
+		if c.traits.probe != nil {
+			path, err := lspLookPath(c.bin)
+			if err != nil || !c.traits.probe(path) {
+				refused = append(refused, c.bin)
+				continue
+			}
+		}
+		return c, nil
+	}
+	return lspCandidate{}, fmt.Errorf("no usable server: %s is installed but is not one (tsc needs TypeScript 7 for --lsp)", strings.Join(refused, ", "))
+}
+
+// lspConfigAnswer answers a workspace/configuration request from
+// settings: one entry per requested item, the item's dotted section
+// looked up in settings, `{}` where it names nothing (the
+// auto-responder's answer, which switches nothing off).
+func lspConfigAnswer(settings map[string]any, params json.RawMessage) []any {
+	var p struct {
+		Items []struct {
+			Section string `json:"section"`
+		} `json:"items"`
+	}
+	_ = json.Unmarshal(params, &p)
+	out := make([]any, len(p.Items))
+	for i, it := range p.Items {
+		out[i] = map[string]any{}
+		if v := lspSettingsSection(settings, it.Section); v != nil {
+			out[i] = v
+		}
+	}
+	return out
+}
+
+// lspSettingsSection walks a dotted section ("typescript.inlayHints")
+// down settings. A whole top-level key wins first, so a section that
+// itself contains a dot or slash ("js/ts") is found as written.
+func lspSettingsSection(settings map[string]any, section string) any {
+	if section == "" {
+		return settings
+	}
+	if v, ok := settings[section]; ok {
+		return v
+	}
+	var cur any = settings
+	for _, part := range strings.Split(section, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return nil
+		}
+		if cur, ok = m[part]; !ok {
+			return nil
+		}
+	}
+	return cur
 }
 
 // lspHandles reports whether some language server covers this file.

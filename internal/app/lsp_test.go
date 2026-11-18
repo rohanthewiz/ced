@@ -43,6 +43,9 @@ type fakeLSPConn struct {
 	inlay      []lsp.InlayHint
 	inlayErr   error
 	inlayCalls int
+	// pullDiags answers PullDiagnostics; pullCalls counts the asks.
+	pullDiags []lsp.Diagnostic
+	pullCalls int
 	// hlUses answers DocumentHighlights.
 	hlUses []lsp.DocumentHighlight
 	hlErr  error
@@ -264,6 +267,13 @@ func (f *fakeLSPConn) ResolveCompletion(raw json.RawMessage) (*lsp.CompletionIte
 func (f *fakeLSPConn) CompletionTriggerChars() []string { return f.compTriggers }
 
 func (f *fakeLSPConn) CompletionResolves() bool { return f.compResolves }
+
+func (f *fakeLSPConn) PullDiagnostics(string) ([]lsp.Diagnostic, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pullCalls++
+	return f.pullDiags, nil
+}
 
 func (f *fakeLSPConn) Close() {
 	f.mu.Lock()
@@ -1227,5 +1237,78 @@ func TestHandleLSPReady_ReleasesTheHandshake(t *testing.T) {
 	a.lsp.handshakes.mu.Unlock()
 	if still {
 		t.Error("the ready event left the client in the handshake set")
+	}
+}
+
+// TestPullServer_AsksAfterOpenAndEveryChange pins N-101's pull model: a
+// server marked pull (tsc --lsp) is asked for diagnostics right after
+// didOpen and after each didChange, and the answer lands in the same
+// diagnostics map a publish fills.
+func TestPullServer_AsksAfterOpenAndEveryChange(t *testing.T) {
+	a, fake, goPath := newLSPTestApp(t)
+	a.lsp.server(lspGoServerID).pull = true
+	fake.pullDiags = []lsp.Diagnostic{{Message: "type error", Severity: lsp.SeverityError}}
+
+	a.openFile(goPath)
+	pumpAppEvents(t, a, func() bool { return len(a.lsp.diags[goPath]) == 1 })
+
+	tab := a.activeTabPtr()
+	tab.InsertString("x")
+	a.lspFlushChange(tab)
+	pumpAppEvents(t, a, func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return fake.pullCalls == 2
+	})
+}
+
+// TestPushServer_IsNeverAsked: the default (push) server gets no pulls —
+// the request would only double its work.
+func TestPushServer_IsNeverAsked(t *testing.T) {
+	a, fake, goPath := newLSPTestApp(t)
+	a.openFile(goPath)
+	time.Sleep(20 * time.Millisecond)
+	if fake.pullCalls != 0 {
+		t.Errorf("a push server was pulled %d times", fake.pullCalls)
+	}
+}
+
+// TestHandleLSPDiags_KeepsOnlyTheNewestPull: an answer to an older ask
+// (a slow reply for text since changed) or for a closed document is
+// dropped; the newest ask's answer lands.
+func TestHandleLSPDiags_KeepsOnlyTheNewestPull(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	path := filepath.Join(a.rootDir, "a.ts")
+	a.lsp.versions = map[string]int{path: 3}
+	a.lsp.pullSeq = map[string]int{path: 2}
+	stale := []lsp.Diagnostic{{Message: "old"}}
+	a.handleLSPDiags(&lspDiagsEvent{path: path, diags: stale, pullSeq: 1})
+	if len(a.lsp.diags[path]) != 0 {
+		t.Fatal("an older pull's answer was kept")
+	}
+	a.handleLSPDiags(&lspDiagsEvent{path: path, diags: []lsp.Diagnostic{{Message: "new"}}, pullSeq: 2})
+	if d := a.lsp.diags[path]; len(d) != 1 || d[0].Message != "new" {
+		t.Fatalf("diags = %+v, want the newest pull's", d)
+	}
+	delete(a.lsp.versions, path) // closed
+	a.handleLSPDiags(&lspDiagsEvent{path: path, diags: nil, pullSeq: 2})
+	if len(a.lsp.diags[path]) != 1 {
+		t.Error("a pull for a closed document changed its diagnostics")
+	}
+}
+
+// TestHandleLSPReady_RecordsPull: the ready event's pull flag (the
+// chosen command's trait) lands on the slot, and a drop clears it.
+func TestHandleLSPReady_RecordsPull(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.lsp.dead = false // newTestApp switches the integration off
+	sv := a.lsp.server(lspGoServerID)
+	a.handleLSPReady(&lspReadyEvent{server: lspGoServerID, client: &fakeLSPConn{}, gen: sv.gen, pull: true})
+	if !sv.pull {
+		t.Fatal("pull not recorded")
+	}
+	a.lspDropServer(lspGoServerID)
+	if sv.pull {
+		t.Error("pull survived the slot being dropped")
 	}
 }

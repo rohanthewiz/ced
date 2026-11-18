@@ -89,6 +89,9 @@ type lspConn interface {
 	ResolveCompletion(raw json.RawMessage) (*lsp.CompletionItem, error)
 	CompletionTriggerChars() []string
 	CompletionResolves() bool
+	// PullDiagnostics asks for a document's diagnostics — only for a
+	// server that doesn't publish them (lspServer.pull, N-101).
+	PullDiagnostics(path string) ([]lsp.Diagnostic, error)
 	Close()
 }
 
@@ -116,6 +119,11 @@ type lspState struct {
 
 	versions  map[string]int // per-path didChange version counter
 	syncedRev map[string]int // per-path Tab.EditRev last sent to the server
+	// pullSeq numbers the diagnostic pulls per path (a pull server only,
+	// lspPullDiagsIfPulling). Never reset on close: a reopened file's
+	// pulls continue the count, so an answer for the old open can't
+	// match a new ask.
+	pullSeq map[string]int
 	timers    map[string]*time.Timer
 
 	// refSeq generations the references lookups (lspreferences.go). That
@@ -165,6 +173,8 @@ type lspReadyEvent struct {
 	// restart bumps it, so a handshake the user has since superseded is
 	// closed instead of installed.
 	gen int
+	// pull is the chosen command's lspCommandTraits.pullDiagnostics.
+	pull bool
 }
 
 // When satisfies the tcell.Event interface.
@@ -196,6 +206,10 @@ type lspDiagsEvent struct {
 	when  time.Time
 	path  string
 	diags []lsp.Diagnostic
+	// pullSeq stamps a PULLED answer (lspPullDiags) with the request it
+	// answers; only the newest request's answer for a path is kept. Zero
+	// for a pushed publish, which the server orders itself.
+	pullSeq int
 }
 
 // When satisfies the tcell.Event interface.
@@ -271,8 +285,12 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 	if sv.client != nil || sv.starting || sv.dead {
 		return
 	}
-	bin, args, ok := def.resolveCommand()
-	if !ok {
+	// Every installed alternate, in order: the PATH lookups are cheap
+	// and stay here, so "nothing installed" is still a synchronous,
+	// silent death. Which of them is really usable (tsc's version probe
+	// forks) is decided on the goroutine.
+	cands := def.installedCommands()
+	if len(cands) == 0 {
 		sv.dead = true
 		return
 	}
@@ -288,12 +306,21 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 	initOptions := def.initOptions
 	go func() {
 		defer crash.Recover()
+		cand, err := lspPickCandidate(cands)
+		if err != nil {
+			postResult(scr, &lspExitEvent{when: time.Now(), server: id, gen: gen, err: err})
+			return
+		}
+		bin, args, traits := cand.bin, cand.args, cand.traits
 		// onNotify runs on the client's read loop — post, don't touch.
 		onNotify := func(method string, params json.RawMessage) {
 			if lspPostServerNote(scr, id, method, params) {
 				return
 			}
-			if method != "textDocument/publishDiagnostics" {
+			// A pull server's own publishes are ignored: tsc sends one
+			// EMPTY publish on open, which would race the first pull's
+			// answer and could erase it (lspCommandTraits).
+			if method != "textDocument/publishDiagnostics" || traits.pullDiagnostics {
 				return
 			}
 			var p lsp.PublishDiagnosticsParams
@@ -315,6 +342,11 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 		// while type-checking. Each invocation gets its own goroutine, so
 		// blocking here for a user's confirmation is safe.
 		onRequest := func(method string, params json.RawMessage) (any, error) {
+			// A server with settings (tsc --lsp) gets them here too,
+			// should it ask rather than wait for the push below.
+			if method == "workspace/configuration" && traits.settings != nil {
+				return lspConfigAnswer(traits.settings, params), nil
+			}
 			if method != "workspace/applyEdit" {
 				return nil, lsp.ErrRequestUnhandled
 			}
@@ -347,7 +379,12 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 			postResult(scr, &lspExitEvent{when: time.Now(), server: id, gen: gen, err: err})
 			return
 		}
-		postResult(scr, &lspReadyEvent{when: time.Now(), server: id, client: client, gen: gen})
+		// Settings go right after `initialized`, before any document:
+		// tsc reads its inlay-hint switches only from here.
+		if traits.settings != nil {
+			_ = client.DidChangeConfiguration(traits.settings)
+		}
+		postResult(scr, &lspReadyEvent{when: time.Now(), server: id, client: client, gen: gen, pull: traits.pullDiagnostics})
 	}()
 }
 
@@ -370,6 +407,7 @@ func (a *App) handleLSPReady(e *lspReadyEvent) {
 	}
 	// The restart it was asked for worked; nothing is left to explain.
 	sv.explainStart = false
+	sv.pull = e.pull
 	a.lspInstall(e.server, e.client)
 	// lspOpenDoc skips every tab this server doesn't speak for (their own
 	// server isn't the one that just came up, or is already announced).
@@ -418,6 +456,7 @@ func (a *App) lspDropServer(id string) {
 	}
 	sv.client = nil
 	sv.starting = false
+	sv.pull = false
 	sv.progress, sv.progressLast = nil, ""
 	// Everything per-document is keyed by path, and a path names its
 	// server, so "this server's share" is a filter rather than a second
@@ -547,6 +586,7 @@ func (a *App) lspOpenDoc(t *editor.Tab) {
 	a.lsp.versions[t.Path] = 1
 	a.lsp.syncedRev[t.Path] = t.EditRev
 	_ = client.DidOpen(t.Path, languageIDFor(t.Path), 1, t.Buffer.String())
+	a.lspPullDiagsIfPulling(t.Path, client)
 }
 
 // lspCloseDoc announces a closed tab and drops its bookkeeping. The
@@ -656,6 +696,34 @@ func (a *App) lspFlushChange(t *editor.Tab) {
 	a.lsp.versions[t.Path]++
 	a.lsp.syncedRev[t.Path] = t.EditRev
 	_ = client.DidChange(t.Path, a.lsp.versions[t.Path], t.Buffer.String())
+	a.lspPullDiagsIfPulling(t.Path, client)
+}
+
+// lspPullDiagsIfPulling asks for path's diagnostics when its server is a
+// PULL server (lspServer.pull, N-101) — right after every sync, which is
+// exactly when a push server would have published. Each ask takes a
+// sequence number and only the newest one's answer is kept
+// (handleLSPDiags): a slow answer for an older text must not overwrite a
+// newer one. A failed ask is silent; the next sync asks again.
+func (a *App) lspPullDiagsIfPulling(path string, client lspConn) {
+	def := lspServerFor(path)
+	if def == nil || !a.lsp.server(def.id).pull || a.screen == nil {
+		return
+	}
+	if a.lsp.pullSeq == nil {
+		a.lsp.pullSeq = map[string]int{}
+	}
+	a.lsp.pullSeq[path]++
+	seq := a.lsp.pullSeq[path]
+	scr := a.screen
+	go func() {
+		defer crash.Recover()
+		diags, err := client.PullDiagnostics(path)
+		if err != nil {
+			return
+		}
+		postResult(scr, &lspDiagsEvent{when: time.Now(), path: path, diags: diags, pullSeq: seq})
+	}()
 }
 
 // tabByPath returns the open tab backing path, or nil. Events resolve
@@ -673,6 +741,13 @@ func (a *App) tabByPath(path string) *editor.Tab {
 // handleLSPDiags stores one document's fresh diagnostics. An empty
 // list retracts — gopls sends that when the last problem is fixed.
 func (a *App) handleLSPDiags(e *lspDiagsEvent) {
+	if e.pullSeq != 0 {
+		// A pulled answer: only the newest ask's, and only while the
+		// document is still open (a close drops its versions entry).
+		if _, open := a.lsp.versions[e.path]; !open || e.pullSeq != a.lsp.pullSeq[e.path] {
+			return
+		}
+	}
 	if a.lsp.diags == nil {
 		a.lsp.diags = map[string][]lsp.Diagnostic{}
 	}

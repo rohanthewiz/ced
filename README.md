@@ -37,9 +37,9 @@ The goals, in order:
 2. **No hot-key archaeology.** Save, save & close, quit — they all live
    in a centered modal you open with one gesture. No `Ctrl+` shortcuts
    that fight `tmux`, your shell, or your terminal emulator.
-3. **SSH-friendly.** Copy uses OSC 52 escape sequences with a tmux
-   passthrough wrapper, so highlighting text on a remote box still
-   ends up in your local Mac clipboard.
+3. **SSH-friendly.** Copy uses OSC 52 escape sequences — inside tmux,
+   handed to tmux itself as well — so highlighting text on a remote box
+   still ends up in your local Mac clipboard.
 4. **One static binary.** No runtime, no plugin manager, no config
    directory full of YAML. Drop it on a server and run it.
 5. **Looks reasonable.** Tokyo Night-inspired palette out of the box,
@@ -140,8 +140,10 @@ The goals, in order:
   then walk every flagged line in the project with ≡ Nav → Next /
   Previous bookmark, or pick one from **Bookmarks…**. See
   [Bookmarks](#bookmarks).
-- **Clipboard over SSH** — OSC 52, including a `tmux` passthrough so
-  copy works from inside a tmux session on a remote host.
+- **Clipboard over SSH** — OSC 52. Inside `tmux` ced also hands the text
+  to tmux (`tmux load-buffer -w`, tmux 3.2+), so copy works in an
+  untouched tmux, where `allow-passthrough` is off and a passthrough
+  sequence alone is dropped; the copy also lands in tmux's paste buffers.
 - **Formatting** — Go files are formatted on every save (goimports /
   gofmt); JSON, PostgreSQL and anything a project lists in
   `.ced/format.json` are formatted on request with **≡ File → Format

@@ -93,7 +93,7 @@ internal/spell/               Struct-tag spell check: embedded SCOWL + extra/ide
 internal/userconfig/          ~/.config/ced/config.json + other config paths
 internal/crash/               Goroutine panic guard (Recover/SetHandler); rescue folders
 internal/child/               Detached children: Setsid, group kill on ctx, WaitDelay; GitEnv
-internal/clipboard/           OSC 52 with tmux passthrough
+internal/clipboard/           OSC 52; inside tmux also `tmux load-buffer -w` (TmuxLoadBuffer seam, N-151)
 internal/icons/               Nerd Font detection + glyphs
 internal/app/
   app.go                      Event loop, layout, rendering
@@ -198,6 +198,7 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `internal/readme` — don't hand-roll another parser.
 - **newTestApp stubs every host side effect** (LSP/Copilot/chat dead,
   `lspLookPath`/`chatLookPath` never-found, builtin formatters nil,
+  `clipboard.TmuxLoadBuffer` a no-op,
   plugin/skill/theme/chat-archive/history/session/favorites/rescue paths at
   temp dirs, exit note discarded, `pluginShell` refusing, `editorEnv` empty, `gonotesCreate`
   refusing, rc.grsh disabled, tree auto-fit off). New integrations that

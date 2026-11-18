@@ -29,6 +29,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/clipboard"
 	"github.com/rohanthewiz/ced/internal/customactions"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/filetree"
@@ -243,6 +244,11 @@ func newTestApp(t testing.TB, root string) *App {
 	// Neuter the sign-in flow's host side-effects so no test can write
 	// the dev machine's clipboard or launch a real browser. Copilot
 	// tests that assert on these swap in their own recorders.
+	// Inside tmux every copy also runs `tmux load-buffer -w` (N-151); a
+	// test run in a developer's tmux must not write their paste buffers.
+	prevTmuxLoad := clipboard.TmuxLoadBuffer
+	clipboard.TmuxLoadBuffer = func(string) error { return nil }
+	t.Cleanup(func() { clipboard.TmuxLoadBuffer = prevTmuxLoad })
 	prevCopilotCopy, prevCopilotOpen := copilotCopyCode, copilotOpenBrowser
 	copilotCopyCode = func(string) error { return nil }
 	copilotOpenBrowser = func(string) {}

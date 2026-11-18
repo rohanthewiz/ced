@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 )
 
 // expectedOSC52 reproduces the byte sequence CopyToSystem is contractually
@@ -114,5 +115,35 @@ func TestCopyToSystem_TMUXWrapped(t *testing.T) {
 
 	if err := CopyToSystem("hello"); err != nil {
 		t.Skipf("CopyToSystem on /dev/tty failed: %v", err)
+	}
+}
+
+// TestCopyToSystem_InsideTmuxAlsoAsksTmux pins N-151: with $TMUX set the
+// text is handed to tmux's own clipboard path (load-buffer -w), which is
+// the one route that works in an untouched tmux 3.3+ — the passthrough
+// sequence alone is dropped there. Outside tmux, tmux is never asked.
+func TestCopyToSystem_InsideTmuxAlsoAsksTmux(t *testing.T) {
+	got := make(chan string, 1)
+	prev := TmuxLoadBuffer
+	TmuxLoadBuffer = func(text string) error { got <- text; return nil }
+	t.Cleanup(func() { TmuxLoadBuffer = prev })
+
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	_ = CopyToSystem("copied text") // the /dev/tty half may fail without a terminal
+	select {
+	case text := <-got:
+		if text != "copied text" {
+			t.Errorf("tmux was handed %q", text)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("inside tmux, CopyToSystem never asked tmux")
+	}
+
+	t.Setenv("TMUX", "")
+	_ = CopyToSystem("outside")
+	select {
+	case text := <-got:
+		t.Errorf("outside tmux, tmux was asked (%q)", text)
+	case <-time.After(100 * time.Millisecond):
 	}
 }

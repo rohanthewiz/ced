@@ -98,12 +98,14 @@ check "N-090 seam drag through tmux moves the divider" divider 40 \
   "$OPEN;{esc}[<0{semi}30{semi}12M;80@{esc}[<32{semi}38{semi}12M;80@{esc}[<32{semi}46{semi}12M;80@{esc}[<0{semi}46{semi}12m;900@SNAP;$QUIT"
 
 # N-086 / N-078 · OSC 52 through tmux: "Copy reference" (palette) copies
-# `<abs path>:<line>`; with the recommended config tmux must hand an
-# OSC 52 to ITS terminal (the outer one), which is what reaches the Mac
-# clipboard over SSH.
-check "N-086 copy reaches the outer terminal (recommended tmux.conf)" raw ']52;c;' \
+# `<abs path>:<line>`, and tmux must hand an OSC 52 to ITS terminal (the
+# outer one), which is what reaches the Mac clipboard over SSH. Any
+# selection parameter counts: the passthrough form arrives as `52;c;`,
+# tmux's own load-buffer route (N-151 — the one an untouched tmux allows)
+# as `52;;`, the form tmux's copy mode uses.
+check "N-086 copy reaches the outer terminal (recommended tmux.conf)" raw ']52;' \
   "$OPEN;{esc}k;500@Copy reference;600@{enter};1200@SNAP;$QUIT" tmux.conf
-check "N-086 copy reaches the outer terminal (untouched tmux)" raw ']52;c;' \
+check "N-086 copy reaches the outer terminal (untouched tmux)" raw ']52;' \
   "$OPEN;{esc}k;500@Copy reference;600@{enter};1200@SNAP;$QUIT" tmux-default.conf
 
 echo "$pass passed, $fail failed"

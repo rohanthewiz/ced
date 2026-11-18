@@ -262,20 +262,6 @@ plus the LSP work done in the seeding session itself
   (~0.4MB per KB) on each settle. Decide a new cap (2–4MB?) after
   measuring a settle re-lex's allocation there.
 
-- **N-151** · raised `2026-1117-SESS4` · value medium
-  **Copy does nothing inside an untouched tmux.** clipboard.go sends OSC
-  52 ONLY wrapped in tmux's DCS passthrough when `$TMUX` is set, and tmux
-  3.3+ ships `allow-passthrough off`, so the sequence is dropped. Measured
-  with the N-139 harness (tmux 3.5a, only `mouse on` set): Copy reference
-  put nothing on the outer terminal; with `allow-passthrough on` it put
-  `/work/main.go:1` there. A plain OSC 52 from the pane is ALSO ignored
-  under the default `set-clipboard external`, but `printf … | tmux
-  load-buffer -w -` DOES reach the outer terminal (tmux emits the OSC 52
-  itself). The README says copy "works from inside a tmux session".
-  Fix: inside tmux, hand the text to `tmux load-buffer -w -` (tmux ≥ 3.2;
-  through a host-exec seam, off the loop) and keep the passthrough form
-  as the fallback; re-run `checks.sh` (both N-086 rows should pass).
-
 ## Validate
 
 Items whose remaining work is purely testing: hand checks in a real terminal
@@ -468,6 +454,8 @@ and `raised`.
   2026-11-17 (`2026-1117-SESS4`, N-139 harness): OSC 52 through tmux reaches the
   outer terminal ONLY with `allow-passthrough on`; an untouched tmux 3.5a
   drops it — raised as N-151 ([ Copy link ] uses the same path).
+  2026-11-17: N-151 fixed that — an untouched tmux now passes too
+  (`tmux load-buffer -w`); `checks.sh` 9/9.
 
 - **N-079** · raised `2026-1021-2049-editor-context-rows-change-view` · value low
   The change view (hunkview.go) ran in the real binary through run-ced
@@ -522,6 +510,8 @@ and `raised`.
   recommended config (allow-passthrough on) — PASS — and NOTHING reaches
   it under an untouched tmux, whose default drops the passthrough DCS
   ced sends: FAIL, raised as N-151. Drag-select itself not scripted.
+  2026-11-17: N-151 fixed that — an untouched tmux now passes too
+  (`tmux load-buffer -w`); `checks.sh` 9/9.
 
 - **N-088** · raised `2026-1025-2017-cmd-up-down-l-g-chords` · value medium
   ⌘↑ / ⌘↓ (top / end of file, ⌘⇧ selecting; the markdown preview's top /
@@ -856,6 +846,17 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS4` —
+  **N-151** copy works inside an untouched tmux: with `$TMUX` set,
+  `clipboard.CopyToSystem` also runs `tmux load-buffer -w -` (text on
+  stdin, detached, 5s cap, on a goroutine; `clipboard.TmuxLoadBuffer` is
+  the seam, a no-op in newTestApp) beside the passthrough sequence.
+  `TestCopyToSystem_InsideTmuxAlsoAsksTmux`. Through the N-139 harness:
+  untouched tmux 3.5a now hands `/work/main.go:1` to its terminal (as
+  `52;;`, tmux's own copy-mode form); the recommended config gets both
+  forms; `checks.sh` 9/9 PASS (the untouched-tmux row failed before the
+  fix with no OSC 52 at all). README's clipboard lines updated.
 
 - closed 2026-11-17, `2026-1117-SESS4` —
   **N-139** the hand checks that are about tmux itself are scripted:

@@ -240,7 +240,7 @@ plus the LSP work done in the seeding session itself
   userdict + data, each editor keeping its own tokenizer (prose vs
   ident.go/structtag.go). Raise if the two drift on a real bug.
 
-- **N-149** · raised `2026-1117-SESS3` · value low
+- **N-149** · raised `2026-1117-2313-n129-n128-syntax-classes-async-lex` · value low
   **A big file paints its previous grid after an unpatched edit.** Since
   N-128 a buffer over `InlineLexBytes` (32KB) is lexed off the loop.
   Enter / paste / multi-line delete patch the grid's rows, but undo, line
@@ -252,7 +252,7 @@ plus the LSP work done in the seeding session itself
   comparison against the lines it was lexed from (the undo layer's
   `lineHunks` idea), leaving only the changed middle plain.
 
-- **N-150** · raised `2026-1117-SESS3` · value low
+- **N-150** · raised `2026-1117-2313-n129-n128-syntax-classes-async-lex` · value low
   **`MaxHighlightBytes` (512KB) predates both fixes that made it
   necessary.** It was set because a re-lex froze the loop (~270 ms at
   512KB) and the grid cost 72 bytes a rune. Since N-128 the lex runs off
@@ -827,7 +827,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-11-17, `2026-1117-SESS3` —
+- closed 2026-11-17, `2026-1117-2313-n129-n128-syntax-classes-async-lex` —
   **N-128** structural edits no longer re-lex on the main loop. (a)
   Enter, a multi-line paste and a multi-line delete SPLIT / JOIN the
   class grid's rows (`patchRowsInsert` / `patchRowsDelete`) and defer like
@@ -844,7 +844,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   binary: Enters on a copy of the 261KB app.go, the code region captured
   with 12 distinct syntax inks. Follow-ups raised: N-149, N-150.
 
-- closed 2026-11-17, `2026-1117-SESS3` —
+- closed 2026-11-17, `2026-1117-2313-n129-n128-syntax-classes-async-lex` —
   **N-129** the syntax grid holds a one-byte CLASS per rune
   (`Tab.Classes [][]SynClass`, editor/highlight.go), resolved through a
   12-entry `SynPalette` built per frame from the theme. Resident grid for

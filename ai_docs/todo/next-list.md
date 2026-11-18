@@ -683,7 +683,6 @@ and `raised`.
   right-click row arrives through tmux (Button2) — the ≡ Code row is the
   twin if not.
 
-
 ## Roadmap
 
 Wanted, but not next. Parked, not declined.

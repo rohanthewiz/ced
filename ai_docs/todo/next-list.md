@@ -128,6 +128,15 @@ plus the LSP work done in the seeding session itself
   highlighting off for no remaining reason except the lex's own garbage
   (~0.4MB per KB) on each settle. Decide a new cap (2–4MB?) after
   measuring a settle re-lex's allocation there.
+  2026-11-18 (`2026-1118-0004-work-next-list-final-n150-measured`): **measured** (synthetic Go,
+  `HighlightClasses`, dev Mac): 512KB → 436 ms, 180MB allocated, 1.0MB
+  grid; 1MB → 863 ms / 358MB / 2.0MB; 2MB → 1.7 s / 715MB / 4.1MB; 4MB →
+  3.4 s / 1.4GB / 8.2MB. Linear: ~0.85 ms and ~350KB of garbage per KB,
+  on EVERY settle (each typing pause) — off the loop now, but a 2MB file
+  would burn 1.7 s of a core and ~700MB of GC churn per pause. The grid
+  itself is no longer the problem. **The decision is yours**: keep
+  512KB; or raise it (2MB?) together with a slower settle for big files
+  (e.g. at most one lex every few seconds), so the churn is bounded.
 
 ## Validate
 

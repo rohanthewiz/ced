@@ -56,7 +56,7 @@ internal/editor/
   fileio.go                   Open guards, line-ending/BOM round-trip, atomic save
   diskstamp.go                Disk version: (mtime,size,inode) stamp + content sum
   encoding.go                 Non-UTF-8 files held as Windows-1252; control-rune stand-ins
-  highlight.go syntax.go      Chroma → style grid; re-lex settle policy + grid patch
+  highlight.go syntax.go      Chroma → CLASS grid (1 byte/rune) + palette; re-lex settle policy + grid patch
   markdown*.go                Markdown preview: flag, row cache, blocks, inline spans
   softwrap.go                 Soft-wrap layout, row-unit scroll/hit-test/Up-Down
   find.go replace.go          The one match scanner; replace current/all
@@ -304,7 +304,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - **Deferred syntax (editor/syntax.go, app/syntax.go)**: intra-line edits
   (typing, backspace, delete, same-line replace) DEFER and patch the grid
   (`stylesAfterInsert/Delete`); structural edits (Enter, multi-line paste,
-  undo, line ops, reload, theme switch) call `InvalidateStyles`.
+  undo, line ops, reload) call `InvalidateStyles`. The grid is classes,
+  not styles (highlight.go, N-129): never store a resolved color in it.
   `InvalidateStyles` is the DEFAULT for any new mutation path. Over
   `MaxHighlightBytes` (512KB) → `SyntaxOff`. `SyntaxSettle` is a package
   var for tests only.
@@ -523,8 +524,8 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   editor right-click), never on caret move; replaces the word highlight while live; dies with
   `EditRev`; writes underlined; Esc clears.
 - **Brace matching (bracket.go)**: always on, no toggle. Skips brackets
-  whose grid color is syn-string/syn-comment (degrades to "code" with no
-  grid, uncovered row, or theme where syn-string == fg). Scan is budgeted
+  whose grid CLASS is `SynString`/`SynComment` — theme-independent
+  (degrades to "code" with no grid or an uncovered row). Scan is budgeted
   (`bracketScanLines`); running out is `Conclusive=false` and paints
   nothing — distinct from unmatched. `bracket-match` 42% neutral + bold;
   unmatched = `err` FOREGROUND. Only `()[]{}`. Caret ON or just after;
@@ -1581,9 +1582,10 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   the accent (`catsHostTreeColors`, same fix as Darcula's palette).
 - `theme.Default()` is a hardcoded literal
   (`TestBuiltin_TokyoNightMatchesDefault`).
-- Switch = live restyle; `Tab.Styles` (and markdown rows) are the only
-  color caches — anything new that caches colors must join
-  `restyleTabs`.
+- Switch = live restyle; the syntax grid is `Tab.Classes` (a `SynClass`
+  per rune, N-129) resolved through `NewSynPalette` at PAINT time, so a
+  switch never re-lexes. Markdown rows are the only color cache left —
+  anything new that caches colors must join `restyleTabs`.
 - User themes shadow built-ins in place; "Customize theme…" writes a
   fully expanded `-custom` file and opens it — no color-picker modal.
   Picker keeps the current theme. ≡ View rows.

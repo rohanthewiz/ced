@@ -36,14 +36,17 @@ const annMinContent = 24
 // the per-tab view state (scroll position, cursor, selection anchor), the
 // cached syntax-highlight styles, and a dirty flag.
 type Tab struct {
-	Path       string // Empty for an unsaved/scratch tab.
-	Buffer     *Buffer
-	Cursor     Position // Where new typed text appears.
-	Anchor     Position // Selection anchor; equals Cursor when nothing is selected.
-	ScrollY    int      // Index of the first visible line.
-	ScrollX    int      // Index of the first visible column (rune-indexed).
-	Dirty      bool
-	Styles     [][]tcell.Style
+	Path    string // Empty for an unsaved/scratch tab.
+	Buffer  *Buffer
+	Cursor  Position // Where new typed text appears.
+	Anchor  Position // Selection anchor; equals Cursor when nothing is selected.
+	ScrollY int      // Index of the first visible line.
+	ScrollX int      // Index of the first visible column (rune-indexed).
+	Dirty   bool
+	// Classes is the syntax grid: one SynClass per rune, resolved to a
+	// colour only at paint time (highlight.go, N-129). Theme-free, so a
+	// theme switch repaints it without a re-lex.
+	Classes    [][]SynClass
 	StyleStale bool
 
 	// SyntaxOff kills highlighting for this tab outright. Set at open (and
@@ -1173,7 +1176,7 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	// a typing burst from paying the O(file) Chroma cost per keystroke,
 	// and paints from a patched grid until the buffer goes quiet.
 	if t.needsRelex() {
-		t.Styles = Highlight(t.Path, t.Buffer.String(), th)
+		t.Classes = HighlightClasses(t.Path, t.Buffer.String())
 		t.StyleStale = false
 		t.styleDefer = false
 	}
@@ -1202,6 +1205,10 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 
 	bg := th.BG
 	bgStyle := tcell.StyleDefault.Background(bg).Foreground(th.Text)
+	// The syntax grid holds classes; this frame's theme turns them into
+	// styles (twelve of them — built per frame, which is what lets a theme
+	// switch skip the re-lex).
+	pal := NewSynPalette(th, bgStyle)
 
 	// Paint the entire editor rectangle with the base background first so
 	// any cells we don't draw (short lines, blank rows) still get themed.
@@ -1287,9 +1294,9 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		// not the next-stop-from-the-scroll-offset. ScrollX skips runes;
 		// the visual column we paint at is rune-walked from there.
 		runes := []rune(t.Buffer.Lines[lineIdx])
-		var styles []tcell.Style
-		if lineIdx < len(t.Styles) {
-			styles = t.Styles[lineIdx]
+		var classes []SynClass
+		if lineIdx < len(t.Classes) {
+			classes = t.Classes[lineIdx]
 		}
 		// Resolve each rune's final style up front — syntax + row bg,
 		// then span deltas in precedence order — so the paint loop
@@ -1299,8 +1306,8 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		rowStyles := make([]tcell.Style, len(runes))
 		for i := range rowStyles {
 			st := bgStyle
-			if i < len(styles) {
-				st = styles[i]
+			if i < len(classes) {
+				st = pal[classes[i]]
 			}
 			rowStyles[i] = st.Background(lineBg)
 		}

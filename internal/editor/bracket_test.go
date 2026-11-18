@@ -11,8 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gdamore/tcell/v2"
-
 	"github.com/rohanthewiz/ced/internal/theme"
 )
 
@@ -30,7 +28,7 @@ func bracketTab(text string, line, col int) *Tab {
 // the test while disagreeing with the editor.
 func withGrid(tab *Tab, path string, th theme.Theme) *Tab {
 	tab.Path = path
-	tab.Styles = Highlight(path, tab.Buffer.String(), th)
+	tab.Classes = HighlightClasses(path, tab.Buffer.String())
 	return tab
 }
 
@@ -265,31 +263,37 @@ func TestMatchingBracket_CaretOnStringBracketFallsThrough(t *testing.T) {
 	}
 }
 
-// TestInStringOrComment_DegradesToCode covers the three ways the
-// classifier deliberately answers "code": no grid, a short row, and a
-// theme whose string color IS the plain text color (where it can no
-// longer tell content from code and must not skip real brackets).
+// TestInStringOrComment_DegradesToCode covers the two ways the
+// classifier deliberately answers "code": no grid, and a row the grid
+// doesn't cover.
 func TestInStringOrComment_DegradesToCode(t *testing.T) {
-	th := theme.Default()
-
 	off := bracketTab("\"(\"", 0, 1)
 	off.SyntaxOff = true
-	if off.inStringOrComment(th, 0, 1) {
+	if off.inStringOrComment(0, 1) {
 		t.Error("SyntaxOff must degrade to naive matching")
 	}
 
 	short := bracketTab("(((", 0, 0)
-	short.Styles = [][]tcell.Style{{}}
-	if short.inStringOrComment(th, 0, 0) {
+	short.Classes = [][]SynClass{{}}
+	if short.inStringOrComment(0, 0) {
 		t.Error("a row the grid doesn't cover must read as code")
 	}
+}
 
-	// A theme that paints strings in the text color.
-	flat := th
-	flat.SynString = th.Text
+// TestInStringOrComment_IsThemeIndependent is N-129's gain for brace
+// matching: the classifier reads the rune's CLASS, so a theme that paints
+// strings in its plain text colour — where the old colour comparison had
+// to give up and call everything code — still skips a bracket inside a
+// string literal.
+func TestInStringOrComment_IsThemeIndependent(t *testing.T) {
+	flat := theme.Default()
+	flat.SynString = flat.Text
 	tab := withGrid(bracketTab("s := \"(\"\n", 0, 6), "f.go", flat)
-	if tab.inStringOrComment(flat, 0, 6) {
-		t.Error("a syn-string equal to the text color must not classify code as string")
+	if !tab.inStringOrComment(0, 6) {
+		t.Error("a '(' inside a string literal must classify as string whatever the theme")
+	}
+	if tab.inStringOrComment(0, 0) {
+		t.Error("code classified as string")
 	}
 }
 

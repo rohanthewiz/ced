@@ -58,8 +58,6 @@ package editor
 import (
 	"strings"
 	"time"
-
-	"github.com/gdamore/tcell/v2"
 )
 
 // SyntaxSettle is how long the buffer must be quiet before a deferred
@@ -134,10 +132,10 @@ func (t *Tab) stylesAfterDelete(from, to Position) {
 // rune past the end of a cached row, which is the correct rendering for
 // text nothing has lexed yet.
 func (t *Tab) patchRowInsert(line, col, n int) bool {
-	if t.Styles == nil || line < 0 || line >= len(t.Styles) || n <= 0 {
+	if t.Classes == nil || line < 0 || line >= len(t.Classes) || n <= 0 {
 		return false
 	}
-	row := t.Styles[line]
+	row := t.Classes[line]
 	if col < 0 || col > len(row) {
 		return false
 	}
@@ -148,12 +146,12 @@ func (t *Tab) patchRowInsert(line, col, n int) bool {
 	if col > 0 {
 		fill = row[col-1]
 	}
-	out := make([]tcell.Style, 0, len(row)+n)
+	out := make([]SynClass, 0, len(row)+n)
 	out = append(out, row[:col]...)
 	for range n {
 		out = append(out, fill)
 	}
-	t.Styles[line] = append(out, row[col:]...)
+	t.Classes[line] = append(out, row[col:]...)
 	return true
 }
 
@@ -162,15 +160,15 @@ func (t *Tab) patchRowInsert(line, col, n int) bool {
 // be shorter than its line (see patchRowInsert's empty-row case), and a
 // short row is not a reason to throw the whole grid away.
 func (t *Tab) patchRowDelete(line, col, n int) bool {
-	if t.Styles == nil || line < 0 || line >= len(t.Styles) || n <= 0 {
+	if t.Classes == nil || line < 0 || line >= len(t.Classes) || n <= 0 {
 		return false
 	}
-	row := t.Styles[line]
+	row := t.Classes[line]
 	if col < 0 || col > len(row) {
 		return false
 	}
 	end := min(col+n, len(row))
-	t.Styles[line] = append(row[:col], row[end:]...)
+	t.Classes[line] = append(row[:col], row[end:]...)
 	return true
 }
 
@@ -181,7 +179,7 @@ func (t *Tab) needsRelex() bool {
 	if !t.StyleStale || t.SyntaxOff || t.IsImage() {
 		return false
 	}
-	if !t.styleDefer || t.Styles == nil {
+	if !t.styleDefer || t.Classes == nil {
 		return true
 	}
 	return time.Since(t.lastEditAt) >= SyntaxSettle
@@ -192,7 +190,7 @@ func (t *Tab) needsRelex() bool {
 // from this. Zero covers the already-due case too: the redraw that
 // follows every dispatch will re-lex, so no wake-up is needed for it.
 func (t *Tab) SyntaxSettleWait() time.Duration {
-	if !t.StyleStale || t.SyntaxOff || !t.styleDefer || t.Styles == nil {
+	if !t.StyleStale || t.SyntaxOff || !t.styleDefer || t.Classes == nil {
 		return 0
 	}
 	if d := SyntaxSettle - time.Since(t.lastEditAt); d > 0 {

@@ -123,19 +123,6 @@ plus the LSP work done in the seeding session itself
   256KB file, vs `BenchmarkTypeThenRender` 0.9 ms) and
   `BenchmarkHighlight`. The fix owes a loose budget test (N-138).
 
-- **N-129** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **The style grid stores a 72-byte `tcell.Style` per character.**
-  Measured: `app.go`'s 261KB of text keeps a 19.1MB grid resident (75×
-  the text) holding 9 distinct styles; each lex allocates 59MB. Twenty
-  ordinary open tabs hold tens of MB of grid. Fix: a one-byte style
-  CLASS per rune plus a palette table resolved at paint time. A theme
-  switch then swaps the palette without a re-lex (`restyleTabs`), and
-  brace matching can ask "is this class string / comment" instead of
-  comparing colours (the degradation when a theme's syn-string == fg
-  goes away).
-  2026-11-17: `BenchmarkHighlight` reports the lex's allocation (114MB
-  for 256KB); the fix owes a budget test on the grid's resident size.
-
 - **N-130** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Render converts whole lines whatever the viewport shows.**
   `runes := []rune(line)` and `rowStyles := make([]tcell.Style,
@@ -833,6 +820,22 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS3` —
+  **N-129** the syntax grid holds a one-byte CLASS per rune
+  (`Tab.Classes [][]SynClass`, editor/highlight.go), resolved through a
+  12-entry `SynPalette` built per frame from the theme. Resident grid for
+  a 256KB file: ~0.54MB (one byte a rune + a header a line) where the
+  `tcell.Style` grid was ~19MB; `TestHighlightClasses_GridCostsOneBytePerRune`
+  is the budget test (3× the text). A theme switch no longer re-lexes:
+  `restyleTabs` drops only the markdown rows
+  (`TestApplyThemeName_RepaintsCodeWithoutARelex`: same grid, keyword
+  cell in the NEW ink). Brace matching asks the class, not the colour, so
+  a theme whose syn-string equals its text colour no longer turns the
+  string check off (`TestInStringOrComment_IsThemeIndependent`).
+  `Highlight` / `HighlightLang` still return styles (markdown fences,
+  tests) via `ResolveClasses`. Enter+Render garbage 58MB → 48MB (Chroma's
+  own allocation is the rest — N-128). Header flipped to the maintainer.
 
 - closed 2026-11-17, `2026-1117-2301-n124-n101-n138-post-result-tsc-lsp-fuzz` —
   **N-138** benchmarks and fuzz targets now exist. (a) Benchmarks, all on

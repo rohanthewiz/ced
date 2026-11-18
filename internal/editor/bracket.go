@@ -16,10 +16,10 @@
 //     naive counter pairs the braces inside `fmt.Printf("{%d}", n)` and
 //     then reports every `{` after it one level deep — which is not a
 //     cosmetic error, it is the feature confidently pointing at the
-//     wrong line. Tab.Styles already holds a per-rune foreground that
-//     Chroma assigned, so a bracket painted syn-string or syn-comment
-//     can be skipped for free: the grid is computed for the render
-//     anyway, and this costs one color compare per bracket. Where there
+//     wrong line. Tab.Classes already holds the per-rune class Chroma
+//     assigned, so a bracket classed string or comment can be skipped
+//     for free: the grid is computed for the render anyway, and this
+//     costs one byte compare per bracket. Where there
 //     is no grid — a file over MaxHighlightBytes opens with SyntaxOff —
 //     the classifier says "code" for everything and the match degrades
 //     to the naive one, which is the honest fallback: those files are
@@ -143,7 +143,7 @@ func (t *Tab) bracketAtCaret(th theme.Theme) (Position, rune, bool) {
 		if col < 0 || col >= len(runes) {
 			continue
 		}
-		if r := runes[col]; isBracket(r) && !t.inStringOrComment(th, p.Line, col) {
+		if r := runes[col]; isBracket(r) && !t.inStringOrComment(p.Line, col) {
 			return Position{Line: p.Line, Col: col}, r, true
 		}
 	}
@@ -173,7 +173,7 @@ func (t *Tab) scanForward(th theme.Theme, from Position, open, close rune) (Posi
 			if r != open && r != close {
 				continue
 			}
-			if t.inStringOrComment(th, line, col) {
+			if t.inStringOrComment(line, col) {
 				continue
 			}
 			if r == open {
@@ -207,7 +207,7 @@ func (t *Tab) scanBackward(th theme.Theme, from Position, open, close rune) (Pos
 			if r != open && r != close {
 				continue
 			}
-			if t.inStringOrComment(th, line, col) {
+			if t.inStringOrComment(line, col) {
 				continue
 			}
 			if r == close {
@@ -240,36 +240,31 @@ func (t *Tab) scanLimit(line, dir int) (limit int, conclusive bool) {
 	return 0, true
 }
 
-// inStringOrComment reports whether the rune at (line, col) was painted
+// inStringOrComment reports whether the rune at (line, col) was classed
 // as string or comment content by the last syntax pass.
 //
 // This is a read of the render's own grid rather than a second lexer,
 // which is the whole reason the feature can afford to be string-aware
-// (see the file comment). Three ways it deliberately says "code":
+// (see the file comment). It reads the rune's CLASS (N-129), so the
+// answer no longer depends on the theme: it used to compare foreground
+// colours, and had to give up whenever a theme stated syn-string as its
+// plain text colour. Two ways it deliberately says "code":
 //
 //   - No grid at all (SyntaxOff, or a row the last pass hasn't reached).
 //     Degrading to naive matching beats refusing to match.
-//   - The color equals the plain text color. A theme is free to state
-//     syn-string as its foreground; when it does, this classifier can no
-//     longer tell content from code, and answering "string" would make
-//     it skip every real bracket in the file.
 //   - Anything else. The grid is patched, not re-lexed, during a typing
 //     burst (see syntax.go), so it can be a keystroke stale — which for
 //     an ambient highlight is invisible, and which is why this reads the
 //     cheap cached answer instead of forcing a re-lex.
-func (t *Tab) inStringOrComment(th theme.Theme, line, col int) bool {
-	if t.SyntaxOff || line < 0 || line >= len(t.Styles) {
+func (t *Tab) inStringOrComment(line, col int) bool {
+	if t.SyntaxOff || line < 0 || line >= len(t.Classes) {
 		return false
 	}
-	row := t.Styles[line]
+	row := t.Classes[line]
 	if col < 0 || col >= len(row) {
 		return false
 	}
-	fg, _, _ := row[col].Decompose()
-	if fg == th.Text {
-		return false
-	}
-	return fg == th.SynString || fg == th.SynComment
+	return row[col] == SynString || row[col] == SynComment
 }
 
 // bracketSource boxes the bracket under the caret and its partner.

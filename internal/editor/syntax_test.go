@@ -26,7 +26,7 @@ func syntaxTab(t *testing.T, name, content string) *Tab {
 	t.Helper()
 	tab := &Tab{Path: name, Buffer: NewBuffer(content), StyleStale: true}
 	tab.initUndo()
-	tab.Styles = Highlight(name, content, theme.Default())
+	tab.Classes = HighlightClasses(name, content)
 	tab.StyleStale = false
 	return tab
 }
@@ -98,13 +98,13 @@ func TestSyntaxDefer_StructuralEditRelexesNow(t *testing.T) {
 // The inserted rune inherits the style to its left; the tail is untouched.
 func TestSyntaxPatch_InsertKeepsTailAligned(t *testing.T) {
 	tab := syntaxTab(t, "x.go", `x := "hello world"`)
-	before := append([]tcell.Style(nil), tab.Styles[0]...)
+	before := append([]SynClass(nil), tab.Classes[0]...)
 	tab.Cursor = Position{Line: 0, Col: 7} // inside the string literal
 	tab.Anchor = tab.Cursor
 
 	tab.InsertRune('Z')
 
-	row := tab.Styles[0]
+	row := tab.Classes[0]
 	if len(row) != len(before)+1 {
 		t.Fatalf("row should grow by one style: got %d want %d", len(row), len(before)+1)
 	}
@@ -121,13 +121,13 @@ func TestSyntaxPatch_InsertKeepsTailAligned(t *testing.T) {
 // TestSyntaxPatch_DeleteKeepsTailAligned is the delete-side twin.
 func TestSyntaxPatch_DeleteKeepsTailAligned(t *testing.T) {
 	tab := syntaxTab(t, "x.go", `x := "hello world"`)
-	before := append([]tcell.Style(nil), tab.Styles[0]...)
+	before := append([]SynClass(nil), tab.Classes[0]...)
 	tab.Cursor = Position{Line: 0, Col: 8}
 	tab.Anchor = tab.Cursor
 
 	tab.Backspace()
 
-	row := tab.Styles[0]
+	row := tab.Classes[0]
 	if len(row) != len(before)-1 {
 		t.Fatalf("row should shrink by one style: got %d want %d", len(row), len(before)-1)
 	}
@@ -155,7 +155,7 @@ func TestSyntaxPatch_SelectionDeleteOnOneLine(t *testing.T) {
 	if tab.needsRelex() {
 		t.Fatal("a single-line selection delete should defer, not force")
 	}
-	if got, want := len(tab.Styles[0]), len("alpha  charlie"); got != want {
+	if got, want := len(tab.Classes[0]), len("alpha  charlie"); got != want {
 		t.Fatalf("style row out of step with the line: got %d want %d", got, want)
 	}
 }
@@ -174,7 +174,7 @@ func TestSyntaxPatch_BackwardSelectionDelete(t *testing.T) {
 	if tab.needsRelex() {
 		t.Fatal("a backward single-line selection delete should still defer")
 	}
-	if got, want := len(tab.Styles[0]), len("alpha  charlie"); got != want {
+	if got, want := len(tab.Classes[0]), len("alpha  charlie"); got != want {
 		t.Fatalf("style row out of step with the line: got %d want %d", got, want)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/alecthomas/chroma/v2"
 
@@ -305,5 +306,68 @@ func BenchmarkHighlight(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = Highlight("bench.go", src, th)
+	}
+}
+
+// BenchmarkHighlightClasses is the lex the editor actually runs since
+// N-129: classes only, no styles resolved.
+func BenchmarkHighlightClasses(b *testing.B) {
+	src := benchGoSource(256)
+	b.SetBytes(int64(len(src)))
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = HighlightClasses("bench.go", src)
+	}
+}
+
+// TestHighlightClasses_GridCostsOneBytePerRune is N-129's budget test.
+// The resident grid of a 256KB file was 19MB of tcell.Style (72 bytes a
+// rune); as classes it must be the rune count plus one slice header per
+// line — measured from the grid itself, so it is exact, not timing-bound.
+func TestHighlightClasses_GridCostsOneBytePerRune(t *testing.T) {
+	src := benchGoSource(256)
+	grid := HighlightClasses("bench.go", src)
+	if unsafe.Sizeof(SynClass(0)) != 1 {
+		t.Fatalf("SynClass is %d bytes", unsafe.Sizeof(SynClass(0)))
+	}
+	cells := 0
+	for _, row := range grid {
+		cells += cap(row)
+	}
+	resident := cells + len(grid)*int(unsafe.Sizeof([]SynClass(nil)))
+	// 3× the text: one byte a rune plus a 24-byte header a line, and this
+	// fixture's lines are short (~25 bytes), so headers are half of it.
+	// The old grid was ~72× the text.
+	if budget := 3 * len(src); resident > budget {
+		t.Errorf("grid holds %d bytes for %d bytes of text; budget %d", resident, len(src), budget)
+	}
+	// And it still classifies: the file is full of keywords and strings.
+	var kw, str bool
+	for _, row := range grid {
+		for _, c := range row {
+			kw = kw || c == SynKeyword
+			str = str || c == SynString
+		}
+	}
+	if !kw || !str {
+		t.Error("the grid lost its classes")
+	}
+}
+
+// TestNewSynPalette_MatchesStyleForToken: the palette and the per-token
+// helper agree for every class a Go file produces — one mapping, two
+// spellings.
+func TestNewSynPalette_MatchesStyleForToken(t *testing.T) {
+	th := theme.Default()
+	base := EditorBase(th)
+	p := NewSynPalette(th, base)
+	for _, tt := range []chroma.TokenType{chroma.Keyword, chroma.LiteralString, chroma.LiteralNumber,
+		chroma.Comment, chroma.NameFunction, chroma.NameBuiltin, chroma.Text} {
+		if got, want := p[classForToken(tt)], styleForToken(tt, th, base); got != want {
+			t.Errorf("%v: palette %v, styleForToken %v", tt, got, want)
+		}
+	}
+	if fg, _, _ := p[SynComment].Decompose(); fg != th.SynComment {
+		t.Errorf("comment ink = %v", fg)
 	}
 }

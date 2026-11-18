@@ -77,12 +77,12 @@ func TestApplyThemeName_SwitchesAndPersists(t *testing.T) {
 	}
 }
 
-// TestApplyThemeName_MarksTabsForRehighlight pins the one cache a theme
-// switch has to invalidate. Tab.Styles holds Chroma output colored by
-// the OLD palette; leaving it valid repaints the chrome but leaves the
-// code in the previous theme's colors until the buffer is next edited —
-// the most obvious way this feature could look broken.
-func TestApplyThemeName_MarksTabsForRehighlight(t *testing.T) {
+// TestApplyThemeName_RepaintsCodeWithoutARelex pins N-129's theme
+// switch: the code repaints in the new palette on the very next frame —
+// the most obvious way the feature could look broken if it didn't — and
+// does so WITHOUT re-lexing, because the syntax grid holds classes and
+// the colours are applied at paint time.
+func TestApplyThemeName_RepaintsCodeWithoutARelex(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "main.go")
 	if err := os.WriteFile(src, []byte("package main\n"), 0o644); err != nil {
@@ -93,15 +93,32 @@ func TestApplyThemeName_MarksTabsForRehighlight(t *testing.T) {
 	if len(a.tabs) != 1 {
 		t.Fatalf("expected the file to open, got %d tabs", len(a.tabs))
 	}
-	// Render once so the cache is populated and the flag clears.
-	a.tabs[0].Render(a.screen, a.theme, 0, 0, 80, 20)
-	if a.tabs[0].StyleStale {
+	tab := a.tabs[0]
+	tab.Render(a.screen, a.theme, 0, 0, 80, 20)
+	if tab.StyleStale {
 		t.Fatal("precondition: rendering should have cleared StyleStale")
 	}
+	grid := tab.Classes
 
 	a.applyThemeName("gruvbox-dark", false)
-	if !a.tabs[0].StyleStale {
-		t.Error("a theme switch must invalidate every tab's cached syntax styles")
+	if tab.StyleStale {
+		t.Error("a theme switch re-lexes the file; the class grid should simply repaint")
+	}
+	tab.Render(a.screen, a.theme, 0, 0, 80, 20)
+	if &tab.Classes[0][0] != &grid[0][0] {
+		t.Error("the grid was rebuilt by the switch")
+	}
+	// `package` is a keyword: its first cell must wear the NEW keyword ink.
+	// Found by scanning row 0 past the gutter for its first letter.
+	x := 0
+	for ; x < 80; x++ {
+		if r, _, _ := a.screen.Get(x, 0); r == "p" {
+			break
+		}
+	}
+	_, style, _ := a.screen.Get(x, 0)
+	if fg, _, _ := style.Decompose(); fg != a.theme.SynKeyword {
+		t.Errorf("keyword cell fg = %v, want the new theme's syn-keyword %v", fg, a.theme.SynKeyword)
 	}
 }
 

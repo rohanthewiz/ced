@@ -1643,7 +1643,7 @@ func TestRender_CaretLineNumbersLit(t *testing.T) {
 func benchTab(b *testing.B, path, src string) (*Tab, tcell.SimulationScreen) {
 	b.Helper()
 	tab := &Tab{Path: path, Buffer: NewBuffer(src)}
-	tab.Styles = Highlight(path, src, theme.Default())
+	tab.Classes = HighlightClasses(path, src)
 	scr := tcell.NewSimulationScreen("UTF-8")
 	if err := scr.Init(); err != nil {
 		b.Fatal(err)

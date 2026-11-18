@@ -13,12 +13,14 @@
 // House rules:
 //
 //   - **A theme switch is a live restyle, never a restart.** setTheme
-//     assigns App.theme, repaints the screen's default style, and marks
-//     every open tab's cached syntax styles stale (Tab.Styles is the ONE
-//     thing in the editor that caches theme-derived colors — every other
-//     surface derives its styles inside its own draw call). Anything
-//     that starts caching colors must join restyleTabs or it will keep
-//     painting the old palette until the file is edited.
+//     assigns App.theme, repaints the screen's default style, and drops
+//     the markdown preview's row cache (it holds resolved tcell.Styles —
+//     the ONE thing in the editor that still caches theme-derived
+//     colors). The syntax grid does not: since N-129 it holds classes,
+//     resolved through the theme at paint time, so code repaints in the
+//     new colors on the next frame with no re-lex. Anything that starts
+//     caching colors must join restyleTabs or it will keep painting the
+//     old palette until the file is edited.
 //   - **Same silent-degradation contract as the LSP and formatters.** A
 //     broken theme file, an unknown saved name, an unwritable config —
 //     all of it flashes once and leaves the editor running on the
@@ -114,20 +116,14 @@ func (a *App) setTheme(th theme.Theme, name string) {
 	a.restyleTabs()
 }
 
-// restyleTabs invalidates every open tab's cached syntax styles so the
-// next render re-runs Chroma against the new palette. Without this a
-// theme switch repaints the chrome but leaves the code in the old
-// colors until the buffer is edited — the single most obvious way this
-// feature could look broken.
+// restyleTabs drops every open tab's theme-derived caches so the next
+// frame paints in the new palette. The syntax grid is NOT one of them:
+// it holds classes, and Render resolves them through the current theme
+// (editor/highlight.go, N-129) — a switch used to re-lex every open file.
+// What remains is the markdown preview's rows, which carry resolved
+// tcell.Styles and so must be rebuilt.
 func (a *App) restyleTabs() {
 	for _, t := range a.tabs {
-		// A full invalidation, not the deferred kind: the cached grid
-		// carries the OLD palette's colors, so painting from it while a
-		// settle window runs would show the previous theme for a beat.
-		t.InvalidateStyles()
-		// The markdown rows carry resolved tcell.Styles, so they are a
-		// second cache of theme-derived color and have to join the
-		// restyle — the Tab.Styles rule, one floor up.
 		t.InvalidateMarkdown()
 	}
 }

@@ -1,14 +1,39 @@
 // =============================================================================
 // File: internal/editor/highlight.go
-// Author: Spicer Matthews <spicer@cloudmanic.com>
+// Author: Rohan Allison <rohanthewiz@gmail.com>
 // Created: 2026-04-29
-// Copyright: 2026 Cloudmanic, LLC. All rights reserved.
+// Copyright: 2026 Rohan Allison. All rights reserved.
+// Portions copyright 2026 Cloudmanic, LLC. Original author: Spicer Matthews.
 // =============================================================================
+
+// highlight.go turns source text into a syntax grid: one CLASS per rune,
+// resolved to a colour only when a cell is painted (N-129).
+//
+// The grid used to hold a resolved tcell.Style per rune — 72 bytes each.
+// app.go's 261KB of text kept a 19.1MB grid resident (75× the text) to
+// describe nine distinct styles, and every lex allocated ~59MB. A class is
+// one byte:
+//
+//	Chroma token ──classForToken──► SynClass (uint8)  ─┐  per rune, in Tab.Classes
+//	                                                    │
+//	theme + base ──NewSynPalette──► SynPalette ─────────┴─► style, at paint time
+//
+// Two things follow from keeping the theme OUT of the grid:
+//
+//   - A theme switch no longer needs a re-lex: the next frame builds a new
+//     palette (12 styles) and paints the same grid in the new colours.
+//   - "Is this rune inside a string or a comment?" (brace matching) is a
+//     class comparison, not a colour comparison that broke down whenever a
+//     theme gave syn-string the plain text colour.
+//
+// Highlight / HighlightLang still return resolved styles, for callers that
+// cache a few rows of their own (markdown code fences) and for tests.
 
 package editor
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
@@ -17,23 +42,72 @@ import (
 	"github.com/rohanthewiz/ced/internal/theme"
 )
 
-// Highlight tokenises src using a Chroma lexer chosen by filename (falling
-// back to content-based detection, then to a plain-text lexer) and returns a
-// per-line slice of styles parallel to the buffer's lines: styles[i][j] is
-// the style for rune j on line i.
-//
-// Returning a per-rune style grid keeps the renderer simple — it just looks
-// up the style for each cell it draws — at the cost of some memory.
-// For files small enough to comfortably review, that's a fine trade.
+// SynClass is one rune's syntax role, an index into a SynPalette. The
+// zero value is SynPlain, so a freshly made row reads as unstyled text.
+type SynClass uint8
+
+// The classes, one per distinct style the theme gives syntax. The set is
+// the theme's syn-* keys; adding a class means adding its palette entry.
+const (
+	SynPlain SynClass = iota
+	SynKeyword
+	SynString
+	SynNumber
+	SynConstant
+	SynComment
+	SynOperator
+	SynPunct
+	SynFunction
+	SynType
+	SynBuiltin
+	SynVariable
+	synClassCount
+)
+
+// SynPalette resolves every class to the style it paints with, for one
+// theme and one base style (what unstyled runes keep: the editor's
+// background, or a markdown code slab's).
+type SynPalette [synClassCount]tcell.Style
+
+// NewSynPalette builds the palette for a theme over base. Twelve style
+// constructions — cheap enough to build per frame, which is what lets a
+// theme switch skip the re-lex.
+func NewSynPalette(t theme.Theme, base tcell.Style) SynPalette {
+	var p SynPalette
+	p[SynPlain] = base
+	p[SynKeyword] = base.Foreground(t.SynKeyword)
+	p[SynString] = base.Foreground(t.SynString)
+	p[SynNumber] = base.Foreground(t.SynNumber)
+	p[SynConstant] = base.Foreground(t.SynConstant)
+	p[SynComment] = base.Foreground(t.SynComment).Italic(true)
+	p[SynOperator] = base.Foreground(t.SynOperator)
+	p[SynPunct] = base.Foreground(t.SynPunct)
+	p[SynFunction] = base.Foreground(t.SynFunction)
+	p[SynType] = base.Foreground(t.SynType)
+	p[SynBuiltin] = base.Foreground(t.SynBuiltin)
+	p[SynVariable] = base.Foreground(t.SynVariable)
+	return p
+}
+
+// EditorBase is the style an unstyled rune in the editor pane keeps: the
+// theme's text on its background.
+func EditorBase(t theme.Theme) tcell.Style {
+	return tcell.StyleDefault.Background(t.BG).Foreground(t.Text)
+}
+
+// HighlightClasses tokenises src with a Chroma lexer chosen by filename
+// (falling back to content-based detection, then to a plain-text lexer)
+// and returns the class grid, parallel to the buffer's lines: grid[i][j]
+// is the class of rune j on line i. Theme-free by design — see the file
+// comment.
+func HighlightClasses(filename, src string) [][]SynClass {
+	return classesWith(lexerForFile(filename, src), src)
+}
+
+// Highlight is HighlightClasses resolved against a theme over the editor
+// base: a per-line slice of styles parallel to the buffer's lines.
 func Highlight(filename, src string, t theme.Theme) [][]tcell.Style {
-	lexer := lexers.Match(filename)
-	if lexer == nil {
-		lexer = lexers.Analyse(src)
-	}
-	if lexer == nil {
-		lexer = lexers.Fallback
-	}
-	return highlightWith(lexer, src, t, tcell.StyleDefault.Background(t.BG).Foreground(t.Text))
+	return ResolveClasses(HighlightClasses(filename, src), NewSynPalette(t, EditorBase(t)))
 }
 
 // HighlightLang is Highlight for source that has no filename to match on —
@@ -58,63 +132,82 @@ func HighlightLang(lang, src string, t theme.Theme, base tcell.Style) [][]tcell.
 	if lexer == nil {
 		lexer = lexers.Fallback
 	}
-	return highlightWith(lexer, src, t, base)
+	return ResolveClasses(classesWith(lexer, src), NewSynPalette(t, base))
 }
 
-// highlightWith is the shared tokenise-and-fill pass behind Highlight and
-// HighlightLang. Split out so the two entry points can differ ONLY in how
-// they choose a lexer and what an unstyled rune falls back to — two copies
-// of the token walk would drift, and the grid it produces is what brace
-// matching reads to decide whether a bracket is inside a string.
-func highlightWith(lexer chroma.Lexer, src string, t theme.Theme, base tcell.Style) [][]tcell.Style {
-	// Coalesce merges adjacent same-type tokens; cheaper to scan in render.
+// ResolveClasses maps a class grid through a palette into styles.
+func ResolveClasses(grid [][]SynClass, p SynPalette) [][]tcell.Style {
+	out := make([][]tcell.Style, len(grid))
+	for i, row := range grid {
+		styles := make([]tcell.Style, len(row))
+		for j, c := range row {
+			styles[j] = p[c]
+		}
+		out[i] = styles
+	}
+	return out
+}
+
+// lexerForFile picks the lexer Highlight uses: by file name, then by
+// content, then plain text.
+func lexerForFile(filename, src string) chroma.Lexer {
+	lexer := lexers.Match(filename)
+	if lexer == nil {
+		lexer = lexers.Analyse(src)
+	}
+	if lexer == nil {
+		lexer = lexers.Fallback
+	}
+	return lexer
+}
+
+// classesWith is the shared tokenise-and-fill pass behind every entry
+// point. One token walk, so the grid brace matching reads to decide
+// "inside a string?" is the same grid the renderer paints.
+func classesWith(lexer chroma.Lexer, src string) [][]SynClass {
+	// Coalesce merges adjacent same-type tokens; fewer, longer tokens.
 	lexer = chroma.Coalesce(lexer)
 
-	// Pre-allocate a styles grid sized to the source. We seed every cell
-	// with the base style so untokenised runes still render readably.
+	// Rows sized to each line's rune count up front. make() zeroes them,
+	// and zero is SynPlain — untokenised runes paint as plain text.
 	lines := strings.Split(src, "\n")
-	styles := make([][]tcell.Style, len(lines))
+	grid := make([][]SynClass, len(lines))
 	for i, ln := range lines {
-		runes := []rune(ln)
-		row := make([]tcell.Style, len(runes))
-		for j := range row {
-			row[j] = base
-		}
-		styles[i] = row
+		grid[i] = make([]SynClass, utf8.RuneCountInString(ln))
 	}
 
 	iter, err := lexer.Tokenise(nil, src)
 	if err != nil {
-		return styles
+		return grid
 	}
 
 	line, col := 0, 0
 	for tok := iter(); tok != chroma.EOF; tok = iter() {
-		st := styleForToken(tok.Type, t, base)
+		c := classForToken(tok.Type)
 		for _, r := range tok.Value {
 			if r == '\n' {
 				line++
 				col = 0
 				continue
 			}
-			if line < len(styles) && col < len(styles[line]) {
-				styles[line][col] = st
+			if line < len(grid) && col < len(grid[line]) {
+				grid[line][col] = c
 			}
 			col++
 		}
 	}
-	return styles
+	return grid
 }
 
-// styleForToken maps a Chroma token type to a tcell.Style using the active
-// theme. We match by CATEGORY first (Keyword, Name, Comment, …) so the
-// mapping stays tight across the dozens of language-specific subtypes —
-// with one documented exception, the Literal family, where the category
-// is too coarse to tell a string from a number. See the arm below.
-func styleForToken(tt chroma.TokenType, t theme.Theme, base tcell.Style) tcell.Style {
+// classForToken maps a Chroma token type to a class. We match by CATEGORY
+// first (Keyword, Name, Comment, …) so the mapping stays tight across the
+// dozens of language-specific subtypes — with one documented exception,
+// the Literal family, where the category is too coarse to tell a string
+// from a number. See the arm below.
+func classForToken(tt chroma.TokenType) SynClass {
 	switch tt.Category() {
 	case chroma.Keyword:
-		return base.Foreground(t.SynKeyword)
+		return SynKeyword
 	case chroma.Literal:
 		// Chroma numbers its token types so that Category() is the
 		// THOUSAND block and SubCategory() the hundred: strings are
@@ -126,37 +219,44 @@ func styleForToken(tt chroma.TokenType, t theme.Theme, base tcell.Style) tcell.S
 		// family is the one place the sub-category has to be asked.
 		switch tt.SubCategory() {
 		case chroma.LiteralString:
-			return base.Foreground(t.SynString)
+			return SynString
 		case chroma.LiteralNumber:
-			return base.Foreground(t.SynNumber)
+			return SynNumber
 		}
-		return base.Foreground(t.SynConstant)
+		return SynConstant
 	case chroma.Comment:
-		return base.Foreground(t.SynComment).Italic(true)
+		return SynComment
 	case chroma.Operator:
-		return base.Foreground(t.SynOperator)
+		return SynOperator
 	case chroma.Punctuation:
-		return base.Foreground(t.SynPunct)
+		return SynPunct
 	case chroma.Name:
 		switch tt {
 		case chroma.NameFunction, chroma.NameFunctionMagic:
-			return base.Foreground(t.SynFunction)
+			return SynFunction
 		case chroma.NameClass, chroma.NameNamespace:
-			return base.Foreground(t.SynType)
+			return SynType
 		case chroma.NameBuiltin, chroma.NameBuiltinPseudo:
-			return base.Foreground(t.SynBuiltin)
+			return SynBuiltin
 		case chroma.NameConstant:
-			return base.Foreground(t.SynConstant)
+			return SynConstant
 		case chroma.NameVariable, chroma.NameVariableInstance,
 			chroma.NameVariableClass, chroma.NameVariableGlobal,
 			chroma.NameVariableAnonymous:
-			return base.Foreground(t.SynVariable)
+			return SynVariable
 		case chroma.NameTag:
-			return base.Foreground(t.SynType)
+			return SynType
 		case chroma.NameAttribute:
-			return base.Foreground(t.SynVariable)
+			return SynVariable
 		}
-		return base
+		return SynPlain
 	}
-	return base
+	return SynPlain
+}
+
+// styleForToken resolves one token type to its style for a theme over
+// base — classForToken through a palette. Kept for the callers (and the
+// tests) that think in styles rather than classes.
+func styleForToken(tt chroma.TokenType, t theme.Theme, base tcell.Style) tcell.Style {
+	return NewSynPalette(t, base)[classForToken(tt)]
 }

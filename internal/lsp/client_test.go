@@ -935,7 +935,7 @@ func TestRequestHookFallthrough(t *testing.T) {
 			return ApplyEditResult{Applied: true}, nil
 		},
 	}
-	go c.readLoop()
+	c.startLoops()
 	srv := &fakeServer{in: bufio.NewReader(srvR), out: srvW}
 	defer func() { _ = srvW.Close(); _ = cliW.Close() }()
 

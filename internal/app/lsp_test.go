@@ -1187,3 +1187,45 @@ func TestMenuHoverInfo_StaysSilentWithNothingToSay(t *testing.T) {
 		t.Errorf("modal = %T on a clean file with no server, want none", a.modal)
 	}
 }
+
+// TestLSPShutdown_ClosesServersStillHandshaking pins N-126c's leak: a
+// client between Start and its handled ready event is closed by
+// lspShutdown, and one that registers AFTER the shutdown is refused (its
+// goroutine closes it). Before, such a client existed only inside the
+// start goroutine and nothing closed it at quit or a folder switch.
+func TestLSPShutdown_ClosesServersStillHandshaking(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.lsp.handshakes = &lspHandshakes{}
+	mid, done := &fakeLSPConn{}, &fakeLSPConn{}
+	if !a.lsp.handshakes.add(mid) || !a.lsp.handshakes.add(done) {
+		t.Fatal("registration refused before shutdown")
+	}
+	a.lsp.handshakes.remove(done) // its ready event was handled
+	a.lspShutdown()
+	if !mid.closed {
+		t.Error("a server still handshaking survived lspShutdown")
+	}
+	if done.closed {
+		t.Error("lspShutdown closed a client the handshake set no longer owned")
+	}
+	if a.lsp.handshakes.add(&fakeLSPConn{}) {
+		t.Error("a client registered after shutdown was accepted")
+	}
+}
+
+// TestHandleLSPReady_ReleasesTheHandshake: the ready handler takes the
+// client out of the handshake set whichever way it goes, so a later
+// shutdown closes it through its slot only.
+func TestHandleLSPReady_ReleasesTheHandshake(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	a.lsp.handshakes = &lspHandshakes{}
+	c := &fakeLSPConn{}
+	a.lsp.handshakes.add(c)
+	a.handleLSPReady(&lspReadyEvent{server: lspGoServerID, client: c, gen: a.lsp.server(lspGoServerID).gen})
+	a.lsp.handshakes.mu.Lock()
+	_, still := a.lsp.handshakes.set[c]
+	a.lsp.handshakes.mu.Unlock()
+	if still {
+		t.Error("the ready event left the client in the handshake set")
+	}
+}

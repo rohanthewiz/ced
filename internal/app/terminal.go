@@ -469,6 +469,17 @@ func (a *App) termDrainNotifications() {
 	}
 }
 
+// termInterruptAtClose signals the panel's foreground job, if one is
+// running, as the editor closes. See the call in App.Close for why it is
+// SIGINT and not the ⏹ ladder's kill. A pasted batch's remaining lines
+// are dropped too: none of them may start after the editor is gone.
+func (a *App) termInterruptAtClose() {
+	a.termDropPasteQueue()
+	if a.term.sess != nil && a.term.running {
+		a.term.sess.Interrupt()
+	}
+}
+
 // termInterrupt is the ⏹ button: SIGINT first, SIGKILL on the second
 // press — the mouse-first stand-in for Ctrl+C / kill -9.
 //

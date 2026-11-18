@@ -39,6 +39,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -98,6 +99,14 @@ type lspState struct {
 	// servers holds one connection slot per language server, keyed by
 	// lspServerDef.id and created on first need. See lspservers.go.
 	servers map[string]*lspServer
+
+	// handshakes holds the clients whose handshake is still in flight
+	// (N-126c). Such a client lives only inside lspEnsureStarted's
+	// goroutine until its ready event is handled, so a shutdown
+	// mid-handshake (quit, folder switch) had nothing to close and left
+	// the server process running. Created on first start; see
+	// lspHandshakes.
+	handshakes *lspHandshakes
 
 	// dead switches the WHOLE integration off: editor shutdown, and the
 	// test harness, which must never spawn a real server. A server that
@@ -268,6 +277,10 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 		return
 	}
 	sv.starting = true
+	if a.lsp.handshakes == nil {
+		a.lsp.handshakes = &lspHandshakes{}
+	}
+	hs := a.lsp.handshakes
 	scr := a.screen
 	root := a.rootDir
 	id := def.id
@@ -317,7 +330,14 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen, err: err})
 			return
 		}
+		// Registered for the length of the handshake, so lspShutdown can
+		// close it. A shutdown that already happened refuses it.
+		if !hs.add(client) {
+			client.Close()
+			return
+		}
 		if err := client.InitializeWithOptions(root, initOptionsOrNil(initOptions)); err != nil {
+			hs.remove(client)
 			client.Close()
 			// The failed handshake already fires onExit via the read
 			// loop in most cases, but a timeout leaves the process
@@ -335,6 +355,11 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 // already-open handled document — the tabs the user opened while the
 // handshake was still in flight.
 func (a *App) handleLSPReady(e *lspReadyEvent) {
+	// The handshake is over either way: the client is installed below or
+	// closed, and from here the slot (or nothing) owns it.
+	if a.lsp.handshakes != nil {
+		a.lsp.handshakes.remove(e.client)
+	}
 	sv := a.lsp.server(e.server)
 	if a.lsp.dead || sv.dead || e.gen != sv.gen {
 		// Server died between the ready post and now (or the editor
@@ -429,6 +454,11 @@ func (a *App) lspDropServer(id string) {
 // lspShutdown tears the connection down on editor exit.
 func (a *App) lspShutdown() {
 	a.lspStopTimers()
+	// Servers still handshaking (and ready events not yet handled) are
+	// closed too — nothing else would ever close them.
+	if a.lsp.handshakes != nil {
+		a.lsp.handshakes.shutdown()
+	}
 	for _, sv := range a.lsp.servers {
 		if sv.client != nil {
 			sv.client.Close()
@@ -436,6 +466,52 @@ func (a *App) lspShutdown() {
 		}
 	}
 	a.lsp.dead = true
+}
+
+// lspHandshakes is the thread-safe set of clients between Start and the
+// handling of their ready event. The start goroutine adds and removes;
+// the main loop removes (handleLSPReady) and shuts it down
+// (lspShutdown). Once shut, it refuses new clients so a goroutine that
+// gets past Start after the shutdown closes its own.
+type lspHandshakes struct {
+	mu   sync.Mutex
+	set  map[lspConn]struct{}
+	shut bool
+}
+
+// add registers c; false means the set is already shut down and the
+// caller must close c itself.
+func (h *lspHandshakes) add(c lspConn) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.shut {
+		return false
+	}
+	if h.set == nil {
+		h.set = make(map[lspConn]struct{})
+	}
+	h.set[c] = struct{}{}
+	return true
+}
+
+// remove forgets c (its handshake failed, or its ready event was
+// handled).
+func (h *lspHandshakes) remove(c lspConn) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.set, c)
+}
+
+// shutdown closes every registered client and refuses new ones. Close
+// never blocks (lsp/writer.go), so calling it under the lock is safe.
+func (h *lspHandshakes) shutdown() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.shut = true
+	for c := range h.set {
+		c.Close()
+	}
+	h.set = nil
 }
 
 // lspStopTimers cancels every pending debounce timer.

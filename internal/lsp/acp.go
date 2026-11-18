@@ -25,7 +25,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 )
 
@@ -48,7 +47,8 @@ func NewClientACP(r io.Reader, w io.Writer,
 		onRequest: onRequest,
 		onExit:    onExit,
 	}
-	go c.readLoop()
+	c.rc, _ = r.(io.Closer)
+	c.startLoops()
 	return c
 }
 
@@ -69,14 +69,22 @@ func StartACP(dir, bin string, args []string,
 	return StartNDJSON(dir, bin, args, nil, onNotify, onRequest, onExit)
 }
 
+// maxLineBytes caps one ndjson record (N-126e); see maxMessageBytes for
+// the size reasoning. A longer line is skipped, never buffered whole.
+const maxLineBytes = maxMessageBytes
+
 // readLineMessage parses one newline-delimited JSON-RPC message — the
-// ACP framing. Blank lines are skipped (harmless keep-alives some
-// agents emit); a line that isn't valid JSON is a hard protocol error,
-// same rationale as lost Content-Length framing — there's no way to
-// resynchronise once a record boundary is wrong.
+// ACP / MCP framing. Blank lines are skipped (harmless keep-alives some
+// agents emit), and so is any line that is not a JSON-RPC object
+// (N-126e): an MCP server launched through a wrapper often prints a
+// banner or a log line on stdout, and that used to END the connection.
+// Unlike Content-Length framing, the record boundary here is the
+// newline itself, so skipping one bad line loses nothing after it. An
+// over-long line (maxLineBytes) is skipped the same way, read past
+// without being held.
 func readLineMessage(r *bufio.Reader) (*message, error) {
 	for {
-		line, err := r.ReadBytes('\n')
+		line, err := readCappedLine(r, maxLineBytes)
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) == 0 {
 			if err != nil {
@@ -87,9 +95,35 @@ func readLineMessage(r *bufio.Reader) (*message, error) {
 		// A final record may arrive without its trailing newline right
 		// before EOF — parse what we have rather than dropping it.
 		var m message
-		if uerr := json.Unmarshal(trimmed, &m); uerr != nil {
-			return nil, fmt.Errorf("lsp: bad ndjson message: %w", uerr)
+		if uerr := json.Unmarshal(trimmed, &m); uerr != nil || m.JSONRPC == "" {
+			if err != nil {
+				return nil, err
+			}
+			continue // not a JSON-RPC record: noise on stdout
 		}
 		return &m, nil
+	}
+}
+
+// readCappedLine reads through the next newline like ReadBytes('\n'),
+// but keeps at most max bytes: a longer line is consumed to its end and
+// returned EMPTY, so the caller skips it. The error is ReadBytes's (nil
+// when a newline ended the line).
+func readCappedLine(r *bufio.Reader, max int) ([]byte, error) {
+	var line []byte
+	over := false
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if !over {
+			if len(line)+len(chunk) > max {
+				over, line = true, nil
+			} else {
+				line = append(line, chunk...)
+			}
+		}
+		if err == bufio.ErrBufferFull {
+			continue // the line goes on past bufio's buffer
+		}
+		return line, err
 	}
 }

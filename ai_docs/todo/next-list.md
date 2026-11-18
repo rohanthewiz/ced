@@ -179,22 +179,6 @@ plus the LSP work done in the seeding session itself
   Since N-114 that CR is at least VISIBLE: Render paints control runes
   as stand-ins, so it shows as `␍` at the end of those lines.
 
-- **N-123** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **A wedged language server freezes the editor.** `lspFlushChange`
-  sends the whole document on the MAIN LOOP (lsp.go:580
-  `client.DidChange(…, t.Buffer.String())`, didOpen at :471), and
-  `Client.send` is a blocking pipe write with no deadline
-  (client.go:332-349). A server that is alive but not reading (a
-  deadlock, swap, SIGSTOP) fills the pipe within a few edits and the
-  loop never returns; `Close()` writes `exit` through the same `send`
-  before its 2s Kill fallback, so quit and ≡ "Restart language server"
-  block too. Reproduced with `sleep 8` as the server: `DidChange(300kB)`
-  and `Close()` both still blocked after 2s. Fix: a writer goroutine
-  per client fed by a bounded queue; `Notify` enqueues without
-  blocking; overflow or a write past N seconds marks the server dead
-  and kills it; `Close` kills after its grace period without writing
-  first.
-
 - **N-124** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **Dropped `PostEvent`s leave permanent stuck state.** tcell's
   `PostEvent` is non-blocking and DROPS when its 256-slot queue is
@@ -223,40 +207,6 @@ plus the LSP work done in the seeding session itself
   flight past `gitSnapshotStale`, 30s, is relaunched) and the gutter's
   `gitDiffEvent` (its skip stamp is recorded on ARRIVAL, so a lost answer
   just means the next tick asks again).
-
-- **N-126** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
-  **Missing bounds on children and wire input.** Close a part by
-  striking it here. Read, not run, unless marked.
-  ~~(a) Formatters run `exec.Command` + `CombinedOutput` with no timeout
-  (format.go:508-510); a hang leaves `formatRuns[path]` up for good.~~
-  DONE 2026-11-17 (`2026-1117-SESS1`): 45s per command
-  (`formatRunTimeout`), detached through internal/child.
-  ~~(b) A plugin's 30s timeout kills only `sh` (plugincmd.go:120-128: no
-  Setpgid, no WaitDelay, and a grandchild holding the pipe keeps
-  `Run()` waiting); edit-triggered runs have no in-flight check
-  (plugindeco.go:134, :157).~~ DONE 2026-11-17: detached (group SIGTERM
-  + WaitDelay); runs gated per (command, file) by `pluginRunBegin`, a
-  mid-run event parking ONE relaunch for the done-event to start.
-  (c) `Close` kills no in-flight git / formatter / plugin /
-  custom-action child and not the terminal's foreground job; a server
-  still handshaking at a folder switch leaks, since its client exists
-  only inside the ready event (lsp.go:328, :341); `Client.Close`
-  returns early without `Wait` when the read loop already closed
-  (client.go:296), one zombie per server that exits on its own.
-  2026-11-17: git READS are now ended by Close (`endReadChildren`,
-  gitexec.go). Git writes, formatters, plugins and custom actions are
-  deliberately NOT: a kill mid-write leaves index.lock or a half-written
-  file, worse than letting them finish in their own session after ced
-  exits. Left: the terminal's foreground job and the two LSP leaks.
-  (d) An uncapped `Content-Length` reaches `make([]byte, contentLen)`
-  (client.go:532-535) and panics the read goroutine. REPRODUCED
-  (`makeslice: len out of range`). Fix: reject above a cap (64MB).
-  (e) One non-JSON stdout line ends an ACP / MCP connection
-  (acp.go:90-91), a common MCP stdio wrapper bug; `ReadBytes('\n')`
-  is unbounded. Fix: skip unparsable lines, cap the line length.
-  (f) `handleEvent` has no case for `*tcell.EventError`, so a dead
-  tty that does not SIGHUP ced leaves it polling git forever
-  (suspected). Fix: treat it as quit.
 
 - **N-128** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **Every structural edit re-lexes the whole file on the main loop.**
@@ -897,6 +847,38 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS1` —
+  **N-123** a wedged language server no longer freezes the editor
+  (internal/lsp/writer.go): every send queues a framed message for ONE
+  writer goroutine per client, so Call / Notify never block on the pipe.
+  A full queue (4096 frames / 64MB) or one write blocked past 15s
+  (`writeStall`) fails the connection — process killed, pipes closed,
+  onExit carrying the reason, the server dead as after a crash. Close
+  writes nothing: it queues `exit`, the writer drains and closes stdin,
+  and a reaper kills after `closeGrace` (2s). Checked in the real binary
+  (run-ced, a stub `gopls` on PATH that answers initialize and then never
+  reads, a 300KB main.go): the old binary froze on didOpen — typed text
+  never appeared, the ≡ menu never opened — and the new one typed and
+  opened the menu. Tests: `TestNotify_NeverBlocksOnADeafServer`,
+  `TestClose_NeverBlocksOnADeafServer`, `TestWriteStall_FailsTheConnection`,
+  `TestEnqueue_OverflowFailsTheConnection`,
+  `TestClose_DrainsQueuedFramesThenExit` (all -race, ×5).
+
+- closed 2026-11-17, `2026-1117-SESS1` —
+  **N-126** all six bounds. (a) formatters 45s per command, detached;
+  (b) plugins detached (group SIGTERM + WaitDelay) and gated per
+  (command, file), a mid-run event parking one relaunch (both landed
+  with N-122). (c) Close ends git READS (`endReadChildren`), closes
+  servers still handshaking (`lspHandshakes`), always Waits the process
+  (`closeOnce`, not `closed`: `TestClose_ReapsAServerThatExitedOnItsOwn`),
+  and SIGINTs the terminal panel's foreground job; git writes,
+  formatters, plugins and custom actions are deliberately left to finish
+  in their own sessions (a kill mid-write leaves index.lock or a
+  half-written file). (d) Content-Length over 64MB or negative is a
+  protocol error (was `makeslice` panic). (e) ndjson skips non-JSON-RPC
+  lines and over-long ones (`readCappedLine`). (f) was already done by
+  N-118 (`EventError` → the signal path).
 
 - closed 2026-11-17, `2026-1117-SESS1` —
   **N-122** every git child goes through ONE constructor:

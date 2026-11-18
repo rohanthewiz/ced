@@ -711,6 +711,15 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 
 ### LSP (internal/lsp, app/lsp*.go)
 - Hand-rolled JSON-RPC; no LSP framework dependency.
+- **Sends never block** (lsp/writer.go, N-123): Call/Notify queue a
+  framed message for ONE writer goroutine per client. A full queue
+  (4096 frames / 64MB) or a write blocked past `writeStall` (15s) FAILS
+  the connection (kill + close pipes → onExit with the reason → the
+  server is dead, ≡ Restart is the retry). Close never writes: it
+  queues `exit`, the writer drains and closes stdin, a reaper kills
+  after `closeGrace` and ALWAYS Waits. Inbound: Content-Length capped
+  at 64MB; ndjson skips non-JSON-RPC lines and over-long ones. Servers
+  mid-handshake sit in `a.lsp.handshakes` so `lspShutdown` closes them.
 - Several servers, ONE PER FILE by extension (lspservers.go; extensions
   disjoint). Installing the binary is the opt-in. Every verb gets its
   connection from `a.lspClientFor(path)`. Degradation is per server;

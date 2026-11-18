@@ -2413,6 +2413,13 @@ func (a *App) Close() {
 	// hangup no longer ends them. Writes are left to finish — see
 	// gitexec.go.
 	endReadChildren()
+	// The terminal panel's foreground job gets what closing a real
+	// terminal gives it: a signal to stop (N-126c). Without it a
+	// `go test ./...` or a dev server ran on, orphaned, writing into a
+	// pipe nobody reads. SIGINT, the ⏹ button's first rung, not a kill:
+	// Close can't wait to escalate, and a job that traps it to clean up
+	// should get to.
+	a.termInterruptAtClose()
 	// Stop the cats event stream and hand the pane back before the tty
 	// work below: the release is a socket write that must not race a
 	// screen being finalized, and a pane still badged "ced" after ced

@@ -15,8 +15,9 @@
 //	    │   onNotify (goroutine) │◄──stdout── readLoop goroutine
 //	    └── caller posts a tcell event; only the main loop touches App
 //
-// Thread model: Call and Notify are safe from any goroutine (writes are
-// mutex-serialised). The read loop runs on its own goroutine and calls
+// Thread model: Call and Notify are safe from any goroutine and never
+// block on the pipe: they queue the framed message for the connection's
+// writer goroutine (writer.go, N-123). The read loop runs on its own goroutine and calls
 // onNotify / resolves pending Calls from there — so onNotify must never
 // touch editor state directly; the app layer posts custom tcell events
 // instead, the same goroutine→main-loop bridge every background job in
@@ -66,14 +67,41 @@ type respError struct {
 
 // Client is a JSON-RPC connection to one language server process.
 type Client struct {
-	writeMu sync.Mutex
-	w       io.Writer
-	r       *bufio.Reader
+	w  io.Writer
+	r  *bufio.Reader
+	rc io.Closer // the reader's closer when it has one; see closeReader
 
 	mu      sync.Mutex
 	nextID  int64
 	pending map[int64]chan *message
 	closed  bool
+
+	// The writer (writer.go). outbox carries framed messages to
+	// writeLoop; queued counts their bytes (under mu). wclosed (under mu)
+	// refuses new sends once Close has queued `exit`; stopW tells the
+	// writer to drain and hang up; wdone closes when it has. dead closes
+	// once (deadOnce) when the connection fails or ends, failErr (under
+	// mu) saying why.
+	outbox     chan []byte
+	queued     int
+	wclosed    bool
+	stopW      chan struct{}
+	wdone      chan struct{}
+	dead       chan struct{}
+	deadOnce   sync.Once
+	failErr    error
+	wcloseOnce sync.Once
+
+	// stall / grace are writeStall / closeGrace as they were when the
+	// client was built; reaped closes when Close's reaper has finished
+	// (the process waited for). See writer.go.
+	stall, grace time.Duration
+	reaped       chan struct{}
+
+	// closeOnce makes Close idempotent on its own, NOT on `closed`: the
+	// read loop sets `closed` when the server exits by itself, and the
+	// old early return on it skipped reaping the process (N-126c).
+	closeOnce sync.Once
 
 	// ndjson selects newline-delimited JSON framing instead of the LSP
 	// Content-Length headers. The Agent Client Protocol (ACP) speaks
@@ -176,7 +204,8 @@ func NewClient(r io.Reader, w io.Writer, onNotify func(string, json.RawMessage),
 		onNotify: onNotify,
 		onExit:   onExit,
 	}
-	go c.readLoop()
+	c.rc, _ = r.(io.Closer)
+	c.startLoops()
 	return c
 }
 
@@ -223,13 +252,14 @@ func StartWithRequests(dir, bin string, args []string,
 	c := &Client{
 		w:         stdin,
 		r:         bufio.NewReader(stdout),
+		rc:        stdout,
 		pending:   map[int64]chan *message{},
 		onNotify:  onNotify,
 		onRequest: onRequest,
 		onExit:    onExit,
 		cmd:       cmd,
 	}
-	go c.readLoop()
+	c.startLoops()
 	return c, nil
 }
 
@@ -290,73 +320,49 @@ func (c *Client) Notify(method string, params any) error {
 	return c.send(&message{JSONRPC: "2.0", Method: method, Params: marshalParams(params)})
 }
 
-// Close tears the connection down: best-effort shutdown/exit handshake
-// when a process is attached, then kill as a backstop so a deaf server
-// can't outlive the editor. Idempotent.
+// Close tears the connection down WITHOUT writing or waiting: it queues
+// the polite `exit`, tells the writer to drain and close stdin, and
+// leaves the rest to a reaper goroutine that kills the process if it has
+// not exited within closeGrace (writer.go). A deaf server therefore
+// can't block quit or "Restart language server" any more (N-123), and
+// the process is always waited for, even one that exited on its own
+// (N-126c). Idempotent.
 func (c *Client) Close() {
-	c.mu.Lock()
-	if c.closed {
+	c.closeOnce.Do(func() {
+		c.mu.Lock()
+		c.closed = true
 		c.mu.Unlock()
-		return
-	}
-	c.closed = true
-	c.mu.Unlock()
-
-	// Polite LSP goodbye. Fire-and-forget notifications only — a full
-	// shutdown Call would block Close for callTimeout on a wedged
-	// server, and the editor is exiting either way.
-	_ = c.Notify("exit", nil)
-	if wc, ok := c.w.(io.Closer); ok {
-		_ = wc.Close()
-	}
-	if c.cmd != nil && c.cmd.Process != nil {
-		// Reap on a goroutine so Close never blocks on a slow exit;
-		// kill after a grace period if the exit notification wasn't
-		// enough.
-		proc := c.cmd
-		go func() {
-			defer crash.Recover()
-			done := make(chan struct{})
-			go func() {
-				defer crash.Recover()
-				_ = proc.Wait()
-				close(done)
-			}()
-			select {
-			case <-done:
-			case <-time.After(2 * time.Second):
-				_ = proc.Process.Kill()
-				<-done
-			}
-		}()
-	}
+		// Fire-and-forget only — a full shutdown Call would hold Close
+		// for callTimeout on a wedged server, and the editor is exiting
+		// or restarting either way. Queued, never written here.
+		_ = c.Notify("exit", nil)
+		c.mu.Lock()
+		c.wclosed = true
+		c.mu.Unlock()
+		close(c.stopW)
+		go c.reap()
+	})
 }
 
-// send frames and writes one message. Serialised by writeMu so
-// concurrent Calls/Notifies can't interleave their bytes. Framing
-// follows the connection's dialect: Content-Length headers for LSP,
-// one JSON object per line for ACP.
+// send frames one message and queues it for the writer (writer.go). It
+// never blocks on the pipe. Framing follows the connection's dialect:
+// Content-Length headers for LSP, one JSON object per line for ACP. A
+// frame is ONE byte slice, so the single writer can't interleave two
+// messages' bytes.
 func (c *Client) send(m *message) error {
 	body, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
+	var frame []byte
 	if c.ndjson {
 		// json.Marshal never emits a raw newline inside an object, so
 		// body+"\n" is exactly one well-formed ndjson record.
-		if _, err := c.w.Write(body); err != nil {
-			return err
-		}
-		_, err = c.w.Write([]byte("\n"))
-		return err
+		frame = append(body, '\n')
+	} else {
+		frame = append([]byte(fmt.Sprintf("Content-Length: %d\r\n\r\n", len(body))), body...)
 	}
-	if _, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
-		return err
-	}
-	_, err = c.w.Write(body)
-	return err
+	return c.enqueue(frame)
 }
 
 // marshalParams pre-encodes params so the envelope marshal can't fail
@@ -410,9 +416,14 @@ func (c *Client) readLoop() {
 	}
 
 	// Connection over — fail every in-flight Call so nothing blocks
-	// until its timeout, and let the owner know.
+	// until its timeout, stop the writer, and let the owner know. A
+	// connection the writer FAILED (the server stopped reading) reports
+	// that reason rather than the bare EOF its kill produced.
+	c.markDead(errConnClosed)
+	if fe := c.failure(); fe != nil && fe != errConnClosed {
+		loopErr = fe
+	}
 	c.mu.Lock()
-	c.closed = true
 	for id, ch := range c.pending {
 		delete(c.pending, id)
 		ch <- nil
@@ -515,9 +526,16 @@ func (c *Client) autoRespond(m *message) {
 	_ = c.send(&message{JSONRPC: "2.0", ID: m.ID, Result: raw})
 }
 
+// maxMessageBytes caps one inbound message (N-126d). An uncapped
+// Content-Length went straight into make([]byte, n): a garbage header
+// panicked the read goroutine (`makeslice: len out of range`) and a huge
+// one allocated whatever it named. The largest real answers — workspace
+// symbols, a big file's semantic data — are a few megabytes.
+const maxMessageBytes = 64 << 20
+
 // readMessage parses one Content-Length-framed JSON-RPC message.
-// Unknown headers (Content-Type) are skipped; a missing or malformed
-// Content-Length is a hard protocol error — there is no way to
+// Unknown headers (Content-Type) are skipped; a missing, malformed or
+// oversized Content-Length is a hard protocol error — there is no way to
 // resynchronise a byte stream once framing is lost.
 func readMessage(r *bufio.Reader) (*message, error) {
 	contentLen := -1
@@ -532,8 +550,11 @@ func readMessage(r *bufio.Reader) (*message, error) {
 		}
 		if v, ok := strings.CutPrefix(line, "Content-Length:"); ok {
 			n, err := strconv.Atoi(strings.TrimSpace(v))
-			if err != nil {
+			if err != nil || n < 0 {
 				return nil, fmt.Errorf("lsp: bad Content-Length %q", v)
+			}
+			if n > maxMessageBytes {
+				return nil, fmt.Errorf("lsp: message of %d bytes is over the %d-byte cap", n, maxMessageBytes)
 			}
 			contentLen = n
 		}

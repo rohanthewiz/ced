@@ -1265,3 +1265,23 @@ func TestDrawTermRowUnderlinesLocation(t *testing.T) {
 		t.Error("the message must not be underlined — only the location is a link")
 	}
 }
+
+// TestClose_InterruptsTheTerminalsForegroundJob pins N-126c's terminal
+// half: Close signals a running job (SIGINT, once) instead of leaving it
+// orphaned, and leaves an idle session alone.
+func TestClose_InterruptsTheTerminalsForegroundJob(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	f := openTestTerm(t, a)
+	a.Close()
+	if f.interrupts != 0 {
+		t.Errorf("an idle terminal was interrupted %d times", f.interrupts)
+	}
+
+	b := newTestApp(t, t.TempDir())
+	g := openTestTerm(t, b)
+	b.term.running = true
+	b.Close()
+	if g.interrupts != 1 || g.kills != 0 {
+		t.Errorf("running job at Close: interrupts=%d kills=%d, want 1 / 0", g.interrupts, g.kills)
+	}
+}

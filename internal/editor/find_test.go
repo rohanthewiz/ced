@@ -9,7 +9,9 @@ package editor
 
 import (
 	"fmt"
+	"math/rand"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -459,5 +461,77 @@ func BenchmarkSetFindQuery(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		tab.SetFindQuery("gamma")
+	}
+}
+
+// referenceLine is the literal scan WITHOUT the byte fast path — fold the
+// whole line as runes, matchCols — the behaviour asciiLine must equal.
+func referenceLine(query, raw string, opts FindOptions) []int {
+	needle := foldRunes([]rune(query), opts.CaseSensitive)
+	return matchCols(foldRunes([]rune(raw), opts.CaseSensitive), needle, opts.WholeWord)
+}
+
+// TestMatcherLine_FastPathAgreesWithTheRunePath is N-132's correctness
+// pin: on random ASCII (and some non-ASCII) lines, under every option
+// combination, Line's answer equals the rune-path reference — columns,
+// widths, non-overlap, word boundaries, case folding.
+func TestMatcherLine_FastPathAgreesWithTheRunePath(t *testing.T) {
+	rng := rand.New(rand.NewSource(132))
+	alphabet := []rune("aAbB _-.zZ9é")
+	for trial := 0; trial < 3000; trial++ {
+		line := make([]rune, rng.Intn(30))
+		for i := range line {
+			line[i] = alphabet[rng.Intn(len(alphabet))]
+		}
+		q := make([]rune, 1+rng.Intn(3))
+		for i := range q {
+			q[i] = alphabet[rng.Intn(len(alphabet)-1)] // the needle stays ASCII
+		}
+		opts := FindOptions{CaseSensitive: rng.Intn(2) == 0, WholeWord: rng.Intn(2) == 0}
+		m, _ := NewMatcher(string(q), opts)
+		var got []int
+		for _, h := range m.Line(0, string(line)) {
+			if h.Width != len(q) {
+				t.Fatalf("width %d for %q", h.Width, string(q))
+			}
+			got = append(got, h.Col)
+		}
+		want := referenceLine(string(q), string(line), opts)
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("%q in %q %+v: got %v, want %v", string(q), string(line), opts, got, want)
+		}
+	}
+}
+
+// TestMatcherLine_NonASCIIFoldingOntoASCIIStillMatches: U+212A KELVIN SIGN
+// lowercases to ASCII 'k', so a case-insensitive "k" must still find it —
+// the reason a non-ASCII line never takes the byte path when folding.
+func TestMatcherLine_NonASCIIFoldingOntoASCIIStillMatches(t *testing.T) {
+	m, _ := NewMatcher("k", FindOptions{})
+	if hits := m.Line(0, "5 K"); len(hits) != 1 || hits[0].Col != 2 {
+		t.Errorf("Kelvin sign: %+v, want one hit at column 2", hits)
+	}
+}
+
+// TestSetFindQuery_MissAllocatesNothingPerLine is N-132's budget test:
+// a query with no hits over 100k ASCII lines used to fold every line into
+// a fresh []rune (79MB at 100k lines). Now a miss allocates nothing per
+// line. Measured in bytes allocated, not time.
+func TestSetFindQuery_MissAllocatesNothingPerLine(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 100_000; i++ {
+		fmt.Fprintf(&sb, "line %d alpha beta delta epsilon\n", i)
+	}
+	tab := &Tab{Buffer: NewBuffer(sb.String())}
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tab.SetFindQuery("gamma")
+	runtime.ReadMemStats(&after)
+	if got := after.TotalAlloc - before.TotalAlloc; got > 64<<10 {
+		t.Errorf("a missing query over 100k lines allocated %d bytes; budget 64KB", got)
+	}
+	tab.SetFindQuery("Delta") // still case-insensitive by default
+	if len(tab.FindMatches) != 100_000 {
+		t.Errorf("found %d hits, want one per line", len(tab.FindMatches))
 	}
 }

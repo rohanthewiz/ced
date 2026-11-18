@@ -63,6 +63,7 @@ import (
 	"errors"
 	"regexp"
 	"regexp/syntax"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 )
@@ -108,6 +109,12 @@ type Matcher struct {
 	opts FindOptions
 	// needle is the folded literal query (literal mode only).
 	needle []rune
+	// asciiNeedle is needle as bytes when every rune of it is ASCII —
+	// the key to Line's byte fast path (N-132); nil otherwise.
+	asciiNeedle []byte
+	// rawNeedle is the query exactly as typed (literal mode), for the
+	// case-sensitive pre-filter on non-ASCII lines.
+	rawNeedle string
 	// re is the compiled pattern (regex mode only).
 	re *regexp.Regexp
 }
@@ -124,7 +131,11 @@ func NewMatcher(query string, opts FindOptions) (*Matcher, error) {
 		if len(needle) == 0 {
 			return nil, nil
 		}
-		return &Matcher{opts: opts, needle: needle}, nil
+		m := &Matcher{opts: opts, needle: needle, rawNeedle: query}
+		if isASCII(string(needle)) {
+			m.asciiNeedle = []byte(string(needle))
+		}
+		return m, nil
 	}
 	pattern := query
 	if !opts.CaseSensitive {
@@ -184,6 +195,21 @@ func (m *Matcher) Line(lineIdx int, raw string) []Match {
 		return nil
 	}
 	if m.re == nil {
+		// The byte fast path (N-132): an ASCII line and an ASCII needle
+		// mean byte offsets ARE rune columns, so the scan needs no []rune,
+		// no folded copy, and a line without a hit allocates nothing. The
+		// find bar and the live Find-all prompt re-scan the whole buffer on
+		// every keystroke: 49 ms / 79MB at 100k lines before this.
+		if m.asciiNeedle != nil && isASCII(raw) {
+			return m.asciiLine(lineIdx, raw)
+		}
+		// A non-ASCII line can still be ruled out cheaply when the search
+		// is case-sensitive: the needle's exact bytes must appear. (Not
+		// when folding — a non-ASCII rune can fold ONTO ASCII: U+212A
+		// KELVIN SIGN lowercases to 'k', so only the rune path is exact.)
+		if m.opts.CaseSensitive && !strings.Contains(raw, m.rawNeedle) {
+			return nil
+		}
 		hay := foldRunes([]rune(raw), m.opts.CaseSensitive)
 		var out []Match
 		for _, col := range matchCols(hay, m.needle, m.opts.WholeWord) {
@@ -196,6 +222,78 @@ func (m *Matcher) Line(lineIdx int, raw string) []Match {
 		out = append(out, Match{Line: lineIdx, Col: h.col, Width: h.width})
 	}
 	return out
+}
+
+// asciiLine is Line's literal scan for an ASCII line and needle: the same
+// rules as matchCols (non-overlapping, left to right, the same word
+// boundary), on bytes, folding A–Z per byte when the search ignores case.
+func (m *Matcher) asciiLine(lineIdx int, raw string) []Match {
+	n := len(m.asciiNeedle)
+	if n > len(raw) {
+		return nil
+	}
+	var out []Match
+	first := m.asciiNeedle[0]
+	for col := 0; col+n <= len(raw); col++ {
+		c := raw[col]
+		if !m.opts.CaseSensitive {
+			c = asciiLower(c)
+		}
+		if c != first || !m.asciiEqualAt(raw, col) {
+			continue
+		}
+		if m.opts.WholeWord && !asciiWordBounded(raw, col, n) {
+			continue
+		}
+		out = append(out, Match{Line: lineIdx, Col: col, Width: n})
+		col += n - 1 // the loop's ++ carries us past the hit
+	}
+	return out
+}
+
+// asciiEqualAt compares the needle against raw at col, folding raw's
+// bytes when the search ignores case (the needle is folded already).
+func (m *Matcher) asciiEqualAt(raw string, col int) bool {
+	for k, b := range m.asciiNeedle {
+		c := raw[col+k]
+		if !m.opts.CaseSensitive {
+			c = asciiLower(c)
+		}
+		if c != b {
+			return false
+		}
+	}
+	return true
+}
+
+// asciiWordBounded is wordBounded for an ASCII line.
+func asciiWordBounded(raw string, col, n int) bool {
+	if col > 0 && IsWordRune(rune(raw[col-1])) {
+		return false
+	}
+	if end := col + n; end < len(raw) && IsWordRune(rune(raw[end])) {
+		return false
+	}
+	return true
+}
+
+// asciiLower lowercases one ASCII byte — the same answer unicode.ToLower
+// gives for A–Z, and identity for every other ASCII byte.
+func asciiLower(c byte) byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+	return c
+}
+
+// isASCII reports whether s holds only ASCII bytes.
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
 
 // regexHit is one regex match in rune coordinates, plus the byte-offset

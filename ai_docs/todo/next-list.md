@@ -62,16 +62,6 @@ plus the LSP work done in the seeding session itself
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
 
-- **N-132** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
-  **Find allocates per line per keystroke.** `SetFindQuery("gamma")`
-  measured 6 ms at 10k lines, 49 ms / 79MB at 100k, 181 ms / 317MB at
-  400k, and the find bar and the live Find-all prompt re-scan on every
-  keystroke. Fix: an ASCII fast path on bytes (`strings.Index`),
-  converting to rune columns only on a hit. Only matters on very
-  large files.
-  2026-11-17: `BenchmarkSetFindQuery` (100k lines: 13.6 ms, 29MB per
-  call); the fix owes a budget test.
-
 - **N-133** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **`ced path/to/file.go` roots the editor at the file's folder.**
   `resolveTarget` (main.go:139) returns the parent dir as the root.
@@ -786,6 +776,20 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS6` —
+  **N-132** find has an ASCII fast path: `Matcher.Line` scans an ASCII
+  line for an ASCII needle on BYTES (offsets are rune columns; A–Z folded
+  per byte; same non-overlap and word-boundary rules as `matchCols`), so
+  a line without a hit allocates nothing. A non-ASCII line is ruled out
+  with `strings.Contains` when the search is case-sensitive; a
+  case-insensitive one keeps the rune path, because U+212A KELVIN SIGN
+  folds onto ASCII 'k'. `BenchmarkSetFindQuery` (100k lines, a miss):
+  13.6 ms / 29MB → 3.4 ms / 136 B. Budget test
+  `TestSetFindQuery_MissAllocatesNothingPerLine` (fails before: 28.8MB);
+  `TestMatcherLine_FastPathAgreesWithTheRunePath` (3000 random lines ×
+  option combos against the rune path),
+  `TestMatcherLine_NonASCIIFoldingOntoASCIIStillMatches`.
 
 - closed 2026-11-17, `2026-1117-2344-n121-n130-data-safety-render-window` —
   **N-130** Render styles only the runes a row shows. Unwrapped (no ghost

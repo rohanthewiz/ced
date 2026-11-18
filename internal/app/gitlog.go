@@ -26,7 +26,6 @@ package app
 
 import (
 	"bytes"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -323,7 +322,7 @@ func gitToplevel(rootDir string) string {
 	if rootDir == "" {
 		return ""
 	}
-	out, err := exec.Command("git", "-C", rootDir, "rev-parse", "--show-toplevel").Output()
+	out, err := gitReadOutput("-C", rootDir, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return ""
 	}
@@ -366,7 +365,7 @@ func loadGitLogDetail(rootDir, hash string, ws bool) []string {
 	if ws {
 		args = append(args, "-w")
 	}
-	out, err := exec.Command("git", append(args, hash)...).Output()
+	out, err := gitReadOutput(append(args, hash)...)
 	if err != nil {
 		return []string{"(unable to load commit " + hash + ")"}
 	}

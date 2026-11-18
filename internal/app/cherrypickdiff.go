@@ -72,7 +72,6 @@
 package app
 
 import (
-	"os/exec"
 	"strings"
 	"time"
 
@@ -231,9 +230,9 @@ func (m *cherryPickModal) ensureDiff(a *App) {
 // fallback; a show that fails both ways is reported in the pane.
 func loadCherryPickDiff(rootDir, hash string) []string {
 	args := []string{"-C", rootDir, "show", "--no-color", "--format=%B", "--stat", "--patch"}
-	out, err := exec.Command("git", append(args, "--diff-merges=first-parent", hash, "--")...).Output()
+	out, err := gitReadOutput(append(args, "--diff-merges=first-parent", hash, "--")...)
 	if err != nil {
-		out, err = exec.Command("git", append(args, hash, "--")...).Output()
+		out, err = gitReadOutput(append(args, hash, "--")...)
 	}
 	if err != nil {
 		return []string{"(can't show " + hash + ": " + firstLine(err.Error()) + ")"}

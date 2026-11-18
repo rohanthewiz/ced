@@ -48,7 +48,6 @@ package app
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -109,7 +108,7 @@ func gitInProgressOp(rootDir string) string {
 	if rootDir == "" {
 		return ""
 	}
-	out, err := exec.Command("git", "-C", rootDir, "rev-parse", "--absolute-git-dir").Output()
+	out, err := gitReadOutput("-C", rootDir, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return ""
 	}
@@ -145,8 +144,8 @@ func gitConflictedPaths(rootDir string) (root string, rels []string) {
 	if root == "" {
 		return "", nil
 	}
-	out, err := exec.Command("git", "-C", rootDir, "diff",
-		"--name-only", "--diff-filter=U", "-z").Output()
+	out, err := gitReadOutput("-C", rootDir, "diff",
+		"--name-only", "--diff-filter=U", "-z")
 	if err != nil {
 		return root, nil
 	}

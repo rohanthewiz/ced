@@ -51,7 +51,6 @@
 package app
 
 import (
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -157,8 +156,8 @@ func loadGitStatus(rootDir string) gitStatus {
 	// prints the stash's SHA on a third line when refs/stash exists and
 	// nothing at all when it doesn't — never an error, which is why it
 	// can share a fork whose failure means "not a repo".
-	revParse, err := exec.Command("git", "-C", rootDir, "rev-parse",
-		"--show-toplevel", "--absolute-git-dir", "--glob="+gitStashGlob).Output()
+	revParse, err := gitReadOutput("-C", rootDir, "rev-parse",
+		"--show-toplevel", "--absolute-git-dir", "--glob="+gitStashGlob)
 	if err != nil {
 		return gitStatus{}
 	}
@@ -168,7 +167,7 @@ func loadGitStatus(rootDir string) gitStatus {
 	}
 	hasStash := revParseHasStash(revParse)
 
-	out, err := exec.Command("git", "-C", rootDir, "status", "--porcelain=v2", "--branch", "-z").Output()
+	out, err := gitReadOutput("-C", rootDir, "status", "--porcelain=v2", "--branch", "-z")
 	if err != nil {
 		// We *are* in a repo (rev-parse succeeded) but couldn't read
 		// status. Mark the result as a repo with no known dirty files
@@ -282,7 +281,7 @@ func loadGitBranch(rootDir string) string {
 	if rootDir == "" {
 		return ""
 	}
-	if out, err := exec.Command("git", "-C", rootDir, "symbolic-ref", "--short", "HEAD").Output(); err == nil {
+	if out, err := gitReadOutput("-C", rootDir, "symbolic-ref", "--short", "HEAD"); err == nil {
 		return strings.TrimRight(string(out), "\n\r")
 	}
 	return loadGitShortHead(rootDir)
@@ -295,7 +294,7 @@ func loadGitShortHead(rootDir string) string {
 	if rootDir == "" {
 		return ""
 	}
-	if out, err := exec.Command("git", "-C", rootDir, "rev-parse", "--short", "HEAD").Output(); err == nil {
+	if out, err := gitReadOutput("-C", rootDir, "rev-parse", "--short", "HEAD"); err == nil {
 		return strings.TrimRight(string(out), "\n\r")
 	}
 	return ""

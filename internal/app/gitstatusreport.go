@@ -33,7 +33,6 @@
 package app
 
 import (
-	"os/exec"
 	"strings"
 	"time"
 
@@ -102,7 +101,7 @@ func (a *App) menuGitStatus() {
 	root := a.rootDir
 	go func() {
 		defer crash.Recover()
-		out, err := exec.Command("git", append([]string{"-C", root}, gitStatusReportArgs...)...).CombinedOutput()
+		out, err := gitReadCombined(append([]string{"-C", root}, gitStatusReportArgs...)...)
 		_ = scr.PostEvent(&gitStatusReportEvent{when: time.Now(), out: out, err: err})
 	}()
 }

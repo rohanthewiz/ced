@@ -45,7 +45,6 @@ package app
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -200,7 +199,7 @@ func loadFileDiff(rootDir, path string) []diffHunk {
 	if rootDir == "" || path == "" {
 		return nil
 	}
-	out, err := exec.Command("git", "-C", rootDir, "diff", "-U0", "--no-color", "--", path).Output()
+	out, err := gitReadOutput("-C", rootDir, "diff", "-U0", "--no-color", "--", path)
 	if err != nil {
 		return nil
 	}

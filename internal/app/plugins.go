@@ -88,6 +88,31 @@ type pluginState struct {
 	// countdown. See pluginsAfterEvent in plugindeco.go.
 	editRev   int
 	editTimer *time.Timer
+
+	// running holds the hook / provider runs in flight, keyed by
+	// pluginRunKey (one per command per FILE). A matching event while a
+	// run is out does not start a second beside it — it parks a relaunch
+	// that the run's done-event starts (N-126b). Without it a 10s linter
+	// on the edit event, debounced at 800ms, stacked a new process per
+	// typing pause. See pluginRunBegin in plugindeco.go.
+	running map[string]*pluginRun
+}
+
+// pluginRun is one hook or provider run in flight for one file.
+type pluginRun struct {
+	// seq is the inventory generation the run started under. A reload
+	// bumps the generation, and a run from an older one no longer gates
+	// anything: the new inventory starts fresh.
+	seq int
+	// started stamps the launch. A run older than pluginRunStale no
+	// longer gates either — its done-event was lost (a dropped
+	// PostEvent, N-124), and a provider must not go quiet for the rest
+	// of the session because of it.
+	started time.Time
+	// rerun, when set, is the launch a mid-run event asked for. Only the
+	// LAST one is kept: it reads the file and editor state as they are
+	// when it starts, so the ones before it would only repeat it.
+	rerun func()
 }
 
 // pluginsOn reports whether plugins may run right now. Every surface

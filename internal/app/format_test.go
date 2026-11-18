@@ -1391,3 +1391,22 @@ func TestFormatClaim_LostEventIsSuperseded(t *testing.T) {
 		t.Fatal("the superseded run's late event disturbed the new run")
 	}
 }
+
+// TestExecFormatter_HungFormatterTimesOut pins N-126a: a formatter that
+// never finishes — here one whose background child would also hold the
+// output pipe — is ended by formatRunTimeout and reported, instead of
+// holding formatRuns[path] (and so the reconcile for that file) up for
+// good.
+func TestExecFormatter_HungFormatterTimesOut(t *testing.T) {
+	useTestTrustFile(t)
+	old := formatRunTimeout
+	formatRunTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { formatRunTimeout = old })
+	a := newTestApp(t, t.TempDir())
+	a.execFormatter("/tmp/hung.go", []string{"sh", "-c", "sleep 30 & sleep 30"}, false)
+
+	ev := waitForFormatEvent(t, a)
+	if ev.err == nil || !strings.Contains(ev.err.Error(), "timed out") {
+		t.Fatalf("err = %v, want a timeout", ev.err)
+	}
+}

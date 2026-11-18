@@ -88,7 +88,6 @@
 package app
 
 import (
-	"os/exec"
 	"strings"
 	"time"
 
@@ -247,8 +246,8 @@ func (a *App) requestCommitReceipt() {
 	root := a.rootDir
 	go func() {
 		defer crash.Recover()
-		out, err := exec.Command("git", "-C", root,
-			"log", "-1", "--no-color", "--format="+commitReceiptFormat).Output()
+		out, err := gitReadOutput("-C", root,
+			"log", "-1", "--no-color", "--format="+commitReceiptFormat)
 		_ = scr.PostEvent(&gitCommitReceiptEvent{when: time.Now(), out: out, err: err})
 	}()
 }

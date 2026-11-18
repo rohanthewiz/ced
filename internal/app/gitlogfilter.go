@@ -67,7 +67,6 @@
 package app
 
 import (
-	"os/exec"
 	"strings"
 	"time"
 
@@ -273,7 +272,7 @@ func loadGitLogQuery(rootDir string, args []string) ([]gitLogCommit, bool) {
 		return nil, false
 	}
 	full := append([]string{"-C", rootDir}, args...)
-	out, err := exec.Command("git", full...).Output()
+	out, err := gitReadOutput(full...)
 	if err != nil {
 		return nil, false
 	}

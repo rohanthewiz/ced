@@ -49,7 +49,6 @@ package app
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/rohanthewiz/ced/internal/clipboard"
@@ -303,7 +302,7 @@ func (a *App) gitLogCopyHash(c gitLogCommit) {
 // the same budget as the branch pickers. The list only carries the
 // subject, and copying half a message would be worse than the fork.
 func (a *App) gitLogCopyMessage(c gitLogCommit) {
-	out, err := exec.Command("git", "-C", a.rootDir, "show", "-s", "--format=%B", c.Hash).Output()
+	out, err := gitReadOutput("-C", a.rootDir, "show", "-s", "--format=%B", c.Hash)
 	if err != nil {
 		a.flash("Copy failed: cannot read " + c.Short)
 		return

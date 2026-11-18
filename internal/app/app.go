@@ -19,6 +19,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/child"
 	"github.com/rohanthewiz/ced/internal/clipboard"
 	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/customactions"
@@ -2406,6 +2408,11 @@ func (a *App) Close() {
 	a.copilotShutdown()
 	a.chatShutdown()
 	a.mcpShutdown()
+	// End every git READ still running (status, log, blame, ls-remote):
+	// their answers have nowhere to land now, and in their own sessions a
+	// hangup no longer ends them. Writes are left to finish — see
+	// gitexec.go.
+	endReadChildren()
 	// Stop the cats event stream and hand the pane back before the tty
 	// work below: the release is a socket write that must not race a
 	// screen being finalized, and a pane still badged "ced" after ced
@@ -5554,6 +5561,10 @@ func (a *App) runCustomAction(idx int) {
 	})
 }
 
+// customActionTimeout bounds one custom action's shell. See
+// execCustomAction for why it is so long.
+const customActionTimeout = time.Hour
+
 // execCustomAction is the actual shell-out. Pulled out of
 // runCustomAction so both the prompt-less and prompted paths share
 // the env-var, logging, and event-posting wiring without diverging.
@@ -5567,7 +5578,16 @@ func (a *App) execCustomAction(act customactions.Action, promptValues map[string
 	go func() {
 		defer crash.Recover()
 		started := time.Now()
-		cmd := exec.Command("sh", "-c", act.Command)
+		// Detached (N-122): an action that runs `ssh` / `scp` can no
+		// longer prompt on ced's terminal — it fails and the prompt
+		// text lands in the info modal. The cap is an hour because an
+		// action is the user's own shell ("brew upgrade" is slow); it
+		// is there for one that will never finish. Not ended by Close:
+		// like a git write, it may be changing things.
+		ctx, cancel := context.WithTimeout(context.Background(), customActionTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "sh", "-c", act.Command)
+		child.Detach(cmd)
 		cmd.Env = env
 		out, runErr := cmd.CombinedOutput()
 		duration := time.Since(started)

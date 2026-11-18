@@ -47,6 +47,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 
+	"github.com/rohanthewiz/ced/internal/child"
 	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/plugins"
@@ -72,6 +73,8 @@ type pluginDecoEvent struct {
 	path  string
 	key   string
 	diags []plugins.Diagnostic
+	// runKey releases the run gate (pluginRunEnd); key files the marks.
+	runKey string
 }
 
 // When implements tcell.Event.
@@ -81,6 +84,7 @@ func (e *pluginDecoEvent) When() time.Time { return e.when }
 type pluginHookDoneEvent struct {
 	when   time.Time
 	seq    int
+	runKey string // releases the run gate, see pluginRunEnd
 	label  string
 	path   string
 	output plugins.OutputMode
@@ -119,52 +123,126 @@ func (a *App) pluginsOnEvent(ev plugins.Event, tab *editor.Tab) {
 		return
 	}
 	base := filepath.Base(tab.Path)
-	vars := a.pluginVars(tab)
-	seq := a.plugins.seq
-	scr := a.screen
-	dir := a.rootDir
-	path := tab.Path
-
 	for _, p := range a.plugins.list {
-		env := pluginEnvFor(p, vars)
 		for _, h := range p.Hooks {
-			if !h.Matches(ev, base) {
-				continue
+			if h.Matches(ev, base) {
+				a.launchPluginHook(p, h, tab)
 			}
-			go func() {
-				defer crash.Recover()
-				stdout, stderr, err := pluginShell(dir, h.Command, env, "")
-				_ = scr.PostEvent(&pluginHookDoneEvent{
-					when: time.Now(), seq: seq,
-					label: p.Name, path: path, output: h.Output,
-					stdout: stdout, stderr: stderr, err: err,
-				})
-			}()
 		}
 		for _, d := range p.Decorations {
-			if !d.Matches(ev, base) {
-				continue
+			if d.Matches(ev, base) {
+				a.launchPluginDeco(p, d, tab)
 			}
-			key := providerKey(p, d)
-			go func() {
-				defer crash.Recover()
-				stdout, stderr, _ := pluginShell(dir, d.Command, env, "")
-				// stdout AND stderr: `go vet` and a good half of the Go
-				// toolchain report findings on stderr, so a provider
-				// that only read stdout would silently see nothing from
-				// the most obvious thing a user would wire up first.
-				// The exit status is ignored — see the file comment.
-				text := string(stdout)
-				if len(stderr) > 0 {
-					text += "\n" + string(stderr)
-				}
-				_ = scr.PostEvent(&pluginDecoEvent{
-					when: time.Now(), seq: seq, path: path, key: key,
-					diags: filterDiagsForFile(plugins.ParseDiagnostics(text), path, dir),
-				})
-			}()
 		}
 	}
+}
+
+// pluginRunStale is how old a run may be before it stops gating new
+// ones: the shell's own deadline plus the group's grace period plus
+// slack. Past it the run has certainly ended, and its done-event was
+// lost.
+const pluginRunStale = pluginRunTimeout + child.WaitDelay + 5*time.Second
+
+// pluginRunKey names one command's runs against one file. The command
+// text (not an index) keys a hook, so a reload that reorders a
+// manifest's hooks can't hand one hook's gate to another.
+func pluginRunKey(kind, plugin, command, path string) string {
+	return kind + "\x00" + plugin + "\x00" + command + "\x00" + path
+}
+
+// pluginRunBegin claims key for a new run. false means a run is already
+// out: relaunch is parked on it, to start when that run's done-event
+// arrives (pluginRunEnd), and the caller starts nothing now.
+func (a *App) pluginRunBegin(key string, relaunch func()) bool {
+	if r, ok := a.plugins.running[key]; ok &&
+		r.seq == a.plugins.seq && time.Since(r.started) < pluginRunStale {
+		r.rerun = relaunch
+		return false
+	}
+	if a.plugins.running == nil {
+		a.plugins.running = make(map[string]*pluginRun)
+	}
+	a.plugins.running[key] = &pluginRun{seq: a.plugins.seq, started: time.Now()}
+	return true
+}
+
+// pluginRunEnd releases key when the run started under seq reports back,
+// and starts the relaunch a mid-run event parked — unless the inventory
+// was reloaded meanwhile (the command may no longer exist). A done-event
+// for a run that no longer holds the key (it went stale and a newer run
+// took the key) releases nothing.
+func (a *App) pluginRunEnd(key string, seq int) {
+	r, ok := a.plugins.running[key]
+	if !ok || r.seq != seq {
+		return
+	}
+	delete(a.plugins.running, key)
+	if r.rerun != nil && seq == a.plugins.seq {
+		r.rerun()
+	}
+}
+
+// launchPluginHook starts one hook for one file on a goroutine, unless
+// it is already running for that file (pluginRunBegin). The relaunch
+// re-resolves the tab by path: by the time it runs, the tab may have
+// been closed, and a hook for a closed file has nothing to act on.
+func (a *App) launchPluginHook(p plugins.Plugin, h plugins.Hook, tab *editor.Tab) {
+	path := tab.Path
+	key := pluginRunKey("hook", p.Name, h.Command, path)
+	relaunch := func() {
+		if t := a.tabForPath(path); t != nil && a.pluginsOn() {
+			a.launchPluginHook(p, h, t)
+		}
+	}
+	if !a.pluginRunBegin(key, relaunch) {
+		return
+	}
+	env := pluginEnvFor(p, a.pluginVars(tab))
+	seq, scr, dir := a.plugins.seq, a.screen, a.rootDir
+	go func() {
+		defer crash.Recover()
+		stdout, stderr, err := pluginShell(dir, h.Command, env, "")
+		_ = scr.PostEvent(&pluginHookDoneEvent{
+			when: time.Now(), seq: seq, runKey: key,
+			label: p.Name, path: path, output: h.Output,
+			stdout: stdout, stderr: stderr, err: err,
+		})
+	}()
+}
+
+// launchPluginDeco starts one decoration provider for one file, on the
+// same terms as launchPluginHook.
+func (a *App) launchPluginDeco(p plugins.Plugin, d plugins.Provider, tab *editor.Tab) {
+	path := tab.Path
+	key := providerKey(p, d)
+	runKey := pluginRunKey("deco", p.Name, d.Command, path)
+	relaunch := func() {
+		if t := a.tabForPath(path); t != nil && a.pluginsOn() {
+			a.launchPluginDeco(p, d, t)
+		}
+	}
+	if !a.pluginRunBegin(runKey, relaunch) {
+		return
+	}
+	env := pluginEnvFor(p, a.pluginVars(tab))
+	seq, scr, dir := a.plugins.seq, a.screen, a.rootDir
+	go func() {
+		defer crash.Recover()
+		stdout, stderr, _ := pluginShell(dir, d.Command, env, "")
+		// stdout AND stderr: `go vet` and a good half of the Go
+		// toolchain report findings on stderr, so a provider that only
+		// read stdout would silently see nothing from the most obvious
+		// thing a user would wire up first. The exit status is ignored —
+		// see the file comment.
+		text := string(stdout)
+		if len(stderr) > 0 {
+			text += "\n" + string(stderr)
+		}
+		_ = scr.PostEvent(&pluginDecoEvent{
+			when: time.Now(), seq: seq, path: path, key: key, runKey: runKey,
+			diags: filterDiagsForFile(plugins.ParseDiagnostics(text), path, dir),
+		})
+	}()
 }
 
 // handlePluginDeco files one provider's findings against one file,
@@ -173,6 +251,11 @@ func (a *App) pluginsOnEvent(ev plugins.Event, tab *editor.Tab) {
 // them, and a provider that goes quiet must not leave its last marks
 // stuck on the screen.
 func (a *App) handlePluginDeco(e *pluginDecoEvent) {
+	if e != nil {
+		// Release the gate first, whatever becomes of the result: a
+		// stale generation still means this run is over.
+		a.pluginRunEnd(e.runKey, e.seq)
+	}
 	if e == nil || e.seq != a.plugins.seq {
 		// Reloaded or disabled since this run started — the provider
 		// that produced these may no longer exist.
@@ -201,6 +284,9 @@ func (a *App) handlePluginDeco(e *pluginDecoEvent) {
 // hook chose otherwise, and only a real failure is allowed to interrupt
 // with a modal.
 func (a *App) handlePluginHookDone(e *pluginHookDoneEvent) {
+	if e != nil {
+		a.pluginRunEnd(e.runKey, e.seq)
+	}
 	if e == nil || e.seq != a.plugins.seq {
 		return
 	}

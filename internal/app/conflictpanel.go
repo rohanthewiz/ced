@@ -61,7 +61,6 @@ package app
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -310,7 +309,7 @@ func gitAbsoluteDir(rootDir string) string {
 	if rootDir == "" {
 		return ""
 	}
-	out, err := exec.Command("git", "-C", rootDir, "rev-parse", "--absolute-git-dir").Output()
+	out, err := gitReadOutput("-C", rootDir, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return ""
 	}

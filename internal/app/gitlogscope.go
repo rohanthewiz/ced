@@ -52,7 +52,6 @@
 package app
 
 import (
-	"os/exec"
 	"strings"
 )
 
@@ -158,8 +157,8 @@ func loadGitLogRefs(rootDir string) []gitLogRef {
 	if rootDir == "" {
 		return nil
 	}
-	out, err := exec.Command("git", "-C", rootDir, "for-each-ref",
-		"--format=%(refname)%09%(symref)%09%(upstream)", "refs/heads", "refs/remotes").Output()
+	out, err := gitReadOutput("-C", rootDir, "for-each-ref",
+		"--format=%(refname)%09%(symref)%09%(upstream)", "refs/heads", "refs/remotes")
 	if err != nil {
 		return nil
 	}
@@ -433,7 +432,7 @@ func (a *App) gitLogScopeGone() bool {
 	if s == gitLogScopeHead || s == gitLogScopeAll {
 		return false
 	}
-	err := exec.Command("git", "-C", a.rootDir, "rev-parse", "--verify", "--quiet", s).Run()
+	err := gitReadRun("-C", a.rootDir, "rev-parse", "--verify", "--quiet", s)
 	if err == nil {
 		return false
 	}

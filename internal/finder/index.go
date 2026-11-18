@@ -28,14 +28,16 @@ package finder
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/rohanthewiz/ced/internal/child"
 	gitignore "github.com/sabhiram/go-gitignore"
 )
 
@@ -88,6 +90,10 @@ func BuildIndex(rootDir string) ([]string, bool, error) {
 	return paths, false, err
 }
 
+// gitIndexTimeout bounds the `git ls-files` listing. A large monorepo
+// lists in well under a second; a minute means git is stuck.
+const gitIndexTimeout = time.Minute
+
 // buildIndexGit shells out to `git ls-files` to collect every
 // tracked + untracked-not-ignored file under rootDir. -z makes git
 // emit null-terminated names so paths with spaces / quotes / even
@@ -96,7 +102,13 @@ func BuildIndex(rootDir string) ([]string, bool, error) {
 // the command fails for any other reason — the caller falls back
 // to the manual walk path.
 func buildIndexGit(rootDir string) ([]string, error) {
-	cmd := exec.Command("git", "-C", rootDir,
+	// Through internal/child like every git ced runs (N-122): its own
+	// session, prompts off, optional locks off (it is a read), and a
+	// deadline that ends the group — on a dead network mount ls-files can
+	// stall, and the walk fallback is a better answer than none.
+	ctx, cancel := context.WithTimeout(context.Background(), gitIndexTimeout)
+	defer cancel()
+	cmd := child.Git(ctx, nil, true, "-C", rootDir,
 		"ls-files",
 		"--cached",
 		"--others",

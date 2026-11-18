@@ -47,8 +47,9 @@ package app
 import (
 	"bufio"
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"github.com/rohanthewiz/ced/internal/child"
 )
 
 // gitLogTickGlyph is the tick a ticked commit row wears in its leading
@@ -192,7 +193,9 @@ func (a *App) gitLogTickedOldestFirst() ([]gitLogCommit, error) {
 	for h := range a.gitLog.ticked {
 		args = append(args, h)
 	}
-	cmd := exec.Command("git", args...)
+	ctx, cancel := gitReadCtx()
+	defer cancel()
+	cmd := child.Git(ctx, nil, true, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err

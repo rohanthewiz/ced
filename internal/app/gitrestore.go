@@ -66,7 +66,6 @@ package app
 
 import (
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -102,7 +101,7 @@ func probeGitRestore(path string) gitRestoreProbe {
 	dir, base := filepath.Dir(path), filepath.Base(path)
 	var p gitRestoreProbe
 
-	out, err := exec.Command("git", "-C", dir, "status", "--porcelain", "--", base).Output()
+	out, err := gitReadOutput("-C", dir, "status", "--porcelain", "--", base)
 	if err != nil {
 		return p
 	}
@@ -112,14 +111,14 @@ func probeGitRestore(path string) gitRestoreProbe {
 		p.Code = line[:2]
 	}
 
-	p.InHead = exec.Command("git", "-C", dir, "cat-file", "-e", "HEAD:./"+base).Run() == nil
+	p.InHead = gitReadRun("-C", dir, "cat-file", "-e", "HEAD:./"+base) == nil
 	if p.Code == "" || !p.InHead {
 		return p
 	}
 
 	// `diff HEAD` covers staged and unstaged work together — the whole
 	// of what checkout HEAD will throw away.
-	ns, err := exec.Command("git", "-C", dir, "diff", "--numstat", "HEAD", "--", base).Output()
+	ns, err := gitReadOutput("-C", dir, "diff", "--numstat", "HEAD", "--", base)
 	if err == nil {
 		p.Added, p.Deleted, p.Binary = parseNumstat(string(ns))
 	}

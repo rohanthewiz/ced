@@ -45,6 +45,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -55,6 +56,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/child"
 	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/format"
@@ -536,9 +538,22 @@ func (a *App) execFormatterChain(tabPath string, cmds [][]string, quiet bool) {
 			if len(argv) == 0 {
 				continue
 			}
-			cmd := exec.Command(argv[0], argv[1:]...)
+			// Bounded and detached (N-126a): a formatter that hangs used
+			// to hold formatRuns[path] up for good, switching the
+			// external-change reconcile off for that file. Its own
+			// session keeps a tool that prompts off ced's terminal; the
+			// group kill reaches a wrapper's children (npx → node).
+			ctx, cancel := context.WithTimeout(context.Background(), formatRunTimeout)
+			cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+			child.Detach(cmd)
 			var out []byte
 			out, err = cmd.CombinedOutput()
+			timedOut := ctx.Err() == context.DeadlineExceeded
+			cancel()
+			if timedOut {
+				err = fmt.Errorf("timed out after %s", formatRunTimeout)
+				break
+			}
 			if err == nil {
 				continue
 			}
@@ -875,6 +890,13 @@ func (a *App) formatRerunIfQueued(tabPath string, run *formatRun) {
 // any real formatter (gofmt takes milliseconds, prettier a second or two)
 // so a slow run is never superseded while it is still writing.
 const formatRunStale = 2 * time.Minute
+
+// formatRunTimeout bounds ONE formatter command (N-126a). A chain is two
+// commands at most (gopls imports, then gofmt), so a chain that runs out
+// both deadlines still ends — and posts its done-event — inside
+// formatRunStale, and a stale supersede never races a live writer. A var
+// only so a test can shorten it.
+var formatRunTimeout = 45 * time.Second
 
 // formatRunBegin / formatRunEnd / formatRunning track how many formatter
 // runs are in flight per file path.

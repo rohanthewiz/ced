@@ -25,7 +25,6 @@
 package app
 
 import (
-	"os/exec"
 	"strings"
 )
 
@@ -84,8 +83,8 @@ func loadRecentBranches(rootDir, current string) []recentBranch {
 	// %gs = reflog subject, %gd = shortened selector ("HEAD@{5 minutes
 	// ago}" under --date=relative); a tab (%x09) joins them so the parser
 	// can split without tripping on spaces inside either field.
-	out, err := exec.Command("git", "-C", rootDir, "reflog",
-		"--date=relative", "--format=%gs%x09%gd").Output()
+	out, err := gitReadOutput("-C", rootDir, "reflog",
+		"--date=relative", "--format=%gs%x09%gd")
 	if err != nil {
 		return nil
 	}

@@ -43,6 +43,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/child"
 	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/plugins"
@@ -119,6 +120,12 @@ func runPluginShell(dir, command string, env []string, stdin string) (stdout, st
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	// Detached (N-126b): the timeout used to kill only `sh`, and a
+	// grandchild (the linter `sh -c` started) kept the output pipes open,
+	// so Run waited on regardless. Now the deadline signals the whole
+	// group and WaitDelay closes the pipes behind any straggler. Its own
+	// session also keeps a command that prompts off ced's terminal.
+	child.Detach(cmd)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 	if stdin != "" {

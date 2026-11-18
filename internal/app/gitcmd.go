@@ -26,11 +26,11 @@ package app
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/rohanthewiz/ced/internal/child"
 	"github.com/rohanthewiz/ced/internal/crash"
 )
 
@@ -136,8 +136,11 @@ func (a *App) runGitCmdFull(label string, env []string, onFail func(*App, *gitCm
 	root := a.rootDir
 	go func() {
 		defer crash.Recover()
-		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-		cmd.Env = env
+		// A write: its own session (no prompt can reach ced's terminal),
+		// the long write deadline, and NOT ended by Close — see gitexec.go.
+		ctx, cancel := gitWriteCtx()
+		defer cancel()
+		cmd := child.Git(ctx, env, false, append([]string{"-C", root}, args...)...)
 		out, err := cmd.CombinedOutput()
 		_ = scr.PostEvent(&gitCmdDoneEvent{
 			when: time.Now(), label: label, err: err, output: out,
@@ -196,7 +199,9 @@ func (a *App) runGitApplyPatch(label, patch string, args ...string) {
 		if dir == "" {
 			dir = root
 		}
-		cmd := exec.Command("git", append([]string{"-C", dir, "apply"}, args...)...)
+		ctx, cancel := gitWriteCtx()
+		defer cancel()
+		cmd := child.Git(ctx, nil, false, append([]string{"-C", dir, "apply"}, args...)...)
 		cmd.Stdin = strings.NewReader(patch)
 		out, err := cmd.CombinedOutput()
 		_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out})
@@ -251,9 +256,13 @@ func (a *App) runGitCmdSeqHook(label string, env []string, onFail func(*App, *gi
 	root := a.rootDir
 	go func() {
 		defer crash.Recover()
+		// ONE deadline for the whole set: the user made one gesture, and
+		// a sequence that stalls on its second command is as stuck as a
+		// single command would be.
+		ctx, cancel := gitWriteCtx()
+		defer cancel()
 		for _, args := range cmds {
-			cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-			cmd.Env = env
+			cmd := child.Git(ctx, env, false, append([]string{"-C", root}, args...)...)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out, onFail: onFail})
@@ -523,7 +532,7 @@ func loadGitBranches(rootDir string) []string {
 	if rootDir == "" {
 		return nil
 	}
-	out, err := exec.Command("git", "-C", rootDir, "branch", "--format=%(refname:short)").Output()
+	out, err := gitReadOutput("-C", rootDir, "branch", "--format=%(refname:short)")
 	if err != nil {
 		return nil
 	}
@@ -548,7 +557,7 @@ func loadGitRemotes(rootDir string) []string {
 	if rootDir == "" {
 		return nil
 	}
-	out, err := exec.Command("git", "-C", rootDir, "remote").Output()
+	out, err := gitReadOutput("-C", rootDir, "remote")
 	if err != nil {
 		return nil
 	}

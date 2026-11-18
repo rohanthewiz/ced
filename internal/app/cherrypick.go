@@ -91,7 +91,6 @@
 package app
 
 import (
-	"os/exec"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -254,8 +253,8 @@ func (a *App) openCherryPickSourcePicker(onCancel func(*App)) {
 // commit recency, minus the current branch and the symbolic origin/HEAD
 // entries (which only alias a branch already in the list).
 func loadCherryPickSources(rootDir, current string) []string {
-	out, err := exec.Command("git", "-C", rootDir, "for-each-ref", "--sort=-committerdate",
-		"--format=%(refname:short)%09%(symref)", "refs/heads", "refs/remotes").Output()
+	out, err := gitReadOutput("-C", rootDir, "for-each-ref", "--sort=-committerdate",
+		"--format=%(refname:short)%09%(symref)", "refs/heads", "refs/remotes")
 	if err != nil {
 		return nil
 	}
@@ -354,9 +353,9 @@ type cherryPickListing struct {
 // both fail the cause is the source, not the flag.
 func listCherryPickCommits(rootDir, source string) (cherryPickListing, error) {
 	var l cherryPickListing
-	out, err := exec.Command("git", cherryPickLogArgs(rootDir, source, false)...).Output()
+	out, err := gitReadOutput(cherryPickLogArgs(rootDir, source, false)...)
 	if err != nil {
-		out, err = exec.Command("git", cherryPickLogArgs(rootDir, source, true)...).Output()
+		out, err = gitReadOutput(cherryPickLogArgs(rootDir, source, true)...)
 		if err != nil {
 			return l, err
 		}
@@ -441,7 +440,7 @@ func loadMergeParentsNotOnHead(rootDir string, commits []cherryPickCommit) map[s
 	if len(args) == n {
 		return nil
 	}
-	out, err := exec.Command("git", append(args, "--not", "HEAD", "--")...).Output()
+	out, err := gitReadOutput(append(args, "--not", "HEAD", "--")...)
 	if err != nil {
 		return nil
 	}
@@ -478,12 +477,12 @@ func markCherryPickSynced(commits []cherryPickCommit, notOnHead map[string]bool)
 // since it and source diverged. Best effort: no merge base (unrelated
 // histories) or any failure yields an empty set, and no ⚠ is shown.
 func loadOurSideChanges(rootDir, source string) map[string]bool {
-	base, err := exec.Command("git", "-C", rootDir, "merge-base", "HEAD", source).Output()
+	base, err := gitReadOutput("-C", rootDir, "merge-base", "HEAD", source)
 	if err != nil {
 		return nil
 	}
-	out, err := exec.Command("git", "-C", rootDir, "diff", "--name-only",
-		strings.TrimSpace(string(base)), "HEAD", "--").Output()
+	out, err := gitReadOutput("-C", rootDir, "diff", "--name-only",
+		strings.TrimSpace(string(base)), "HEAD", "--")
 	if err != nil {
 		return nil
 	}

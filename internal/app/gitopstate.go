@@ -38,11 +38,11 @@ package app
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/rohanthewiz/ced/internal/child"
 	"github.com/rohanthewiz/ced/internal/editor"
 )
 
@@ -157,7 +157,7 @@ func sequencerProgress(rootDir, todo, head string) (step, total int) {
 	}
 	done := 0
 	if head != "" {
-		out, err := exec.Command("git", "-C", rootDir, "rev-list", "--count", head+"..HEAD").Output()
+		out, err := gitReadOutput("-C", rootDir, "rev-list", "--count", head+"..HEAD")
 		if err == nil {
 			done, _ = strconv.Atoi(strings.TrimSpace(string(out)))
 		}
@@ -168,7 +168,7 @@ func sequencerProgress(rootDir, todo, head string) (step, total int) {
 // gitCommitSummary returns a commit's short hash and subject — one fork,
 // asked only while an operation is parked.
 func gitCommitSummary(rootDir, commit string) (short, subject string) {
-	out, err := exec.Command("git", "-C", rootDir, "log", "-1", "--format=%h%x1f%s", commit).Output()
+	out, err := gitReadOutput("-C", rootDir, "log", "-1", "--format=%h%x1f%s", commit)
 	if err != nil {
 		if len(commit) >= 7 {
 			return commit[:7], ""
@@ -190,7 +190,7 @@ func gitCommitSummary(rootDir, commit string) (short, subject string) {
 // reads as "has changes", the answer that keeps Continue offered and lets
 // git's own message explain.
 func gitIndexHasChanges(rootDir string) bool {
-	return exec.Command("git", "-C", rootDir, "diff", "--cached", "--quiet", "HEAD").Run() != nil
+	return gitReadRun("-C", rootDir, "diff", "--cached", "--quiet", "HEAD") != nil
 }
 
 // conflictFile is one unmerged path: where it is, and HOW it conflicts —
@@ -213,7 +213,7 @@ func loadConflictFiles(rootDir string) (toplevel string, files []conflictFile) {
 	if toplevel == "" {
 		return "", nil
 	}
-	out, err := exec.Command("git", "-C", rootDir, "status", "--porcelain", "-z", "--untracked-files=no").Output()
+	out, err := gitReadOutput("-C", rootDir, "status", "--porcelain", "-z", "--untracked-files=no")
 	if err != nil {
 		return toplevel, nil
 	}
@@ -344,7 +344,9 @@ func loadConflictMarkerSizes(toplevel string, abs []string) map[string]int {
 		in.WriteString(filepath.ToSlash(rel))
 		in.WriteByte(0)
 	}
-	cmd := exec.Command("git", "-C", toplevel, "check-attr", "--stdin", "-z", "conflict-marker-size")
+	ctx, cancel := gitReadCtx()
+	defer cancel()
+	cmd := child.Git(ctx, nil, true, "-C", toplevel, "check-attr", "--stdin", "-z", "conflict-marker-size")
 	cmd.Stdin = &in
 	out, err := cmd.Output()
 	if err != nil {

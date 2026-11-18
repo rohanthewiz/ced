@@ -179,36 +179,6 @@ plus the LSP work done in the seeding session itself
   Since N-114 that CR is at least VISIBLE: Render paints control runes
   as stand-ins, so it shows as `␍` at the end of those lines.
 
-- **N-122** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **Git children share ced's controlling terminal.** `runGitCmdFull`
-  (gitcmd.go:136-138) is `exec.Command` + `CombinedOutput` with the
-  inherited env: no Setsid, no `GIT_TERMINAL_PROMPT`, no timeout, no
-  handle kept. Only `ls-remote` sets `GIT_TERMINAL_PROMPT=0`
-  (gitpush.go:432; its comment "nothing is attached to a terminal it
-  could prompt on" is wrong). Reproduced under a pty against a local
-  401 server: `Username for …:` is written to the tty over the frame,
-  git waits forever, keys are split between tcell and git, and after
-  killing git its `git remote-http` helper survives holding the pipe,
-  so `CombinedOutput` never returns. No cancel path. Suspected the
-  same way, not run: an ssh passphrase / unknown host key, a signed
-  commit with pinentry-curses, custom actions running `scp` / `ssh`
-  (app.go:5427). Also: no read-only git call sets
-  `GIT_OPTIONAL_LOCKS=0`, so the 10s `git status` can take
-  `index.lock` under a git command the user runs in another pane
-  (absence verified by grep, the collision not reproduced). Fix: ONE
-  constructor for every launcher (`runGitCmdFull`, `runGitCmdSeqHook`,
-  `runGitApplyPatch`, `fetchGitPushHeads`, `execCustomAction`):
-  `Setsid` (as `hostRun` does), `GIT_TERMINAL_PROMPT=0`, `GPG_TTY`
-  dropped, `CommandContext` with a process-group kill and `WaitDelay`,
-  `GIT_OPTIONAL_LOCKS=0` on reads. A refusal then lands in the
-  existing "Git failed" modal.
-  2026-11-10 (`2026-1110-1909-n127-git-status-off-loop`): the status
-  snapshot now runs on a goroutine (gitsnapshot.go), so a hung status no
-  longer freezes the UI — it holds the snapshot "in flight" until the 30s
-  relaunch. Its two forks in `loadGitStatus` (and the git panel's
-  `loadGitStatusFiles`) should still take the constructor, with
-  `GIT_OPTIONAL_LOCKS=0`; nothing in N-127 set it.
-
 - **N-123** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **A wedged language server freezes the editor.** `lspFlushChange`
   sends the whole document on the MAIN LOOP (lsp.go:580
@@ -257,20 +227,27 @@ plus the LSP work done in the seeding session itself
 - **N-126** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Missing bounds on children and wire input.** Close a part by
   striking it here. Read, not run, unless marked.
-  (a) Formatters run `exec.Command` + `CombinedOutput` with no timeout
-  (format.go:508-510); a hang leaves `formatRuns[path]` up for good.
-  Fix: `CommandContext` with a 30–60s cap and `WaitDelay`.
-  (b) A plugin's 30s timeout kills only `sh` (plugincmd.go:120-128: no
+  ~~(a) Formatters run `exec.Command` + `CombinedOutput` with no timeout
+  (format.go:508-510); a hang leaves `formatRuns[path]` up for good.~~
+  DONE 2026-11-17 (`2026-1117-SESS1`): 45s per command
+  (`formatRunTimeout`), detached through internal/child.
+  ~~(b) A plugin's 30s timeout kills only `sh` (plugincmd.go:120-128: no
   Setpgid, no WaitDelay, and a grandchild holding the pipe keeps
   `Run()` waiting); edit-triggered runs have no in-flight check
-  (plugindeco.go:134, :157). Fix: Setpgid + group kill + WaitDelay,
-  skip a provider already running.
+  (plugindeco.go:134, :157).~~ DONE 2026-11-17: detached (group SIGTERM
+  + WaitDelay); runs gated per (command, file) by `pluginRunBegin`, a
+  mid-run event parking ONE relaunch for the done-event to start.
   (c) `Close` kills no in-flight git / formatter / plugin /
   custom-action child and not the terminal's foreground job; a server
   still handshaking at a folder switch leaks, since its client exists
   only inside the ready event (lsp.go:328, :341); `Client.Close`
   returns early without `Wait` when the read loop already closed
   (client.go:296), one zombie per server that exits on its own.
+  2026-11-17: git READS are now ended by Close (`endReadChildren`,
+  gitexec.go). Git writes, formatters, plugins and custom actions are
+  deliberately NOT: a kill mid-write leaves index.lock or a half-written
+  file, worse than letting them finish in their own session after ced
+  exits. Left: the terminal's foreground job and the two LSP leaks.
   (d) An uncapped `Content-Length` reaches `make([]byte, contentLen)`
   (client.go:532-535) and panics the read goroutine. REPRODUCED
   (`makeslice: len out of range`). Fix: reject above a cap (64MB).
@@ -920,6 +897,25 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS1` —
+  **N-122** every git child goes through ONE constructor:
+  `internal/child` (`Detach`: Setsid, a ctx cancel that SIGTERMs the
+  whole process GROUP, `WaitDelay`; `GitEnv`: `GIT_TERMINAL_PROMPT=0`,
+  `GPG_TTY` dropped, `GIT_OPTIONAL_LOCKS=0` on reads; `Git`). App side
+  (gitexec.go): reads via `gitReadOutput` / `gitReadRun` /
+  `gitReadCombined` with a 2m deadline, ended by Close
+  (`endReadChildren`); writes (`runGitCmdFull`, `runGitCmdSeqHook` — one
+  deadline per set — `runGitApplyPatch`) 15m, not ended by Close. All
+  ~45 git forks converted, `ls-remote` and the finder's `ls-files`
+  included; custom actions detached with a 1h cap.
+  `TestGitChildrenUseTheConstructor` pins it. Checked: under a real pty
+  (python `pty.fork`) a plain child opens /dev/tty and a detached one
+  can't; `TestRunGitCmd_CredentialPromptFailsIntoTheModal` (an httptest
+  401 server, helpers cleared) fails fast with "terminal prompts
+  disabled" in the done-event, run inside the pty too;
+  `TestDetach_DeadlineEndsTheWholeGroup` (`sleep 30 & sleep 30` returns
+  at the deadline). N-126 (a) and (b) landed alongside.
 
 - closed 2026-11-17, `2026-1117-SESS1` —
   **N-147** `gofmt -w` on the eight drifted test files (trailing blank

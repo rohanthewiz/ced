@@ -31,7 +31,6 @@ package app
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -393,7 +392,7 @@ func loadGitStatusFiles(rootDir string) []gitPanelFile {
 		return nil
 	}
 	toplevel := gitToplevel(rootDir)
-	out, err := exec.Command("git", "-C", rootDir, "status", "--porcelain=v2", "-z").Output()
+	out, err := gitReadOutput("-C", rootDir, "status", "--porcelain=v2", "-z")
 	if err != nil || toplevel == "" {
 		return nil
 	}
@@ -487,7 +486,7 @@ func loadGitPanelDiff(rootDir string, f gitPanelFile, ws bool) ([]string, diffSi
 		}
 		full = append(full, args...)
 		full = append(full, "--", f.Path)
-		out, err := exec.Command("git", full...).Output()
+		out, err := gitReadOutput(full...)
 		if err != nil {
 			return nil
 		}
@@ -519,7 +518,7 @@ func loadGitPanelDiff(rootDir string, f gitPanelFile, ws bool) ([]string, diffSi
 	if ws {
 		head = append(head, "-w")
 	}
-	if out, err := exec.Command("git", append(head, "--", f.Path)...).Output(); err == nil {
+	if out, err := gitReadOutput(append(head, "--", f.Path)...); err == nil {
 		if lines := splitDiffLines(out); len(lines) > 0 {
 			return lines, sideNone
 		}

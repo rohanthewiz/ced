@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rohanthewiz/ced/internal/plugins"
 	"github.com/rohanthewiz/ced/internal/theme"
@@ -361,3 +362,65 @@ type shellExitError struct{}
 
 // Error implements error.
 func (*shellExitError) Error() string { return "exit status 1" }
+
+// TestPluginRunGate_SecondRunParksAndRelaunches pins N-126b's in-flight
+// check: a second event for a command already running for the file
+// starts nothing, and the first run's done-event starts exactly one
+// follow-up (the parked relaunch), after which the gate is free again.
+func TestPluginRunGate_SecondRunParksAndRelaunches(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	key := pluginRunKey("deco", "p", "lint", "/x.go")
+	if !a.pluginRunBegin(key, nil) {
+		t.Fatal("the first run was refused")
+	}
+	relaunched := 0
+	park := func() { relaunched++ }
+	if a.pluginRunBegin(key, park) || a.pluginRunBegin(key, park) {
+		t.Fatal("a run started beside one already in flight")
+	}
+	a.pluginRunEnd(key, a.plugins.seq)
+	if relaunched != 1 {
+		t.Errorf("relaunched %d times, want once", relaunched)
+	}
+	if !a.pluginRunBegin(key, nil) {
+		t.Error("the gate stayed shut after the run ended")
+	}
+}
+
+// TestPluginRunGate_StaleOrOldGenerationDoesNotGate pins the two escape
+// hatches: a run whose done-event was lost (older than pluginRunStale)
+// and a run from before a reload must not keep a provider quiet.
+func TestPluginRunGate_StaleOrOldGenerationDoesNotGate(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	key := pluginRunKey("hook", "p", "fmt", "/x.go")
+	a.plugins.running = map[string]*pluginRun{
+		key: {seq: a.plugins.seq, started: time.Now().Add(-pluginRunStale - time.Second)},
+	}
+	if !a.pluginRunBegin(key, nil) {
+		t.Error("a stale run still gated")
+	}
+	a.plugins.running[key] = &pluginRun{seq: a.plugins.seq - 1, started: time.Now()}
+	if !a.pluginRunBegin(key, nil) {
+		t.Error("a run from an older generation still gated")
+	}
+}
+
+// TestPluginRunGate_ReloadDropsTheParkedRelaunch pins that a relaunch
+// parked under the old inventory is not started after a reload — the
+// command it would run may no longer exist.
+func TestPluginRunGate_ReloadDropsTheParkedRelaunch(t *testing.T) {
+	a := newTestApp(t, t.TempDir())
+	key := pluginRunKey("deco", "p", "lint", "/x.go")
+	a.pluginRunBegin(key, nil)
+	ran := false
+	a.pluginRunBegin(key, func() { ran = true })
+	old := a.plugins.seq
+	a.plugins.seq++
+	a.pluginRunEnd(key, old)
+	if ran {
+		t.Error("a relaunch parked before the reload ran after it")
+	}
+	if _, ok := a.plugins.running[key]; ok {
+		t.Error("the finished run still holds its key")
+	}
+}

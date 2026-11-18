@@ -92,6 +92,7 @@ internal/spell/               Struct-tag spell check: embedded SCOWL + extra/ide
                               ident.go (name splitter, compounds), structtag.go, suggest.go
 internal/userconfig/          ~/.config/ced/config.json + other config paths
 internal/crash/               Goroutine panic guard (Recover/SetHandler); rescue folders
+internal/child/               Detached children: Setsid, group kill on ctx, WaitDelay; GitEnv
 internal/clipboard/           OSC 52 with tmux passthrough
 internal/icons/               Nerd Font detection + glyphs
 internal/app/
@@ -117,6 +118,7 @@ internal/app/
   git*.go compare.go           Git panel/log/commit/receipt/status; compare panel
   gitcommitall.go             Commit all changes (Esc G): save tabs, add -A, commit the folder
   gitsnapshot.go              Async git status snapshot (coalesced, seq-checked)
+  gitexec.go                  Git child deadlines + lifetimes (reads end at Close, writes finish)
   diffview.go comparerevert.go  Shared diff layer (split/ws/steppers); compare hunk revert
   gitrestore.go               Restore one file to HEAD (tree/tab/≡ Git rows)
   gitconflict.go gitopstate.go  Conflict picker + stop hook; parked-op / unmerged reads
@@ -204,6 +206,16 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - **Events only.** Goroutines never mutate UI state; they post custom
   tcell events handled on the main loop. Blocking server→client requests
   post an event with a buffered reply channel and wait.
+- **Every child process is DETACHED** (internal/child, N-122): its own
+  session (no prompt can reach ced's tty), a context whose cancel
+  SIGTERMs the whole GROUP, `WaitDelay`. git goes through `child.Git` /
+  `gitReadOutput` / `gitReadRun` (`GIT_TERMINAL_PROMPT=0`, no `GPG_TTY`,
+  `GIT_OPTIONAL_LOCKS=0` on reads) — never `exec.Command("git", …)`
+  (`TestGitChildrenUseTheConstructor`). Reads: 2m deadline, ended by
+  Close. Writes (git writes, formatters 45s, plugins 30s, custom actions
+  1h): NOT ended by Close — a kill mid-write leaves index.lock / a
+  half-written file. Plugin runs are gated per (command, file)
+  (`pluginRunBegin`): a mid-run event parks one relaunch.
 - **Every goroutine starts with `defer crash.Recover()`**
   (`TestEveryGoroutineRecovers`: first statement of the func literal, or of
   the named func/closure a `go` calls — unique name in its package). It

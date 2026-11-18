@@ -35,7 +35,6 @@ package app
 
 import (
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -620,14 +619,14 @@ func loadCommitDiff(rootDir string, files []gitPanelFile) string {
 			args = append(args, "HEAD", "--")
 			args = append(args, gitPanelPaths(tracked)...)
 		}
-		out, err := exec.Command("git", args...).Output()
+		out, err := gitReadOutput(args...)
 		if err != nil && len(files) > 0 {
 			// No HEAD yet (unborn branch): every tracked path is new,
 			// so compare against the index instead of a commit that
 			// doesn't exist.
 			retry := []string{"-C", rootDir, "diff", "--no-color", "--stat", "--patch", "--"}
 			retry = append(retry, gitPanelPaths(tracked)...)
-			out, _ = exec.Command("git", retry...).Output()
+			out, _ = gitReadOutput(retry...)
 		}
 		if s := strings.TrimRight(string(out), "\n"); s != "" {
 			parts = append(parts, s)

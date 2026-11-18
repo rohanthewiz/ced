@@ -78,12 +78,12 @@ package app
 
 import (
 	"hash/fnv"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/child"
 	"github.com/rohanthewiz/ced/internal/crash"
 	"github.com/rohanthewiz/ced/internal/editor"
 	"github.com/rohanthewiz/ced/internal/theme"
@@ -797,7 +797,9 @@ func loadFileBlameRange(rootDir, path, contents string, now time.Time, lo, hi in
 	if lo > 0 {
 		args = append(args, "-L", strconv.Itoa(lo)+","+strconv.Itoa(hi))
 	}
-	cmd := exec.Command("git", append(args, "--", path)...)
+	ctx, cancel := gitReadCtx()
+	defer cancel()
+	cmd := child.Git(ctx, nil, true, append(args, "--", path)...)
 	cmd.Stdin = strings.NewReader(contents)
 	out, err := cmd.Output()
 	if err != nil {

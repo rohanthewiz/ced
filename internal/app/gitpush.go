@@ -62,7 +62,6 @@
 package app
 
 import (
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -362,7 +361,7 @@ func gitCurrentBranch(rootDir string) string {
 	if rootDir == "" {
 		return ""
 	}
-	out, err := exec.Command("git", "-C", rootDir, "symbolic-ref", "--short", "HEAD").Output()
+	out, err := gitReadOutput("-C", rootDir, "symbolic-ref", "--short", "HEAD")
 	if err != nil {
 		return ""
 	}
@@ -421,9 +420,11 @@ func (e *gitPushRefsEvent) When() time.Time { return e.when }
 // extra", not "the dialog is broken". git's own diagnosis shows up in
 // the info modal if the push itself then fails.
 //
-// GIT_TERMINAL_PROMPT=0 keeps a credential prompt from blocking this
-// goroutine forever on an HTTPS remote with no cached credentials —
-// nothing is attached to a terminal it could prompt on.
+// A credential prompt can't block it: every git child runs in its own
+// session with GIT_TERMINAL_PROMPT=0 (internal/child, gitexec.go), so an
+// HTTPS remote with no cached credentials fails fast instead of asking
+// on ced's terminal. It is a READ (it changes nothing locally), so Close
+// ends it and the read deadline bounds a server that never answers.
 func (a *App) fetchGitPushHeads(remote string) {
 	if a.screen == nil || a.rootDir == "" || remote == "" {
 		return
@@ -431,10 +432,8 @@ func (a *App) fetchGitPushHeads(remote string) {
 	scr, root := a.screen, a.rootDir
 	go func() {
 		defer crash.Recover()
-		cmd := exec.Command("git", "-C", root, "ls-remote", "--heads", remote)
-		cmd.Env = append(cmd.Environ(), "GIT_TERMINAL_PROMPT=0")
 		var heads []string
-		if out, err := cmd.Output(); err == nil {
+		if out, err := gitReadOutput("-C", root, "ls-remote", "--heads", remote); err == nil {
 			heads = parseLsRemoteHeads(out)
 		}
 		_ = scr.PostEvent(&gitPushRefsEvent{when: time.Now(), remote: remote, heads: heads})

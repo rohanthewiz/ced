@@ -409,7 +409,7 @@ and `raised`.
   DESATURATED red and the clean-tabs confirm opens on Yes: also check the
   dusty red still reads as "close the editor" (not as muted chrome) in a
   couple of themes, and that click + Enter quits.
-  2026-11-17 (`2026-1117-SESS4`, N-139 harness, tmux 3.5a): a scripted click on
+  2026-11-17 (`2026-1117-2326-n139-n151-tmux-harness-clipboard`, N-139 harness, tmux 3.5a): a scripted click on
   ✕ through tmux's mouse forwarding opens "Close the editor?", and a click
   on ≡ opens the menu — PASS. Still by hand: the dusty red by eye, cats,
   click + Enter quitting.
@@ -435,7 +435,7 @@ and `raised`.
   flicker, a click or key dismisses it without being eaten, and the
   unpinned Find-all list's ⟳ ◇ ◨ labels draw ABOVE the list. Where no
   motion is reported, nothing appears and nothing breaks.
-  2026-11-17 (`2026-1117-SESS4`, N-139 harness, plain tmux 3.5a `mouse on`): a
+  2026-11-17 (`2026-1117-2326-n139-n151-tmux-harness-clipboard`, N-139 harness, plain tmux 3.5a `mouse on`): a
   motion report resting on ≡ shows "Action menu" after the dwell — PASS.
   Still by hand: the other buttons, flicker across `Actions ▾`, the
   Find-all list's labels, cats and macOS Terminal + tmux.
@@ -451,7 +451,7 @@ and `raised`.
   last push output" brings it back. Also try ≡ Git "New branch…" (bad
   name → git's refusal modal; dirty tree → the "changes come along"
   hint).
-  2026-11-17 (`2026-1117-SESS4`, N-139 harness): OSC 52 through tmux reaches the
+  2026-11-17 (`2026-1117-2326-n139-n151-tmux-harness-clipboard`, N-139 harness): OSC 52 through tmux reaches the
   outer terminal ONLY with `allow-passthrough on`; an untouched tmux 3.5a
   drops it — raised as N-151 ([ Copy link ] uses the same path).
   2026-11-17: N-151 fixed that — an untouched tmux now passes too
@@ -476,7 +476,7 @@ and `raised`.
   missing closing )" in red, `$1` replace (bar Replace / All and the
   list's "Replace in N") expands, and the `[regex: off]` chip on the
   find prompts flips with a click and alt+r.
-  2026-11-17 (`2026-1117-SESS4`, N-139 harness, tmux 3.5a): "Esc r" sent as one
+  2026-11-17 (`2026-1117-2326-n139-n151-tmux-harness-clipboard`, N-139 harness, tmux 3.5a): "Esc r" sent as one
   write reaches the find bar as Alt+r through tmux's Esc folding and
   toggles regex (not Redo): `(fmt` then shows "regex: missing closing )"
   — PASS. Still by hand: the `.*` click, `$1` replace, the prompt chip.
@@ -505,7 +505,7 @@ and `raised`.
   (run-ced PTY: a scripted drag across the git panel diff flashed "3
   lines copied"): check those three too, and that the git panel's hunk
   chips and the compare `[↺]` still answer a real click.
-  2026-11-17 (`2026-1117-SESS4`, N-139 harness, tmux 3.5a): a copy's OSC 52 (Copy
+  2026-11-17 (`2026-1117-2326-n139-n151-tmux-harness-clipboard`, N-139 harness, tmux 3.5a): a copy's OSC 52 (Copy
   reference, `/work/main.go:1`) reaches the terminal OUTSIDE tmux with the
   recommended config (allow-passthrough on) — PASS — and NOTHING reaches
   it under an untouched tmux, whose default drops the passthrough DCS
@@ -537,7 +537,7 @@ and `raised`.
   goes back to the starting tab; the seam's grip is visible against the
   theme, the drag tracks from where it was seized, and a pinned panel's
   seam drags too.
-  2026-11-17 (`2026-1117-SESS4`, N-139 harness, tmux 3.5a): press / drag / release
+  2026-11-17 (`2026-1117-2326-n139-n151-tmux-harness-clipboard`, N-139 harness, tmux 3.5a): press / drag / release
   through tmux's mouse forwarding moves a seam (the tree's, 30 → ≥40) —
   PASS for drag forwarding; the Find-all seam and the click-then-Esc
   behaviour are still by hand.
@@ -561,7 +561,7 @@ and `raised`.
   (an editor click while it is up makes Esc stay). Hand check in tmux
   and cats: the click lands on the line under the pointer in both docks,
   and the bar's Esc / click-then-Esc feel right in daily use.
-  2026-11-17 (`2026-1117-SESS4`, N-139 harness, tmux 3.5a): Alt+x through tmux's
+  2026-11-17 (`2026-1117-2326-n139-n151-tmux-harness-clipboard`, N-139 harness, tmux 3.5a): Alt+x through tmux's
   Esc folding empties the Find-all prompt's field and does not arm the
   Esc-x plugin leader — PASS. Still by hand: a real click on the ×,
   feel on a large file, cats.
@@ -847,7 +847,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-11-17, `2026-1117-SESS4` —
+- closed 2026-11-17, `2026-1117-2326-n139-n151-tmux-harness-clipboard` —
   **N-151** copy works inside an untouched tmux: with `$TMUX` set,
   `clipboard.CopyToSystem` also runs `tmux load-buffer -w -` (text on
   stdin, detached, 5s cap, on a goroutine; `clipboard.TmuxLoadBuffer` is
@@ -858,7 +858,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   forms; `checks.sh` 9/9 PASS (the untouched-tmux row failed before the
   fix with no OSC 52 at all). README's clipboard lines updated.
 
-- closed 2026-11-17, `2026-1117-SESS4` —
+- closed 2026-11-17, `2026-1117-2326-n139-n151-tmux-harness-clipboard` —
   **N-139** the hand checks that are about tmux itself are scripted:
   `.claude/skills/run-ced/tmux/` runs the run-ced driver INSIDE tmux 3.5a
   in a Linux container (image `ced-tmux-harness`, golang:1.26.1 + apt

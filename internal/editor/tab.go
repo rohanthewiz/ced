@@ -122,6 +122,15 @@ type Tab struct {
 	// missing. It exists so we only flash the "deleted on disk" warning
 	// once, instead of re-flashing every reconcile tick.
 	DiskGone bool
+	// DiskGoneClean records that the tab was CLEAN when its file went
+	// missing, and DiskGoneRev its EditRev at that moment (N-121c).
+	// DiskGone has to mark the buffer dirty — it is then the only copy —
+	// but if the file comes back (a branch switched away and back) and
+	// the buffer was never touched meanwhile, the tab is still a clean
+	// view of that file, not "unsaved edits" in conflict with it. The
+	// reconcile tick (app/reconcile.go) reads both.
+	DiskGoneClean bool
+	DiskGoneRev   int
 
 	// cursorMoved is set by every method that changes Cursor; Render
 	// consumes it to decide whether to scroll the viewport so the cursor

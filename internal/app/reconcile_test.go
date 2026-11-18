@@ -843,3 +843,50 @@ func TestTabMarkerClick_MissesTheFilename(t *testing.T) {
 		t.Fatalf("it should still switch tabs, activeTab = %d", a.activeTab)
 	}
 }
+
+// TestReconcile_CleanTabWhoseFileReturnsReloads is N-121(c): a CLEAN tab's
+// file vanishes and comes back with new content (git checkout of another
+// branch and back, or a branch where it differs). DiskGone had to mark
+// the buffer dirty while it was the only copy, but the user never touched
+// it — so on return the tab takes the new content (undoably), with no
+// conflict. Before, it came back as "unsaved edits" in conflict, and Keep
+// mine would have written the stale text over the new.
+func TestReconcile_CleanTabWhoseFileReturnsReloads(t *testing.T) {
+	a, tab, path := reconcileFixture(t)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	a.reconcileOpenTabsWithDisk()
+	if !tab.DiskGone || !tab.Dirty {
+		t.Fatalf("gone: DiskGone=%v Dirty=%v", tab.DiskGone, tab.Dirty)
+	}
+	if err := os.WriteFile(path, []byte("package main\n\n// the other branch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.reconcileOpenTabsWithDisk()
+	if tab.Dirty || a.conflictFor(tab) != nil {
+		t.Fatalf("returned file: Dirty=%v conflict=%v, want a clean reload", tab.Dirty, a.conflictFor(tab) != nil)
+	}
+	if !strings.Contains(tab.Buffer.String(), "the other branch") {
+		t.Errorf("buffer = %q, want the returned content", tab.Buffer.String())
+	}
+}
+
+// TestReconcile_EditedWhileGoneStillConflicts: the clean-return rule is
+// only for an UNTOUCHED buffer. Typing while the file was missing makes
+// the buffer real unsaved work, and its return is a conflict as before.
+func TestReconcile_EditedWhileGoneStillConflicts(t *testing.T) {
+	a, tab, path := reconcileFixture(t)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	a.reconcileOpenTabsWithDisk()
+	tab.InsertString("// typed while it was gone\n")
+	if err := os.WriteFile(path, []byte("package main\n\n// the other branch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.reconcileOpenTabsWithDisk()
+	if !tab.Dirty || a.conflictFor(tab) == nil {
+		t.Fatalf("Dirty=%v conflict=%v, want the edit kept and a conflict recorded", tab.Dirty, a.conflictFor(tab) != nil)
+	}
+}

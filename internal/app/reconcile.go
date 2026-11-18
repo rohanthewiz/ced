@@ -130,6 +130,10 @@ func (a *App) reconcileOpenTabsWithDisk() {
 		if os.IsNotExist(err) {
 			if !tab.DiskGone {
 				tab.DiskGone = true
+				// Remember whether this was a clean view, so a return of
+				// the file to an untouched buffer is a reload, not a
+				// false conflict (below).
+				tab.DiskGoneClean, tab.DiskGoneRev = !tab.Dirty, tab.EditRev
 				// Dirty because the buffer is now the only copy that
 				// exists: marking it clean would let the editor quit
 				// without a murmur and take the file's last remains
@@ -155,6 +159,17 @@ func (a *App) reconcileOpenTabsWithDisk() {
 			// reload or warn about a dirty conflict.
 			tab.DiskGone = false
 			tab.ForgetDiskStamp()
+			// A tab that was CLEAN when the file vanished and has not been
+			// edited since is clean again (N-121c): DiskGone only made it
+			// dirty because the buffer was the sole copy, and that is
+			// over. Without this the return — a branch switched away and
+			// back — read as unsaved edits in conflict with the file, and
+			// "Keep mine" wrote the stale text over the new content. The
+			// clean path below then takes the disk copy, undoably.
+			if tab.DiskGoneClean && tab.EditRev == tab.DiskGoneRev {
+				tab.Dirty = false
+			}
+			tab.DiskGoneClean = false
 		}
 		// ANY difference from the version the tab read or wrote counts —
 		// an older mtime (cp -p, rsync -t, a restored backup) and a

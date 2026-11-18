@@ -533,3 +533,47 @@ func TestAutoSaveTab_ReloadsASpellDictionary(t *testing.T) {
 		t.Errorf("auto-saving the project dictionary: %d loads, want 1", *calls)
 	}
 }
+
+// TestAutoSaveTab_KeepsRedoByNotFormatting is N-121(b): undo, then an
+// idle auto-save. The quiet formatter's rewrite would be adopted as an
+// edit and clear the redo stack, throwing away what the user could still
+// redo — so while the tab can redo, auto-save saves but does not format.
+// After a fresh edit (no redo left) it formats as before.
+func TestAutoSaveTab_KeepsRedoByNotFormatting(t *testing.T) {
+	useTestTrustFile(t)
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	calls := stubBuiltinFormatter(t, []string{"true"})
+	target := filepath.Join(root, "main.go")
+	if err := os.WriteFile(target, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.openFile(target)
+	tab := a.activeTabPtr()
+	// Two edits, one undo: the buffer still differs from disk (dirty)
+	// and the second edit is redoable.
+	tab.InsertString("// one\n")
+	tab.InsertString("// two\n")
+	tab.Undo()
+	if !tab.CanRedo() || !tab.Dirty {
+		t.Fatalf("fixture: redo=%v dirty=%v", tab.CanRedo(), tab.Dirty)
+	}
+	before := *calls
+	if !a.autoSaveTab(a.activeTab) {
+		t.Fatal("auto-save failed")
+	}
+	if *calls != before {
+		t.Error("auto-save ran the formatter while the tab could redo")
+	}
+	if !tab.CanRedo() {
+		t.Error("the redo stack is gone")
+	}
+
+	tab.InsertString("x") // a fresh edit clears redo
+	if !a.autoSaveTab(a.activeTab) {
+		t.Fatal("auto-save failed")
+	}
+	if *calls == before {
+		t.Error("with nothing to redo, auto-save should format as before")
+	}
+}

@@ -72,17 +72,19 @@ plus the LSP work done in the seeding session itself
   (fileio.go:203-236). Fix: `fchown` the temp and copy the full mode;
   write in place when nlink > 1 or ownership can't be kept; refuse or
   confirm when the target lacks owner write.
-  (b) Undo onto a state gofmt would change, then one idle auto-save:
+  ~~(b) Undo onto a state gofmt would change, then one idle auto-save:
   `ReloadAsEdit`'s `pushUndo` clears the redo stack (tab.go:586,
-  undo.go:244). Fix: skip auto-save (or the quiet formatter) while
-  `CanRedo()`.
-  (c) A clean tab whose file vanishes and returns (branch switch away
+  undo.go:244).~~ DONE 2026-11-17 (`2026-1117-SESS5`): auto-save still
+  saves but skips the quiet formatter while `CanRedo()`
+  (`TestAutoSaveTab_KeepsRedoByNotFormatting`, fails before).
+  ~~(c) A clean tab whose file vanishes and returns (branch switch away
   and back) was marked Dirty by DiskGone (reconcile.go:128-136), so it
   comes back as a false "unsaved edits" conflict holding stale text,
-  and "Keep mine" overwrites the new content. Fix: remember whether it
-  was dirty before DiskGone; if clean, `ReloadUndoable`. (Since N-113 /
-  N-117, DiskGone also calls `ForgetSavedText`, and the return calls
-  `ForgetDiskStamp`; a reload re-seeds both.)
+  and "Keep mine" overwrites the new content.~~ DONE 2026-11-17:
+  `Tab.DiskGoneClean` / `DiskGoneRev` record a clean tab at the vanish;
+  an untouched return clears Dirty and takes the clean path
+  (`ReloadUndoable`) — `TestReconcile_CleanTabWhoseFileReturnsReloads`
+  (fails before), `TestReconcile_EditedWhileGoneStillConflicts`.
   (d) The chat agent's fs write is a plain `os.WriteFile(…, 0o644)`
   and an open CRLF / BOM tab is served to it as LF without the BOM
   (copilot_chat_perm.go:584-587, :614-620), so the write-back converts

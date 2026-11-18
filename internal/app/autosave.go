@@ -327,7 +327,16 @@ func (a *App) autoSaveTab(idx int) bool {
 	// reload rides here too; a no-op for every other path and silent
 	// either way (spellcheck.go).
 	a.spellAfterSave(tab.Path)
-	a.runFormatOnSave(idx, true)
+	// No quiet format while the tab can REDO (N-121b). A formatter's
+	// rewrite is adopted as an edit (ReloadAsEdit → pushUndo), and a new
+	// edit clears the redo stack: undo onto text gofmt would change,
+	// pause, and the idle auto-save silently threw away everything the
+	// user could still have redone. The save itself still happens; the
+	// next explicit save (or the next auto-save after a fresh edit, which
+	// clears redo anyway) formats.
+	if !tab.CanRedo() {
+		a.runFormatOnSave(idx, true)
+	}
 	return true
 }
 

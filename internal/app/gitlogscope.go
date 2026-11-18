@@ -429,14 +429,21 @@ func (a *App) setGitLogScope(scope string) {
 // asked on an empty result, so a healthy panel never pays the fork.
 func (a *App) gitLogScopeGone() bool {
 	s := a.gitLog.scope
-	if s == gitLogScopeHead || s == gitLogScopeAll {
-		return false
-	}
-	err := gitReadRun("-C", a.rootDir, "rev-parse", "--verify", "--quiet", s)
-	if err == nil {
+	if !gitLogRefGone(a.rootDir, s) {
 		return false
 	}
 	a.gitLog.scope = gitLogScopeHead
 	a.flash(gitLogRefShort(s) + " is gone — showing the current branch")
 	return true
+}
+
+// gitLogRefGone is gitLogScopeGone's question without the answer's side
+// effects: does scope name a ref that no longer exists? The current
+// branch and --all never do. A plain function of the root so the tick's
+// off-loop reload (gitpaneltick.go) can ask it.
+func gitLogRefGone(rootDir, scope string) bool {
+	if scope == gitLogScopeHead || scope == gitLogScopeAll {
+		return false
+	}
+	return gitReadRun("-C", rootDir, "rev-parse", "--verify", "--quiet", scope) != nil
 }

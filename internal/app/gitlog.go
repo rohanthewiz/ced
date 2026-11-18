@@ -85,6 +85,9 @@ type gitLogCommit struct {
 // panel — reopening puts the user back on the commit they were reading.
 type gitLogState struct {
 	open bool
+	// loadSeq numbers the tick's off-loop reloads (gitpaneltick.go):
+	// only the newest one's answer is applied.
+	loadSeq int
 	// listWidth is the user-chosen commit-list column count from a
 	// list/detail divider drag; 0 means "auto". Session-only. The
 	// panel's own SIZE is not here: a tool window's extent lives in the

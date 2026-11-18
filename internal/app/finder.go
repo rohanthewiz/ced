@@ -224,13 +224,15 @@ func (m *finderModal) refresh(a *App) {
 }
 
 // invalidateFinder marks the index stale and kicks off a rebuild.
-// Called by the file-tree refresh tick and by every fileops
-// mutation (create / rename / delete) so the finder doesn't show
-// ghost paths or miss freshly-created files.
+// Called by every fileops mutation (create / rename / delete) and
+// finished git command so the finder doesn't show ghost paths or miss
+// freshly-created files — and by the refresh tick only when something
+// may have changed (finderTickRebuild, N-140).
 func (a *App) invalidateFinder() {
 	if a.finder == nil {
 		return
 	}
+	a.finderBuiltAt = time.Now()
 	a.finder.Invalidate()
 	scr := a.screen
 	a.finder.Rebuild(func() {
@@ -500,4 +502,38 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+// finderMaxAge is the longest the refresh tick lets the finder index go
+// without a rebuild, whatever the change signals say. They cannot see
+// everything — a file added inside a folder the tree never expanded, in
+// a project that is not a git repository, moves neither — and a minute
+// bounds how stale that can leave the finder.
+const finderMaxAge = time.Minute
+
+// finderTickRebuild is the refresh tick's finder decision (N-140): it
+// used to rebuild the index (`git ls-files`, or a walk) every period
+// whether or not anything changed. Now: when the tree's loaded folders
+// changed, or the index is older than finderMaxAge. The git half of the
+// signal arrives later, with the status snapshot (finderAfterGitStatus).
+func (a *App) finderTickRebuild(treeChanged bool) {
+	if treeChanged || time.Since(a.finderBuiltAt) >= finderMaxAge {
+		a.invalidateFinder()
+	}
+}
+
+// finderAfterGitStatus rebuilds the finder index when a status snapshot's
+// file-set fingerprint (gitStatus.FilesSig) differs from the last one —
+// files came or went somewhere git looks, collapsed folders and a
+// checkout in another pane included. The first snapshot only records the
+// fingerprint: the index was just built at startup.
+func (a *App) finderAfterGitStatus(sig string) {
+	if sig == a.finderStatusSig {
+		return
+	}
+	first := a.finderStatusSig == ""
+	a.finderStatusSig = sig
+	if !first {
+		a.invalidateFinder()
+	}
 }

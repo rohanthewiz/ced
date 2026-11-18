@@ -90,6 +90,9 @@ const (
 // conflictPanelState is the panel's whole state, mutated on the main loop.
 type conflictPanelState struct {
 	open bool
+	// loadSeq numbers the tick's off-loop reloads (gitpaneltick.go):
+	// only the newest one's answer is applied.
+	loadSeq int
 
 	info     gitOpInfo
 	files    []conflictFile // unmerged right now, path order
@@ -198,14 +201,41 @@ func (a *App) conflictPanelToggleLabel() string {
 // tick and every finished git command ride that), and after the panel's
 // own verbs.
 func (a *App) refreshConflictPanel() {
-	st := &a.conflictPanel
-	gitDir := a.gitDir
+	a.applyConflictPanelData(loadConflictPanelData(a.rootDir, a.gitDir, a.conflictPanel.info))
+}
+
+// conflictPanelData is everything refreshConflictPanel reads from git and
+// the git dir — split from the apply so the refresh TICK can gather it
+// off the main loop (gitpaneltick.go, N-140) while every other caller
+// keeps the inline refresh.
+type conflictPanelData struct {
+	op    string
+	top   string
+	files []conflictFile
+	info  gitOpInfo
+	empty bool
+}
+
+// loadConflictPanelData gathers a refresh's inputs: the operation, the
+// unmerged files, the operation's record (reusing prev's summary), and
+// whether a stopped pick has nothing left staged. Forks; safe off-loop
+// (it reads nothing of the App's).
+func loadConflictPanelData(rootDir, gitDir string, prev gitOpInfo) conflictPanelData {
 	if gitDir == "" {
-		gitDir = gitAbsoluteDir(a.rootDir)
+		gitDir = gitAbsoluteDir(rootDir)
 	}
 	op := gitOpFromGitDir(gitDir)
-	top, files := loadConflictFiles(a.rootDir)
-	info := reloadGitOpInfo(a.rootDir, gitDir, op, st.info)
+	top, files := loadConflictFiles(rootDir)
+	d := conflictPanelData{op: op, top: top, files: files, info: reloadGitOpInfo(rootDir, gitDir, op, prev)}
+	d.empty = len(files) == 0 && (op == "cherry-pick" || op == "revert") && !gitIndexHasChanges(rootDir)
+	return d
+}
+
+// applyConflictPanelData installs gathered inputs on the main loop: the
+// settled-since-this-stop memory, the rows, the counts.
+func (a *App) applyConflictPanelData(d conflictPanelData) {
+	st := &a.conflictPanel
+	op, top, files, info := d.op, d.top, d.files, d.info
 
 	// The settled-since-this-stop memory: kept while the stop is the same
 	// one, and grown by every file that was unmerged a refresh ago and is
@@ -225,7 +255,7 @@ func (a *App) refreshConflictPanel() {
 		}
 	}
 	st.info, st.files, st.toplevel = info, files, top
-	st.empty = len(files) == 0 && (op == "cherry-pick" || op == "revert") && !gitIndexHasChanges(a.rootDir)
+	st.empty = d.empty
 	a.refreshConflictPanelCounts()
 	a.conflictPanelClamp()
 }

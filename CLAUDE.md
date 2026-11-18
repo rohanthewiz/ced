@@ -119,6 +119,7 @@ internal/app/
   git*.go compare.go           Git panel/log/commit/receipt/status; compare panel
   gitcommitall.go             Commit all changes (Esc G): save tabs, add -A, commit the folder
   gitsnapshot.go              Async git status snapshot (coalesced, seq-checked)
+  gitpaneltick.go             Tick-time git log / Conflicts reloads off the loop
   gitexec.go                  Git child deadlines + lifetimes (reads end at Close, writes finish)
   postresult.go               Reliable delivery for completion events (retry while the queue is full)
   diffview.go comparerevert.go  Shared diff layer (split/ws/steppers); compare hunk revert
@@ -432,7 +433,14 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   (gitstatus.go: rev-parse with the stash `--glob`, `status
   --porcelain=v2 --branch -z`); the git panel takes its rows from it
   (`setGitPanelFiles`), and its own read (`loadGitStatusFiles`) shares
-  `parsePorcelainV2`. XY codes stay in v1's spelling.
+  `parsePorcelainV2`. XY codes stay in v1's spelling. Its apply
+  (`applyGitStatus`) reloads the git log / Conflicts panels OFF the loop
+  in an async App (gitpaneltick.go: `gitLogLoadedEvent` /
+  `conflictLoadedEvent`, newest `loadSeq` wins; open / ⟳ / post-command
+  hooks stay inline), and rebuilds the finder only when `FilesSig` (HEAD
+  oid + entries) moved. The tick rebuilds it only when `Tree.Refresh`
+  reports a listing change or the index is older than `finderMaxAge`
+  (60s); explicit file ops and git commands always rebuild.
 - **Gutter diffs on the tick are stamp-gated (gitdiff.go)**: a path is
   re-diffed only when its file or the index stamp moved
   (`diffStamp`, taken BEFORE git runs, recorded on arrival); stamps

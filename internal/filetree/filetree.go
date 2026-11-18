@@ -251,13 +251,23 @@ func loadChildren(n *Node) error {
 // are kept by-pointer so their Expanded state, loaded grandchildren, etc.
 // survive a refresh. New names get fresh Nodes; vanished names are dropped.
 func (n *Node) reload() error {
+	_, err := n.reloadChanged()
+	return err
+}
+
+// reloadChanged is reload that also reports whether the directory's
+// entries CHANGED — a name added or removed, or a file turned folder
+// (N-140: the refresh tick rebuilds the finder index only when something
+// did). An executable bit flipping is not a change of the listing.
+func (n *Node) reloadChanged() (changed bool, err error) {
 	if !n.IsDir {
-		return nil
+		return false, nil
 	}
 	entries, err := os.ReadDir(n.Path)
 	if err != nil {
-		return err
+		return false, err
 	}
+	survivors := 0
 
 	existing := make(map[string]*Node, len(n.Children))
 	for _, c := range n.Children {
@@ -283,8 +293,10 @@ func (n *Node) reload() error {
 		if old, ok := existing[e.Name()]; ok && old.IsDir == e.IsDir() {
 			old.IsExec = isExec
 			children = append(children, old)
+			survivors++
 			continue
 		}
+		changed = true // a name this directory didn't have (or a new kind)
 		children = append(children, &Node{
 			Path:   filepath.Join(n.Path, e.Name()),
 			Name:   e.Name(),
@@ -298,9 +310,12 @@ func (n *Node) reload() error {
 		}
 		return strings.ToLower(children[i].Name) < strings.ToLower(children[j].Name)
 	})
+	if survivors != len(n.Children) {
+		changed = true // something vanished
+	}
 	n.Children = children
 	n.Loaded = true
-	return nil
+	return changed, nil
 }
 
 // Refresh re-reads every directory in the tree that has been loaded at
@@ -313,22 +328,31 @@ func (n *Node) reload() error {
 // through and a forgotten prune is invisible: the mark for a file that
 // left the tree would silently widen the next bulk action (the git
 // panel's tick-pruning rule, and the same failure mode).
-func (t *Tree) Refresh() {
-	refreshNode(t.Root)
+//
+// It reports whether any loaded directory's listing changed (a name came
+// or went), so a caller can skip work that only matters when files did
+// (N-140). Only LOADED directories are read, so a change inside a folder
+// the tree never expanded is not seen here.
+func (t *Tree) Refresh() bool {
+	changed := refreshNode(t.Root)
 	t.PruneMarks()
+	return changed
 }
 
 // refreshNode is Tree.Refresh's recursive worker. It reloads only Loaded
 // directories — there's no value in reading directories the user has
-// never seen.
-func refreshNode(n *Node) {
+// never seen — and reports whether any of them changed.
+func refreshNode(n *Node) bool {
 	if !n.IsDir || !n.Loaded {
-		return
+		return false
 	}
-	_ = n.reload()
+	changed, _ := n.reloadChanged()
 	for _, c := range n.Children {
-		refreshNode(c)
+		if refreshNode(c) {
+			changed = true
+		}
 	}
+	return changed
 }
 
 // shouldHide is the project's small, opinionated list of names the file

@@ -2050,6 +2050,11 @@ type App struct {
 	// background-build goroutine ("Esc p" or ≡ → Find file). The
 	// transient UI state of an open finder lives in finderModal.
 	finder *finder.Finder
+	// finderBuiltAt is when the finder index was last (re)built, and
+	// finderStatusSig the git file-set fingerprint it reflects — the
+	// refresh tick's two reasons to rebuild (finder.go, N-140).
+	finderBuiltAt   time.Time
+	finderStatusSig string
 
 	// sessionStore is the workspace state read from state.json: the
 	// recent-folders queue and, per folder, the tabs it had open. Held
@@ -2553,6 +2558,10 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleSyntaxSettle()
 	case *syntaxLexedEvent:
 		a.handleSyntaxLexed(e)
+	case *gitLogLoadedEvent:
+		a.handleGitLogLoaded(e)
+	case *conflictLoadedEvent:
+		a.handleConflictLoaded(e)
 	case *projectSearchEvent:
 		a.handleProjectSearch(e)
 	case *treeRefreshEvent:
@@ -2856,8 +2865,19 @@ func (a *App) refreshTreeAfterGit() {
 }
 
 // refreshTreePipeline is the body of refreshTreeNow / refreshTreeAfterGit.
+//
+// The two differ in the finder too: after a git command ced ran, the
+// index is rebuilt outright (a checkout moves files); on the tick and
+// its relatives it is rebuilt only when something may have changed
+// (finderTickRebuild, N-140).
 func (a *App) refreshTreePipeline(gitInline bool) {
-	a.workspaceChangedGit(gitInline)
+	if gitInline {
+		a.workspaceChangedGit(true)
+	} else {
+		changed := a.tree.Refresh()
+		a.refreshGitStatus()
+		a.finderTickRebuild(changed)
+	}
 	a.reconcileOpenTabsWithDisk()
 	a.requestOpenTabDiffs()
 }

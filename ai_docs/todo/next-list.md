@@ -75,22 +75,6 @@ plus the LSP work done in the seeding session itself
   the file; no repository → the parent dir as today. A change to
   documented behaviour (README Usage, `helpText`): decide.
 
-- **N-140** · raised `2026-1110-1909-n127-git-status-off-loop` · value low
-  **What still forks on the main loop when the snapshot lands.**
-  N-127 took the status snapshot off the loop, but its apply
-  (`applyGitStatus`) still calls two panel refreshes that fork inline
-  while their panel is open: the git log (`refreshGitLogCommits` →
-  `gitToplevel` + `loadGitLogCommits`, two forks at ~40 ms each just to
-  start on the dev Mac, unmeasured as a whole) and the Conflicts panel
-  (`refreshConflictPanel` / `refreshConflictPanelInfo` →
-  `reloadGitOpInfo`, also run while an operation is parked with the
-  panel shut). Every 10s while the log is up, the loop stalls that long.
-  Separately the tick rebuilds the finder index (`git ls-files`,
-  off-loop) every period whether or not anything changed. Fix: give the
-  log and the op-info reads the snapshot's pattern (goroutine +
-  seq-checked event), and skip the finder rebuild when the tree refresh
-  found no change.
-
 - **N-142** · raised `2026-1113-1614-n069-sql-routine-bodies` · value low
   ced's in-process SQL formatter (sqlfmt.go) still does not wrap long
   lines: a long DDL line, call or IN list stays as written. Wrapping
@@ -735,6 +719,27 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS7` —
+  **N-140** nothing forks on the loop when the snapshot lands, and the
+  finder isn't rebuilt every period. In an async App, `applyGitStatus`
+  hands the git log and Conflicts reloads to goroutines
+  (gitpaneltick.go; the gathers split out as `loadGitLogCommits` +
+  `gitLogRefGone` and `loadConflictPanelData`, applied by the same code
+  the inline refresh uses, newest `loadSeq` only; a vanished log scope
+  falls back on the loop). Open / ⟳ / post-command refreshes stay inline.
+  Finder: the tick rebuilds only when `Tree.Refresh` (now reporting a
+  listing change) says so or the index is older than `finderMaxAge`
+  (60s — the backstop for collapsed folders in a non-git project); each
+  status snapshot rebuilds it when its new `FilesSig` (HEAD oid + every
+  entry's XY and path) moved. File ops and finished git commands rebuild
+  as before. `TestGitLogReloadAsync_LoadsOffTheLoopAndApplies`,
+  `TestHandleGitLogLoaded_DropsStaleAndMisdirected`,
+  `TestHandleConflictLoaded_NewestOnlyAndInfoWhenShut`,
+  `TestFinderTickRebuild_OnlyWhenSomethingMayHaveChanged`,
+  `TestFinderAfterGitStatus_RebuildsOnAChangedFingerprint`,
+  `TestFilesSig_TracksHeadAndEntries`,
+  `TestRefresh_ReportsWhetherTheListingChanged` (filetree).
 
 - closed 2026-11-17, `2026-1117-SESS7` —
   **N-136** (the undo-trim half; the cp1252 half closed with N-114) the

@@ -2042,3 +2042,35 @@ func TestRecentFoldersGlyph_MatchesRecentStarWidth(t *testing.T) {
 		t.Fatal("the star must be a single rune — Render paints it with one SetContent")
 	}
 }
+
+// TestRefresh_ReportsWhetherTheListingChanged pins N-140's signal: a
+// refresh with nothing new on disk reports false; a file added to a
+// loaded folder, or one removed, reports true.
+func TestRefresh_ReportsWhetherTheListingChanged(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Refresh() {
+		t.Error("an unchanged folder reported a change")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !tr.Refresh() {
+		t.Error("an added file went unreported")
+	}
+	if err := os.Remove(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if !tr.Refresh() {
+		t.Error("a removed file went unreported")
+	}
+	if tr.Refresh() {
+		t.Error("a second refresh with nothing new reported a change")
+	}
+}

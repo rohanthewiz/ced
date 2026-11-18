@@ -131,6 +131,14 @@ type gitStatus struct {
 	// the snapshot keeps that fork off the main loop (gitpanel.go's
 	// setGitPanelFiles).
 	PanelFiles []gitPanelFile
+
+	// FilesSig fingerprints the set of files git sees: HEAD's commit plus
+	// every changed / untracked entry with its XY code. When it moves
+	// between two snapshots, files may have come or gone where the tree
+	// never looked (a collapsed folder, a checkout in another pane), so
+	// the finder index is rebuilt; when it doesn't, the refresh tick
+	// leaves the index alone (N-140, applyGitStatus).
+	FilesSig string
 }
 
 // loadGitStatus inspects rootDir and returns the snapshot described on
@@ -219,6 +227,7 @@ func loadGitStatus(rootDir string) gitStatus {
 		GitDir:              gitDir,
 		InProgress:          gitOpFromGitDir(gitDir),
 		PanelFiles:          gitPanelFilesFrom(p.Entries, toplevel, rootDir),
+		FilesSig:            p.filesSig(),
 	}
 }
 
@@ -323,6 +332,9 @@ type porcelainStatus struct {
 	// absent. Detached records the "(detached)" spelling.
 	Head     string
 	Detached bool
+	// Oid is "# branch.oid": HEAD's commit, or "(initial)" on an unborn
+	// branch. Read for gitStatus.FilesSig.
+	Oid string
 	// Upstream is "# branch.upstream", kept ONLY when "# branch.ab"
 	// followed it. git prints the upstream's name whenever one is
 	// configured but the ab counts only when that ref actually exists;
@@ -332,6 +344,20 @@ type porcelainStatus struct {
 	Upstream      string
 	Ahead, Behind int
 	Entries       []porcelainEntry
+}
+
+// filesSig is the snapshot's file-set fingerprint (gitStatus.FilesSig):
+// HEAD's oid and each entry's XY + path, in git's own (stable) order.
+func (p porcelainStatus) filesSig() string {
+	var b strings.Builder
+	b.WriteString(p.Oid)
+	for _, e := range p.Entries {
+		b.WriteByte(0)
+		b.WriteString(e.XY)
+		b.WriteByte(' ')
+		b.WriteString(e.Path)
+	}
+	return b.String()
 }
 
 // parsePorcelainV2 reads `git status --porcelain=v2 --branch -z` output.
@@ -362,6 +388,8 @@ func parsePorcelainV2(out []byte) porcelainStatus {
 		case '#':
 			key, val, _ := strings.Cut(strings.TrimPrefix(tok, "# "), " ")
 			switch key {
+			case "branch.oid":
+				p.Oid = val
 			case "branch.head":
 				if val == "(detached)" {
 					p.Detached = true

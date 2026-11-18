@@ -233,15 +233,30 @@ func (a *App) applyGitStatus(st gitStatus) {
 	// tick, saves, file ops, and finished git commands. It takes the
 	// snapshot's own list rather than forking `git status` again.
 	a.setGitPanelFiles(st.PanelFiles)
+	// Files came or went where git looks → the finder index follows
+	// (finder.go, N-140); an unchanged fingerprint leaves it alone.
+	if st.IsRepo {
+		a.finderAfterGitStatus(st.FilesSig)
+	}
 	// The log panel rides the same pipeline (no-op while collapsed), so
 	// a commit, cherry-pick, or outside-the-editor fetch shows up on the
 	// next tick without a dedicated refresh path.
-	a.refreshGitLogCommits()
+	//
 	// The Conflicts panel too, for the same reason: a resolve staged from
 	// a terminal, or a continue run there, shows up on the next tick.
 	// Shut, it still keeps the operation's record fresh while there is an
 	// operation (or a record of one to retire): the side names on every
 	// lens and separator label read it (conflictsides.go).
+	//
+	// Both reloads fork git. With the snapshot itself async (a real App),
+	// they go off the loop too (gitpaneltick.go, N-140): they ran here,
+	// inline, on every 10s tick while their panel was up. A directly
+	// built App (tests) keeps them inline, as it keeps the snapshot.
+	if a.gitSnap.async && a.screen != nil {
+		a.gitPanelsReloadAsync()
+		return
+	}
+	a.refreshGitLogCommits()
 	if a.conflictPanel.open {
 		a.refreshConflictPanel()
 	} else if a.gitOp != "" || a.conflictPanel.info.op != "" {

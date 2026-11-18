@@ -394,6 +394,57 @@ func TestHandleChatFSRequest_WriteCreatesParents(t *testing.T) {
 	}
 }
 
+// TestHandleChatFSRequest_WriteKeepsTheFilesFormat is N-121(d): the
+// agent's read of a CRLF + BOM file (open in a tab) was LF without the
+// BOM, so writing its text back verbatim converted the file. The write
+// now keeps the tab's ending and BOM; a Windows-1252 file that is NOT
+// open keeps its encoding; and text that file can't hold is refused, not
+// written as UTF-8.
+func TestHandleChatFSRequest_WriteKeepsTheFilesFormat(t *testing.T) {
+	root := t.TempDir()
+	a := newTestApp(t, root)
+	wireChat(a)
+
+	win := filepath.Join(root, "win.txt")
+	if err := os.WriteFile(win, []byte("\xef\xbb\xbfone\r\ntwo\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.openFile(win)
+	e := fsEvent(true, win)
+	e.content = "uno\ndos\n"
+	a.handleChatFSRequest(e)
+	if r := <-e.reply; r.err != nil {
+		t.Fatalf("write: %v", r.err)
+	}
+	if data, _ := os.ReadFile(win); string(data) != "\xef\xbb\xbfuno\r\ndos\r\n" {
+		t.Errorf("CRLF+BOM file after the agent's write = %q", data)
+	}
+
+	cp := filepath.Join(root, "cp.txt")
+	if err := os.WriteFile(cp, []byte("caf\xe9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e = fsEvent(true, cp)
+	e.content = "café crème\n"
+	a.handleChatFSRequest(e)
+	if r := <-e.reply; r.err != nil {
+		t.Fatalf("write: %v", r.err)
+	}
+	if data, _ := os.ReadFile(cp); string(data) != "caf\xe9 cr\xe8me\n" {
+		t.Errorf("Windows-1252 file after the agent's write = %q", data)
+	}
+
+	e = fsEvent(true, cp)
+	e.content = "emoji 🙂\n"
+	a.handleChatFSRequest(e)
+	if r := <-e.reply; r.err == nil {
+		t.Error("text the code page can't hold was written")
+	}
+	if data, _ := os.ReadFile(cp); string(data) != "caf\xe9 cr\xe8me\n" {
+		t.Errorf("a refused write changed the file: %q", data)
+	}
+}
+
 // TestHandleChatFSRequest_RefusesEscape pins the confinement on the
 // full handler path: a path outside the root is answered with an error,
 // and nothing is written.

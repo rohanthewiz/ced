@@ -523,3 +523,37 @@ func FuzzReadEncodeRoundTrip(f *testing.F) {
 		}
 	})
 }
+
+// TestEncodeLikeFile_KeepsTheFilesFormat pins N-121(d)'s serialiser: new
+// TEXT for an existing file is written in that file's encoding, line
+// ending and BOM; CRLF in the text is folded first (no CRCRLF); a missing
+// file gets the text verbatim; and a character the code page can't hold
+// is refused rather than substituted.
+func TestEncodeLikeFile_KeepsTheFilesFormat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "win.txt")
+	if err := os.WriteFile(path, []byte("\xef\xbb\xbfone\r\ntwo\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := EncodeLikeFile(path, "uno\ndos\r\n")
+	if err != nil || string(got) != "\xef\xbb\xbfuno\r\ndos\r\n" {
+		t.Errorf("CRLF+BOM file: %q, %v", got, err)
+	}
+
+	cp := filepath.Join(dir, "cp.txt")
+	if err := os.WriteFile(cp, []byte("caf\xe9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err = EncodeLikeFile(cp, "café crème\n")
+	if err != nil || string(got) != "caf\xe9 cr\xe8me\n" {
+		t.Errorf("Windows-1252 file: %q, %v", got, err)
+	}
+	if _, err := EncodeLikeFile(cp, "emoji 🙂\n"); err == nil {
+		t.Error("a rune Windows-1252 can't hold was not refused")
+	}
+
+	got, err = EncodeLikeFile(filepath.Join(dir, "new.txt"), "fresh\r\n")
+	if err != nil || string(got) != "fresh\r\n" {
+		t.Errorf("new file: %q, %v (want the text verbatim)", got, err)
+	}
+}

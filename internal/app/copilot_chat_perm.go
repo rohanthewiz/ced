@@ -615,11 +615,30 @@ func (a *App) chatFSRead(path string, line, limit int) (string, error) {
 // just an external change with a name. The transcript note is the
 // visible receipt; parent directories are created because "write a new
 // file" legitimately includes new folders.
+//
+// The bytes keep the FILE's format (N-121d). The agent's read was served
+// decoded, LF and without a BOM (chatFSRead), so writing its text back
+// verbatim converted a CRLF, BOM or Windows-1252 file on every agent
+// edit. It is serialised like the file's own save instead — the open
+// tab's encoding / ending / BOM, else the file's on disk — and written
+// atomically (temp + rename, mode kept) like every other ced write. Text
+// the file's code page can't hold is REFUSED back to the agent, naming
+// the file, rather than written as UTF-8 behind the user's back.
 func (a *App) chatFSWrite(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	var data []byte
+	var err error
+	if t := a.chatAttachTab(path); t != nil {
+		data, err = editor.EncodeLikeTab(t, content)
+	} else {
+		data, err = editor.EncodeLikeFile(path, content)
+	}
+	if err != nil {
+		return fmt.Errorf("%s is saved as Windows-1252 and the new text has a character it can't hold (%v); not written", a.relativePathFor(path), err)
+	}
+	if err := editor.WriteFileAtomic(path, data); err != nil {
 		return err
 	}
 	a.chatAppendMsg(chatMsg{role: chatRoleTool, text: "✎ wrote " + a.relativePathFor(path)})

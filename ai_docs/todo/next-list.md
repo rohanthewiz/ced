@@ -85,7 +85,7 @@ plus the LSP work done in the seeding session itself
   an untouched return clears Dirty and takes the clean path
   (`ReloadUndoable`) — `TestReconcile_CleanTabWhoseFileReturnsReloads`
   (fails before), `TestReconcile_EditedWhileGoneStillConflicts`.
-  (d) The chat agent's fs write is a plain `os.WriteFile(…, 0o644)`
+  ~~(d) The chat agent's fs write is a plain `os.WriteFile(…, 0o644)`
   and an open CRLF / BOM tab is served to it as LF without the BOM
   (copilot_chat_perm.go:584-587, :614-620), so the write-back converts
   the file. Fix: re-apply the tab's LineEnding / BOM and write through
@@ -93,7 +93,13 @@ plus the LSP work done in the seeding session itself
   the agent's READ of a Windows-1252 file is decoded (`chatFSRead` →
   `editor.DecodeBytes`), so its write-back is UTF-8 text that must be
   re-encoded with `editor.EncodeAs` (a refusal → ask, or write UTF-8
-  and say so) — today it silently converts the file to UTF-8.
+  and say so) — today it silently converts the file to UTF-8.~~ DONE 2026-11-17 (`2026-1117-SESS5`): the write is
+  serialised like the file's own save (`editor.EncodeLikeTab` /
+  `EncodeLikeFile`: the open tab's, else the disk file's encoding, ending
+  and BOM; CRLF in the text folded first) and written with
+  `WriteFileAtomic`; text a Windows-1252 file can't hold is refused back
+  to the agent (`TestHandleChatFSRequest_WriteKeepsTheFilesFormat`, fails
+  before).
   ~~(e) A failed paste runs `os.RemoveAll(p.dest)` even when the failure
   was "dest already exists" (copypaste.go:522-531).~~ DONE 2026-11-17
   (`2026-1117-SESS5`): a failure creating the destination ITSELF is a

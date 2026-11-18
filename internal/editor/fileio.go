@@ -41,6 +41,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -183,17 +184,47 @@ func detectLineEnding(data []byte) string {
 // the ending and BOM are ASCII and go on after. A refusal returns no
 // bytes at all — there is no partial or substituted form to write.
 func (t *Tab) encode() ([]byte, error) {
-	body, err := EncodeAs(t.Encoding, t.Buffer.String())
+	return encodeText(t.Encoding, t.LineEnding, t.BOM, t.Buffer.String())
+}
+
+// encodeText is encode for any LF text: encoding first, then the ending,
+// then the BOM. Shared by the tab's own save and EncodeLikeTab /
+// EncodeLikeFile, so there is ONE serialiser that knows about CRLF.
+func encodeText(enc, ending string, bom bool, text string) ([]byte, error) {
+	body, err := EncodeAs(enc, text)
 	if err != nil {
 		return nil, err
 	}
-	if t.LineEnding == lineEndingCRLF {
+	if ending == lineEndingCRLF {
 		body = bytes.ReplaceAll(body, []byte(lineEndingLF), []byte(lineEndingCRLF))
 	}
-	if !t.BOM {
+	if !bom {
 		return body, nil
 	}
 	return append(append([]byte(nil), utf8BOM...), body...), nil
+}
+
+// EncodeLikeTab serialises text — a whole new content for t's file — the
+// way t's save would: t's encoding, line ending and BOM. For a writer that
+// holds TEXT, not the tab's buffer: the chat agent's fs write (N-121d),
+// whose read was served from the buffer (LF, no BOM, decoded) and whose
+// write-back must not quietly convert the file. CRLF in text is folded to
+// LF first, so an agent that echoed CRLF does not get CRCRLF. The error
+// is an *UnencodableError.
+func EncodeLikeTab(t *Tab, text string) ([]byte, error) {
+	return encodeText(t.Encoding, t.LineEnding, t.BOM, strings.ReplaceAll(text, lineEndingCRLF, lineEndingLF))
+}
+
+// EncodeLikeFile is EncodeLikeTab for a file with no open tab: the
+// encoding, ending and BOM are read from the file on disk now. A file
+// that does not exist, or that ced would not open (binary, too large),
+// gets text verbatim — there is no format of its own to keep.
+func EncodeLikeFile(path, text string) ([]byte, error) {
+	r, err := readTextFile(path)
+	if err != nil || !r.exists {
+		return []byte(text), nil
+	}
+	return encodeText(r.encoding, r.ending, r.bom, strings.ReplaceAll(text, lineEndingCRLF, lineEndingLF))
 }
 
 // EncodedBytes is the buffer exactly as a save would write it — encode

@@ -52,6 +52,11 @@ type Tab struct {
 	// lexing is set while an async re-lex is out (BeginAsyncLex →
 	// AdoptClasses): at most one per tab.
 	lexing bool
+	// undoTrimmed counts history steps trimUndo has dropped;
+	// undoTrimNoticed records that TakeUndoTrimNotice already answered
+	// true (N-136: one notice per tab).
+	undoTrimmed     int
+	undoTrimNoticed bool
 
 	// SyntaxOff kills highlighting for this tab outright. Set at open (and
 	// re-evaluated on reload) for files over MaxHighlightBytes, where even

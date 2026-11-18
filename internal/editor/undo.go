@@ -624,11 +624,30 @@ func (t *Tab) trimUndo() {
 		// released now rather than when append next reallocates.
 		t.undoStack[0] = undoStep{}
 		t.undoStack = t.undoStack[1:]
+		t.undoTrimmed++
 	}
 	if t.undoBytes < 0 {
 		t.undoBytes = 0
 	}
 }
+
+// TakeUndoTrimNotice reports, ONCE per tab, that trimUndo has started
+// dropping the oldest steps (N-136). A trimmed history changes what the
+// editor will do for you — the earliest edits can no longer be undone —
+// and used to happen in silence; the app flashes the first time this
+// answers true. Later trims stay quiet: one notice says the cap is in
+// play, repeating it per keystroke would only be noise.
+func (t *Tab) TakeUndoTrimNotice() bool {
+	if t.undoTrimmed == 0 || t.undoTrimNoticed {
+		return false
+	}
+	t.undoTrimNoticed = true
+	return true
+}
+
+// UndoCaps describes the history's limits for messages: the entry cap
+// and the byte budget.
+func UndoCaps() (entries int, bytes int) { return maxUndoEntries, maxUndoBytes }
 
 // settleUndo closes the open step: it diffs undoBase (the buffer at the
 // last checkpoint) against the buffer and files the result, then makes

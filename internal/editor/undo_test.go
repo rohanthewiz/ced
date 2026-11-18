@@ -1175,3 +1175,27 @@ func BenchmarkUndoPush_LargeBuffer(b *testing.B) {
 		tab.InsertString("\n")
 	}
 }
+
+// TestTakeUndoTrimNotice_OnceAfterTheFirstDrop pins N-136's signal: no
+// notice while the history fits, exactly one once trimUndo drops its
+// first step, and none after that.
+func TestTakeUndoTrimNotice_OnceAfterTheFirstDrop(t *testing.T) {
+	tab := &Tab{Buffer: NewBuffer("x\n")}
+	tab.initUndo()
+	for i := 0; i < maxUndoEntries-10; i++ {
+		tab.InsertString("a\n")
+	}
+	if tab.TakeUndoTrimNotice() {
+		t.Fatal("a notice before anything was dropped")
+	}
+	for i := 0; i < 20; i++ {
+		tab.InsertString("b\n")
+	}
+	if !tab.TakeUndoTrimNotice() {
+		t.Fatal("no notice after the history started dropping steps")
+	}
+	tab.InsertString("c\n")
+	if tab.TakeUndoTrimNotice() {
+		t.Error("a second notice for the same tab")
+	}
+}

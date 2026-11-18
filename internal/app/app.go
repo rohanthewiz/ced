@@ -2751,6 +2751,9 @@ func (a *App) handleEvent(ev tcell.Event) {
 	// text would keep the old colors until the next unrelated event.
 	// See syntax.go.
 	a.syntaxAfterEvent()
+	// And the undo cap: the first time a tab's history drops its oldest
+	// step, say so once (undoTrimAfterEvent, N-136).
+	a.undoTrimAfterEvent()
 	// And for chat permissions: a queued session/request_permission
 	// resurfaces as soon as the modal slot frees up. See
 	// copilot_chat_perm.go.
@@ -5217,6 +5220,25 @@ func (a *App) requestCloseTab(idx int) {
 			}
 		},
 	)
+}
+
+// undoTrimAfterEvent flashes, once per tab, when its undo history has
+// begun dropping its oldest steps (editor.Tab.TakeUndoTrimNotice). Asked
+// of every tab, not just the active one: a workspace edit can fill a
+// background tab's history, and the notice should come when it happens.
+func (a *App) undoTrimAfterEvent() {
+	for _, t := range a.tabs {
+		if t.TakeUndoTrimNotice() {
+			entries, bytes := editor.UndoCaps()
+			name := filepath.Base(t.Path)
+			if t.Path == "" {
+				name = "untitled"
+			}
+			a.flash(fmt.Sprintf("%s: undo history is full — its oldest steps are now dropped (keeps %d steps, %dMB)",
+				name, entries, bytes>>20))
+			return
+		}
+	}
 }
 
 // closeTab removes the tab at idx without any dirty-check.

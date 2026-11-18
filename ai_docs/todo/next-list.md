@@ -75,21 +75,6 @@ plus the LSP work done in the seeding session itself
   the file; no repository → the parent dir as today. A change to
   documented behaviour (README Usage, `helpText`): decide.
 
-- **N-136** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
-  **Limits that bite are silent.** A non-UTF-8 file (N-114) and a
-  trimmed undo history (N-131) change what the editor will do for you
-  and say nothing. Give each a status-bar segment with a `tip`, and
-  flash once when an undo trim first drops a step. Waits on the
-  decisions in N-114 and N-131. 2026-11-10: the N-114 half is DONE
-  (the ` · cp1252` segment with a tip, a red `cp1252 ✗` badge while the
-  buffer holds a character the file can't save); what remains here is
-  the undo-trim half, waiting on N-131.
-  2026-11-10 (`2026-1110-1946-n131-delta-undo`): N-131 landed, so the
-  undo-trim half is unblocked — and smaller than it was: entries are
-  deltas now, so a trim needs 500 steps or 32MB of genuinely large steps
-  (multi-megabyte pastes, a file of very long lines). Still silent when
-  it happens; the flash on the first dropped step is what's left.
-
 - **N-140** · raised `2026-1110-1909-n127-git-status-off-loop` · value low
   **What still forks on the main loop when the snapshot lands.**
   N-127 took the status snapshot off the loop, but its apply
@@ -750,6 +735,19 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS7` —
+  **N-136** (the undo-trim half; the cp1252 half closed with N-114) the
+  first time a tab's undo history drops its oldest step, ced flashes once
+  for that tab: "<file>: undo history is full — its oldest steps are now
+  dropped (keeps 500 steps, 32MB)". `trimUndo` counts dropped steps;
+  `Tab.TakeUndoTrimNotice` answers true once; `undoTrimAfterEvent` asks
+  every tab (a workspace edit can fill a background one). No status-bar
+  segment: since N-131 a trim needs 500 steps or 32MB of genuinely large
+  steps, so a permanent segment would be noise for a rare event, and the
+  flash is kept in ≡ Tools ▸ Help ▸ Messages… (N-134).
+  `TestTakeUndoTrimNotice_OnceAfterTheFirstDrop`,
+  `TestUndoTrimAfterEvent_FlashesOncePerTab`.
 
 - closed 2026-11-17, `2026-1117-2352-n132-n148-n134-n135-find-fastpath-help-menu` —
   **N-134** + **N-135** a ≡ Tools ▸ Help section (helpmenu.go):

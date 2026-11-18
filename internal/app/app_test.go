@@ -4109,3 +4109,31 @@ func BenchmarkAppDraw(b *testing.B) {
 		a.draw()
 	}
 }
+
+// TestUndoTrimAfterEvent_FlashesOncePerTab is N-136 through the App: the
+// first dropped undo step flashes a notice naming the file and the caps;
+// later events stay quiet.
+func TestUndoTrimAfterEvent_FlashesOncePerTab(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "long.txt")
+	if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(path)
+	tab := a.activeTabPtr()
+	for i := 0; i < 520; i++ {
+		tab.InsertString("a\n")
+	}
+	a.statusMsg = ""
+	a.undoTrimAfterEvent()
+	if !strings.Contains(a.statusMsg, "long.txt: undo history is full") || !strings.Contains(a.statusMsg, "500 steps") {
+		t.Fatalf("flash = %q", a.statusMsg)
+	}
+	a.statusMsg = ""
+	tab.InsertString("b\n")
+	a.undoTrimAfterEvent()
+	if a.statusMsg != "" {
+		t.Errorf("second notice: %q", a.statusMsg)
+	}
+}

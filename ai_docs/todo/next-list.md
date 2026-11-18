@@ -787,7 +787,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-11-17, `2026-1117-SESS5` —
+- closed 2026-11-17, `2026-1117-2344-n121-n130-data-safety-render-window` —
   **N-130** Render styles only the runes a row shows. Unwrapped (no ghost
   on the line): no `[]rune` — `lineWindow` walks the string to the
   viewport and `lineStylesFor` resolves `[ScrollX, hi)` only, spans
@@ -803,7 +803,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `TestLineVisualColString_AgreesWithTheRuneSlice`. Real binary: a 1MB
   one-line bundle.js scrolled to its end draws with the ‹ arrow.
 
-- closed 2026-11-17, `2026-1117-SESS5` —
+- closed 2026-11-17, `2026-1117-2344-n121-n130-data-safety-render-window` —
   **N-121** the eight data-safety parts. (a) saves keep the file's
   identity (editor/savemeta.go): full mode incl. setgid, owner/group and
   xattrs carried to the temp; a target without owner write is refused

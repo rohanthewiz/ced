@@ -290,9 +290,24 @@ func writeFileAtomic(path string, data []byte) (os.FileInfo, error) {
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		path = resolved
 	}
+	// What the save must keep of the file it replaces (savemeta.go,
+	// N-121a): refuse a read-only file, keep a hard-linked one's inode,
+	// and carry owner / group / full mode / xattrs to the new inode.
+	meta, err := readTargetMeta(path)
+	if err != nil {
+		return nil, err
+	}
 	perm := os.FileMode(0o644)
-	if info, err := os.Stat(path); err == nil {
-		perm = info.Mode().Perm()
+	if meta.exists {
+		perm = meta.mode
+		if perm&0o200 == 0 {
+			return nil, &ReadOnlyError{Path: path, Mode: perm}
+		}
+		if meta.nlink > 1 {
+			// A rename would leave the file's OTHER names on the old
+			// content; the inode is the file here.
+			return writeInPlace(path, data, perm)
+		}
 	}
 
 	dir, base := filepath.Dir(path), filepath.Base(path)
@@ -306,6 +321,15 @@ func writeFileAtomic(path string, data []byte) (os.FileInfo, error) {
 	tmpName := tmp.Name()
 	// Any failure from here on leaves the ORIGINAL untouched, which is the
 	// whole point; the temp file is what gets cleaned up.
+	if meta.exists {
+		if err := keepIdentity(tmp, path, meta); err != nil {
+			// The new inode can't carry the file's owner, group or
+			// xattrs; overwriting the original in place keeps them.
+			tmp.Close()
+			os.Remove(tmpName)
+			return writeInPlace(path, data, perm)
+		}
+	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
@@ -329,13 +353,17 @@ func writeFileAtomic(path string, data []byte) (os.FileInfo, error) {
 		return nil, err
 	}
 	if err := os.Chmod(tmpName, perm); err != nil {
+		// The full mode (setgid included) can't be put on the new inode
+		// — e.g. setgid for a group the user isn't in. The original
+		// already has it: overwrite that in place instead.
 		os.Remove(tmpName)
-		return nil, err
+		return writeInPlace(path, data, perm)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		os.Remove(tmpName)
 		return nil, err
 	}
+	syncDir(dir)
 	return info, nil
 }
 

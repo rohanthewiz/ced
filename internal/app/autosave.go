@@ -314,7 +314,11 @@ func (a *App) autoSaveDepartingTab(idx int) {
 func (a *App) autoSaveTab(idx int) bool {
 	tab := a.tabs[idx]
 	if err := tab.Save(); err != nil {
-		if isUnencodableErr(err) {
+		// A read-only file (N-121a) is the same kind of refusal as an
+		// unencodable one: a decision only the user can make, which the
+		// next explicit save names — not a disk failure to repeat after
+		// every typing pause.
+		if isUnencodableErr(err) || editor.IsReadOnlyError(err) {
 			return false
 		}
 		a.flash("Auto-save failed: " + err.Error())

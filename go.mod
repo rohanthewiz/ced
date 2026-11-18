@@ -10,6 +10,7 @@ require (
 	github.com/rohanthewiz/grsh v0.0.0-20260711071403-78d4ea92604e
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/urfave/cli/v2 v2.27.7
+	golang.org/x/sys v0.46.0
 )
 
 require (
@@ -24,7 +25,6 @@ require (
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/tidwall/btype v0.3.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 )

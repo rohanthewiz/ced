@@ -62,69 +62,6 @@ plus the LSP work done in the seeding session itself
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
 
-- **N-121** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
-  **Smaller data-safety fixes, each contained.** Close a part by
-  striking it here; close the item when all are done. All reproduced
-  on a scratch copy unless marked.
-  (a) Every save replaces the inode: group, xattrs, ACLs, hard links
-  and setgid are lost, a 0444 file in a writable dir is overwritten
-  silently (auto-save too), and the directory is not fsynced
-  (fileio.go:203-236). Fix: `fchown` the temp and copy the full mode;
-  write in place when nlink > 1 or ownership can't be kept; refuse or
-  confirm when the target lacks owner write.
-  ~~(b) Undo onto a state gofmt would change, then one idle auto-save:
-  `ReloadAsEdit`'s `pushUndo` clears the redo stack (tab.go:586,
-  undo.go:244).~~ DONE 2026-11-17 (`2026-1117-SESS5`): auto-save still
-  saves but skips the quiet formatter while `CanRedo()`
-  (`TestAutoSaveTab_KeepsRedoByNotFormatting`, fails before).
-  ~~(c) A clean tab whose file vanishes and returns (branch switch away
-  and back) was marked Dirty by DiskGone (reconcile.go:128-136), so it
-  comes back as a false "unsaved edits" conflict holding stale text,
-  and "Keep mine" overwrites the new content.~~ DONE 2026-11-17:
-  `Tab.DiskGoneClean` / `DiskGoneRev` record a clean tab at the vanish;
-  an untouched return clears Dirty and takes the clean path
-  (`ReloadUndoable`) — `TestReconcile_CleanTabWhoseFileReturnsReloads`
-  (fails before), `TestReconcile_EditedWhileGoneStillConflicts`.
-  ~~(d) The chat agent's fs write is a plain `os.WriteFile(…, 0o644)`
-  and an open CRLF / BOM tab is served to it as LF without the BOM
-  (copilot_chat_perm.go:584-587, :614-620), so the write-back converts
-  the file. Fix: re-apply the tab's LineEnding / BOM and write through
-  `editor.WriteFileAtomic`. Since N-114 the same goes for the encoding:
-  the agent's READ of a Windows-1252 file is decoded (`chatFSRead` →
-  `editor.DecodeBytes`), so its write-back is UTF-8 text that must be
-  re-encoded with `editor.EncodeAs` (a refusal → ask, or write UTF-8
-  and say so) — today it silently converts the file to UTF-8.~~ DONE 2026-11-17 (`2026-1117-SESS5`): the write is
-  serialised like the file's own save (`editor.EncodeLikeTab` /
-  `EncodeLikeFile`: the open tab's, else the disk file's encoding, ending
-  and BOM; CRLF in the text folded first) and written with
-  `WriteFileAtomic`; text a Windows-1252 file can't hold is refused back
-  to the agent (`TestHandleChatFSRequest_WriteKeepsTheFilesFormat`, fails
-  before).
-  ~~(e) A failed paste runs `os.RemoveAll(p.dest)` even when the failure
-  was "dest already exists" (copypaste.go:522-531).~~ DONE 2026-11-17
-  (`2026-1117-SESS5`): a failure creating the destination ITSELF is a
-  `notCreatedError` (stripped once a parent the copy made is above it),
-  and only a destination the copy created is removed
-  (`TestRunCopyPlan_FailureKeepsADestinationItDidNotCreate`, fails
-  before; `…_FailureRemovesItsOwnPartialFolder`).
-  ~~(f) The dirty-close dialog captures a tab INDEX (app.go:5013-5023);
-  a tab closing to its left under the dialog (the cats Move-to-split
-  answer) makes Discard close a different tab.~~ DONE 2026-11-17: the
-  callbacks resolve the `*editor.Tab` with `tabIndexOf`
-  (`TestRequestCloseTab_DiscardClosesTheSameTabAfterAShift`, fails
-  before).
-  ~~(g) Deleting a folder closes open dirty tabs inside it without a
-  prompt, and the confirm does not mention them (fileops.go:218-230;
-  read, not run).~~ DONE 2026-11-17 (`2026-1117-SESS5`): every delete
-  confirm (≡ file / folder, tree right-click, marked set) names the open
-  tabs under the target with unsaved changes (`openDeleteConfirm`,
-  `unsavedDeleteLines`, capped at three names + count) —
-  `TestMenuDeleteFolder_NamesUnsavedTabsInside`.
-  (h) A minority-CRLF file keeps `\r` in the buffer as a character;
-  typing at end of line writes text after the CR (fileio.go:108-115).
-  Since N-114 that CR is at least VISIBLE: Render paints control runes
-  as stand-ins, so it shows as `␍` at the end of those lines.
-
 - **N-130** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Render converts whole lines whatever the viewport shows.**
   `runes := []rune(line)` and `rowStyles := make([]tcell.Style,
@@ -864,6 +801,29 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS5` —
+  **N-121** the eight data-safety parts. (a) saves keep the file's
+  identity (editor/savemeta.go): full mode incl. setgid, owner/group and
+  xattrs carried to the temp; a target without owner write is refused
+  (`*ReadOnlyError`, auto-save skips it quietly); hard links, or an
+  identity the new inode can't take, write in place; the directory is
+  fsynced after the rename — `TestSave_RefusesAReadOnlyFile`,
+  `…_KeepsHardLinks`, `…_KeepsSetgidAndAtomicity`,
+  `…_KeepsExtendedAttributes` (all four fail before; pass on macOS and
+  Linux, the latter in docker). (b) auto-save skips the quiet formatter
+  while the tab can redo. (c) a clean tab whose file vanishes and returns
+  untouched reloads instead of conflicting. (d) the chat agent's write
+  keeps the file's encoding / ending / BOM (`EncodeLikeTab` /
+  `EncodeLikeFile`), refusing text a Windows-1252 file can't hold. (e) a
+  failed paste removes only what it created. (f) the dirty-close
+  dialog resolves its tab by pointer. (g) delete confirms name the
+  unsaved tabs they will close. (h) KEPT as is, by decision: a minority
+  CR stays a character in the buffer because that is what preserves the
+  file's bytes exactly (`FuzzReadEncodeRoundTrip`'s property), and since
+  N-114 it is visible as `␍`; normalising it would rewrite lines the user
+  never touched. macOS ACLs (outside the xattr API) are not carried —
+  noted in savemeta.go. Each part's regression test fails before its fix.
 
 - closed 2026-11-17, `2026-1117-2326-n139-n151-tmux-harness-clipboard` —
   **N-151** copy works inside an untouched tmux: with `$TMUX` set,

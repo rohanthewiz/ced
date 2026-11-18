@@ -344,11 +344,16 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   own rewrite (formatter, plugin) as one undo step.
 - **File IO (fileio.go)**: guards (size on stat, NUL in first 8KB)
   BEFORE reading. Buffer is always bare LF; LineEnding/BOM re-emitted on
-  write. Saves: temp file in TARGET dir + rename, symlinks resolved,
-  mode copied; ONLY a permission refusal of the temp falls back to
-  in-place (no O_TRUNC — truncate after a good write); ENOSPC & co. return
-  the error with the original intact. `WriteFileAtomic` is exported for
-  other writers — don't copy it.
+  write. Saves: temp file in TARGET dir + rename (+ directory fsync),
+  symlinks resolved, and the file's IDENTITY kept (savemeta.go, N-121a):
+  full mode incl. setgid, owner/group, xattrs carried to the temp; a
+  target without owner write is REFUSED (`*ReadOnlyError`, auto-save
+  skips it silently); nlink > 1, an owner/group/xattr/mode the new inode
+  can't take, or a permission refusal of the temp → IN PLACE (no
+  O_TRUNC — truncate after a good write); ENOSPC & co. return the error
+  with the original intact. `WriteFileAtomic` is exported for other
+  writers — don't copy it; text for a file with no buffer goes through
+  `EncodeLikeTab` / `EncodeLikeFile` (N-121d).
 - **Encoding (editor/encoding.go, app/encoding.go)**: bytes that aren't
   valid UTF-8 are decoded as WINDOWS-1252 (`Tab.Encoding = "cp1252"`)
   and re-encoded on save — a one-to-one table, so ANY byte string

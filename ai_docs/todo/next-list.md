@@ -683,12 +683,6 @@ and `raised`.
   right-click row arrives through tmux (Button2) — the ≡ Code row is the
   twin if not.
 
-- **N-148** · raised `2026-1116-1247-struct-tag-spellcheck` · value low
-  **`TestOpenFinder_PopulatesResults` timed out (2s) under load.** It
-  failed once while two `make test` race suites ran at the same time
-  ("finder did not reach StateReady within 2s", finder_test.go:72);
-  it passed 3× alone and in a clean full run. Decide whether the 2s
-  deadline should be longer under `-race` (never a t.Skip).
 
 ## Roadmap
 
@@ -776,6 +770,14 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS6` —
+  **N-148** `waitForFinderReady`'s deadline is now 10s
+  (`finderReadyTimeout`), documented as a hang guard rather than a
+  budget: the loop returns as soon as the index is ready, so only a
+  starved machine (two -race suites at once, the build forking
+  `git ls-files`) ever waits longer than 2s. No t.Skip. The finder tests
+  pass under -race.
 
 - closed 2026-11-17, `2026-1117-SESS6` —
   **N-132** find has an ASCII fast path: `Matcher.Line` scans an ASCII

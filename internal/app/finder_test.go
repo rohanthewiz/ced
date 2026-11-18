@@ -23,17 +23,26 @@ import (
 // StateReady or the timeout expires. Pulled out so each test
 // can read as the scenario it's pinning down rather than the
 // goroutine-sync boilerplate.
+//
+// The deadline is a HANG guard, not a performance budget: the loop
+// returns the moment the index is ready, so a generous ceiling costs a
+// passing run nothing. 2s failed once (N-148) while two -race suites ran
+// side by side — the build forks `git ls-files`, and a loaded machine
+// can take seconds to schedule that. 10s still ends a real hang quickly.
 func waitForFinderReady(t *testing.T, a *App) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(finderReadyTimeout)
 	for time.Now().Before(deadline) {
 		if a.finder != nil && a.finder.State() == finder.StateReady {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("finder did not reach StateReady within 2s")
+	t.Fatalf("finder did not reach StateReady within %s", finderReadyTimeout)
 }
+
+// finderReadyTimeout bounds waitForFinderReady; see its comment.
+const finderReadyTimeout = 10 * time.Second
 
 // withFinder wires up an App + an indexed Finder rooted at a
 // tempdir we seed with a few files. Tests use it as the entry

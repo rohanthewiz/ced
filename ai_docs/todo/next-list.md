@@ -113,9 +113,13 @@ plus the LSP work done in the seeding session itself
   callbacks resolve the `*editor.Tab` with `tabIndexOf`
   (`TestRequestCloseTab_DiscardClosesTheSameTabAfterAShift`, fails
   before).
-  (g) Deleting a folder closes open dirty tabs inside it without a
+  ~~(g) Deleting a folder closes open dirty tabs inside it without a
   prompt, and the confirm does not mention them (fileops.go:218-230;
-  read, not run).
+  read, not run).~~ DONE 2026-11-17 (`2026-1117-SESS5`): every delete
+  confirm (≡ file / folder, tree right-click, marked set) names the open
+  tabs under the target with unsaved changes (`openDeleteConfirm`,
+  `unsavedDeleteLines`, capped at three names + count) —
+  `TestMenuDeleteFolder_NamesUnsavedTabsInside`.
   (h) A minority-CRLF file keeps `\r` in the buffer as a character;
   typing at end of line writes text after the CR (fileio.go:108-115).
   Since N-114 that CR is at least VISIBLE: Render paints control runes

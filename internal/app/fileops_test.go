@@ -384,6 +384,61 @@ func TestMenuDeleteFolder_Confirms(t *testing.T) {
 	}
 }
 
+// TestMenuDeleteFolder_NamesUnsavedTabsInside is N-121(g): deleting a
+// folder closes every open tab inside it, and a dirty one's edits go with
+// it — the confirm used to say only "everything inside". It now names
+// the unsaved tabs; a folder with none keeps the plain one-line question.
+func TestMenuDeleteFolder_NamesUnsavedTabsInside(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "victim")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	for _, n := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(sub, n), []byte(n), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := newTestApp(t, root)
+	a.openFile(filepath.Join(sub, "a.txt"))
+	a.openFile(filepath.Join(sub, "b.txt"))
+	a.setActiveFolder(sub)
+
+	a.menuDeleteFolder()
+	if m := confirmOf(a); m == nil || len(m.lines) != 0 {
+		t.Fatalf("clean tabs: want the plain one-line confirm, got %+v", m)
+	}
+	a.closeModal()
+
+	a.tabs[0].Dirty = true
+	a.tabs[1].Dirty = true
+	a.menuDeleteFolder()
+	m := confirmOf(a)
+	if m == nil {
+		t.Fatal("no confirm")
+	}
+	body := strings.Join(m.confirmBody(), "\n")
+	if !strings.Contains(body, "2 open files here have unsaved changes") ||
+		!strings.Contains(body, "a.txt") || !strings.Contains(body, "b.txt") {
+		t.Errorf("confirm body does not name the unsaved tabs:\n%s", body)
+	}
+}
+
+// TestUnsavedDeleteLines_CapsTheList: one name reads as a sentence; many
+// list three and count the rest — the confirm announces its cap.
+func TestUnsavedDeleteLines_CapsTheList(t *testing.T) {
+	if unsavedDeleteLines(nil) != nil {
+		t.Error("no unsaved tabs must add nothing")
+	}
+	if got := unsavedDeleteLines([]string{"x.go"}); len(got) != 2 || !strings.HasPrefix(got[1], "x.go has unsaved") {
+		t.Errorf("one: %q", got)
+	}
+	got := unsavedDeleteLines([]string{"a", "b", "c", "d", "e"})
+	if last := got[len(got)-1]; last != "…and 2 more" {
+		t.Errorf("five: last line %q, want the cap announced", last)
+	}
+}
+
 // TestMenuDeleteFolder_RefusesRoot guards the most destructive
 // possibility: the project root must never be deletable from the
 // menu, even if some future caller manages to set activeFolder to

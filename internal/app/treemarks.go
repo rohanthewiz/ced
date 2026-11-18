@@ -506,6 +506,10 @@ func (a *App) treeMarkDelete(nodes []*filetree.Node) {
 		lines = append(lines, "Folders are deleted with everything inside them.")
 	}
 	lines = append(lines, "This cannot be undone.")
+	// Open tabs under the set with unsaved edits are closed by the delete
+	// and their edits lost — said here, as every delete confirm does
+	// (N-121g).
+	lines = append(lines, unsavedDeleteLines(a.unsavedUnder(paths...))...)
 
 	a.openConfirmLines("Delete "+itoa(len(nodes))+" items", lines, func(app *App) {
 		app.doDeletePaths(paths)

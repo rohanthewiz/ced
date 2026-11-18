@@ -215,6 +215,62 @@ func (a *App) doRenameFile(oldPath, newName string) {
 	a.flash(fmt.Sprintf("Renamed to %s", newName))
 }
 
+// unsavedUnder lists, as display names, the open tabs whose file is at
+// or under one of paths AND holds unsaved changes — the edits a delete
+// will throw away when it closes those tabs (N-121g). Every delete
+// confirm names them: a folder delete used to close dirty tabs inside it
+// without a word, and the confirm said only "everything inside".
+func (a *App) unsavedUnder(paths ...string) []string {
+	var names []string
+	for _, t := range a.tabs {
+		if !t.Dirty || t.Path == "" {
+			continue
+		}
+		for _, p := range paths {
+			if tabPathRemoved(t.Path, p) {
+				names = append(names, a.relativePathFor(t.Path))
+				break
+			}
+		}
+	}
+	return names
+}
+
+// unsavedDeleteLines is the confirm's warning for those tabs: empty when
+// there are none, else a blank line, the count, and up to three names.
+func unsavedDeleteLines(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	head := names[0] + " has unsaved changes — they will be lost."
+	if len(names) > 1 {
+		head = fmt.Sprintf("%d open files here have unsaved changes — they will be lost:", len(names))
+	}
+	lines := []string{"", head}
+	if len(names) > 1 {
+		for i, n := range names {
+			if i == 3 {
+				lines = append(lines, fmt.Sprintf("…and %d more", len(names)-3))
+				break
+			}
+			lines = append(lines, n)
+		}
+	}
+	return lines
+}
+
+// openDeleteConfirm is openConfirm for a delete of targets: the plain
+// one-line question when nothing open is dirty under them, the question
+// plus unsavedDeleteLines when something is.
+func (a *App) openDeleteConfirm(title, msg string, targets []string, onYes func(*App)) {
+	warn := unsavedDeleteLines(a.unsavedUnder(targets...))
+	if warn == nil {
+		a.openConfirm(title, msg, onYes)
+		return
+	}
+	a.openConfirmLines(title, append([]string{msg}, warn...), onYes)
+}
+
 // doDeletePath removes path (file or directory), closes any open tab
 // whose file is gone as a result, and refreshes the tree.
 //
@@ -445,9 +501,10 @@ func (a *App) menuDelete() {
 		return
 	}
 	target := tab.Path
-	a.openConfirm(
+	a.openDeleteConfirm(
 		"Delete file",
 		"Permanently delete "+filepath.Base(target)+"?",
+		[]string{target},
 		func(app *App) {
 			app.doDeletePath(target)
 		},
@@ -580,9 +637,10 @@ func (a *App) menuDeleteFolder() {
 		return
 	}
 	target := folder
-	a.openConfirm(
+	a.openDeleteConfirm(
 		"Delete folder",
 		"Permanently delete "+filepath.Base(target)+" and everything inside?",
+		[]string{target},
 		func(app *App) {
 			app.doDeletePath(target)
 			// After the directory is gone we can't keep activeFolder
@@ -834,7 +892,7 @@ func ctxDelete(a *App, n *filetree.Node) {
 		title = "Delete folder"
 		msg = "Permanently delete " + n.Name + " and everything inside?"
 	}
-	a.openConfirm(title, msg, func(app *App) {
+	a.openDeleteConfirm(title, msg, []string{target}, func(app *App) {
 		app.doDeletePath(target)
 	})
 }

@@ -192,7 +192,7 @@ func (a *App) launchSpellLoad() {
 	go func() {
 		defer crash.Recover()
 		d, err := load(paths...)
-		_ = scr.PostEvent(&spellDictEvent{when: time.Now(), seq: seq, dict: d, err: err})
+		postResult(scr, &spellDictEvent{when: time.Now(), seq: seq, dict: d, err: err})
 	}()
 }
 

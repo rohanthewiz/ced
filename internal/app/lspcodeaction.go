@@ -158,7 +158,7 @@ func (a *App) menuCodeActions() {
 	go func() {
 		defer crash.Recover()
 		acts, err := client.CodeActions(path, rng, diags)
-		_ = scr.PostEvent(&lspCodeActionsEvent{
+		postResult(scr, &lspCodeActionsEvent{
 			when: time.Now(), seq: seq, path: path,
 			actions: acts, req: req, err: err,
 		})
@@ -325,7 +325,7 @@ func (a *App) runServerCommand(path string, cmd *lsp.Command) {
 	go func() {
 		defer crash.Recover()
 		err := client.ExecuteCommand(cmd.Command, cmd.Arguments)
-		_ = scr.PostEvent(&lspCommandEvent{when: time.Now(), title: title, err: err})
+		postResult(scr, &lspCommandEvent{when: time.Now(), title: title, err: err})
 	}()
 }
 

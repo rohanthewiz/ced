@@ -71,7 +71,7 @@ func (a *App) menuGoToSymbol() {
 	go func() {
 		defer crash.Recover()
 		syms, err := client.DocumentSymbols(path)
-		_ = scr.PostEvent(&lspSymbolsEvent{
+		postResult(scr, &lspSymbolsEvent{
 			when: time.Now(), path: path, syms: syms, err: err,
 		})
 	}()

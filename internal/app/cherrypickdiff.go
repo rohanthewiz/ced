@@ -221,7 +221,7 @@ func (m *cherryPickModal) ensureDiff(a *App) {
 	go func() {
 		defer crash.Recover()
 		lines := loadCherryPickDiff(root, hash)
-		_ = scr.PostEvent(&cherryPickDiffEvent{when: time.Now(), m: m, hash: hash, lines: lines})
+		postResult(scr, &cherryPickDiffEvent{when: time.Now(), m: m, hash: hash, lines: lines})
 	}()
 }
 

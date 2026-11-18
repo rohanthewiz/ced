@@ -288,7 +288,7 @@ func (a *App) startZip(src string) {
 	go func() {
 		defer crash.Recover()
 		err := createZip(src, dest)
-		_ = scr.PostEvent(&zipDoneEvent{when: time.Now(), dest: dest, err: err})
+		postResult(scr, &zipDoneEvent{when: time.Now(), dest: dest, err: err})
 	}()
 }
 
@@ -329,7 +329,7 @@ func (a *App) startZipSet(srcs []string) {
 	go func() {
 		defer crash.Recover()
 		err := createZipMulti(paths, base, dest)
-		_ = scr.PostEvent(&zipDoneEvent{when: time.Now(), dest: dest, err: err})
+		postResult(scr, &zipDoneEvent{when: time.Now(), dest: dest, err: err})
 	}()
 }
 

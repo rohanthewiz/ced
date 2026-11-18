@@ -166,7 +166,7 @@ func (a *App) catsClipRead(use catsClipUse) {
 			catsPostNotice(scr, "Clipboard: "+catsClipError(err))
 			return
 		}
-		_ = scr.PostEvent(&catsEvent{
+		postResult(scr, &catsEvent{
 			when: time.Now(), kind: catsKindClip,
 			text: d.Text, clipUse: use, clipTab: tab, clipRev: rev,
 			truncated: d.Truncated,

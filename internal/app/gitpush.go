@@ -436,7 +436,7 @@ func (a *App) fetchGitPushHeads(remote string) {
 		if out, err := gitReadOutput("-C", root, "ls-remote", "--heads", remote); err == nil {
 			heads = parseLsRemoteHeads(out)
 		}
-		_ = scr.PostEvent(&gitPushRefsEvent{when: time.Now(), remote: remote, heads: heads})
+		postResult(scr, &gitPushRefsEvent{when: time.Now(), remote: remote, heads: heads})
 	}()
 }
 

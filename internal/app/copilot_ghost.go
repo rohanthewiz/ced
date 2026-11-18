@@ -398,7 +398,7 @@ func (a *App) copilotRequestCompletion(t *editor.Tab) {
 		defer crash.Recover()
 		var res copilotInlineResult
 		err := client.Call("textDocument/inlineCompletion", params, &res)
-		_ = scr.PostEvent(&copilotCompletionEvent{
+		postResult(scr, &copilotCompletionEvent{
 			when: time.Now(), seq: seq, path: path, rev: rev, pos: pos,
 			items: res.Items, err: err,
 		})

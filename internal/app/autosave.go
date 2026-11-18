@@ -178,7 +178,7 @@ func (a *App) armAutoSaveIn(wait time.Duration) {
 	}
 	scr := a.screen
 	a.autoSaveTimer = time.AfterFunc(wait, func() {
-		_ = scr.PostEvent(&autoSaveEvent{when: time.Now()})
+		postResult(scr, &autoSaveEvent{when: time.Now()})
 	})
 }
 

@@ -164,7 +164,7 @@ func (a *App) launchGitStatus() {
 	go func() {
 		defer crash.Recover()
 		st := loadGitStatus(root)
-		_ = scr.PostEvent(&gitStatusEvent{when: time.Now(), seq: seq, root: root, st: st})
+		postResult(scr, &gitStatusEvent{when: time.Now(), seq: seq, root: root, st: st})
 	}()
 }
 

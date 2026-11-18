@@ -188,7 +188,7 @@ func chatParsePermission(params json.RawMessage) (sessionID string, req *chatPer
 // reject is the honest last word.
 func chatServePermission(scr tcell.Screen, seq int, params json.RawMessage) (any, error) {
 	sessionID, req := chatParsePermission(params)
-	_ = scr.PostEvent(&chatPermRequestEvent{when: time.Now(), seq: seq, sessionID: sessionID, req: req})
+	postResult(scr, &chatPermRequestEvent{when: time.Now(), seq: seq, sessionID: sessionID, req: req})
 	select {
 	case res := <-req.reply:
 		return res, nil
@@ -213,7 +213,7 @@ func chatServeFS(scr tcell.Screen, seq int, write bool, params json.RawMessage) 
 	ev := &chatFSRequestEvent{when: time.Now(), seq: seq, sessionID: p.SessionID,
 		write: write, path: p.Path, content: p.Content, line: p.Line, limit: p.Limit,
 		reply: make(chan chatFSResult, 1)}
-	_ = scr.PostEvent(ev)
+	postResult(scr, ev)
 	select {
 	case r := <-ev.reply:
 		return r.result, r.err

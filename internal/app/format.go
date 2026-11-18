@@ -578,7 +578,7 @@ func (a *App) execFormatterChain(tabPath string, cmds [][]string, quiet bool) {
 			}
 			break
 		}
-		_ = scr.PostEvent(&formatDoneEvent{
+		postResult(scr, &formatDoneEvent{
 			when:    time.Now(),
 			tabPath: tabPath,
 			label:   label,
@@ -638,7 +638,7 @@ func (a *App) execInProcessFormat(tabPath string, quiet bool) bool {
 	go func() {
 		defer crash.Recover()
 		err := formatFileInPlace(tabPath)
-		_ = scr.PostEvent(&formatDoneEvent{
+		postResult(scr, &formatDoneEvent{
 			when:    time.Now(),
 			tabPath: tabPath,
 			label:   label,

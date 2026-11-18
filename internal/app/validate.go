@@ -272,7 +272,7 @@ func (a *App) armValidateTimer() {
 	a.validate.seq++
 	seq := a.validate.seq
 	a.validate.timer = time.AfterFunc(validateDebounce, func() {
-		_ = scr.PostEvent(&validateEvent{when: time.Now(), seq: seq})
+		postResult(scr, &validateEvent{when: time.Now(), seq: seq})
 	})
 }
 

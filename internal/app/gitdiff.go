@@ -284,7 +284,7 @@ func (a *App) requestFileDiffStamped(path string, stamp diffStamp, stamped bool)
 	go func() {
 		defer crash.Recover()
 		hunks := loadFileDiff(root, path)
-		_ = scr.PostEvent(&gitDiffEvent{when: time.Now(), path: path, hunks: hunks, stamp: stamp, stamped: stamped})
+		postResult(scr, &gitDiffEvent{when: time.Now(), path: path, hunks: hunks, stamp: stamp, stamped: stamped})
 	}()
 }
 

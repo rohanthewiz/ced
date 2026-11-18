@@ -255,7 +255,7 @@ func (a *App) catsPollTheme() {
 		if err != nil {
 			return // a host that will not answer keeps whatever theme we have
 		}
-		_ = scr.PostEvent(&catsEvent{when: time.Now(), kind: catsKindTheme, theme: res.Theme})
+		postResult(scr, &catsEvent{when: time.Now(), kind: catsKindTheme, theme: res.Theme})
 	}()
 }
 

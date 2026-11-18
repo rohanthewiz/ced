@@ -393,7 +393,7 @@ func (a *App) completionRequest(t *editor.Tab, ctx lsp.CompletionContext, manual
 	go func() {
 		defer crash.Recover()
 		items, incomplete, err := client.Completion(path, lspPos, ctx)
-		_ = scr.PostEvent(&lspCompletionEvent{
+		postResult(scr, &lspCompletionEvent{
 			when: time.Now(), seq: seq, path: path, rev: rev, pos: pos,
 			manual: manual, items: items, incomplete: incomplete, err: err,
 		})
@@ -709,7 +709,7 @@ func (a *App) completionResolveSelected() {
 		if err != nil || enriched == nil {
 			return
 		}
-		_ = scr.PostEvent(&lspCompletionResolveEvent{
+		postResult(scr, &lspCompletionResolveEvent{
 			when: time.Now(), seq: seq, idx: idx, item: enriched,
 		})
 	}()

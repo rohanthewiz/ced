@@ -128,7 +128,7 @@ func (a *App) catsCapturePane(p cats.PaneInfo) {
 			catsPostNotice(scr, "That pane has no output to compare")
 			return
 		}
-		_ = scr.PostEvent(&catsEvent{
+		postResult(scr, &catsEvent{
 			when: time.Now(), kind: catsKindCapture,
 			text: text, label: label,
 		})

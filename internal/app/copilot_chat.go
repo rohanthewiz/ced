@@ -438,7 +438,7 @@ func (a *App) chatEnsureStarted() {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			_ = scr.PostEvent(&chatUpdateEvent{when: time.Now(), sessionID: p.SessionID, update: p.Update})
+			postResult(scr, &chatUpdateEvent{when: time.Now(), sessionID: p.SessionID, update: p.Update})
 		}
 		onRequest := func(method string, params json.RawMessage) (any, error) {
 			// Each of these runs on its own per-request goroutine (the
@@ -458,11 +458,11 @@ func (a *App) chatEnsureStarted() {
 			return nil, fmt.Errorf("ced does not handle %s", method)
 		}
 		onExit := func(error) {
-			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), seq: seq})
+			postResult(scr, &chatExitEvent{when: time.Now(), seq: seq})
 		}
 		client, err := lsp.StartACP(root, def.binary, def.args, onNotify, onRequest, onExit)
 		if err != nil {
-			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), seq: seq, err: err})
+			postResult(scr, &chatExitEvent{when: time.Now(), seq: seq, err: err})
 			return
 		}
 		sess, err := chatInitialize(client, root, pref, allowWrite, mcpServers)
@@ -471,10 +471,10 @@ func (a *App) chatEnsureStarted() {
 			// A failed handshake may leave the process alive with no
 			// read-loop exit — post explicitly to settle the state
 			// machine, same as the sidecar start path.
-			_ = scr.PostEvent(&chatExitEvent{when: time.Now(), seq: seq, err: err})
+			postResult(scr, &chatExitEvent{when: time.Now(), seq: seq, err: err})
 			return
 		}
-		_ = scr.PostEvent(&chatReadyEvent{when: time.Now(), seq: seq, client: client,
+		postResult(scr, &chatReadyEvent{when: time.Now(), seq: seq, client: client,
 			sessionID: sess.id, models: sess.models, modelID: sess.modelID,
 			embedded: sess.embedded, mcpNote: sess.mcpNote})
 	}()
@@ -824,7 +824,7 @@ func (a *App) chatSendPrompt(text string) {
 			StopReason string `json:"stopReason"`
 		}
 		err := client.CallWithTimeout("session/prompt", params, &res, chatTurnTimeout)
-		_ = scr.PostEvent(&chatTurnDoneEvent{when: time.Now(), seq: seq, stopReason: res.StopReason, err: err})
+		postResult(scr, &chatTurnDoneEvent{when: time.Now(), seq: seq, stopReason: res.StopReason, err: err})
 	}()
 }
 
@@ -1566,7 +1566,7 @@ func (a *App) chatSetModel(m chatModel) {
 		err := client.CallWithTimeout("session/set_model",
 			map[string]any{"sessionId": sid, "modelId": m.id},
 			nil, chatSessionTimeout)
-		_ = scr.PostEvent(&chatModelSetEvent{when: time.Now(), model: m, err: err})
+		postResult(scr, &chatModelSetEvent{when: time.Now(), model: m, err: err})
 	}()
 }
 

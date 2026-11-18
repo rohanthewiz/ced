@@ -99,7 +99,7 @@ func (a *App) openFinder() {
 		// during a still-warm session shouldn't pay for a refresh.
 		if a.finder.State() != finder.StateReady {
 			a.finder.Rebuild(func() {
-				_ = scr.PostEvent(&finderRebuiltEvent{when: time.Now()})
+				postResult(scr, &finderRebuiltEvent{when: time.Now()})
 			})
 		}
 	}
@@ -141,7 +141,7 @@ func (a *App) rebuildFinderIfStale() {
 	}
 	scr := a.screen
 	a.finder.Rebuild(func() {
-		_ = scr.PostEvent(&finderRebuiltEvent{when: time.Now()})
+		postResult(scr, &finderRebuiltEvent{when: time.Now()})
 	})
 }
 
@@ -234,7 +234,7 @@ func (a *App) invalidateFinder() {
 	a.finder.Invalidate()
 	scr := a.screen
 	a.finder.Rebuild(func() {
-		_ = scr.PostEvent(&finderRebuiltEvent{when: time.Now()})
+		postResult(scr, &finderRebuiltEvent{when: time.Now()})
 	})
 }
 

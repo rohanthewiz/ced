@@ -81,7 +81,7 @@ func (a *App) menuSignatureHelp() {
 	go func() {
 		defer crash.Recover()
 		sig, err := client.SignatureHelpAt(path, pos)
-		_ = scr.PostEvent(&lspSignatureEvent{when: time.Now(), path: path, sig: sig, err: err})
+		postResult(scr, &lspSignatureEvent{when: time.Now(), path: path, sig: sig, err: err})
 	}()
 }
 

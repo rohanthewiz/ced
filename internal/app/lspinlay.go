@@ -113,7 +113,7 @@ func (a *App) inlayAfterEvent() {
 	go func() {
 		defer crash.Recover()
 		hints, err := client.InlayHints(path, rng)
-		_ = scr.PostEvent(&lspInlayEvent{when: time.Now(), path: path, rev: rev, hints: hints, err: err})
+		postResult(scr, &lspInlayEvent{when: time.Now(), path: path, rev: rev, hints: hints, err: err})
 	}()
 }
 

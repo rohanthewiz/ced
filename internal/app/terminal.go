@@ -411,7 +411,7 @@ func (a *App) submitTermCommand() {
 	go func() {
 		defer crash.Recover()
 		err := sess.Eval(src)
-		_ = scr.PostEvent(&termDoneEvent{when: time.Now(), err: err})
+		postResult(scr, &termDoneEvent{when: time.Now(), err: err})
 	}()
 }
 

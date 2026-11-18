@@ -442,7 +442,7 @@ func catsPostRunDone(scr tcell.Screen, notice string, ok bool, pane uint32, pane
 	if scr == nil {
 		return
 	}
-	_ = scr.PostEvent(&catsEvent{
+	postResult(scr, &catsEvent{
 		when: time.Now(), kind: catsKindRunDone,
 		notice: notice, runOK: ok, pane: pane, paneOK: paneOK,
 	})

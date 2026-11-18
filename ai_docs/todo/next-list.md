@@ -179,35 +179,6 @@ plus the LSP work done in the seeding session itself
   Since N-114 that CR is at least VISIBLE: Render paints control runes
   as stand-ins, so it shows as `␍` at the end of those lines.
 
-- **N-124** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **Dropped `PostEvent`s leave permanent stuck state.** tcell's
-  `PostEvent` is non-blocking and DROPS when its 256-slot queue is
-  full, while tcell's own input enqueue blocks, so input arriving
-  faster than the loop drains pins the queue. 107 of 110 call sites
-  write `_ = scr.PostEvent(…)` (handled: terminal.go:223,
-  lspcodeaction.go:372, remote.go:169). Drops that stick:
-  `formatDoneEvent` and Restore's `gitCmdDoneEvent` leave
-  `formatRuns[path]` up (reconcile off for that path until restart;
-  for formatDoneEvent since N-116, only until `formatRunStale` (2m)
-  lets the next claim supersede the run);
-  `termDoneEvent` leaves `term.running` (terminal "busy" for the
-  session); `chatTurnDoneEvent` leaves `chat.turnActive`;
-  `chatPermRequestEvent` leaves its goroutine waiting up to 15 min;
-  the four `…ReadyEvent`s leave `starting` set and leak the child;
-  `autoSaveEvent`, `validateEvent`, `pluginEditEvent` leave their
-  one-shot timers unarmed until the next edit. The mechanism and the
-  per-event cost are verified; no collision was reproduced end to end.
-  What fills the queue: a paste (N-125) or a main-loop stall (N-127)
-  while the pointer moves (all-motion mouse is on). Fix: a
-  `postResult` helper for COMPLETION events that retries until
-  delivered or the App is closed (every such site is on a goroutine or
-  an AfterFunc); tickers may keep dropping.
-  2026-11-10 (`2026-1110-1909-n127-git-status-off-loop`): two new
-  completion events don't stick on a drop: `gitStatusEvent` (a scan in
-  flight past `gitSnapshotStale`, 30s, is relaunched) and the gutter's
-  `gitDiffEvent` (its skip stamp is recorded on ARRIVAL, so a lost answer
-  just means the next tick asks again).
-
 - **N-128** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **Every structural edit re-lexes the whole file on the main loop.**
   Enter, a multi-line paste, undo and line ops call
@@ -847,6 +818,27 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS2` —
+  **N-124** completion events are delivered reliably: `postResult`
+  (postresult.go) posts, and while tcell's queue is full retries with a
+  1ms→20ms backoff until taken or 1 minute passes (a closed / switched-away
+  App's queue is never drained; the deadline ends the goroutine). 94
+  sites converted — every Done / Ready / Exit / answer event, the
+  one-shot timers (auto-save, validate, plugin edit, syntax settle), the
+  LSP read loop's diagnostics / progress / notes, chat stream updates and
+  permission / fs requests, cats answers and stream frames. The 15 ticks
+  (caret blink, dwell, tooltips, expiries, tree tick, auto-scroll) keep
+  plain PostEvent. Each converted site was checked to sit lexically
+  inside a goroutine / AfterFunc / client callback, or in one of the five
+  helpers only goroutines call. Tracking `tcell`'s `EventQ` / `StopQ`
+  directly was not possible (they are not on the Screen interface) and
+  `PostEventWait` is deprecated. Tests:
+  `TestPostResult_WaitsForRoomInsteadOfDropping` (a full sim-screen queue:
+  PostEvent drops, postResult delivers after one PollEvent),
+  `TestPostResult_GivesUpOnAQueueNobodyDrains`,
+  `TestCompletionEventsArePostedReliably` (no `_ = x.PostEvent(&…Done|
+  Ready|Exit|Result|FailedEvent` left).
 
 - closed 2026-11-17, `2026-1117-2243-n147-n122-n123-n126-detached-children-lsp-writer` —
   **N-123** a wedged language server no longer freezes the editor

@@ -142,7 +142,7 @@ func (a *App) runGitCmdFull(label string, env []string, onFail func(*App, *gitCm
 		defer cancel()
 		cmd := child.Git(ctx, env, false, append([]string{"-C", root}, args...)...)
 		out, err := cmd.CombinedOutput()
-		_ = scr.PostEvent(&gitCmdDoneEvent{
+		postResult(scr, &gitCmdDoneEvent{
 			when: time.Now(), label: label, err: err, output: out,
 			onFail: onFail, onOK: onOK, onOKOutput: onOKOutput,
 		})
@@ -204,7 +204,7 @@ func (a *App) runGitApplyPatch(label, patch string, args ...string) {
 		cmd := child.Git(ctx, nil, false, append([]string{"-C", dir, "apply"}, args...)...)
 		cmd.Stdin = strings.NewReader(patch)
 		out, err := cmd.CombinedOutput()
-		_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out})
+		postResult(scr, &gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out})
 	}()
 }
 
@@ -265,11 +265,11 @@ func (a *App) runGitCmdSeqHook(label string, env []string, onFail func(*App, *gi
 			cmd := child.Git(ctx, env, false, append([]string{"-C", root}, args...)...)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
-				_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out, onFail: onFail})
+				postResult(scr, &gitCmdDoneEvent{when: time.Now(), label: label, err: err, output: out, onFail: onFail})
 				return
 			}
 		}
-		_ = scr.PostEvent(&gitCmdDoneEvent{when: time.Now(), label: label, onOK: onOK})
+		postResult(scr, &gitCmdDoneEvent{when: time.Now(), label: label, onOK: onOK})
 	}()
 }
 

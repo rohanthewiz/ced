@@ -364,7 +364,7 @@ func (a *App) gitLogFilterRun() {
 	go func() {
 		defer crash.Recover()
 		commits, truncated := loadGitLogQuery(root, args)
-		_ = scr.PostEvent(&gitLogFilterEvent{
+		postResult(scr, &gitLogFilterEvent{
 			when: time.Now(), seq: seq, query: text,
 			commits: commits, truncated: truncated,
 		})

@@ -79,12 +79,12 @@ func lspPostServerNote(scr tcell.Screen, server, method string, params json.RawM
 	switch method {
 	case "$/progress":
 		if p, ok := lsp.ParseProgress(params); ok {
-			_ = scr.PostEvent(&lspServerNoteEvent{when: time.Now(), server: server, progress: &p})
+			postResult(scr, &lspServerNoteEvent{when: time.Now(), server: server, progress: &p})
 		}
 		return true
 	case "window/showMessage":
 		if typ, text, ok := lsp.ParseShowMessage(params); ok {
-			_ = scr.PostEvent(&lspServerNoteEvent{when: time.Now(), server: server, msgType: typ, msgText: text})
+			postResult(scr, &lspServerNoteEvent{when: time.Now(), server: server, msgType: typ, msgText: text})
 		}
 		return true
 	}

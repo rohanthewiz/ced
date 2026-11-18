@@ -311,7 +311,7 @@ func (a *App) loadCherryPickCommits(m *cherryPickModal) {
 		if err != nil {
 			e.err = err.Error()
 		}
-		_ = scr.PostEvent(e)
+		postResult(scr, e)
 	}()
 }
 

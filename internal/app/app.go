@@ -2260,7 +2260,7 @@ func New(rootDir string) (*App, error) {
 	a.finder = finder.New(rootDir)
 	scr2 := a.screen
 	a.finder.Rebuild(func() {
-		_ = scr2.PostEvent(&finderRebuiltEvent{when: time.Now()})
+		postResult(scr2, &finderRebuiltEvent{when: time.Now()})
 	})
 	return a, nil
 }
@@ -5614,7 +5614,7 @@ func (a *App) execCustomAction(act customactions.Action, promptValues map[string
 			Output:   out,
 		})
 
-		_ = scr.PostEvent(&customActionDoneEvent{
+		postResult(scr, &customActionDoneEvent{
 			when:   time.Now(),
 			label:  act.Label,
 			err:    runErr,

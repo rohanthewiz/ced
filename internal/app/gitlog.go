@@ -345,7 +345,7 @@ func (a *App) requestGitLogDetail(c gitLogCommit) {
 	go func() {
 		defer crash.Recover()
 		lines := loadGitLogDetail(root, c.Hash, ws)
-		_ = scr.PostEvent(&gitLogShowEvent{when: time.Now(), hash: c.Hash, lines: lines, ws: ws})
+		postResult(scr, &gitLogShowEvent{when: time.Now(), hash: c.Hash, lines: lines, ws: ws})
 	}()
 }
 

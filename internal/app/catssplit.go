@@ -167,7 +167,7 @@ func (a *App) catsSplitTab(t *editor.Tab, direction, arrow string, move bool) {
 			// The tab pointer rides the event as a plain value; only the
 			// main loop resolves it (catsSplitMoved), so a tab closed in
 			// the meantime is simply not found.
-			_ = scr.PostEvent(&catsEvent{when: time.Now(), kind: catsKindSplitMoved,
+			postResult(scr, &catsEvent{when: time.Now(), kind: catsKindSplitMoved,
 				notice: "Moved " + shown + " to a split " + arrow, clipTab: t})
 			return
 		}

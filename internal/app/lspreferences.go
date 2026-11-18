@@ -139,7 +139,7 @@ func (a *App) menuFindReferences() {
 		defer crash.Recover()
 		locs, err := client.References(path, pos, true)
 		refs, truncated := collectRefLines(locs)
-		_ = scr.PostEvent(&lspReferencesEvent{
+		postResult(scr, &lspReferencesEvent{
 			when: time.Now(), seq: seq, path: path, query: word,
 			locs: refs, truncated: truncated, err: err,
 		})

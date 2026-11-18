@@ -238,7 +238,7 @@ func (a *App) execPluginCommand(p plugins.Plugin, c plugins.Command, promptValue
 		stdout, stderr, err := pluginShell(dir, c.Command, env, stdin)
 		ev.when = time.Now()
 		ev.stdout, ev.stderr, ev.err = stdout, stderr, err
-		_ = scr.PostEvent(ev)
+		postResult(scr, ev)
 	}()
 }
 

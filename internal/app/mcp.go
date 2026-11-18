@@ -266,20 +266,20 @@ func (a *App) mcpStartConnect(name string) {
 	go func() {
 		defer crash.Recover()
 		onExit := func(error) {
-			_ = scr.PostEvent(&mcpExitEvent{when: time.Now(), name: s.Name, seq: seq})
+			postResult(scr, &mcpExitEvent{when: time.Now(), name: s.Name, seq: seq})
 		}
 		client, err := mcpConnect(root, s, root, onExit)
 		if err != nil {
-			_ = scr.PostEvent(&mcpFailedEvent{when: time.Now(), name: s.Name, seq: seq, err: err})
+			postResult(scr, &mcpFailedEvent{when: time.Now(), name: s.Name, seq: seq, err: err})
 			return
 		}
 		tools, err := client.ListTools()
 		if err != nil {
 			client.Close()
-			_ = scr.PostEvent(&mcpFailedEvent{when: time.Now(), name: s.Name, seq: seq, err: err})
+			postResult(scr, &mcpFailedEvent{when: time.Now(), name: s.Name, seq: seq, err: err})
 			return
 		}
-		_ = scr.PostEvent(&mcpReadyEvent{when: time.Now(), name: s.Name, seq: seq,
+		postResult(scr, &mcpReadyEvent{when: time.Now(), name: s.Name, seq: seq,
 			client: client, info: client.Info(), tools: tools})
 	}()
 }
@@ -827,7 +827,7 @@ func (a *App) mcpRunTool(server, tool string, args map[string]any) {
 	go func() {
 		defer crash.Recover()
 		res, err := client.CallTool(tool, args)
-		_ = scr.PostEvent(&mcpToolResultEvent{when: time.Now(), name: server, tool: tool,
+		postResult(scr, &mcpToolResultEvent{when: time.Now(), name: server, tool: tool,
 			seq: seq, result: res, err: err})
 	}()
 }

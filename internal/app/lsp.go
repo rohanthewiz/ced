@@ -304,7 +304,7 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 			if path == "" {
 				return
 			}
-			_ = scr.PostEvent(&lspDiagsEvent{when: time.Now(), path: path, diags: p.Diagnostics})
+			postResult(scr, &lspDiagsEvent{when: time.Now(), path: path, diags: p.Diagnostics})
 		}
 		// onRequest answers server→client REQUESTS, and it answers exactly
 		// one: workspace/applyEdit, the route a command-only code action
@@ -323,11 +323,11 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 			return lspServeApplyEdit(scr, params)
 		}
 		onExit := func(error) {
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen})
+			postResult(scr, &lspExitEvent{when: time.Now(), server: id, gen: gen})
 		}
 		client, err := lsp.StartWithRequests(root, bin, args, onNotify, onRequest, onExit)
 		if err != nil {
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen, err: err})
+			postResult(scr, &lspExitEvent{when: time.Now(), server: id, gen: gen, err: err})
 			return
 		}
 		// Registered for the length of the handshake, so lspShutdown can
@@ -344,10 +344,10 @@ func (a *App) lspEnsureStarted(def *lspServerDef) {
 			// running — post explicitly so the state machine settles.
 			// This post, not onExit's, carries the REASON, which the
 			// Restart row shows when it was the one that asked.
-			_ = scr.PostEvent(&lspExitEvent{when: time.Now(), server: id, gen: gen, err: err})
+			postResult(scr, &lspExitEvent{when: time.Now(), server: id, gen: gen, err: err})
 			return
 		}
-		_ = scr.PostEvent(&lspReadyEvent{when: time.Now(), server: id, client: client, gen: gen})
+		postResult(scr, &lspReadyEvent{when: time.Now(), server: id, client: client, gen: gen})
 	}()
 }
 
@@ -620,7 +620,7 @@ func (a *App) lspArmTimer(path string) {
 	}
 	scr := a.screen
 	a.lsp.timers[path] = time.AfterFunc(lspSyncDebounce, func() {
-		_ = scr.PostEvent(&lspSyncEvent{when: time.Now(), path: path})
+		postResult(scr, &lspSyncEvent{when: time.Now(), path: path})
 	})
 }
 
@@ -739,7 +739,7 @@ func (a *App) menuGoToDefinition() {
 	go func() {
 		defer crash.Recover()
 		locs, err := client.Definition(path, pos)
-		_ = scr.PostEvent(&lspDefinitionEvent{
+		postResult(scr, &lspDefinitionEvent{
 			when: time.Now(), fromPath: path, fromPos: from, locs: locs, err: err,
 		})
 	}()
@@ -921,7 +921,7 @@ func (a *App) menuHoverInfo() {
 		if h != nil {
 			text, markdown = h.Markup()
 		}
-		_ = scr.PostEvent(&lspHoverEvent{when: time.Now(), path: path, text: text, markdown: markdown, err: err})
+		postResult(scr, &lspHoverEvent{when: time.Now(), path: path, text: text, markdown: markdown, err: err})
 	}()
 }
 

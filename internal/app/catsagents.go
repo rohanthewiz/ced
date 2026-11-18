@@ -89,7 +89,7 @@ func (a *App) catsPollPanes() {
 		if err != nil {
 			return // keep whatever we have; a stale name beats a blank bar
 		}
-		_ = scr.PostEvent(&catsEvent{when: time.Now(), kind: catsKindPanes, panes: panes})
+		postResult(scr, &catsEvent{when: time.Now(), kind: catsKindPanes, panes: panes})
 	}()
 }
 

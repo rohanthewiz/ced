@@ -248,7 +248,7 @@ func (a *App) requestCommitReceipt() {
 		defer crash.Recover()
 		out, err := gitReadOutput("-C", root,
 			"log", "-1", "--no-color", "--format="+commitReceiptFormat)
-		_ = scr.PostEvent(&gitCommitReceiptEvent{when: time.Now(), out: out, err: err})
+		postResult(scr, &gitCommitReceiptEvent{when: time.Now(), out: out, err: err})
 	}()
 }
 

@@ -207,7 +207,7 @@ func (a *App) handleHoverDwellTick(e *hoverDwellEvent) {
 		if h != nil {
 			text, markdown = h.Markup()
 		}
-		_ = scr.PostEvent(&lspHoverEvent{
+		postResult(scr, &lspHoverEvent{
 			when: time.Now(), path: path, text: text, markdown: markdown, err: err,
 			dwell: true, seq: seq, ax: ax, ay: ay,
 		})

@@ -199,7 +199,7 @@ func (a *App) startFolderSearch(query string, opts editor.FindOptions, dir strin
 	go func() {
 		defer crash.Recover()
 		hits, truncated := search.Project(root, paths, search.Options{Query: query, FindOptions: opts})
-		_ = scr.PostEvent(&projectSearchEvent{
+		postResult(scr, &projectSearchEvent{
 			when: time.Now(), seq: seq, dir: dir, query: query, opts: opts,
 			hits: hits, truncated: truncated,
 		})

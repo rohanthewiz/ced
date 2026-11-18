@@ -154,7 +154,7 @@ func (a *App) startRename(path string, pos editor.Position, askRev int, oldName,
 	go func() {
 		defer crash.Recover()
 		edit, err := client.Rename(path, lspPos, newName)
-		_ = scr.PostEvent(&lspRenameEvent{
+		postResult(scr, &lspRenameEvent{
 			when: time.Now(), seq: seq,
 			oldName: oldName, newName: newName,
 			edit: edit, req: req, err: err,

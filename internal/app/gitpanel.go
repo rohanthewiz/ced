@@ -443,7 +443,7 @@ func (a *App) requestGitPanelDiff(f gitPanelFile) {
 	go func() {
 		defer crash.Recover()
 		lines, side := loadGitPanelDiff(root, f, ws)
-		_ = scr.PostEvent(&gitPanelDiffEvent{when: time.Now(), path: f.Path, lines: lines, side: side, ws: ws})
+		postResult(scr, &gitPanelDiffEvent{when: time.Now(), path: f.Path, lines: lines, side: side, ws: ws})
 	}()
 }
 

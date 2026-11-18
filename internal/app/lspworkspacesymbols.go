@@ -154,7 +154,7 @@ func (a *App) startWorkspaceSymbols(query string) {
 		if len(all) > 0 {
 			firstErr = nil
 		}
-		_ = scr.PostEvent(&lspWorkspaceSymbolsEvent{
+		postResult(scr, &lspWorkspaceSymbolsEvent{
 			when: time.Now(), seq: seq, query: query,
 			syms: all, truncated: truncated, err: firstErr,
 		})

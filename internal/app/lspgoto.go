@@ -149,7 +149,7 @@ func (a *App) lspGoTo(fetch lspLocFetch, noun, heading string, alwaysList bool) 
 		if len(locs) > 1 || (alwaysList && len(locs) == 1) {
 			refs, truncated = collectRefLines(locs)
 		}
-		_ = scr.PostEvent(&lspLocationsEvent{
+		postResult(scr, &lspLocationsEvent{
 			when: time.Now(), seq: seq, fromPath: path, fromPos: from,
 			noun: noun, heading: heading, query: word, alwaysList: alwaysList,
 			locs: locs, refs: refs, truncated: truncated, err: err,

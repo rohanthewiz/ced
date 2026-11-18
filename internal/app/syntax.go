@@ -68,7 +68,7 @@ func (a *App) armSyntaxSettle(d time.Duration) {
 		return
 	}
 	a.syntaxTimer = time.AfterFunc(d, func() {
-		_ = scr.PostEvent(&syntaxSettleEvent{when: time.Now()})
+		postResult(scr, &syntaxSettleEvent{when: time.Now()})
 	})
 }
 

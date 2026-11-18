@@ -555,7 +555,7 @@ func (a *App) runCopyPlan(plan []copyPlanItem, overlay map[string][]byte, into s
 			buffered += n
 			last, lastSrc = p.dest, p.src
 		}
-		_ = scr.PostEvent(&pasteDoneEvent{
+		postResult(scr, &pasteDoneEvent{
 			when: time.Now(), dest: last, count: done, err: err,
 			into: into, src: lastSrc, buffered: buffered,
 		})

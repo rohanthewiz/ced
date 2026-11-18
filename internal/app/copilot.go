@@ -319,14 +319,14 @@ func (a *App) copilotEnsureStarted() {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			_ = scr.PostEvent(&copilotStatusEvent{when: time.Now(), kind: p.Kind, message: p.Message})
+			postResult(scr, &copilotStatusEvent{when: time.Now(), kind: p.Kind, message: p.Message})
 		}
 		onExit := func(error) {
-			_ = scr.PostEvent(&copilotExitEvent{when: time.Now()})
+			postResult(scr, &copilotExitEvent{when: time.Now()})
 		}
 		client, err := lsp.Start(root, copilotServerBinary, copilotServerArgs, onNotify, onExit)
 		if err != nil {
-			_ = scr.PostEvent(&copilotExitEvent{when: time.Now()})
+			postResult(scr, &copilotExitEvent{when: time.Now()})
 			return
 		}
 		status, err := copilotInitialize(client, root)
@@ -335,10 +335,10 @@ func (a *App) copilotEnsureStarted() {
 			// Mirrors the gopls start path: a timed-out handshake leaves
 			// the process alive with no read-loop exit, so post
 			// explicitly to settle the state machine.
-			_ = scr.PostEvent(&copilotExitEvent{when: time.Now()})
+			postResult(scr, &copilotExitEvent{when: time.Now()})
 			return
 		}
-		_ = scr.PostEvent(&copilotReadyEvent{when: time.Now(), client: client, status: status})
+		postResult(scr, &copilotReadyEvent{when: time.Now(), client: client, status: status})
 	}()
 }
 
@@ -515,7 +515,7 @@ func (a *App) copilotBeginSignIn() {
 		defer crash.Recover()
 		var res copilotSignInResult
 		err := client.Call("signIn", map[string]any{}, &res)
-		_ = scr.PostEvent(&copilotSignInEvent{when: time.Now(), res: res, err: err})
+		postResult(scr, &copilotSignInEvent{when: time.Now(), res: res, err: err})
 	}()
 }
 
@@ -571,7 +571,7 @@ func (a *App) copilotConfirmSignIn(code, uri string, cmd copilotCommand) {
 		err := client.CallWithTimeout("workspace/executeCommand",
 			map[string]any{"command": cmd.Command, "arguments": cmd.Arguments},
 			&st, copilotSignInTimeout)
-		_ = scr.PostEvent(&copilotSignInDoneEvent{when: time.Now(), status: st, err: err})
+		postResult(scr, &copilotSignInDoneEvent{when: time.Now(), status: st, err: err})
 	}()
 }
 
@@ -605,7 +605,7 @@ func (a *App) copilotSignOut() {
 	go func() {
 		defer crash.Recover()
 		err := client.Call("signOut", map[string]any{}, nil)
-		_ = scr.PostEvent(&copilotSignOutDoneEvent{when: time.Now(), err: err})
+		postResult(scr, &copilotSignOutDoneEvent{when: time.Now(), err: err})
 	}()
 }
 

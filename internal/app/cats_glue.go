@@ -257,7 +257,7 @@ func (a *App) catsInit() {
 				self, selfOK = id, true
 			}
 		}
-		_ = scr.PostEvent(&catsEvent{
+		postResult(scr, &catsEvent{
 			when: time.Now(), kind: catsKindReady,
 			caps: caps, self: self, selfOK: selfOK,
 		})
@@ -349,10 +349,10 @@ func (a *App) catsSubscribe() {
 			cats.EventPaneNotify, cats.EventThemeChanged, cats.EventFocusChanged,
 		}},
 		func(ev cats.Event) {
-			_ = scr.PostEvent(&catsEvent{when: time.Now(), kind: catsKindFrame, frame: ev})
+			postResult(scr, &catsEvent{when: time.Now(), kind: catsKindFrame, frame: ev})
 		},
 		func(up bool, _ error) {
-			_ = scr.PostEvent(&catsEvent{when: time.Now(), kind: catsKindLink, up: up})
+			postResult(scr, &catsEvent{when: time.Now(), kind: catsKindLink, up: up})
 		},
 	)
 }
@@ -610,7 +610,7 @@ func catsPostNotice(scr tcell.Screen, msg string) {
 	if scr == nil || msg == "" {
 		return
 	}
-	_ = scr.PostEvent(&catsEvent{when: time.Now(), kind: catsKindNotice, notice: msg})
+	postResult(scr, &catsEvent{when: time.Now(), kind: catsKindNotice, notice: msg})
 }
 
 // catsTier1 reports whether the full integration is available right now.

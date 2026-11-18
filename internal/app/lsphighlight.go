@@ -75,7 +75,7 @@ func (a *App) menuHighlightSymbol() {
 	go func() {
 		defer crash.Recover()
 		uses, err := client.DocumentHighlights(path, pos)
-		_ = scr.PostEvent(&lspHighlightEvent{
+		postResult(scr, &lspHighlightEvent{
 			when: time.Now(), path: path, rev: rev, word: word, uses: uses, err: err,
 		})
 	}()

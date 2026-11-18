@@ -872,7 +872,7 @@ func (a *App) requestFileBlame(t *editor.Tab) {
 		if fb != nil {
 			fb.rev = rev
 		}
-		_ = scr.PostEvent(&gitBlameEvent{when: time.Now(), path: path, seq: seq, blame: fb, partial: lo > 0})
+		postResult(scr, &gitBlameEvent{when: time.Now(), path: path, seq: seq, blame: fb, partial: lo > 0})
 	}
 	if lo, hi, ok := a.blameWindow(t); ok && a.fileBlames[path] == nil {
 		go blamePass(lo, hi)

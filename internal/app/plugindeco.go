@@ -202,7 +202,7 @@ func (a *App) launchPluginHook(p plugins.Plugin, h plugins.Hook, tab *editor.Tab
 	go func() {
 		defer crash.Recover()
 		stdout, stderr, err := pluginShell(dir, h.Command, env, "")
-		_ = scr.PostEvent(&pluginHookDoneEvent{
+		postResult(scr, &pluginHookDoneEvent{
 			when: time.Now(), seq: seq, runKey: key,
 			label: p.Name, path: path, output: h.Output,
 			stdout: stdout, stderr: stderr, err: err,
@@ -238,7 +238,7 @@ func (a *App) launchPluginDeco(p plugins.Plugin, d plugins.Provider, tab *editor
 		if len(stderr) > 0 {
 			text += "\n" + string(stderr)
 		}
-		_ = scr.PostEvent(&pluginDecoEvent{
+		postResult(scr, &pluginDecoEvent{
 			when: time.Now(), seq: seq, path: path, key: key, runKey: runKey,
 			diags: filterDiagsForFile(plugins.ParseDiagnostics(text), path, dir),
 		})
@@ -362,7 +362,7 @@ func (a *App) armPluginEditTimer() {
 	scr := a.screen
 	seq := a.plugins.seq
 	a.plugins.editTimer = time.AfterFunc(pluginEditDebounce, func() {
-		_ = scr.PostEvent(&pluginEditEvent{when: time.Now(), seq: seq})
+		postResult(scr, &pluginEditEvent{when: time.Now(), seq: seq})
 	})
 }
 

@@ -74,7 +74,7 @@ func (a *App) catsPollRecents() {
 		if err != nil {
 			return // the picker falls back to ced's own list
 		}
-		_ = scr.PostEvent(&catsEvent{
+		postResult(scr, &catsEvent{
 			when: time.Now(), kind: catsKindRecents, recents: res.Recents,
 		})
 	}()

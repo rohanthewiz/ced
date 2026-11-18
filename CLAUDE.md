@@ -119,6 +119,7 @@ internal/app/
   gitcommitall.go             Commit all changes (Esc G): save tabs, add -A, commit the folder
   gitsnapshot.go              Async git status snapshot (coalesced, seq-checked)
   gitexec.go                  Git child deadlines + lifetimes (reads end at Close, writes finish)
+  postresult.go               Reliable delivery for completion events (retry while the queue is full)
   diffview.go comparerevert.go  Shared diff layer (split/ws/steppers); compare hunk revert
   gitrestore.go               Restore one file to HEAD (tree/tab/≡ Git rows)
   gitconflict.go gitopstate.go  Conflict picker + stop hook; parked-op / unmerged reads
@@ -205,7 +206,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 
 - **Events only.** Goroutines never mutate UI state; they post custom
   tcell events handled on the main loop. Blocking server→client requests
-  post an event with a buffered reply channel and wait.
+  post an event with a buffered reply channel and wait. A COMPLETION /
+  answer (…Done/Ready/Exit/Result, a timer's one-shot, a server note)
+  goes through `postResult` (postresult.go, N-124: retries while
+  tcell's queue is full, gives up after 1m) — a dropped one is permanent
+  stuck state. Only ticks / dwell / expiry keep plain `PostEvent`
+  (`TestCompletionEventsArePostedReliably`). Never call `postResult` on
+  the main loop.
 - **Every child process is DETACHED** (internal/child, N-122): its own
   session (no prompt can reach ced's tty), a context whose cancel
   SIGTERMs the whole GROUP, `WaitDelay`. git goes through `child.Git` /

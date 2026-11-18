@@ -102,7 +102,7 @@ func (a *App) menuGitStatus() {
 	go func() {
 		defer crash.Recover()
 		out, err := gitReadCombined(append([]string{"-C", root}, gitStatusReportArgs...)...)
-		_ = scr.PostEvent(&gitStatusReportEvent{when: time.Now(), out: out, err: err})
+		postResult(scr, &gitStatusReportEvent{when: time.Now(), out: out, err: err})
 	}()
 }
 

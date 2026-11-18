@@ -496,7 +496,7 @@ func (a *App) suggestCommitFor(scope commitScope, trailer bool) {
 	go func() {
 		defer crash.Recover()
 		diff := loadCommitDiff(root, targets)
-		_ = scr.PostEvent(&gitCommitDiffEvent{when: time.Now(), files: targets, diff: diff, trailer: trailer, all: all})
+		postResult(scr, &gitCommitDiffEvent{when: time.Now(), files: targets, diff: diff, trailer: trailer, all: all})
 	}()
 }
 

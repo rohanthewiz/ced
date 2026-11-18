@@ -707,7 +707,7 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
-- closed 2026-11-18, `2026-1117-SESS7` —
+- closed 2026-11-18, `2026-1118-0003-n136-n140-n144-undo-trim-git-panels-recovered` —
   **N-144** rescued edits have an in-editor door: ≡ File "Recovered
   edits…" (recovered.go), after the session-restore toggle. `crash.List`
   reads this project's rescue folders back from their INDEX.txt (when,
@@ -723,7 +723,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `TestRecoveredEditsLabel_CountsThisProjectsRescues`,
   `TestMenuRecoveredEdits_ListsAndCompares`.
 
-- closed 2026-11-17, `2026-1117-SESS7` —
+- closed 2026-11-17, `2026-1118-0003-n136-n140-n144-undo-trim-git-panels-recovered` —
   **N-140** nothing forks on the loop when the snapshot lands, and the
   finder isn't rebuilt every period. In an async App, `applyGitStatus`
   hands the git log and Conflicts reloads to goroutines
@@ -744,7 +744,7 @@ Newest first. Closures before 2026-09-21 live in the session docs.
   `TestFilesSig_TracksHeadAndEntries`,
   `TestRefresh_ReportsWhetherTheListingChanged` (filetree).
 
-- closed 2026-11-17, `2026-1117-SESS7` —
+- closed 2026-11-17, `2026-1118-0003-n136-n140-n144-undo-trim-git-panels-recovered` —
   **N-136** (the undo-trim half; the cp1252 half closed with N-114) the
   first time a tab's undo history drops its oldest step, ced flashes once
   for that tab: "<file>: undo history is full — its oldest steps are now

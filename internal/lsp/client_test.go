@@ -9,6 +9,7 @@ package lsp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1017,4 +1018,24 @@ func TestInitialize_PrefersMarkdownHover(t *testing.T) {
 	}
 	srv.write(t, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"capabilities":{}}}`, *m.ID))
 	srv.read(t) // the `initialized` notification
+}
+
+// FuzzReadMessage feeds the Content-Length frame reader arbitrary bytes
+// (N-138): whatever a broken or hostile server writes, the read loop
+// gets an error or a message — never a panic (N-126d was a makeslice
+// panic on a huge length) — and never allocates past the cap.
+func FuzzReadMessage(f *testing.F) {
+	f.Add([]byte("Content-Length: 17\r\n\r\n{\"jsonrpc\":\"2.0\"}"))
+	f.Add([]byte("Content-Length: 99999999999999999999\r\n\r\n"))
+	f.Add([]byte("Content-Type: x\r\nContent-Length: 2\r\n\r\n{}"))
+	f.Add([]byte("Content-Length: -1\r\n\r\n"))
+	f.Add([]byte("\r\n\r\n"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		r := bufio.NewReader(bytes.NewReader(data))
+		for i := 0; i < 4; i++ {
+			if _, err := readMessage(r); err != nil {
+				return
+			}
+		}
+	})
 }

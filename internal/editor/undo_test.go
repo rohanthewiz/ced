@@ -1159,3 +1159,19 @@ func TestUndo_StepRestoresBothCarets(t *testing.T) {
 		t.Fatalf("cursor after redo = %+v, want %+v", tab.Cursor, end)
 	}
 }
+
+// BenchmarkUndoPush_LargeBuffer is one structural edit's undo cost in a
+// 20k-line file: since N-131 a delta, so it should not track file size.
+func BenchmarkUndoPush_LargeBuffer(b *testing.B) {
+	var sb strings.Builder
+	for i := 0; i < 20_000; i++ {
+		fmt.Fprintf(&sb, "line %d of a long file\n", i)
+	}
+	tab := &Tab{Buffer: NewBuffer(sb.String())}
+	tab.initUndo()
+	tab.Cursor = Position{Line: 10_000}
+	b.ReportAllocs()
+	for b.Loop() {
+		tab.InsertString("\n")
+	}
+}

@@ -189,3 +189,21 @@ func TestParseDiagnostic_SingleLine(t *testing.T) {
 		t.Errorf("ParseDiagnostics disagreed with ParseDiagnostic: %+v vs %+v", whole, d)
 	}
 }
+
+// FuzzParseDiagnostic feeds the compiler-output parser arbitrary lines
+// (N-138) — it reads whatever a plugin or a terminal command printed.
+// No panic, and a parsed location is never negative (the editor indexes
+// lines with it) — except Col's documented -1, "no column printed".
+func FuzzParseDiagnostic(f *testing.F) {
+	f.Add("main.go:12:5: error: undefined: foo")
+	f.Add("12:\tfoo := bar")
+	f.Add("C:\\x\\y.go:3:1: warning: w")
+	f.Add("::::")
+	f.Add("a.go:99999999999999999999:1: x")
+	f.Fuzz(func(t *testing.T, line string) {
+		d, ok := ParseDiagnostic(line)
+		if ok && (d.Line < 0 || d.Col < -1) {
+			t.Fatalf("negative location from %q: %+v", line, d)
+		}
+	})
+}

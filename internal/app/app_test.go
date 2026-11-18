@@ -45,7 +45,7 @@ import (
 // newTestApp builds a fully-wired App against a tcell.SimulationScreen. It
 // mirrors what New() does, but skips the background tree-refresh goroutine
 // because we don't want a ticker firing while tests run.
-func newTestApp(t *testing.T, root string) *App {
+func newTestApp(t testing.TB, root string) *App {
 	t.Helper()
 	scr := tcell.NewSimulationScreen("UTF-8")
 	if err := scr.Init(); err != nil {
@@ -4022,5 +4022,41 @@ func TestReadmeLabelPattern(t *testing.T) {
 	two := readmeLabelPattern("Undo <edit> (<n> files)")
 	if !two.MatchString("Undo rename (3 files)") || two.MatchString("Undo rename") {
 		t.Error("two placeholders: want each to stand for one run")
+	}
+}
+
+// benchApp opens a ~256KB Go file in an App drawn at 200×60 — the frame
+// size the N-125 / N-130 numbers were taken at — scrolled to its middle.
+func benchApp(b *testing.B) *App {
+	b.Helper()
+	dir := b.TempDir()
+	var src strings.Builder
+	src.WriteString("package bench\n\n")
+	for i := 0; src.Len() < 256<<10; i++ {
+		fmt.Fprintf(&src, "// f%d is ordinary code.\nfunc f%d(s string) int {\n\treturn len(s) + %d // tail\n}\n\n", i, i, i)
+	}
+	path := filepath.Join(dir, "bench.go")
+	if err := os.WriteFile(path, []byte(src.String()), 0o644); err != nil {
+		b.Fatal(err)
+	}
+	a := newTestApp(b, dir)
+	a.screen.(tcell.SimulationScreen).SetSize(200, 60)
+	a.width, a.height = 200, 60
+	a.openFile(path)
+	if tab := a.activeTabPtr(); tab != nil {
+		tab.ScrollY = tab.Buffer.LineCount() / 2
+	}
+	a.draw()
+	return a
+}
+
+// BenchmarkAppDraw is one whole frame of the editor: tree, tab bar,
+// editor, status bar, decorations (N-138). What every event the loop
+// handles costs when nothing defers the frame.
+func BenchmarkAppDraw(b *testing.B) {
+	a := benchApp(b)
+	b.ReportAllocs()
+	for b.Loop() {
+		a.draw()
 	}
 }

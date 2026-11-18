@@ -17,6 +17,7 @@
 package editor
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -274,5 +275,35 @@ func TestHighlightLang_UnknownLanguageKeepsTheBaseBackground(t *testing.T) {
 		if _, bg, _ := st.Decompose(); bg != th.MDCodeBG {
 			t.Fatalf("a rune fell back to the wrong background: %v", bg)
 		}
+	}
+}
+
+// benchGoSource builds roughly kb kilobytes of ordinary Go — functions,
+// strings, comments, a struct — for the performance benchmarks (N-138).
+// Synthetic rather than a file from the repo, so the numbers don't move
+// when someone edits app.go.
+func benchGoSource(kb int) string {
+	var b strings.Builder
+	b.WriteString("package bench\n\nimport \"fmt\"\n\n")
+	for i := 0; b.Len() < kb<<10; i++ {
+		fmt.Fprintf(&b, "// item%d documents a function that does a little work.\n", i)
+		fmt.Fprintf(&b, "type item%d struct {\n\tName string `json:\"name\"`\n\tN    int\n}\n\n", i)
+		fmt.Fprintf(&b, "func (x *item%d) run(n int) (string, error) {\n", i)
+		b.WriteString("\tif n < 0 {\n\t\treturn \"\", fmt.Errorf(\"negative: %d\", n)\n\t}\n")
+		b.WriteString("\ts := fmt.Sprintf(\"%s=%d\", x.Name, x.N+n) // a trailing comment\n\treturn s, nil\n}\n\n")
+	}
+	return b.String()
+}
+
+// BenchmarkHighlight is the whole-file Chroma lex a structural edit pays
+// on the main loop (N-128) and the grid it allocates (N-129). 256KB is
+// the size of the repo's largest file (internal/app/app.go).
+func BenchmarkHighlight(b *testing.B) {
+	src := benchGoSource(256)
+	th := theme.Default()
+	b.SetBytes(int64(len(src)))
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = Highlight("bench.go", src, th)
 	}
 }

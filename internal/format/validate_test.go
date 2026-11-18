@@ -192,3 +192,18 @@ func TestNotValidatedReason_ExplainsOnlySQL(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateJSON_MarkNeverSplitsARune is FuzzValidateJSON's first find:
+// an unterminated string ending in a 4-byte character was marked at the
+// character's LAST BYTE, which the rune count read as column 4 of a
+// two-character line. The mark now lands on the character itself.
+func TestValidateJSON_MarkNeverSplitsARune(t *testing.T) {
+	src := []byte("\"\U00052ee9\n")
+	probs := Validate("f.json", src)
+	if len(probs) != 1 {
+		t.Fatalf("problems = %+v, want one", probs)
+	}
+	if p := probs[0]; p.Line != 0 || p.Col > 1 {
+		t.Errorf("mark %d:%d, want on line 0 within its two characters", p.Line, p.Col)
+	}
+}

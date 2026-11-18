@@ -149,3 +149,28 @@ func TestDeferFrame_NonKeyEventsMidPastePaint(t *testing.T) {
 		t.Fatal("a non-key event mid-paste deferred its frame")
 	}
 }
+
+// BenchmarkPasteThroughTheLoop replays a 125-line bracketed paste through
+// Run's loop body — handleEvent, then a frame unless deferFrame holds it
+// — into a 256KB file, the N-125 case (9s per paste before the fix).
+func BenchmarkPasteThroughTheLoop(b *testing.B) {
+	a := benchApp(b)
+	var evs []tcell.Event
+	evs = append(evs, tcell.NewEventPaste(true))
+	for _, r := range strings.Repeat("\tx := compute(a, b) // pasted\n", 125) {
+		if r == '\n' {
+			evs = append(evs, tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+			continue
+		}
+		evs = append(evs, tcell.NewEventKey(tcell.KeyRune, r, tcell.ModNone))
+	}
+	evs = append(evs, tcell.NewEventPaste(false))
+	b.ReportAllocs()
+	for b.Loop() {
+		for _, ev := range evs {
+			if loopStep(a, ev) {
+				a.draw()
+			}
+		}
+	}
+}

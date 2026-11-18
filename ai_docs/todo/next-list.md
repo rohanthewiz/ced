@@ -118,6 +118,10 @@ plus the LSP work done in the seeding session itself
   intra-line edit; (b) run the settle re-lex on a goroutine keyed by
   `EditRev`, posting the grid back, so the loop never blocks on
   Chroma. With N-129, `MaxHighlightBytes` (512KB) can be revisited.
+  2026-11-17 (`2026-1117-SESS2`): measured by `BenchmarkEnterThenRender`
+  (editor/tab_test.go; 113 ms and 58MB per Enter+frame on a synthetic
+  256KB file, vs `BenchmarkTypeThenRender` 0.9 ms) and
+  `BenchmarkHighlight`. The fix owes a loose budget test (N-138).
 
 - **N-129** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **The style grid stores a 72-byte `tcell.Style` per character.**
@@ -129,6 +133,8 @@ plus the LSP work done in the seeding session itself
   brace matching can ask "is this class string / comment" instead of
   comparing colours (the degradation when a theme's syn-string == fg
   goes away).
+  2026-11-17: `BenchmarkHighlight` reports the lex's allocation (114MB
+  for 256KB); the fix owes a budget test on the grid's resident size.
 
 - **N-130** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Render converts whole lines whatever the viewport shows.**
@@ -141,6 +147,9 @@ plus the LSP work done in the seeding session itself
   `ScrollX` without allocating (tab stops still anchor at column 0)
   and build runes / styles for the visible window only; the wrapped
   layout needs the same treatment.
+  2026-11-17: `BenchmarkTabRender_OneLongLine` (1MB line: 22 ms, 85MB a
+  frame) vs `BenchmarkTabRender_CleanFrame` (1 ms); the fix owes a
+  budget test.
 
 - **N-132** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Find allocates per line per keystroke.** `SetFindQuery("gamma")`
@@ -149,6 +158,8 @@ plus the LSP work done in the seeding session itself
   keystroke. Fix: an ASCII fast path on bytes (`strings.Index`),
   converting to rune columns only on a hit. Only matters on very
   large files.
+  2026-11-17: `BenchmarkSetFindQuery` (100k lines: 13.6 ms, 29MB per
+  call); the fix owes a budget test.
 
 - **N-133** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **`ced path/to/file.go` roots the editor at the file's folder.**
@@ -697,20 +708,6 @@ and `raised`.
   For scale, the suite takes 2m40s locally WITHOUT -race, 153s of it
   in `internal/app`.
 
-- **N-138** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **There are no benchmarks and no fuzz tests.** Zero `func Benchmark`
-  and zero `func Fuzz` in the repo, so the numbers in N-125 and
-  N-127 … N-132 were taken with throwaway tests and nothing guards
-  them. Write: (a) benchmarks for `Highlight`, a clean `Tab.Render`
-  frame, Enter + Render, `App.draw`, `SetFindQuery`, an undo push on a
-  large buffer, and a paste replayed through Run's loop body, with a
-  loose budget test on the ones a fix is meant to move; (b) fuzz
-  targets for the code that parses what ced did not write: the LSP
-  frame reader (`Content-Length`, N-126d), the ndjson reader,
-  `plugins.ParseDiagnostic`, the conflict-marker scanner, `lexSQL`,
-  the JSON explainer, and a `readTextFile` → `EncodedBytes` round trip
-  that must be byte-identical (N-114).
-
 - **N-139** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
   **The hand checks have no harness.** About 25 Validate items above
   wait on a real tmux, and there is no tmux on the dev machine;
@@ -836,6 +833,28 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS2` —
+  **N-138** benchmarks and fuzz targets now exist. (a) Benchmarks, all on
+  synthetic input (256KB Go, 200×60): `BenchmarkHighlight`,
+  `BenchmarkTabRender_CleanFrame`, `BenchmarkTabRender_OneLongLine`,
+  `BenchmarkEnterThenRender` / `BenchmarkTypeThenRender`,
+  `BenchmarkSetFindQuery`, `BenchmarkUndoPush_LargeBuffer` (editor),
+  `BenchmarkAppDraw` and `BenchmarkPasteThroughTheLoop` (Run's loop body,
+  app). The loose budget tests are owed WITH the fixes they guard and
+  are noted on N-128 / N-129 / N-130 / N-132. (b) Fuzz targets:
+  `FuzzReadMessage`, `FuzzReadLineMessage` (lsp), `FuzzParseDiagnostic`
+  (plugins), `FuzzParseConflicts`, `FuzzReadEncodeRoundTrip` (editor),
+  `FuzzLexSQL`, `FuzzValidateJSON` (format); each fuzzed 15–30s clean.
+  Two finds: `FuzzValidateJSON` caught a real bug — a mark on the last
+  byte of a multi-byte character (an unterminated string ending in one)
+  was counted as several columns, past the line's end; `offsetToLineCol`
+  now snaps to the rune's start (`TestValidateJSON_MarkNeverSplitsARune`,
+  fails before; the corpus entry is committed as a seed). And the round
+  trip confirmed that a file MIXING CRLF and LF is normalised to its
+  majority ending on save — policy (N-121h), so the property skips
+  mixed files. `newTestApp` takes `testing.TB` so benchmarks can build
+  an App.
 
 - closed 2026-11-17, `2026-1117-SESS2` —
   **N-124** completion events are delivered reliably: `postResult`

@@ -123,3 +123,28 @@ func TestPrevNonBlank(t *testing.T) {
 		t.Errorf("prevNonBlank over all-blank prefix = %d, want -1", got)
 	}
 }
+
+// FuzzValidateJSON feeds the JSON check — and through it the explainer,
+// which moves the mark to the mistake — arbitrary bytes (N-138). No
+// panic, at most one problem, and its mark inside the document (Line and
+// Col are ZERO-based, Col in runes; it may sit one past a line's end,
+// where the missing token goes).
+func FuzzValidateJSON(f *testing.F) {
+	f.Add([]byte(`{"a": [1, 2,], "b": tru}`))
+	f.Add([]byte(`{"a": 1 "b": 2}`))
+	f.Add([]byte(`[{"x": "unterminated`))
+	f.Add([]byte("{\n  \"k\": 1,\n}\n"))
+	f.Add([]byte(""))
+	f.Fuzz(func(t *testing.T, src []byte) {
+		probs := Validate("f.json", src)
+		if len(probs) > 1 {
+			t.Fatalf("%d problems, want at most one", len(probs))
+		}
+		for _, p := range probs {
+			lines := strings.Split(string(src), "\n")
+			if p.Line < 0 || p.Line >= len(lines) || p.Col < 0 || p.Col > len([]rune(lines[p.Line])) {
+				t.Fatalf("mark %d:%d outside %q", p.Line, p.Col, src)
+			}
+		}
+	})
+}

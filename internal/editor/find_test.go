@@ -8,6 +8,7 @@
 package editor
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -444,5 +445,19 @@ func TestNewMatcher_EmptyQueryIsANilMatcherThatMatchesNothing(t *testing.T) {
 	}
 	if mt.All(NewBuffer("x")) != nil || mt.At([]rune("x"), 0, 1) || mt.IsRegex() {
 		t.Fatal("nil Matcher matched something")
+	}
+}
+
+// BenchmarkSetFindQuery is N-132's case: the find bar re-scans the whole
+// buffer on every keystroke, here 100k lines.
+func BenchmarkSetFindQuery(b *testing.B) {
+	var sb strings.Builder
+	for i := 0; i < 100_000; i++ {
+		fmt.Fprintf(&sb, "line %d alpha beta delta epsilon\n", i)
+	}
+	tab := &Tab{Buffer: NewBuffer(sb.String())}
+	b.ReportAllocs()
+	for b.Loop() {
+		tab.SetFindQuery("gamma")
 	}
 }

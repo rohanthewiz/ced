@@ -349,3 +349,28 @@ func TestTab_SetConflictMarkerSizeRescans(t *testing.T) {
 		t.Errorf("after reset to default: %d blocks, want 0", n)
 	}
 }
+
+// FuzzParseConflicts feeds the marker scanner arbitrary text (N-138): it
+// must not panic, and every block it reports must be well-formed —
+// markers in order, inside the input, blocks not overlapping.
+func FuzzParseConflicts(f *testing.F) {
+	f.Add(twoWay)
+	f.Add("<<<<<<< a\n||||||| b\nx\n=======\ny\n>>>>>>> c\n")
+	f.Add("<<<<<<<\n=======\n")
+	f.Add("=======\n>>>>>>> x\n<<<<<<< y\n")
+	f.Fuzz(func(t *testing.T, text string) {
+		lines := strings.Split(text, "\n")
+		for _, n := range []int{7, 3} {
+			prevEnd := -1
+			for _, blk := range ParseConflictsSized(lines, n) {
+				if blk.Start <= prevEnd || blk.Start >= blk.Mid || blk.Mid >= blk.End || blk.End >= len(lines) {
+					t.Fatalf("n=%d: malformed block %+v (prev end %d, %d lines)", n, blk, prevEnd, len(lines))
+				}
+				if blk.Base >= 0 && (blk.Base <= blk.Start || blk.Base >= blk.Mid) {
+					t.Fatalf("n=%d: base marker outside its block: %+v", n, blk)
+				}
+				prevEnd = blk.End
+			}
+		}
+	})
+}

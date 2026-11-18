@@ -1637,3 +1637,72 @@ func TestRender_CaretLineNumbersLit(t *testing.T) {
 		}
 	}
 }
+
+// benchTab is a tab over src with a fresh syntax grid and a 200×60
+// simulation screen to render into — the frame size N-130 measured at.
+func benchTab(b *testing.B, path, src string) (*Tab, tcell.SimulationScreen) {
+	b.Helper()
+	tab := &Tab{Path: path, Buffer: NewBuffer(src)}
+	tab.Styles = Highlight(path, src, theme.Default())
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		b.Fatal(err)
+	}
+	scr.SetSize(200, 60)
+	b.Cleanup(scr.Fini)
+	return tab, scr
+}
+
+// BenchmarkTabRender_CleanFrame is one ordinary frame: nothing changed,
+// a 256KB Go file scrolled to its middle. The baseline every other
+// render cost is read against (~1ms when N-130 was raised).
+func BenchmarkTabRender_CleanFrame(b *testing.B) {
+	tab, scr := benchTab(b, "bench.go", benchGoSource(256))
+	tab.ScrollY = tab.Buffer.LineCount() / 2
+	th := theme.Default()
+	b.ReportAllocs()
+	for b.Loop() {
+		tab.Render(scr, th, 0, 0, 200, 60)
+	}
+}
+
+// BenchmarkTabRender_OneLongLine is N-130's case: a 1MB single-line file
+// (a minified bundle). Render converts the whole line per frame, so the
+// cost tracks the line, not the viewport.
+func BenchmarkTabRender_OneLongLine(b *testing.B) {
+	src := strings.Repeat("var a=1;function f(){return a+1}", (1<<20)/33)
+	tab, scr := benchTab(b, "bundle.js", src)
+	th := theme.Default()
+	b.ReportAllocs()
+	for b.Loop() {
+		tab.Render(scr, th, 0, 0, 200, 60)
+	}
+}
+
+// BenchmarkEnterThenRender is N-128's case: a structural edit (Enter)
+// invalidates the grid, so the next frame re-lexes the whole 256KB file
+// on the main loop. Typing (deferred, patched) is the contrast case
+// below.
+func BenchmarkEnterThenRender(b *testing.B) {
+	tab, scr := benchTab(b, "bench.go", benchGoSource(256))
+	tab.Cursor = Position{Line: tab.Buffer.LineCount() / 2}
+	th := theme.Default()
+	b.ReportAllocs()
+	for b.Loop() {
+		tab.InsertString("\n")
+		tab.Render(scr, th, 0, 0, 200, 60)
+	}
+}
+
+// BenchmarkTypeThenRender is the deferred path for contrast: an
+// intra-line insert patches the grid and the frame reuses it.
+func BenchmarkTypeThenRender(b *testing.B) {
+	tab, scr := benchTab(b, "bench.go", benchGoSource(256))
+	tab.Cursor = Position{Line: tab.Buffer.LineCount() / 2}
+	th := theme.Default()
+	b.ReportAllocs()
+	for b.Loop() {
+		tab.InsertRune('x')
+		tab.Render(scr, th, 0, 0, 200, 60)
+	}
+}

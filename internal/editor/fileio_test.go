@@ -482,3 +482,44 @@ func TestEncodedBytes_IsWhatASaveWouldWrite(t *testing.T) {
 		t.Fatalf("EncodedBytes shares memory between calls: %q", again)
 	}
 }
+
+// FuzzReadEncodeRoundTrip is N-114's promise as a property (N-138): any
+// byte string ced agrees to open — UTF-8 or not, CRLF or LF, BOM or not
+// — comes back BYTE-IDENTICAL from EncodedBytes, which is what Save
+// writes. A refusal to open (binary, too large) is fine; a changed byte
+// is a corrupted file.
+//
+// One deliberate exception is skipped: a file MIXING CRLF and bare LF
+// line breaks. The buffer is bare LF with ONE recorded ending, so a
+// mixed file is normalised to its majority ending on save (and a
+// minority CR is kept as a character — N-121(h)); that is the line-ending
+// policy, not a codec bug.
+func FuzzReadEncodeRoundTrip(f *testing.F) {
+	f.Add([]byte("plain\nlf\n"))
+	f.Add([]byte("crlf\r\nlines\r\n"))
+	f.Add([]byte("\xef\xbb\xbfbom\n"))
+	f.Add([]byte("caf\xe9 cp1252\r\n"))
+	f.Add([]byte("mixed\r\nends\nhere"))
+	f.Add([]byte("no newline at end"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		crlf := strings.Count(string(data), "\r\n")
+		if crlf > 0 && crlf != strings.Count(string(data), "\n") {
+			return // mixed endings: normalised by design, see above
+		}
+		path := filepath.Join(t.TempDir(), "f.txt")
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		tab, err := NewTab(path)
+		if err != nil {
+			return // refused to open: nothing to round-trip
+		}
+		got, err := tab.EncodedBytes()
+		if err != nil {
+			t.Fatalf("EncodedBytes on an untouched tab: %v", err)
+		}
+		if string(got) != string(data) {
+			t.Fatalf("round trip changed the file:\n in  %q\n out %q", data, got)
+		}
+	})
+}

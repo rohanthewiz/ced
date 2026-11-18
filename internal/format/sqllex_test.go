@@ -217,3 +217,27 @@ func TestLexSQL_NumbersSwallowTrailingJunk(t *testing.T) {
 		}
 	}
 }
+
+// FuzzLexSQL feeds the PostgreSQL lexer arbitrary text (N-138): no panic,
+// and when it accepts the input every token's offset points into the
+// source at the token's own text — the property the formatter's
+// token-preservation check (sameSQLTokens) and its error positions rest
+// on.
+func FuzzLexSQL(f *testing.F) {
+	f.Add("SELECT a, 'it''s' FROM t WHERE x = $1; -- c\n")
+	f.Add("CREATE FUNCTION f() RETURNS int AS $$ BEGIN RETURN 1; END $$ LANGUAGE plpgsql;")
+	f.Add("COPY t FROM stdin;\n1\t2\n\\.\n")
+	f.Add("/* nested /* comment */ */ E'\\n' U&\"x\"")
+	f.Add("$tag$ unterminated")
+	f.Fuzz(func(t *testing.T, src string) {
+		toks, err := lexSQL(src)
+		if err != nil {
+			return
+		}
+		for _, tk := range toks {
+			if tk.off < 0 || tk.off+len(tk.text) > len(src) || src[tk.off:tk.off+len(tk.text)] != tk.text {
+				t.Fatalf("token %q at %d does not match the source", tk.text, tk.off)
+			}
+		}
+	})
+}

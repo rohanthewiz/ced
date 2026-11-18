@@ -14,6 +14,7 @@ package lsp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -247,4 +248,25 @@ func TestACPNotificationDispatch(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("notification never dispatched")
 	}
+}
+
+// FuzzReadLineMessage does the same for the ndjson reader (ACP / MCP):
+// no panic on any input, and a message it returns is a JSON-RPC record
+// (noise lines are skipped, N-126e).
+func FuzzReadLineMessage(f *testing.F) {
+	f.Add([]byte("{\"jsonrpc\":\"2.0\",\"method\":\"x\"}\n"))
+	f.Add([]byte("banner\n\n{\"a\":1}\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":null}"))
+	f.Add([]byte("{\"jsonrpc\":"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		r := bufio.NewReader(bytes.NewReader(data))
+		for i := 0; i < 4; i++ {
+			m, err := readLineMessage(r)
+			if err != nil {
+				return
+			}
+			if m.JSONRPC == "" {
+				t.Fatalf("returned a non-JSON-RPC record: %+v", m)
+			}
+		}
+	})
 }

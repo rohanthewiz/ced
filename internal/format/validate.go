@@ -186,6 +186,16 @@ func offsetToLineCol(src []byte, off int) (line, col int) {
 	if off < 0 {
 		off = 0
 	}
+	// An offset INSIDE a multi-byte rune is snapped back to the rune's
+	// first byte. The explainer marks "the byte before" in several shapes
+	// (the last character of an unterminated string, say), and when that
+	// character is non-ASCII the byte before is its last continuation
+	// byte; counting from there treats each continuation byte as a rune
+	// of its own and puts the mark past the end of the line (found by
+	// FuzzValidateJSON: `"` + U+52EE9 + newline marked column 4 of 2).
+	for off > 0 && off < len(src) && !utf8.RuneStart(src[off]) {
+		off--
+	}
 	// The line is how many newlines precede the offset; the column is
 	// the rune count of whatever follows the last of them.
 	nl := bytes.LastIndexByte(src[:off], '\n')

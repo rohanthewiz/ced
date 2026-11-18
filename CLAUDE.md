@@ -167,6 +167,13 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - `t.TempDir()` for filesystem state; never write into the repo or /tmp.
 - UI code: `tcell.NewSimulationScreen("UTF-8")` + `scr.GetContents()`.
 - `t.Skip` only for unsatisfiable environment needs, never for flakiness.
+- **Benchmarks + fuzz targets** (N-138) live in the source file's own
+  `_test.go`, on SYNTHETIC input (`benchGoSource`, `benchApp`) — never a
+  repo file. Parsers of what ced didn't write get a `Fuzz*` (LSP frames,
+  ndjson, compiler output, conflict markers, SQL lexer, JSON check, the
+  read→EncodedBytes round trip); a fuzz find is fixed with a unit test
+  and its `testdata/fuzz` entry committed. A perf fix adds a loose
+  budget test beside its benchmark. `newTestApp` takes `testing.TB`.
 - `make test` (race detector) / `make coverage`. CI does NOT actually run
   on this fork: Actions triggers (test.yml) don't fire until enabled in
   the Actions tab. Run tests locally.

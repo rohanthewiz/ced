@@ -2454,6 +2454,9 @@ func (a *App) Run() error {
 	// before the process dies. See crashsafety.go.
 	defer a.recoverRun()
 	a.width, a.height = a.screen.Size()
+	// A big file restored from the session is lexed off the loop; start
+	// that now rather than on the first event, which may be a while.
+	a.syntaxAfterEvent()
 	a.draw()
 	a.screen.Show()
 	a.lastFrameAt = time.Now()
@@ -2527,6 +2530,8 @@ func (a *App) handleEvent(ev tcell.Event) {
 		a.handleTTYError(e)
 	case *syntaxSettleEvent:
 		a.handleSyntaxSettle()
+	case *syntaxLexedEvent:
+		a.handleSyntaxLexed(e)
 	case *projectSearchEvent:
 		a.handleProjectSearch(e)
 	case *treeRefreshEvent:

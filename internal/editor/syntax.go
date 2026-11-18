@@ -58,6 +58,7 @@ package editor
 import (
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // SyntaxSettle is how long the buffer must be quiet before a deferred
@@ -99,13 +100,20 @@ func (t *Tab) deferStyles() {
 }
 
 // stylesAfterInsert mirrors an insertion of s at at into the cached grid.
-// Multi-line inserts fall back to a full re-lex — see the file comment
-// for why the line-structure boundary is where deferral stops.
+// A multi-line insert (Enter, a multi-line paste) SPLITS the row and
+// defers too (N-128): it used to invalidate, and the next frame re-lexed
+// the whole file on the main loop — 113 ms per Enter on a 256KB file.
 func (t *Tab) stylesAfterInsert(at Position, s string) {
 	if s == "" {
 		return
 	}
-	if strings.ContainsRune(s, '\n') || !t.patchRowInsert(at.Line, at.Col, len([]rune(s))) {
+	var ok bool
+	if strings.ContainsRune(s, '\n') {
+		ok = t.patchRowsInsert(at, s)
+	} else {
+		ok = t.patchRowInsert(at.Line, at.Col, utf8.RuneCountInString(s))
+	}
+	if !ok {
 		t.InvalidateStyles()
 		return
 	}
@@ -113,16 +121,102 @@ func (t *Tab) stylesAfterInsert(at Position, s string) {
 }
 
 // stylesAfterDelete mirrors the removal of the range [from, to) into the
-// cached grid. A range spanning lines joins rows, so it re-lexes.
+// cached grid. A range spanning lines JOINS the rows and defers (N-128).
 func (t *Tab) stylesAfterDelete(from, to Position) {
-	if from.Line != to.Line || !t.patchRowDelete(from.Line, from.Col, to.Col-from.Col) {
+	var ok bool
+	if from.Line != to.Line {
+		ok = t.patchRowsDelete(from, to)
+	} else {
+		ok = t.patchRowDelete(from.Line, from.Col, to.Col-from.Col)
+	}
+	if !ok {
 		t.InvalidateStyles()
 		return
 	}
 	t.deferStyles()
 }
 
-// patchRowInsert widens row `line` by n style entries at col, filling them
+// patchRowsInsert mirrors a MULTI-LINE insertion of s at at: the row at
+// at.Line splits at at.Col, the head keeps its classes and gains the
+// first inserted line's, every further inserted line gets a row of its
+// own, and the tail keeps its classes at the end of the last one.
+//
+//	before:  row L = [ head | tail ]          s = "x\ny\nz"
+//	after:   row L   = [ head | x ]
+//	         row L+1 = [ y ]
+//	         row L+2 = [ z | tail ]
+//
+// Inserted runes take the class to the left of the insertion point, as
+// typed text does in patchRowInsert — a newline typed inside a string
+// leaves both halves string-coloured until the settle re-lex says
+// otherwise. Reports false when the grid can't be patched (no grid, the
+// row is out of range); the caller then invalidates.
+func (t *Tab) patchRowsInsert(at Position, s string) bool {
+	if t.Classes == nil || at.Line < 0 || at.Line >= len(t.Classes) {
+		return false
+	}
+	row := t.Classes[at.Line]
+	if at.Col < 0 || at.Col > len(row) {
+		return false
+	}
+	fill := SynPlain
+	switch {
+	case at.Col > 0:
+		fill = row[at.Col-1]
+	case len(row) > 0:
+		fill = row[0]
+	}
+	parts := strings.Split(s, "\n")
+	rows := make([][]SynClass, len(parts))
+	for k, part := range parts {
+		n := utf8.RuneCountInString(part)
+		var r []SynClass
+		switch k {
+		case 0:
+			r = make([]SynClass, 0, at.Col+n)
+			r = append(r, row[:at.Col]...)
+		case len(parts) - 1:
+			r = make([]SynClass, 0, n+len(row)-at.Col)
+		}
+		for range n {
+			r = append(r, fill)
+		}
+		if k == len(parts)-1 {
+			r = append(r, row[at.Col:]...)
+		}
+		rows[k] = r
+	}
+	t.Classes = spliceRows(t.Classes, at.Line, at.Line+1, rows)
+	return true
+}
+
+// patchRowsDelete mirrors the removal of a range that spans lines: the
+// head of from.Line's row and the tail of to.Line's row join into one,
+// and the rows between go. Columns are clamped to what the rows hold —
+// a row may be shorter than its line (see patchRowInsert).
+func (t *Tab) patchRowsDelete(from, to Position) bool {
+	if t.Classes == nil || from.Line < 0 || to.Line >= len(t.Classes) || from.Line > to.Line {
+		return false
+	}
+	a, b := t.Classes[from.Line], t.Classes[to.Line]
+	fc, tc := min(max(from.Col, 0), len(a)), min(max(to.Col, 0), len(b))
+	joined := make([]SynClass, 0, fc+len(b)-tc)
+	joined = append(joined, a[:fc]...)
+	joined = append(joined, b[tc:]...)
+	t.Classes = spliceRows(t.Classes, from.Line, to.Line+1, [][]SynClass{joined})
+	return true
+}
+
+// spliceRows replaces grid[lo:hi] with rows, in a fresh slice: the old
+// one may still be referenced by an async lex's caller, never mutated.
+func spliceRows(grid [][]SynClass, lo, hi int, rows [][]SynClass) [][]SynClass {
+	out := make([][]SynClass, 0, len(grid)-(hi-lo)+len(rows))
+	out = append(out, grid[:lo]...)
+	out = append(out, rows...)
+	return append(out, grid[hi:]...)
+}
+
+// patchRowInsert widens row `line` by n class entries at col, filling them
 // with the style of the rune to the left of the insertion point so typed
 // text inherits the color of what it's being typed into. Reports whether
 // the patch was possible; false means the caller must re-lex instead.
@@ -183,6 +277,57 @@ func (t *Tab) needsRelex() bool {
 		return true
 	}
 	return time.Since(t.lastEditAt) >= SyntaxSettle
+}
+
+// InlineLexBytes is the largest buffer Render re-lexes itself (N-128).
+// Chroma costs ~0.5-0.9 ms per KB, so 32KB is a frame or two; anything
+// bigger is lexed OFF the main loop (BeginAsyncLex / AdoptClasses, run by
+// the app) and the frame paints the patched — or, after a structural edit
+// no patch covers, the previous — grid until the answer lands. A var only
+// so tests can move the line.
+var InlineLexBytes = 32 << 10
+
+// lexInline reports whether this tab's re-lex may run inside Render. The
+// byte count is summed from the lines (O(lines), only asked while a
+// re-lex is due).
+func (t *Tab) lexInline() bool {
+	n := 0
+	for _, ln := range t.Buffer.Lines {
+		n += len(ln) + 1
+		if n > InlineLexBytes {
+			return false
+		}
+	}
+	return true
+}
+
+// BeginAsyncLex hands the app a re-lex to run off the loop: the tab's
+// path, a snapshot of its text, and the revision that text is. ok is
+// false when nothing is due, the buffer is small enough for Render to
+// lex inline, or a lex for this tab is already out — ONE at a time, so a
+// burst of undos on a big file can't stack 200ms lexes; the answer's
+// arrival (AdoptClasses) clears the way for the next.
+func (t *Tab) BeginAsyncLex() (path, src string, rev int, ok bool) {
+	if t.lexing || !t.needsRelex() || t.lexInline() {
+		return "", "", 0, false
+	}
+	t.lexing = true
+	return t.Path, t.Buffer.String(), t.EditRev, true
+}
+
+// AdoptClasses installs an async lex's grid if the buffer is still the
+// text it was computed from (rev == EditRev), and reports whether it did.
+// Either way the tab is free to start another; the caller asks
+// BeginAsyncLex again, which says whether one is still due.
+func (t *Tab) AdoptClasses(rev int, grid [][]SynClass) bool {
+	t.lexing = false
+	if rev != t.EditRev || t.SyntaxOff {
+		return false
+	}
+	t.Classes = grid
+	t.StyleStale = false
+	t.styleDefer = false
+	return true
 }
 
 // SyntaxSettleWait returns how long until a deferred re-lex comes due, or

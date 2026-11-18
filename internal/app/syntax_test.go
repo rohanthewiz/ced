@@ -55,10 +55,19 @@ func TestSyntaxAfterEvent_ArmsOnlyForDeferredWork(t *testing.T) {
 		t.Fatal("an intra-line edit must arm the settle timer")
 	}
 
-	// A structural edit re-lexes on the next render instead, so there is
-	// nothing left for a timer to wake up for.
+	// Enter patches the grid's rows and defers like typing (N-128), so it
+	// arms the timer too.
 	a.stopSyntaxSettle()
 	tab.InsertString("\n")
+	a.syntaxAfterEvent()
+	if a.syntaxTimer == nil {
+		t.Fatal("Enter defers its re-lex and must arm the settle timer")
+	}
+
+	// An edit no row patch covers re-lexes on the next render instead, so
+	// there is nothing left for a timer to wake up for.
+	a.stopSyntaxSettle()
+	tab.DuplicateLines()
 	a.syntaxAfterEvent()
 	if a.syntaxTimer != nil {
 		t.Fatal("a structural edit re-lexes immediately and needs no timer")
@@ -104,4 +113,41 @@ func TestSyntaxStatusSuffix_NamesTheSizeDecision(t *testing.T) {
 	if got := a.syntaxStatusSuffix(); !strings.Contains(got, "large file") {
 		t.Fatalf("a syntax-off tab should explain itself, got %q", got)
 	}
+}
+
+// TestSyntaxLexAsync_BigFileLexedOffTheLoopAndAdopted is N-128's part (b)
+// end to end through the App: a file over editor.InlineLexBytes opens
+// with no grid (the frame paints plain text instead of freezing), the
+// after-event hook starts the off-loop lex, and its event installs the
+// grid. An edit while it runs makes the answer stale; the handler asks
+// again and the second answer lands.
+func TestSyntaxLexAsync_BigFileLexedOffTheLoopAndAdopted(t *testing.T) {
+	old := editor.InlineLexBytes
+	editor.InlineLexBytes = 16
+	t.Cleanup(func() { editor.InlineLexBytes = old })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.go")
+	if err := os.WriteFile(path, []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := newTestApp(t, dir)
+	a.openFile(path)
+	tab := a.activeTabPtr()
+	a.draw()
+	if tab.Classes != nil {
+		t.Fatal("Render lexed a buffer over InlineLexBytes on the loop")
+	}
+	a.syntaxAfterEvent()
+	pumpAppEvents(t, a, func() bool { return !tab.StyleStale })
+	if tab.Classes == nil || tab.Classes[0][0] != editor.SynKeyword {
+		t.Fatalf("grid not adopted: %v", tab.Classes)
+	}
+
+	// An undo-style invalidation (no row patch) while a lex is out: the
+	// first answer is stale, and the handler's re-ask lands the fresh one.
+	tab.InvalidateStyles()
+	a.syntaxAfterEvent()
+	tab.EditRev++ // the buffer "moved" under the running lex
+	pumpAppEvents(t, a, func() bool { return !tab.StyleStale })
 }

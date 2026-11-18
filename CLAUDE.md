@@ -302,10 +302,16 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   consumes it. Never call `EnsureVisible` unconditionally. Restores
   (`RestoreView`, `CenterOnCursor`) must CLEAR it.
 - **Deferred syntax (editor/syntax.go, app/syntax.go)**: intra-line edits
-  (typing, backspace, delete, same-line replace) DEFER and patch the grid
-  (`stylesAfterInsert/Delete`); structural edits (Enter, multi-line paste,
-  undo, line ops, reload) call `InvalidateStyles`. The grid is classes,
-  not styles (highlight.go, N-129): never store a resolved color in it.
+  (typing, backspace, delete, same-line replace) AND line splits / joins
+  (Enter, multi-line paste, multi-line delete: `patchRowsInsert/Delete`,
+  N-128) DEFER and patch the grid (`stylesAfterInsert/Delete`); edits no
+  patch covers (undo, line ops, reload, multi-edit) call
+  `InvalidateStyles`. The grid is classes, not styles (highlight.go,
+  N-129): never store a resolved color in it. Render lexes ONLY buffers
+  ≤ `InlineLexBytes` (32KB); bigger ones are lexed off the loop
+  (`BeginAsyncLex` → goroutine → `syntaxLexedEvent` → `AdoptClasses`,
+  stale `EditRev` dropped, one in flight per tab) and the frame paints
+  the grid it has meanwhile.
   `InvalidateStyles` is the DEFAULT for any new mutation path. Over
   `MaxHighlightBytes` (512KB) → `SyntaxOff`. `SyntaxSettle` is a package
   var for tests only.

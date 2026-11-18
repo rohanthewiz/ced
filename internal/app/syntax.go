@@ -19,12 +19,27 @@
 // same constraint as the caret blink: the timer is armed ONLY while a tab
 // is actually waiting on one. A standing timer would wake an idle editor
 // forever, which on a laptop is a battery bug and over SSH is traffic.
+//
+// It is also where a BIG buffer's re-lex runs (N-128). Render lexes only
+// buffers up to editor.InlineLexBytes; above that the whole-file Chroma
+// pass (~0.5-0.9 ms per KB, 113 ms per Enter on a 256KB file) would
+// freeze the loop, so it runs on a goroutine:
+//
+//	afterEvent ──tab.BeginAsyncLex()──► go HighlightClasses(snapshot)
+//	                                        └─ syntaxLexedEvent{tab, rev, grid}
+//	handleSyntaxLexed ──tab.AdoptClasses(rev, grid)── stale rev? dropped,
+//	                                                   and asked again
+//
+// One lex per tab at a time; the frame meanwhile paints the grid the tab
+// has (patched rows, or the previous grid after an edit no patch covers).
 package app
 
 import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rohanthewiz/ced/internal/crash"
+	"github.com/rohanthewiz/ced/internal/editor"
 )
 
 // syntaxSettleEvent is posted when the typing pause elapses. It carries
@@ -53,6 +68,52 @@ func (a *App) syntaxAfterEvent() {
 	}
 	if d := tab.SyntaxSettleWait(); d > 0 {
 		a.armSyntaxSettle(d)
+	}
+	a.syntaxLexAsync(tab)
+}
+
+// syntaxLexedEvent carries an off-loop lex's grid back to the main loop,
+// stamped with the tab and the revision of the text it lexed.
+type syntaxLexedEvent struct {
+	when time.Time
+	tab  *editor.Tab
+	rev  int
+	grid [][]editor.SynClass
+}
+
+// When satisfies the tcell.Event interface.
+func (e *syntaxLexedEvent) When() time.Time { return e.when }
+
+// syntaxLexAsync starts tab's re-lex on a goroutine when one is due and
+// the buffer is too big to lex inside Render (editor.Tab.BeginAsyncLex
+// decides both, and refuses while one is already out).
+func (a *App) syntaxLexAsync(tab *editor.Tab) {
+	if a.screen == nil {
+		return
+	}
+	path, src, rev, ok := tab.BeginAsyncLex()
+	if !ok {
+		return
+	}
+	scr := a.screen
+	go func() {
+		defer crash.Recover()
+		grid := editor.HighlightClasses(path, src)
+		postResult(scr, &syntaxLexedEvent{when: time.Now(), tab: tab, rev: rev, grid: grid})
+	}()
+}
+
+// handleSyntaxLexed adopts an off-loop lex if its tab still holds the
+// text it lexed, and asks again for the active tab either way — a stale
+// answer means the buffer moved, and BeginAsyncLex knows whether another
+// pass is due yet (it waits out the settle window like Render does).
+func (a *App) handleSyntaxLexed(e *syntaxLexedEvent) {
+	e.tab.AdoptClasses(e.rev, e.grid)
+	if tab := a.activeTabPtr(); tab != nil {
+		if d := tab.SyntaxSettleWait(); d > 0 {
+			a.armSyntaxSettle(d)
+		}
+		a.syntaxLexAsync(tab)
 	}
 }
 
@@ -99,5 +160,8 @@ func (a *App) syntaxStatusSuffix() string {
 	return ""
 }
 
-// Compile-time check that syntaxSettleEvent really is a tcell.Event.
-var _ tcell.Event = (*syntaxSettleEvent)(nil)
+// Compile-time check that the syntax events really are tcell.Events.
+var (
+	_ tcell.Event = (*syntaxSettleEvent)(nil)
+	_ tcell.Event = (*syntaxLexedEvent)(nil)
+)

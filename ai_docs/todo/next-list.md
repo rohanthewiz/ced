@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-149**
+**Next ID: N-151**
 
 ## Open
 
@@ -106,22 +106,6 @@ plus the LSP work done in the seeding session itself
   typing at end of line writes text after the CR (fileio.go:108-115).
   Since N-114 that CR is at least VISIBLE: Render paints control runes
   as stand-ins, so it shows as `␍` at the end of those lines.
-
-- **N-128** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **Every structural edit re-lexes the whole file on the main loop.**
-  Enter, a multi-line paste, undo and line ops call
-  `InvalidateStyles`, and the next Render runs Chroma over the whole
-  buffer. Measured: ~0.5 ms per KB, so on `internal/app/app.go` (261KB)
-  Enter + Render is 129 ms and Undo + Render 151 ms, with 59MB of
-  garbage each; typing (the deferred path) is 1.2 ms. Fix: (a) patch
-  the grid for line inserts / deletes (splice rows) and DEFER like an
-  intra-line edit; (b) run the settle re-lex on a goroutine keyed by
-  `EditRev`, posting the grid back, so the loop never blocks on
-  Chroma. With N-129, `MaxHighlightBytes` (512KB) can be revisited.
-  2026-11-17 (`2026-1117-2301-n124-n101-n138-post-result-tsc-lsp-fuzz`): measured by `BenchmarkEnterThenRender`
-  (editor/tab_test.go; 113 ms and 58MB per Enter+frame on a synthetic
-  256KB file, vs `BenchmarkTypeThenRender` 0.9 ms) and
-  `BenchmarkHighlight`. The fix owes a loose budget test (N-138).
 
 - **N-130** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Render converts whole lines whatever the viewport shows.**
@@ -255,6 +239,28 @@ plus the LSP work done in the seeding session itself
   (`github.com/rohanthewiz/spell`) holding Dictionary / Suggest /
   userdict + data, each editor keeping its own tokenizer (prose vs
   ident.go/structtag.go). Raise if the two drift on a real bug.
+
+- **N-149** · raised `2026-1117-SESS3` · value low
+  **A big file paints its previous grid after an unpatched edit.** Since
+  N-128 a buffer over `InlineLexBytes` (32KB) is lexed off the loop.
+  Enter / paste / multi-line delete patch the grid's rows, but undo, line
+  ops (move, duplicate, delete line), reload and multi-edits still
+  `InvalidateStyles`, and until the async lex lands (~100–200 ms on a
+  256KB file) the frame paints the OLD grid: lines below an inserted or
+  removed line wear their neighbours' colours for that moment. Fix if it
+  shows: on invalidation, realign the grid by prefix/suffix line
+  comparison against the lines it was lexed from (the undo layer's
+  `lineHunks` idea), leaving only the changed middle plain.
+
+- **N-150** · raised `2026-1117-SESS3` · value low
+  **`MaxHighlightBytes` (512KB) predates both fixes that made it
+  necessary.** It was set because a re-lex froze the loop (~270 ms at
+  512KB) and the grid cost 72 bytes a rune. Since N-128 the lex runs off
+  the loop for anything over 32KB, and since N-129 the grid is one byte a
+  rune. Files between 512KB and the 32MB open cap now open with
+  highlighting off for no remaining reason except the lex's own garbage
+  (~0.4MB per KB) on each settle. Decide a new cap (2–4MB?) after
+  measuring a settle re-lex's allocation there.
 
 ## Validate
 
@@ -820,6 +826,23 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS3` —
+  **N-128** structural edits no longer re-lex on the main loop. (a)
+  Enter, a multi-line paste and a multi-line delete SPLIT / JOIN the
+  class grid's rows (`patchRowsInsert` / `patchRowsDelete`) and defer like
+  typing. (b) Render lexes only buffers ≤ `InlineLexBytes` (32KB); a
+  bigger one is lexed on a goroutine (`BeginAsyncLex`, one in flight per
+  tab → `syntaxLexedEvent` → `AdoptClasses`, dropped on a moved
+  `EditRev` and asked again), also started before the first frame for a
+  restored session. `BenchmarkEnterThenRender` (256KB): 113 ms / 58MB →
+  0.96 ms / 0.47MB. Budget test `TestEnterThenRender_StaysOffChromaOnTheLoop`
+  (bytes allocated, not time; also asserts a settled frame doesn't lex a
+  big file inline). `TestSyntaxPatch_LineSplitsAndJoinsDefer`,
+  `TestAsyncLex_BigBufferIsLexedOffTheLoop`,
+  `TestSyntaxLexAsync_BigFileLexedOffTheLoopAndAdopted` (-race ×5). Real
+  binary: Enters on a copy of the 261KB app.go, the code region captured
+  with 12 distinct syntax inks. Follow-ups raised: N-149, N-150.
 
 - closed 2026-11-17, `2026-1117-SESS3` —
   **N-129** the syntax grid holds a one-byte CLASS per rune

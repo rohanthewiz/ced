@@ -56,21 +56,16 @@ func TestSyntaxDefer_TypingDoesNotRelexPerKeystroke(t *testing.T) {
 }
 
 // TestSyntaxDefer_StructuralEditRelexesNow pins the boundary the deferral
-// stops at. Anything that changes the line structure would leave the
-// grid's rows misaligned with the buffer's, which repaints everything
-// below the edit in the wrong colors — so it re-lexes immediately.
+// stops at. An edit no row patch covers (undo, line ops, a comment
+// toggle) would leave the grid's rows misaligned with the buffer's,
+// which repaints everything below the edit in the wrong colors — so it
+// re-lexes immediately. (Enter, a multi-line paste and a line join DO
+// have patches since N-128: TestSyntaxPatch_LineSplitsAndJoinsDefer.)
 func TestSyntaxDefer_StructuralEditRelexesNow(t *testing.T) {
 	cases := []struct {
 		name string
 		edit func(*Tab)
 	}{
-		{"newline", func(tb *Tab) { tb.InsertString("\n") }},
-		{"multi-line paste", func(tb *Tab) { tb.InsertString("a\nb") }},
-		{"join lines", func(tb *Tab) {
-			tb.Cursor = Position{Line: 2, Col: 0}
-			tb.Anchor = tb.Cursor
-			tb.Backspace()
-		}},
 		{"undo", func(tb *Tab) { tb.InsertRune('X'); tb.Undo() }},
 		{"line duplicate", func(tb *Tab) { tb.DuplicateLines() }},
 		{"comment toggle", func(tb *Tab) { tb.ToggleLineComment() }},
@@ -278,5 +273,120 @@ func TestSyntaxDefer_RenderPaintsPatchedGrid(t *testing.T) {
 	}
 	if !tab.StyleStale {
 		t.Fatal("render must not have consumed the staleness before the settle window")
+	}
+}
+
+// TestSyntaxPatch_LineSplitsAndJoinsDefer is N-128's part (a): Enter, a
+// multi-line paste and a line join patch the grid's ROWS and defer like
+// typing, instead of forcing a whole-file re-lex on the next frame. The
+// grid stays one row per line, each row as long as its line, and the
+// classes around the edit stay where they were.
+func TestSyntaxPatch_LineSplitsAndJoinsDefer(t *testing.T) {
+	cases := []struct {
+		name string
+		edit func(*Tab)
+	}{
+		{"newline", func(tb *Tab) { tb.InsertString("\n") }},
+		{"multi-line paste", func(tb *Tab) { tb.InsertString("a\nbb\nccc") }},
+		{"join lines", func(tb *Tab) {
+			tb.Cursor = Position{Line: 2, Col: 0}
+			tb.Anchor = tb.Cursor
+			tb.Backspace()
+		}},
+		{"multi-line selection delete", func(tb *Tab) {
+			tb.Anchor = Position{Line: 0, Col: 3}
+			tb.Cursor = Position{Line: 2, Col: 5}
+			tb.DeleteSelection()
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tab := syntaxTab(t, "x.go", "package main\n\nfunc main() { s := \"str\" }\n")
+			tab.Cursor = Position{Line: 2, Col: 5}
+			tab.Anchor = tab.Cursor
+			kwBefore := tab.Classes[0][0] // `package`
+
+			tc.edit(tab)
+			if tab.needsRelex() || !tab.styleDefer {
+				t.Fatalf("%s must defer (patch), not force a re-lex", tc.name)
+			}
+			if len(tab.Classes) != tab.Buffer.LineCount() {
+				t.Fatalf("%s: %d grid rows for %d lines", tc.name, len(tab.Classes), tab.Buffer.LineCount())
+			}
+			for i, ln := range tab.Buffer.Lines {
+				if len(tab.Classes[i]) != len([]rune(ln)) {
+					t.Fatalf("%s: row %d holds %d classes for %q", tc.name, i, len(tab.Classes[i]), ln)
+				}
+			}
+			if tc.name != "multi-line selection delete" && tab.Classes[0][0] != kwBefore {
+				t.Errorf("%s: the untouched first line lost its classes", tc.name)
+			}
+		})
+	}
+}
+
+// TestSyntaxPatch_SplitKeepsTheTailsClasses: Enter in front of a string
+// literal carries the literal's classes down to the new line intact.
+func TestSyntaxPatch_SplitKeepsTheTailsClasses(t *testing.T) {
+	tab := syntaxTab(t, "x.go", `x := "hello"`)
+	strCol := 5 // the opening quote
+	want := append([]SynClass(nil), tab.Classes[0][strCol:]...)
+	tab.Cursor = Position{Line: 0, Col: strCol}
+	tab.Anchor = tab.Cursor
+	tab.InsertString("\n")
+	if got := tab.Classes[1]; string(classBytes(got)) != string(classBytes(want)) {
+		t.Errorf("tail classes %v, want %v", got, want)
+	}
+}
+
+// classBytes turns a class row into bytes for comparison.
+func classBytes(r []SynClass) []byte {
+	b := make([]byte, len(r))
+	for i, c := range r {
+		b[i] = byte(c)
+	}
+	return b
+}
+
+// TestAsyncLex_BigBufferIsLexedOffTheLoop is N-128's part (b) at the
+// editor's seam: over InlineLexBytes, Render no longer lexes; the app
+// takes the work with BeginAsyncLex (one at a time) and AdoptClasses
+// installs the answer only for the revision it was computed from.
+func TestAsyncLex_BigBufferIsLexedOffTheLoop(t *testing.T) {
+	old := InlineLexBytes
+	InlineLexBytes = 16
+	t.Cleanup(func() { InlineLexBytes = old })
+
+	tab := &Tab{Path: "x.go", Buffer: NewBuffer("package main\n\nfunc main() {}\n"), StyleStale: true}
+	tab.initUndo()
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer scr.Fini()
+	tab.Render(scr, theme.Default(), 0, 0, 40, 10)
+	if tab.Classes != nil || !tab.StyleStale {
+		t.Fatal("Render lexed a buffer over InlineLexBytes")
+	}
+
+	path, src, rev, ok := tab.BeginAsyncLex()
+	if !ok || path != "x.go" || src != tab.Buffer.String() || rev != tab.EditRev {
+		t.Fatalf("BeginAsyncLex = %q %q %d %v", path, src, rev, ok)
+	}
+	if _, _, _, again := tab.BeginAsyncLex(); again {
+		t.Fatal("a second lex started while one was out")
+	}
+
+	// The buffer moved while the lex ran: its answer is for old text.
+	tab.InsertRune('x')
+	if tab.AdoptClasses(rev, HighlightClasses(path, src)) {
+		t.Fatal("a stale lex was adopted")
+	}
+	_, src, rev, ok = tab.BeginAsyncLex()
+	if !ok {
+		t.Fatal("no new lex offered after the stale one")
+	}
+	if !tab.AdoptClasses(rev, HighlightClasses("x.go", src)) || tab.StyleStale || tab.Classes == nil {
+		t.Fatal("a current lex was not adopted")
 	}
 }

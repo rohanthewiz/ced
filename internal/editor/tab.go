@@ -48,6 +48,9 @@ type Tab struct {
 	// theme switch repaints it without a re-lex.
 	Classes    [][]SynClass
 	StyleStale bool
+	// lexing is set while an async re-lex is out (BeginAsyncLex →
+	// AdoptClasses): at most one per tab.
+	lexing bool
 
 	// SyntaxOff kills highlighting for this tab outright. Set at open (and
 	// re-evaluated on reload) for files over MaxHighlightBytes, where even
@@ -1175,7 +1178,10 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 	// Re-lex only when it's actually due — syntax.go's settle policy keeps
 	// a typing burst from paying the O(file) Chroma cost per keystroke,
 	// and paints from a patched grid until the buffer goes quiet.
-	if t.needsRelex() {
+	// Only a small buffer is lexed here; a big one is lexed off the loop
+	// by the app (BeginAsyncLex), and until it answers this frame paints
+	// the grid it has (N-128).
+	if t.needsRelex() && t.lexInline() {
 		t.Classes = HighlightClasses(t.Path, t.Buffer.String())
 		t.StyleStale = false
 		t.styleDefer = false

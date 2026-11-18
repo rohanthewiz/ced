@@ -1706,3 +1706,42 @@ func BenchmarkTypeThenRender(b *testing.B) {
 		tab.Render(scr, th, 0, 0, 200, 60)
 	}
 }
+
+// TestEnterThenRender_StaysOffChromaOnTheLoop is N-128's budget test. On
+// a 256KB file, Enter followed by a frame used to re-lex the whole file
+// on the main loop: 113 ms and 58MB per keypress. Now Enter patches the
+// grid's rows (the frame allocates well under a megabyte), and once the
+// settle window passes the frame STILL doesn't lex — the file is over
+// InlineLexBytes, so that pass belongs to the app's goroutine. Measured
+// in bytes allocated (deterministic), not time (load-dependent).
+func TestEnterThenRender_StaysOffChromaOnTheLoop(t *testing.T) {
+	src := benchGoSource(256)
+	tab := &Tab{Path: "bench.go", Buffer: NewBuffer(src)}
+	tab.Classes = HighlightClasses("bench.go", src)
+	tab.Cursor = Position{Line: tab.Buffer.LineCount() / 2}
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer scr.Fini()
+	scr.SetSize(200, 60)
+	th := theme.Default()
+	tab.Render(scr, th, 0, 0, 200, 60) // warm
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tab.InsertString("\n")
+	tab.Render(scr, th, 0, 0, 200, 60)
+	runtime.ReadMemStats(&after)
+	if got := after.TotalAlloc - before.TotalAlloc; got > 4<<20 {
+		t.Errorf("Enter + frame allocated %d bytes; a whole-file lex is ~50MB, the budget 4MB", got)
+	}
+
+	tab.lastEditAt = time.Now().Add(-2 * SyntaxSettle) // settled
+	runtime.ReadMemStats(&before)
+	tab.Render(scr, th, 0, 0, 200, 60)
+	runtime.ReadMemStats(&after)
+	if got := after.TotalAlloc - before.TotalAlloc; got > 4<<20 || !tab.StyleStale {
+		t.Errorf("a settled frame lexed %dKB inline (stale=%v); it is the app's to run off the loop", (after.TotalAlloc-before.TotalAlloc)>>10, tab.StyleStale)
+	}
+}

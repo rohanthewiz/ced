@@ -197,3 +197,17 @@ func TestDetectIndent_MixedFavorsMajority(t *testing.T) {
 		t.Fatalf("expected tab from majority, got %q", got)
 	}
 }
+
+// TestLineVisualColString_AgreesWithTheRuneSlice: the string walker is the
+// rune-slice arithmetic without the conversion — tabs, wide runes,
+// columns past the end.
+func TestLineVisualColString_AgreesWithTheRuneSlice(t *testing.T) {
+	for _, line := range []string{"", "abc", "\tx\ty", "a界\tb", "日本語\t!"} {
+		runes := []rune(line)
+		for col := 0; col <= len(runes)+2; col++ {
+			if got, want := LineVisualColString(line, col), LineVisualCol(runes, col); got != want {
+				t.Errorf("%q col %d: %d, want %d", line, col, got, want)
+			}
+		}
+	}
+}

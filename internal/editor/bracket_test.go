@@ -360,3 +360,19 @@ func TestBracketSource_QuietWithCarets(t *testing.T) {
 		t.Errorf("multi-caret mode should suppress the pair box, got %v", spans)
 	}
 }
+
+// TestRunesAroundCol reads the two runes either side of a caret off the
+// string, including the line's edges.
+func TestRunesAroundCol(t *testing.T) {
+	b, on, ok := runesAroundCol("a(界)", 2)
+	if b != '(' || on != '界' || !ok {
+		t.Errorf("middle: %q %q %v", b, on, ok)
+	}
+	b, _, ok = runesAroundCol("ab)", 3)
+	if b != ')' || ok {
+		t.Errorf("end of line: before=%q onOK=%v", b, ok)
+	}
+	if _, on, ok = runesAroundCol("(x", 0); on != '(' || !ok {
+		t.Errorf("start: on=%q ok=%v", on, ok)
+	}
+}

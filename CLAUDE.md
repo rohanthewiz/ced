@@ -378,6 +378,12 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `racyGranule` is content-checked anyway (same-granule rewrites). Never
   `mtime.After`. Stamps are recorded only via recordDisk / AdoptDisk /
   ForgetDiskStamp; `Tab.Mtime` is a read-only mirror.
+- **Render styles only what a row shows** (N-130): the unwrapped path
+  never converts a line to `[]rune` (`lineWindow` walks the string,
+  `lineStylesFor` resolves `[ScrollX, hi)` only); wrapped rows style
+  their own span; the ghost line keeps the whole-line path. Per-frame
+  caret helpers walk the string (`LineVisualColString`,
+  `runesAroundCol`) — no `LineRunes` of a whole line every frame.
 - **Scroll clamp** allows overscroll (`max(viewH/2, 3)`) — intentional.
 - **Jump margin (jumpmargin.go)**: a JUMP (find hit via
   `FocusCurrentMatch`, `lspJumpTo`, nav retrace, goto, the peek/list

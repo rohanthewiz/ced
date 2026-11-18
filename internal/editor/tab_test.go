@@ -1745,3 +1745,82 @@ func TestEnterThenRender_StaysOffChromaOnTheLoop(t *testing.T) {
 		t.Errorf("a settled frame lexed %dKB inline (stale=%v); it is the app's to run off the loop", (after.TotalAlloc-before.TotalAlloc)>>10, tab.StyleStale)
 	}
 }
+
+// TestRender_LongLineFrameStaysSmall is N-130's budget test: one frame of
+// a 1MB single-line file (a minified bundle) used to convert and style
+// the WHOLE line — 85MB of garbage and 14-22 ms, every frame, mouse
+// motion included. Now only the viewport's runes are styled; the caret
+// helpers walk the string. Measured in bytes allocated (deterministic).
+func TestRender_LongLineFrameStaysSmall(t *testing.T) {
+	src := strings.Repeat("var a=1;function f(){return a+1}", (1<<20)/33)
+	tab := &Tab{Path: "bundle.js", Buffer: NewBuffer(src), SyntaxOff: true}
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer scr.Fini()
+	scr.SetSize(200, 60)
+	th := theme.Default()
+	tab.Render(scr, th, 0, 0, 200, 60)
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	tab.Render(scr, th, 0, 0, 200, 60)
+	runtime.ReadMemStats(&after)
+	if got := after.TotalAlloc - before.TotalAlloc; got > 1<<20 {
+		t.Errorf("a frame of a 1MB line allocated %d bytes; budget 1MB (it was ~85MB)", got)
+	}
+	// And it still shows the start of the line and says it runs on.
+	if r, _, _ := scr.Get(tab.gutterCols()+1, 0); r != "v" {
+		t.Errorf("first content cell = %q, want the line's first rune", r)
+	}
+	if r, _, _ := scr.Get(199, 0); r != "›" {
+		t.Errorf("last cell = %q, want the › overflow arrow", r)
+	}
+}
+
+// TestRender_HorizontallyScrolledLineMatchesTheRuneWalk pins the fast
+// path's geometry against the old arithmetic: tabs anchored at column 0,
+// a wide rune, and ScrollX inside the line paint the same cells as
+// LineVisualCol over the rune slice says they should.
+func TestRender_HorizontallyScrolledLineMatchesTheRuneWalk(t *testing.T) {
+	line := "a\tb界c" + strings.Repeat("xyz", 40)
+	tab := &Tab{Buffer: NewBuffer(line), SyntaxOff: true, ScrollX: 3}
+	scr := tcell.NewSimulationScreen("UTF-8")
+	if err := scr.Init(); err != nil {
+		t.Fatal(err)
+	}
+	defer scr.Fini()
+	scr.SetSize(40, 3)
+	tab.Render(scr, theme.Default(), 0, 0, 40, 3)
+	runes := []rune(line)
+	contentX := tab.gutterCols() + 1
+	scrollVisual := LineVisualCol(runes, 3)
+	// Rune 3 sits in the leftmost content cell, which the ‹ overflow
+	// arrow owns while scrolled; probe the runes after it.
+	for _, col := range []int{4, 5, 9, 20} {
+		want := string(runes[col])
+		x := contentX + LineVisualCol(runes, col) - scrollVisual
+		if r, _, _ := scr.Get(x, 0); r != want {
+			t.Errorf("rune %d (%q) expected at x=%d, found %q", col, want, x, r)
+		}
+	}
+}
+
+// TestLineWindow_FindsTheVisibleRunes covers the walker directly: the
+// scroll column with a tab before it, the first rune past the edge, and
+// a scroll past the end of the line.
+func TestLineWindow_FindsTheVisibleRunes(t *testing.T) {
+	sv, hi, over := lineWindow("\tabcdef", 1, 3) // tab → 4 cells; window 3
+	if sv != 4 || hi != 4 || !over {
+		t.Errorf("tab prefix: sv=%d hi=%d over=%v, want 4 4 true", sv, hi, over)
+	}
+	sv, hi, over = lineWindow("abc", 0, 10)
+	if sv != 0 || hi != 3 || over {
+		t.Errorf("fits: sv=%d hi=%d over=%v", sv, hi, over)
+	}
+	sv, hi, over = lineWindow("abc", 9, 10)
+	if sv != 3 || hi != 3 || over {
+		t.Errorf("scrolled past the end: sv=%d hi=%d over=%v", sv, hi, over)
+	}
+}

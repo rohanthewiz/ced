@@ -62,21 +62,6 @@ plus the LSP work done in the seeding session itself
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
 
-- **N-130** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
-  **Render converts whole lines whatever the viewport shows.**
-  `runes := []rune(line)` and `rowStyles := make([]tcell.Style,
-  len(runes))` per visible line, per frame (tab.go:1196-1213).
-  Measured at 200×60 on a single-line file: 1MB → 14 ms and 84MB of
-  garbage per frame; 5MB → 190 ms and 420MB per frame (every frame,
-  mouse motion included), so a minified bundle under the 32MB open cap
-  is unusable. Ordinary files are fine (1.2 ms a frame). Fix: walk to
-  `ScrollX` without allocating (tab stops still anchor at column 0)
-  and build runes / styles for the visible window only; the wrapped
-  layout needs the same treatment.
-  2026-11-17: `BenchmarkTabRender_OneLongLine` (1MB line: 22 ms, 85MB a
-  frame) vs `BenchmarkTabRender_CleanFrame` (1 ms); the fix owes a
-  budget test.
-
 - **N-132** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Find allocates per line per keystroke.** `SetFindQuery("gamma")`
   measured 6 ms at 10k lines, 49 ms / 79MB at 100k, 181 ms / 317MB at
@@ -801,6 +786,22 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS5` —
+  **N-130** Render styles only the runes a row shows. Unwrapped (no ghost
+  on the line): no `[]rune` — `lineWindow` walks the string to the
+  viewport and `lineStylesFor` resolves `[ScrollX, hi)` only, spans
+  intersected with it; wrapped rows style their own span; the ghost line
+  keeps the whole-line path. The two per-frame caret helpers stopped
+  converting the caret's line too (`PosScreenCell` →
+  `LineVisualColString`, `bracketAtCaret` → `runesAroundCol`).
+  `BenchmarkTabRender_OneLongLine` (1MB line): 22 ms / 85MB → 0.74 ms /
+  64KB per frame; a clean ordinary frame unchanged (~0.95 ms). Budget
+  test `TestRender_LongLineFrameStaysSmall` (≤ 1MB a frame);
+  `TestRender_HorizontallyScrolledLineMatchesTheRuneWalk`,
+  `TestLineWindow_FindsTheVisibleRunes`,
+  `TestLineVisualColString_AgreesWithTheRuneSlice`. Real binary: a 1MB
+  one-line bundle.js scrolled to its end draws with the ‹ arrow.
 
 - closed 2026-11-17, `2026-1117-SESS5` —
   **N-121** the eight data-safety parts. (a) saves keep the file's

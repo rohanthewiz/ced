@@ -69,6 +69,23 @@ func LineVisualCol(runes []rune, runeCol int) int {
 	return visualCol
 }
 
+// LineVisualColString is LineVisualCol over the line's STRING: the same
+// tab-stop arithmetic, decoding as it walks instead of converting the
+// whole line to []rune first. For callers that ask about one column of a
+// line that may be megabytes long (N-130: PosScreenCell placed the
+// hardware cursor every frame by converting the caret's line).
+func LineVisualColString(line string, runeCol int) int {
+	visualCol, i := 0, 0
+	for _, r := range line {
+		if i >= runeCol {
+			break
+		}
+		visualCol += RuneVisualWidth(r, visualCol)
+		i++
+	}
+	return visualCol
+}
+
 // RuneColAtVisual returns the rune index whose start column is at or just
 // before targetVisualCol, snapping clicks inside a tab's visual span back
 // to the tab's start. Used by mouse hit-testing — clicking anywhere in a

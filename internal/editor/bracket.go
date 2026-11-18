@@ -138,16 +138,37 @@ func (t *Tab) bracketAtCaret(th theme.Theme) (Position, rune, bool) {
 	if p.Line < 0 || p.Line >= t.Buffer.LineCount() {
 		return Position{}, 0, false
 	}
-	runes := t.Buffer.LineRunes(p.Line)
-	for _, col := range []int{p.Col, p.Col - 1} {
-		if col < 0 || col >= len(runes) {
-			continue
-		}
-		if r := runes[col]; isBracket(r) && !t.inStringOrComment(p.Line, col) {
-			return Position{Line: p.Line, Col: col}, r, true
+	// The two runes either side of the caret, read off the string: this
+	// runs every frame, and converting a long caret line to []rune to
+	// look at two of its runes was the frame's biggest allocation (N-130).
+	before, on, onOK := runesAroundCol(t.Buffer.Lines[p.Line], p.Col)
+	for _, c := range []struct {
+		col int
+		r   rune
+		ok  bool
+	}{{p.Col, on, onOK}, {p.Col - 1, before, p.Col > 0}} {
+		if c.ok && isBracket(c.r) && !t.inStringOrComment(p.Line, c.col) {
+			return Position{Line: p.Line, Col: c.col}, c.r, true
 		}
 	}
 	return Position{}, 0, false
+}
+
+// runesAroundCol returns the runes at col-1 and col of line, walking the
+// string only as far as col. onOK is false when col is at or past the end
+// (a caret at end of line has nothing ON it).
+func runesAroundCol(line string, col int) (before, on rune, onOK bool) {
+	i := 0
+	for _, r := range line {
+		if i == col-1 {
+			before = r
+		}
+		if i == col {
+			return before, r, true
+		}
+		i++
+	}
+	return before, 0, false
 }
 
 // scanForward walks from an opening bracket toward the end of the

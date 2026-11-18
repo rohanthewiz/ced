@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 
@@ -1308,40 +1309,55 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 		// — a tab one cell into the line still expands to the next stop,
 		// not the next-stop-from-the-scroll-offset. ScrollX skips runes;
 		// the visual column we paint at is rune-walked from there.
-		runes := []rune(t.Buffer.Lines[lineIdx])
 		var classes []SynClass
 		if lineIdx < len(t.Classes) {
 			classes = t.Classes[lineIdx]
 		}
-		// Resolve each rune's final style up front — syntax + row bg,
-		// then span deltas in precedence order — so the paint loop
+		// Each rune's final style is resolved up front — syntax + row
+		// bg, then span deltas in precedence order — so the paint loop
 		// below stays a straight walk (it already has tab-stop
-		// bookkeeping to carry). O(lineLen + coveredCells) per row,
-		// which beats the per-cell match probing this replaced.
-		rowStyles := make([]tcell.Style, len(runes))
-		for i := range rowStyles {
-			st := bgStyle
-			if i < len(classes) {
-				st = pal[classes[i]]
+		// bookkeeping to carry). But only for the runes a row SHOWS
+		// (N-130): converting and styling the whole line cost 14 ms and
+		// 84MB of garbage per frame on a 1MB minified line, every frame.
+		//
+		//	unwrapped, no ghost ─► no []rune at all: lineWindow walks the
+		//	                       string to the viewport, styles cover
+		//	                       just [ScrollX, hi)
+		//	wrapped ─────────────► []rune for the layout (wrapStarts needs
+		//	                       it), styles per painted row
+		//	ghost text here ─────► the whole line, as before: the splice
+		//	                       needs it, and the caret's line is short
+		line := t.Buffer.Lines[lineIdx]
+		ghostHere := t.Ghost != nil && t.Ghost.Pos.Line == lineIdx
+		fast := t.wrapW == 0 && !ghostHere
+		var runes []rune
+		var rowStyles []tcell.Style // styles of runes [styleBase, styleBase+len)
+		styleBase := 0
+		lineLen := 0
+		// paintEnd bounds the paint walk in the fast path: the first rune
+		// past the viewport. fastOverflow says such a rune exists.
+		paintEnd, fastOverflow := 0, false
+		if fast {
+			lineLen = utf8.RuneCountInString(line)
+			_, paintEnd, fastOverflow = lineWindow(line, t.ScrollX, contentW)
+			styleBase = min(t.ScrollX, lineLen)
+			rowStyles = lineStylesFor(lineIdx, lineLen, styleBase, paintEnd, classes, pal, bgStyle, lineBg, spans)
+		} else {
+			runes = []rune(line)
+			lineLen = len(runes)
+			if ghostHere {
+				rowStyles = lineStylesFor(lineIdx, lineLen, 0, lineLen, classes, pal, bgStyle, lineBg, spans)
+				// Inline-suggestion ghost text: splice the dimmed proposal
+				// into the cursor row AFTER spans resolve, so decoration
+				// precedence is untouched and the paint walk below (tab
+				// stops, ScrollX, overflow arrows) handles the widened row
+				// with zero ghost awareness. See ghost.go for why this
+				// isn't a DecorationSource.
+				ghostStyle := tcell.StyleDefault.Background(lineBg).
+					Foreground(th.Muted).Attributes(tcell.AttrItalic)
+				runes, rowStyles = t.ghostOverlay(lineIdx, runes, rowStyles, ghostStyle)
+				lineLen = len(runes)
 			}
-			rowStyles[i] = st.Background(lineBg)
-		}
-		for _, sp := range spans {
-			if s, e, ok := sp.colRange(lineIdx, len(runes)); ok {
-				for i := s; i < e; i++ {
-					rowStyles[i] = sp.Delta.Apply(rowStyles[i])
-				}
-			}
-		}
-		// Inline-suggestion ghost text: splice the dimmed proposal into
-		// the cursor row AFTER spans resolve, so decoration precedence
-		// is untouched and the paint walk below (tab stops, ScrollX,
-		// overflow arrows) handles the widened row with zero ghost
-		// awareness. See ghost.go for why this isn't a DecorationSource.
-		if t.Ghost != nil {
-			ghostStyle := tcell.StyleDefault.Background(lineBg).
-				Foreground(th.Muted).Attributes(tcell.AttrItalic)
-			runes, rowStyles = t.ghostOverlay(lineIdx, runes, rowStyles, ghostStyle)
 		}
 
 		// The rows this line paints. Unwrapped there is one, and it starts
@@ -1357,8 +1373,14 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 			cy := y + row
 			row++
 			from := starts[seg]
-			to := wrapRowEnd(starts, seg, len(runes))
+			to := wrapRowEnd(starts, seg, lineLen)
 			lastRow := seg == len(starts)-1
+			// A wrapped row (no ghost on its line) styles just its own
+			// span; the ghost path styled the whole line above.
+			if !fast && !ghostHere {
+				rowStyles = lineStylesFor(lineIdx, lineLen, from, to, classes, pal, bgStyle, lineBg, spans)
+				styleBase = from
+			}
 
 			// Re-paint this row with its (possibly highlighted) bg.
 			for cx := x; cx < x+w; cx++ {
@@ -1466,11 +1488,27 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 			// is ScrollX and to is the line's end; wrapped, they are one
 			// row's span. scrollVisual is the visual column the row's first
 			// cell shows, in both cases.
-			scrollVisual := LineVisualCol(runes, from)
+			//
+			// The fast path walks the STRING (no []rune) and stops at
+			// paintEnd, the first rune past the viewport; the others walk
+			// the rune slice to the row's end, as they always did.
+			var scrollVisual int
+			if fast {
+				scrollVisual, _, _ = lineWindow(line, from, contentW)
+			} else {
+				scrollVisual = LineVisualCol(runes, from)
+			}
+			limit := to
+			if fast {
+				limit = paintEnd
+			}
 			visualCol := 0 // visual cell offset from the start of the LINE
-			for runeIdx, r := range runes {
+			runeIdx := -1
+			walk := runeWalker(line, runes)
+			for r, more := walk(); more; r, more = walk() {
+				runeIdx++
 				width := RuneVisualWidth(r, visualCol)
-				if runeIdx >= to {
+				if runeIdx >= limit {
 					break
 				}
 				if runeIdx >= from {
@@ -1478,7 +1516,7 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 					// shows the actual glyph (or ' ' for tabs); padding cells
 					// for a multi-cell tab show a space so the trailing tab
 					// area still gets the right bg.
-					st := rowStyles[runeIdx]
+					st := rowStyles[runeIdx-styleBase]
 					glyph := r
 					if r == '\t' {
 						glyph = ' '
@@ -1520,6 +1558,13 @@ func (t *Tab) Render(scr tcell.Screen, th theme.Theme, x, y, w, h int) {
 			// wins there: "the file runs on" outranks "this line runs on",
 			// because the line's own arrow is repeated on every other long
 			// row while that marker has exactly one place to be.
+			if fast && fastOverflow {
+				// The fast walk stopped at the viewport's edge, so its
+				// visualCol is short of the line's width. All that the
+				// arrow and the note slot below need to know is that the
+				// line runs past the pane.
+				visualCol = max(visualCol, scrollVisual+contentW+1)
+			}
 			if t.wrapW == 0 {
 				overflowStyle := tcell.StyleDefault.Background(lineBg).Foreground(th.Muted)
 				if t.ScrollX > 0 {
@@ -1600,8 +1645,13 @@ func (t *Tab) PosScreenCell(p Position, w, h int) (dx, dy int, ok bool) {
 		contentW = 1
 	}
 	dy = p.Line - t.ScrollY
-	runes := t.Buffer.LineRunes(p.Line)
-	dx = contentX + (LineVisualCol(runes, p.Col) - LineVisualCol(runes, t.ScrollX))
+	// Walked on the string, not LineRunes: this runs every frame for the
+	// caret, and on a 1MB line the conversion was 4MB of garbage (N-130).
+	var line string
+	if p.Line >= 0 && p.Line < len(t.Buffer.Lines) {
+		line = t.Buffer.Lines[p.Line]
+	}
+	dx = contentX + (LineVisualColString(line, p.Col) - LineVisualColString(line, t.ScrollX))
 	if dy < 0 || dy >= h || dx < contentX || dx >= contentX+contentW {
 		return 0, 0, false
 	}
@@ -1804,4 +1854,91 @@ func (t *Tab) caretLineSet() map[int]bool {
 		lines[c.Cursor.Line] = true
 	}
 	return lines
+}
+
+// lineStylesFor resolves the final style of runes [lo, hi) of line lineIdx
+// (n runes long): the syntax class through the frame's palette on the
+// row's background, then every decoration span's delta in precedence
+// order. Index i of the result is rune lo+i. Only the window a row shows
+// is resolved (N-130) — a span is intersected with it, never walked whole.
+func lineStylesFor(lineIdx, n, lo, hi int, classes []SynClass, pal SynPalette,
+	bgStyle tcell.Style, lineBg tcell.Color, spans []Span) []tcell.Style {
+	if hi > n {
+		hi = n
+	}
+	if lo < 0 {
+		lo = 0
+	}
+	if hi <= lo {
+		return nil
+	}
+	out := make([]tcell.Style, hi-lo)
+	for i := range out {
+		st := bgStyle
+		if c := lo + i; c < len(classes) {
+			st = pal[classes[c]]
+		}
+		out[i] = st.Background(lineBg)
+	}
+	for _, sp := range spans {
+		if s, e, ok := sp.colRange(lineIdx, n); ok {
+			s, e = max(s, lo), min(e, hi)
+			for i := s; i < e; i++ {
+				out[i-lo] = sp.Delta.Apply(out[i-lo])
+			}
+		}
+	}
+	return out
+}
+
+// lineWindow walks line (no []rune) to find what an unwrapped row starting
+// at rune from can show in contentW cells: scrollVisual is the visual
+// column rune from starts at (tab stops anchored at column 0 — a from
+// past the end is the line's full width), hi the first rune that starts
+// at or past the right edge, and overflow whether such a rune exists. The
+// walk stops at hi, so the cost is the prefix plus one screen width, not
+// the line.
+func lineWindow(line string, from, contentW int) (scrollVisual, hi int, overflow bool) {
+	visualCol, idx := 0, 0
+	scrollVisual = -1
+	for _, r := range line {
+		if idx == from {
+			scrollVisual = visualCol
+		}
+		if idx >= from && visualCol-scrollVisual >= contentW {
+			return scrollVisual, idx, true
+		}
+		visualCol += RuneVisualWidth(r, visualCol)
+		idx++
+	}
+	if scrollVisual < 0 {
+		scrollVisual = visualCol
+	}
+	return scrollVisual, idx, false
+}
+
+// runeWalker yields the runes of a line one at a time: from the rune
+// slice when the caller has one (wrapped rows, the ghost line), else
+// straight from the string, decoding as it goes, so the unwrapped fast
+// path never materialises the line as []rune.
+func runeWalker(line string, runes []rune) func() (rune, bool) {
+	if runes != nil {
+		i := 0
+		return func() (rune, bool) {
+			if i >= len(runes) {
+				return 0, false
+			}
+			i++
+			return runes[i-1], true
+		}
+	}
+	off := 0
+	return func() (rune, bool) {
+		if off >= len(line) {
+			return 0, false
+		}
+		r, size := utf8.DecodeRuneInString(line[off:])
+		off += size
+		return r, true
+	}
 }

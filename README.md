@@ -1068,6 +1068,14 @@ See [AI features](#ai-features-chat-agents--copilot-completions).
 | `Reload plugins` | | Re-read `~/.config/ced/plugins/`. |
 | `Disable plugins` / `Enable plugins` | | The kill switch for every plugin (`"plugins"`). |
 
+#### Tools ▸ Help
+
+| Row | Key | What it does |
+| --- | --- | --- |
+| `Keyboard reference` | `esc ?` | The key-bindings band: every `Esc` leader and what it does. |
+| `Messages…` | | The last 50 status-bar messages with their times, newest first — the explanation you missed. Pick one to copy it. |
+| `Open config.json` / `Open config.json (problem: <…>)` | | Open `~/.config/ced/config.json` as a tab (created as `{}` when missing). A config that failed to load names its problem in the row. |
+
 #### Quit
 
 | Row | Key | What it does |

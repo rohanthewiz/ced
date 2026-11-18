@@ -298,6 +298,11 @@ func newTestApp(t testing.TB, root string) *App {
 	// themselves. Plugin tests write manifests into pluginHome and
 	// install their own recorder over pluginShell.
 	pluginHome := t.TempDir()
+	// ≡ Open config.json creates and opens a file: never the developer's.
+	prevConfigPath := configPathFn
+	cfgPath := filepath.Join(t.TempDir(), "ced", "config.json")
+	configPathFn = func() string { return cfgPath }
+	t.Cleanup(func() { configPathFn = prevConfigPath })
 	prevPluginDir, prevPluginCfg := pluginsDirFn, pluginConfigPathFn
 	pluginsDirFn = func() string { return filepath.Join(pluginHome, "plugins") }
 	pluginConfigPathFn = func() string { return filepath.Join(pluginHome, "config.json") }
@@ -430,10 +435,10 @@ func TestMenuButtonRect(t *testing.T) {
 // to (0,0) when the window is too small to fit it.
 func TestMenuModalRect_Centered(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	// The menu (255 rows fully expanded) outgrew the 40-row default sim
+	// The menu (259 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 255
+	a.height = 259
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -2344,19 +2349,19 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 255 {
-		t.Errorf("modalHeight = %d, want 255 (219 + 36 splits)", h)
+	if h != 259 {
+		t.Errorf("modalHeight = %d, want 259 (223 + 36 splits)", h)
 	}
 	if got := len(a.menuGeometry().splits); got != 36 {
 		t.Errorf("splits = %d, want 36", got)
 	}
-	if got := len(items); got != 213 {
-		t.Errorf("row count = %d, want 213 (2 top-zone + 196 group actions + 15 headers)", got)
+	if got := len(items); got != 217 {
+		t.Errorf("row count = %d, want 217 (2 top-zone + 199 group actions + 16 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (252) — headers separate the
+	// one setting off the headerless Quit group (256) — headers separate the
 	// sections, and splits (not dividers) the runs inside them.
-	wantDiv := []int{2, 5, 252}
+	wantDiv := []int{2, 5, 256}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2941,8 +2946,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 258 { // 255 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 258", h)
+	if h != 262 { // 259 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 262", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -3396,7 +3401,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 255
+	a.height = 259
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

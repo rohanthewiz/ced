@@ -1031,6 +1031,16 @@ func builtinMenuGroups() []menuGroup {
 			{label: "Reload plugins", action: (*App).menuReloadPlugins, enabled: alwaysTrue},
 			{action: (*App).menuTogglePlugins, enabled: alwaysTrue, labelFor: (*App).pluginsToggleLabel},
 		}},
+		// Help (helpmenu.go, N-134 / N-135): the doors to what ced
+		// already knew — its key bindings, the messages it flashed, its
+		// config file — for a user who doesn't know `Esc ?` or where
+		// ~/.config/ced lives. A Tools sub-section, after the built-in
+		// ones: it is about the editor, not a subsystem.
+		{title: "Help", collapsible: true, parent: "Tools", items: []menuItemDef{
+			{label: "Keyboard reference", shortcut: "esc ?", action: (*App).menuKeyboardReference, enabled: alwaysTrue},
+			{label: "Messages…", action: (*App).menuMessages, enabled: alwaysTrue},
+			{action: (*App).menuOpenConfig, enabled: alwaysTrue, labelFor: (*App).openConfigLabel},
+		}},
 		{title: "Quit", collapsible: false, items: []menuItemDef{
 			{label: "Quit editor", shortcut: "esc q", action: (*App).menuQuit, enabled: alwaysTrue},
 		}},
@@ -1525,9 +1535,14 @@ type App struct {
 	// every line. Reset with the buffer at each start marker.
 	pasteCR bool
 
-	statusMsg   string
-	statusUntil time.Time
-	dragMode    string // "editor" while a drag-select is active.
+	statusMsg string
+	// flashLog keeps the recent flashes for ≡ Tools ▸ Help ▸ Messages…
+	// (helpmenu.go); configLoadErr holds config.json's load problem for
+	// the Open config.json row's label.
+	flashLog      []flashEntry
+	configLoadErr string
+	statusUntil   time.Time
+	dragMode      string // "editor" while a drag-select is active.
 	// dragSplitOffset is how far the press that started a seam drag
 	// landed from the seam's own column. The grab zone is three columns
 	// wide (splitter.go), so a drag that glued the divider to the cursor
@@ -2290,6 +2305,12 @@ func (a *App) loadUserConfig() {
 	cfg, err := userconfig.Load(userconfig.DefaultPath())
 	if err != nil {
 		a.flash("config: " + err.Error())
+		// Held for the ≡ Open config.json row's label too (helpmenu.go,
+		// N-135): a startup flash is easily missed under everything else
+		// starting.
+		a.configLoadErr = err.Error()
+	} else {
+		a.configLoadErr = ""
 	}
 	if a.tree != nil {
 		a.tree.IconsEnabled = icons.Resolve(cfg.Icons)
@@ -4876,8 +4897,12 @@ func (a *App) activeTabPtr() *editor.Tab {
 // flash sets a transient status message that displays for statusFlashFor
 // before the status bar reverts to the active file's info.
 func (a *App) flash(msg string) {
+	now := time.Now()
 	a.statusMsg = msg
-	a.statusUntil = time.Now().Add(statusFlashFor)
+	a.statusUntil = now.Add(statusFlashFor)
+	// Every flash is also kept for ≡ Tools ▸ Help ▸ Messages…
+	// (helpmenu.go, N-134): the slot above is overwritten by the next.
+	a.logFlash(msg, now)
 }
 
 // welcomeIfQuiet greets a new workspace, but only when startup has

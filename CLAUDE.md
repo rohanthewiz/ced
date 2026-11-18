@@ -104,6 +104,7 @@ internal/app/
   altchords.go                In-surface Alt chord tables (prompts, find bar, dialogs)
   metakeys.go nav.go          ⌘ layer; back/forward history
   quitbutton.go               ✕ quit button left of ≡ (confirm, then menuQuit)
+  helpmenu.go                 ≡ Tools ▸ Help: Keyboard reference, Messages… (flash log), Open config.json
   buttontip.go                Hover labels on chrome buttons (one enumerator)
   tabbar.go tablabel.go tabcontext.go tabgroups.go statusbar.go
   undercolor.go               May an underline be coloured (SGR 58): env allowlist
@@ -198,7 +199,7 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `internal/readme` — don't hand-roll another parser.
 - **newTestApp stubs every host side effect** (LSP/Copilot/chat dead,
   `lspLookPath`/`chatLookPath` never-found, builtin formatters nil,
-  `clipboard.TmuxLoadBuffer` a no-op,
+  `clipboard.TmuxLoadBuffer` a no-op, `configPathFn` in a temp dir,
   plugin/skill/theme/chat-archive/history/session/favorites/rescue paths at
   temp dirs, exit note discarded, `pluginShell` refusing, `editorEnv` empty, `gonotesCreate`
   refusing, rc.grsh disabled, tree auto-fit off). New integrations that
@@ -1643,9 +1644,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   terminal rows spends the above-the-fold budget.
 - **Adding a menu row means updating the pins** — a README menu-reference
   row first, then the layout counts:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 196 group
-  actions + 15 headers (213), 36 splits, height 255, dividers
-  `[2, 5, 252]`; also the Git fold height (37 rows + 8 splits = 45) in
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 199 group
+  actions + 16 headers (217), 36 splits, height 259, dividers
+  `[2, 5, 256]`; also the Git fold height (37 rows + 8 splits = 45) in
   `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.

@@ -75,25 +75,6 @@ plus the LSP work done in the seeding session itself
   the file; no repository → the parent dir as today. A change to
   documented behaviour (README Usage, `helpText`): decide.
 
-- **N-134** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
-  **Flashed messages vanish.** `flash` is one slot shown for 3s
-  (`statusFlashFor`), overwritten by the next of 647 call sites, and
-  many carry the only explanation of a refusal ("an unavailable row
-  explains itself"). There is no history. Add a small message log
-  (the last N flashes with their time) behind a ≡ View row, opened
-  through `openPicker`; consider holding error-class flashes longer.
-
-- **N-135** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
-  **No in-app door to config.json or a key reference.** config.json
-  has 25 hand-edited keys and no ≡ row opens it; the which-key band
-  exists only behind `Esc ?`; the README (2958 lines) is the only
-  reference. Add ≡ rows "Open config.json" (create it with `{}` when
-  missing, then plain `openFile`) and "Keyboard reference" (the
-  which-key band). Each new row moves the README and menu-layout pins.
-  The config row is also where config.json's load error belongs (the
-  "startup errors are HELD for a ≡ label" rule): N-120 made it per key,
-  but it is still only flashed at startup.
-
 - **N-136** · raised `2026-1110-1630-reliability-performance-usability-audit` · value low
   **Limits that bite are silent.** A non-UTF-8 file (N-114) and a
   trimmed undo history (N-131) change what the editor will do for you
@@ -769,6 +750,25 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-17, `2026-1117-SESS6` —
+  **N-134** + **N-135** a ≡ Tools ▸ Help section (helpmenu.go):
+  "Keyboard reference" (the `Esc ?` which-key band, closing the menu
+  first), "Messages…" (every flash is logged — the last 50, a back-to-back
+  repeat folded into one row with ×N; the picker lists them newest first
+  with times and the cap in its title; a pick copies the text) and "Open
+  config.json" (created as `{}` when missing, opened as a plain tab; a
+  config that failed to load names its problem IN the row's label and
+  flashes it on open — held, not only flashed at startup). Placed under
+  Tools rather than View (N-134 suggested View): the three are about the
+  editor itself, and View is about how things are drawn. README menu
+  reference gained the table; layout pins moved (+3 rows, +1 header). Not
+  done: holding error-class flashes longer (N-134's "consider" — flashes
+  carry no class today, and the log now keeps every one).
+  `TestLogFlash_KeepsTheLastAndFoldsRepeats`,
+  `TestMenuMessages_ListsNewestFirst`, `TestMenuOpenConfig_CreatesAndOpens`,
+  `TestOpenConfigLabel_HoldsTheLoadProblem`,
+  `TestMenuKeyboardReference_OpensTheBand`.
 
 - closed 2026-11-17, `2026-1117-SESS6` —
   **N-148** `waitForFinderReady`'s deadline is now 10s

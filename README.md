@@ -150,6 +150,10 @@ The goals, in order:
   file**, keeping the file's own indentation (tabs stay tabs). A first-run trust prompt means
   cloning a repo never silently executes its commands. See
   [Formatting](#formatting).
+- **Reformat JSON by picking keys** — tick which top-level keys a
+  JSON-lines log, an array of objects, or a single object keeps, with a
+  live preview; apply to the file or selection (one undo step) or copy.
+  See [Reformat JSON by picking keys](#reformat-json-by-picking-keys).
 - **Auto-save** — dirty buffers are written after you pause for five
   seconds, and immediately when you leave: switch tabs, or click away
   from the terminal window entirely. Typing that never pauses is still
@@ -775,6 +779,11 @@ table sees it, so these never fire an `Esc` key, even inside tmux.
 | Cherry-pick | `alt+d` | Open / close the diff preview |
 | Cherry-pick | `alt+v` | Preview side by side / unified |
 | Cherry-pick | `alt+n` / `alt+p` | Next / previous change in the preview |
+| Reformat JSON | `alt+a` | **Select all** / **Select none** (the visible keys) |
+| Reformat JSON | `alt+i` | **Invert** the visible keys' ticks |
+| Reformat JSON | `alt+p` | `[ ] pretty-print` on / off |
+| Reformat JSON | `alt+e` | `[ ] hide records left empty` on / off |
+| Reformat JSON | `alt+c` | **Copy** the result to the clipboard |
 | Change view | `alt+r` | **Revert change** |
 | Change view | `alt+n` / `alt+p` | **Next ▸** / **◂ Prev** change in the file |
 | Change view | `alt+s` | **Side by side** |
@@ -783,8 +792,9 @@ table sees it, so these never fire an `Esc` key, even inside tmux.
 
 "Find prompts" are the prompts of **Find all in file**, **Find in
 project** and **Find all in folder**. Two `Alt` keys aren't button twins
-and so aren't listed: `alt+↑` / `alt+↓` scroll the cherry-pick preview,
-and `alt+Enter` breaks a line in the chat composer.
+and so aren't listed: `alt+↑` / `alt+↓` scroll the cherry-pick and
+Reformat JSON previews, and `alt+Enter` breaks a line in the chat
+composer.
 
 ### The ≡ menu, row by row
 
@@ -818,6 +828,7 @@ still clickable and says why (install a binary, export `$EDITOR`).
 | `Save` | `esc s` | Save the active tab (Go files are formatted as they save). |
 | `Format file` | | Run the file's formatter now — the only way non-Go files are formatted. See [Formatting](#formatting). |
 | `Validate file` | | Check the file now: ced's own JSON / CSV / PostgreSQL (`.pgsql`, `.psql`) parse plus what the language server and plugins last reported. |
+| `Reformat JSON (pick keys)…` | | Tick which top-level keys JSON records keep — a JSON-lines log, an array of objects, or one object — with a live preview; apply to the file or selection (one undo step) or copy. See [Reformat JSON by picking keys](#reformat-json-by-picking-keys). |
 | `Convert file to UTF-8…` | | After asking, write a file that was read as Windows-1252 as UTF-8 from its next save. See [Files that aren't UTF-8](#files-that-arent-utf-8). |
 | `Revert file` | | Put the buffer back to how it was when you opened it (Undo recovers it). |
 | `Disable auto-save` / `Enable auto-save` | | Save dirty tabs after an idle pause (`"autosave"`, `"autosavedelay"`). |
@@ -1358,6 +1369,50 @@ search modes, the Conflicts panel's Continue / Skip / Abort). A label
 disappears when you move off the button, click, or press a key. It
 needs a terminal that reports mouse motion; where none is reported,
 every button still works and no label ever appears.
+
+### Reformat JSON by picking keys
+
+**≡ File → Reformat JSON (pick keys)…** lists every top-level key in the
+active file (or the selection) and rewrites the JSON keeping only the keys
+you tick. A preview beside the list updates as you tick, so it also works
+as a quick way to read a log through a filter.
+
+```
+┌ Reformat JSON · app.log ─────────────────────────────────────── esc ┐
+│ JSON lines · 2431 records · 3 of 9 keys kept     lines 1–38 of 2431 │
+│ [ ] app          2431 │{"level":"info","msg":"flushed 500 rows","ti… │
+│ [ ] file         2431 │  me":"2026-01-02T03:04:05Z"}                 │
+│ [x] level        2431 │{"level":"warn","msg":"retrying","time":"2…   │
+│ [x] msg          2431 │                                              │
+│ [x] time         2431 │                                              │
+│ [ ] pretty-print  [ ] hide records left empty                       │
+│ [ Select all ] [ Invert ]     [ Cancel ]  [ Copy ]  [ Apply to file ] │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+- **What it reads:** a JSON-lines file (one object per line, which is what
+  most structured loggers write), an array of objects, a single object, or
+  pretty-printed objects one after another. In a log, lines that aren't a
+  JSON object (a stack trace, a banner) are kept exactly as they are.
+- **The list:** each key with how many records have it, in the order they
+  first appear. All keys start ticked. To **drop** a few, untick them. To
+  **keep** only a few, press **Select none** and tick those. `Space` ticks
+  the highlighted key, and typing filters the list. **Select all / none**
+  and **Invert** only change the keys the filter is showing.
+- **The output:** each record keeps its own key order, and values are
+  copied exactly as written (numbers, escapes and nested objects
+  included). Only whitespace changes. **pretty-print** indents each record
+  (using the file's own indent when it has one). **hide records left
+  empty** drops records that had none of the ticked keys.
+- **Apply to file / Apply to selection** (`Enter`) replaces the text as
+  **one undo step** and doesn't save. **Copy** (`alt+c`) puts the result
+  on the clipboard and leaves the file alone. If the file is reloaded
+  while the dialog is open, Apply refuses rather than overwrite text you
+  haven't seen.
+
+The preview scrolls with the mouse wheel or `alt+↑` / `alt+↓`, `alt+PgUp`
+/ `alt+PgDn`. Only top-level keys are listed. Text that isn't JSON says
+why in the status bar (a broken document says where).
 
 ### Files that aren't UTF-8
 

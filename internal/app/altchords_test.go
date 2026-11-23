@@ -160,6 +160,7 @@ func altChordSurfaces(t *testing.T) map[string][]altChord {
 	// over its state), so a zero modal shows every chord.
 	out["Cherry-pick"] = (&cherryPickModal{}).altChords(a)
 	out["Change view"] = (&hunkViewModal{}).altChords(a)
+	out["Reformat JSON"] = (&jsonKeysModal{}).altChords(a)
 
 	// Recent folders' Local pane and Recent locations share these
 	// sections (locationSections); both headings show when both lists

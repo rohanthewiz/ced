@@ -84,7 +84,8 @@ internal/cats/                cats detection, control socket, event stream, hook
 internal/favorites/           favorites.json: two scopes, walk-up resolver
 internal/filetree/            Lazy tree, identity-preserving refresh, marks; filter.go
 internal/format/              format.json, trust store, builtin ladder, kinds.go,
-                              inprocess.go (JSON), validate.go, jsonexplain.go
+                              inprocess.go (JSON), validate.go, jsonexplain.go,
+                              jsonkeys.go (JSON records: shapes, key union, projection)
 internal/theme/               Theme struct, palette derivation, builtins, loader;
                               contrast.go (WCAG ratio + hue-keeping lift)
 internal/readme/              README.md as sections/tables/code spans (test-only consumer)
@@ -134,6 +135,7 @@ internal/app/
   terminal.go termdiag.go runexec.go openineditor.go
   hostopen.go openterminal.go entrycmd.go  Open in Finder / terminal; {{DIR_ENTRY}} shell command
   autosave.go format.go validate.go syntax.go zipops.go
+  jsonkeys.go                 ≡ File "Reformat JSON (pick keys)…": key tick list + live preview, Apply / Copy
   encoding.go                 Convert-to-UTF-8 question (save/≡/status), diff-line decode
   copypaste.go copyto.go      File clipboard Copy/Paste; Copy to… a typed folder (one engine)
   spellcheck.go spellfix.go   Struct-tag spelling: underline source + lazy load; picker
@@ -964,6 +966,15 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   last char; unclosed / line-eating quote → the OPENER
   (`quotedFieldAt` re-walks the failed record). `.tsv` excluded (no
   quoting convention).
+- **Reformat JSON (pick keys)** (format/jsonkeys.go, app/jsonkeys.go):
+  records = one object / array elements / JSON lines (other lines kept
+  byte for byte) / a stream; detection order single doc → pure lines →
+  stream → lines with passengers. Output is key bytes + `json.Compact`ed
+  value bytes — never Marshal (`TestProject_AllKeysIsCompact`: all keys
+  kept == Compact). Top-level keys only. A dialog with a live preview,
+  NOT a view mode; ticks = keep; bulk buttons act on the filtered view.
+  Apply = one `ApplyMultiEdit` step over the selection or buffer,
+  EditRev-checked; Copy via `jsonKeysCopyFn` (pinned in newTestApp).
 - **Only Go formats on save** (`format.FormatsOnSave`). Everything else
   (JSON, non-Go `format.json` entries) runs only via ≡ File → "Format
   file" (`formatActiveFile`: saves a dirty tab first; a Go save already
@@ -1653,9 +1664,9 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   terminal rows spends the above-the-fold budget.
 - **Adding a menu row means updating the pins** — a README menu-reference
   row first, then the layout counts:
-  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 200 group
-  actions + 16 headers (218), 36 splits, height 260, dividers
-  `[2, 5, 257]`; also the Git fold height (37 rows + 8 splits = 45) in
+  `TestMenuLayout_NoCustomActions` expects 2 top-zone rows + 201 group
+  actions + 16 headers (219), 36 splits, height 261, dividers
+  `[2, 5, 258]`; also the Git fold height (37 rows + 8 splits = 45) in
   `TestMenuLayout_CollapseHidesSectionRows`,
   `TestMenuLayout_WithCustomActions`, the two tall-window heights in
   `TestMenuModalRect_*`, and `TestMenuLayout_TerminalRowsAboveTheFold`.

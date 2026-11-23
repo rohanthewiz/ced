@@ -258,6 +258,10 @@ func newTestApp(t testing.TB, root string) *App {
 	prevLocationsCopy := locationsCopyFn
 	locationsCopyFn = func(string) error { return nil }
 	t.Cleanup(func() { locationsCopyFn = prevLocationsCopy })
+	// Reformat JSON's Copy (jsonkeys.go) writes OSC 52 the same way.
+	prevJSONKeysCopy := jsonKeysCopyFn
+	jsonKeysCopyFn = func(string) error { return nil }
+	t.Cleanup(func() { jsonKeysCopyFn = prevJSONKeysCopy })
 	// Stub out the builtin Go formatter for the same reason: saving a
 	// .go fixture must not shell out to whatever goimports/gofmt the
 	// machine running the tests has on PATH. Tests that exercise the
@@ -435,10 +439,10 @@ func TestMenuButtonRect(t *testing.T) {
 // to (0,0) when the window is too small to fit it.
 func TestMenuModalRect_Centered(t *testing.T) {
 	a := newTestApp(t, t.TempDir())
-	// The menu (260 rows fully expanded) outgrew the 40-row default sim
+	// The menu (261 rows fully expanded) outgrew the 40-row default sim
 	// screen; give it vertical room so "centered" is well-defined — the
 	// too-small case is pinned separately by TestMenuModalRect_ClampsTinyWindow.
-	a.height = 260
+	a.height = 261
 	x, y, w, h := a.menuModalRect()
 	_, _, expectedH := a.menuLayout()
 	if w != modalWidth || h != expectedH {
@@ -2349,19 +2353,19 @@ func TestMenuLayout_NoCustomActions(t *testing.T) {
 	a.customActions = nil
 	items, dividers, h := a.menuLayout()
 
-	if h != 260 {
-		t.Errorf("modalHeight = %d, want 260 (224 + 36 splits)", h)
+	if h != 261 {
+		t.Errorf("modalHeight = %d, want 261 (225 + 36 splits)", h)
 	}
 	if got := len(a.menuGeometry().splits); got != 36 {
 		t.Errorf("splits = %d, want 36", got)
 	}
-	if got := len(items); got != 218 {
-		t.Errorf("row count = %d, want 218 (2 top-zone + 200 group actions + 16 headers)", got)
+	if got := len(items); got != 219 {
+		t.Errorf("row count = %d, want 219 (2 top-zone + 201 group actions + 16 headers)", got)
 	}
 	// The pinned title divider (2), the one under the top zone (5), and the
-	// one setting off the headerless Quit group (257) — headers separate the
+	// one setting off the headerless Quit group (258) — headers separate the
 	// sections, and splits (not dividers) the runs inside them.
-	wantDiv := []int{2, 5, 257}
+	wantDiv := []int{2, 5, 258}
 	if len(dividers) != len(wantDiv) {
 		t.Fatalf("dividers = %v, want %v", dividers, wantDiv)
 	}
@@ -2946,8 +2950,8 @@ func TestMenuLayout_WithCustomActions(t *testing.T) {
 	}
 	items, _, h := a.menuLayout()
 
-	if h != 263 { // 260 baseline + custom header + 2 items
-		t.Errorf("modalHeight = %d, want 263", h)
+	if h != 264 { // 261 baseline + custom header + 2 items
+		t.Errorf("modalHeight = %d, want 264", h)
 	}
 	// Custom actions should be the second-to-last and third-to-last
 	// rows, with Quit as the final row.
@@ -3401,7 +3405,7 @@ func TestMenuModalRect_ClampsToWindowHeight(t *testing.T) {
 	}
 
 	// A tall window fits everything — no scroll range at all.
-	a.height = 260
+	a.height = 261
 	if got := a.menuMaxScroll(); got != 0 {
 		t.Fatalf("tall-window menuMaxScroll = %d, want 0", got)
 	}

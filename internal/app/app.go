@@ -335,6 +335,15 @@ func builtinMenuGroups() []menuGroup {
 			// parse plus whatever the language server and plugins last
 			// said, on request. The ≡ door of the tab menu's row.
 			{label: "Validate file", action: (*App).menuValidateFile, enabled: (*App).hasSavableTab},
+			// Pick which top-level keys JSON records keep, with a live
+			// preview (jsonkeys.go) — a log's fifteen keys down to the
+			// three worth reading. In the content run beside Format: it
+			// rewrites the buffer's text (one undo step) or copies the
+			// result. Live on any text tab, untitled included; text that
+			// isn't JSON records flashes the parser's reason rather than
+			// the row dimming, since "why not?" is the useful answer. No
+			// leader: the flat table is out of mnemonic letters.
+			{label: "Reformat JSON (pick keys)…", action: (*App).menuReformatJSON, enabled: (*App).hasEditableTab},
 			// The way out of a file held as Windows-1252 (encoding.go):
 			// ask, then write UTF-8 from the next save. In the content run
 			// because it is about the bytes a save writes. A UTF-8 file

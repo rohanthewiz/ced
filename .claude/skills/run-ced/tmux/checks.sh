@@ -79,6 +79,14 @@ check "N-094 prompt alt+x through tmux clears the field" lacks 'fmtzz' \
 check "N-094 prompt alt+x does not arm the plugin leader" lacks 'Plugin' \
   "$OPEN;{esc}F;600@fmtzz;400@{esc}x;900@SNAP;$QUIT"
 
+# N-095 · Alt+Enter in the find bar closes it and STAYS on the hit. Inside
+# tmux the chord reaches ced as ESC CR (tcell's Alt+Ctrl+m), which the bar
+# used to type into its query as an "m". The Z typed after it lands at
+# the caret: on the hit ("fmt.ZPrintln"), not back at the file's top
+# where the bar's Esc goes. Esc u undoes the Z so main.go stays as built.
+check "N-095 find bar alt+Enter through tmux stays on the hit" has 'fmt.ZPrintln' \
+  "$OPEN;{esc}f;400@Println;600@{esc}{enter};900@Z;500@SNAP;400@{esc}u;$QUIT"
+
 # N-070 · a real click on ✕ through tmux's mouse forwarding opens the
 # quit confirm; a click on ≡ beside it opens the menu.
 check "N-070 click on the quit button asks first" has 'Close the editor' \

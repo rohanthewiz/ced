@@ -164,8 +164,9 @@ func (a *App) closeFind() {
 // them is a place the user picked, so cancelling the search cancels the
 // trip.
 //
-// Staying on a hit is a click on its line (that press forgets the origin,
-// see App.findFrom), or ↓ into the list and Enter there. The origin is
+// Staying on a hit is Alt+Enter in the bar (stayFind), a click on its
+// line (that press forgets the origin, see App.findFrom), or ↓ into the
+// list and Enter there. The origin is
 // also passed over silently when there is nothing to undo or nowhere to
 // go: another tab is active now (a switch is the user's own navigation),
 // or the caret never left the origin (restoring would only yank back a
@@ -174,6 +175,25 @@ func (a *App) escapeFind() {
 	from := a.findFrom
 	a.closeFind()
 	from.restore(a)
+}
+
+// stayFind is the bar's Alt+Enter: close it and leave the caret on the
+// hit it is on — "I found it". It is the keyboard door to what used to
+// need the mouse (click the hit's line, then Esc) or a detour through
+// the list (↓, then Enter), now that Esc means "go back".
+//
+// Staying is closing minus escapeFind's restore: closeFind zeroes
+// findFrom without acting on it. It is still its own verb so the key
+// case names the intent, and a later change to either exit can't
+// quietly turn one into the other.
+//
+// The caret stays where the search put it, at the hit's start with no
+// selection (FocusCurrentMatch), the same place a click on the hit's
+// first column would leave it. It answers on either row: after a few
+// Replace steps, staying where the last one advanced to is the same
+// wish. With nothing found the caret never moved, so it just closes.
+func (a *App) stayFind() {
+	a.closeFind()
 }
 
 // viewMark is one tab's caret and view at a moment, held so a cancelled
@@ -740,7 +760,8 @@ func (a *App) drawFindHist() {
 // handleFindKey dispatches a keystroke while the bar is focused.
 // Behavior:
 //
-//	Esc                     close the bar
+//	Esc                     close the bar, caret back where it opened
+//	Alt+Enter               close the bar, caret stays on the hit
 //	Enter (query row)       jump to the next match
 //	Shift+Enter             jump to the previous match
 //	Enter (replace row)     replace this hit and advance
@@ -758,6 +779,10 @@ func (a *App) drawFindHist() {
 // keyboard, so handleKey's Alt+rune leader branch never sees them —
 // including inside tmux, where "Esc c" arrives folded as Alt+c.
 func (a *App) handleFindKey(ev *tcell.EventKey) {
+	// The bar is dispatched ahead of handleKey's own Alt+Enter fold, so
+	// it folds for itself: on tmux / a legacy terminal Alt+Enter arrives
+	// as Alt+Ctrl+'m', which would otherwise type an "m" into the query.
+	ev = foldAltEnter(ev)
 	// An open history dropdown hears the key first; one it hands back
 	// (it has closed) carries on through the bar as if it never opened.
 	if a.findHist.open {
@@ -782,6 +807,13 @@ func (a *App) handleFindKey(ev *tcell.EventKey) {
 		a.escapeFind()
 		return
 	case tcell.KeyEnter:
+		// Alt+Enter is checked before the row: closing and staying means
+		// the same on both, and on the replace row a plain Enter would
+		// rewrite the hit the user only wanted to stop at.
+		if ev.Modifiers()&tcell.ModAlt != 0 {
+			a.stayFind()
+			return
+		}
 		if a.findFocus == findFocusReplace {
 			a.replaceCurrent()
 			return
@@ -920,13 +952,14 @@ func (a *App) findBarPress(x, y int) bool {
 
 // drawFindBar renders the bar at the bottom of the editor area:
 //
-//	Find: <input>            Aa  |W|  .*   3 of 12   Enter: next · Esc: back
-//	Repl: <input>                            Replace   All
+//	Find: <input>     Enter: next · … · Esc: back · alt+Enter: stay   3 of 12   Aa  |W|  .*
+//	Repl: <input>                                                    Replace   All
 //
-// The hint on the right is dropped first when the window is too narrow to
-// fit it and the match counter is dropped next; the input and the toggle
-// buttons always stay, because a control you can't reach is worse than a
-// label you can't read (the git panel header's rule).
+// The hint on the right gives way first when the window is too narrow,
+// one segment at a time from its end (findBarHintSegs), and the match
+// counter is dropped next; the input and the toggle buttons always stay,
+// because a control you can't reach is worse than a label you can't read
+// (the git panel header's rule).
 func (a *App) drawFindBar() {
 	if !a.findOpen {
 		return
@@ -963,10 +996,6 @@ func (a *App) drawFindBar() {
 	// hold it, walking leftwards from the toggles.
 	rightEdge := a.findCaseRect().x
 	counter := a.findCounterText()
-	hint := " Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: back "
-	if a.findReplaceOpen {
-		hint = " Enter: replace · alt+a: all · ↑: recent · tab: field · Esc: back "
-	}
 	inputStart := bx + runeLen(findBarLabel(findFocusQuery))
 	if counter != "" && rightEdge-runeLen(counter)-2 > inputStart+8 {
 		rightEdge -= runeLen(counter) + 2
@@ -978,7 +1007,10 @@ func (a *App) drawFindBar() {
 		}
 		drawAt(a.screen, rightEdge, by, counter, st)
 	}
-	if rightEdge-runeLen(hint) > inputStart+8 {
+	// The query keeps at least 8 cells of input before the hint may
+	// start (the counter's rule above), so the hint gets what is left of
+	// the row minus those and the one-cell gap.
+	if hint := fitHint(findBarHintSegs(a.findReplaceOpen), rightEdge-(inputStart+8)-1); hint != "" {
 		rightEdge -= runeLen(hint)
 		drawAt(a.screen, rightEdge, by, hint, mutedStyle)
 	}
@@ -1001,6 +1033,35 @@ func (a *App) drawFindBar() {
 	drawAt(a.screen, ab.x, ab.y, findAllLabel, btnSt)
 	_, rStart, rEnd := a.findFieldSpan(findFocusReplace)
 	a.replField.draw(a.screen, ry, rStart, rEnd, barStyle, a.findFocus == findFocusReplace)
+}
+
+// findBarHintSegs is the bar's key hint for the row set showing, as
+// segments in the order they are read, most needed first. The draw keeps
+// as many LEADING segments as fit (fitHint), so a mid-width window sheds
+// the rarest key (alt+Enter: stay) before it loses the whole hint, and
+// the hint can grow by a word without vanishing from every window it
+// used to fit in.
+func findBarHintSegs(replaceOpen bool) []string {
+	if replaceOpen {
+		return []string{"Enter: replace", "alt+a: all", "↑: recent", "tab: field", "Esc: back", "alt+Enter: stay"}
+	}
+	return []string{"Enter: next", "⇧Enter: prev", "↑: recent", "↓: list all", "Esc: back", "alt+Enter: stay"}
+}
+
+// fitHint joins the longest run of segs' LEADING segments whose padded
+// form (" a · b · c ") is at most room cells, or "" when not even the
+// first fits. Dropping from the end keeps the hint a prefix of itself,
+// so the words that stay never move as the window narrows.
+func fitHint(segs []string, room int) string {
+	hint := ""
+	for i := range segs {
+		next := " " + strings.Join(segs[:i+1], " · ") + " "
+		if runeLen(next) > room {
+			break
+		}
+		hint = next
+	}
+	return hint
 }
 
 // drawFindToggle paints one option button in its on/off state. Active is

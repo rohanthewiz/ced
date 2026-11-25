@@ -41,15 +41,6 @@ plus the LSP work done in the seeding session itself
 
 ## Open
 
-- **N-095** · raised `2026-1026-1545-find-click-to-line-esc-back` · value low
-  The find bar's Esc now goes back to where the bar opened, so there is
-  no KEYBOARD way to close the bar and stay on a hit: the doors are a
-  click on the hit's line (an editor press while the bar is up forgets
-  the origin, `App.findFrom`) or `↓` into the Find-all list and Enter
-  there. ced is mouse-first, so this may never bite; if it does, add a
-  bar chord (Alt+Enter, say) that closes and keeps the caret, plus its
-  hint word.
-
 - **N-103** · raised `2026-1028-1614-n016-python-inlay-hints-premise` · value low
   **pyright is tried before basedpyright, so a machine with both gets no
   Python hints.** `lspservers.go` orders the Python commands "most
@@ -715,6 +706,29 @@ Wanted, but not next. Parked, not declined.
 ## Closed
 
 Newest first. Closures before 2026-09-21 live in the session docs.
+
+- closed 2026-11-25, `2026-1125-1219-n095-find-bar-alt-enter-stay` —
+  **N-095** the find bar has a keyboard way to stay on a hit: Alt+Enter
+  (`stayFind`) closes it with the caret on the current hit, from either row (checked before the replace row's Enter,
+  so it never rewrites). Found on the way: inside tmux / a legacy
+  terminal Alt+Enter is ESC CR, which tcell reports as Alt+Ctrl+'m', and
+  the bar is dispatched AHEAD of handleKey's fold, so it typed an "m"
+  into the query. The fold is now `foldAltEnter` (altchords.go), called
+  by handleKey and by the bar; NOT hoisted above the modals, where a
+  tmux-folded "Esc, Enter" would become a submit. Hint word
+  `alt+Enter: stay` added to both rows; the hint now sheds segments from
+  its end (`fitHint`) instead of vanishing whole, so the longer hint
+  still shows where the old one fit. README (Find in file, replace
+  diagram, the Alt-chords note) and CLAUDE.md updated.
+  `TestFindBar_AltEnterStaysOnTheHit`,
+  `TestFindBar_LegacyAltEnterStaysAndTypesNothing` (fails without the
+  bar's fold: query "needlem"), `TestFindBar_AltEnterOnReplaceRowDoesNotReplace`,
+  `TestFoldAltEnter_RewritesOnlyTheLegacySpelling`,
+  `TestFitHint_ShedsSegmentsFromTheEnd`,
+  `TestDrawFindBar_HintNamesTheStayChord`. Seen in the real binary
+  inside tmux 3.5a (run-ced docker harness): Alt+Enter left the caret in
+  `fmt.Println`, Esc went back to line 1; now a scripted check in
+  `tmux/checks.sh`.
 
 - closed 2026-11-18, `2026-1118-0003-n136-n140-n144-undo-trim-git-panels-recovered` —
   **N-144** rescued edits have an in-editor door: ≡ File "Recovered

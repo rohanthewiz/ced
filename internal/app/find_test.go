@@ -940,6 +940,128 @@ func TestFindBar_DownListEscGoesBackToTheBarOrigin(t *testing.T) {
 	}
 }
 
+// TestFindBar_AltEnterStaysOnTheHit pins the bar's keyboard way to stay
+// (N-095): Alt+Enter closes it and leaves the caret on the hit the
+// search walked to, where Esc would have gone back to the origin.
+func TestFindBar_AltEnterStaysOnTheHit(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	origin := editor.Position{Line: 2, Col: 3}
+	tab.MoveCursorTo(origin, false)
+	a.openFind()
+	typeFind(a, "needle")
+	hit := tab.Cursor
+	if hit == origin {
+		t.Fatal("setup: the search should have moved the caret")
+	}
+	a.handleFindKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModAlt))
+	if a.findOpen {
+		t.Fatal("Alt+Enter should close the bar")
+	}
+	if tab.Cursor != hit || tab.HasSelection() {
+		t.Errorf("cursor %v (selection %v), want the hit %v", tab.Cursor, tab.HasSelection(), hit)
+	}
+	if tab.FindQuery != "" || len(tab.FindMatches) != 0 {
+		t.Errorf("find state %q / %d hits left behind, want it cleared as Esc clears it", tab.FindQuery, len(tab.FindMatches))
+	}
+}
+
+// TestFindBar_LegacyAltEnterStaysAndTypesNothing: inside tmux or on a
+// legacy terminal Alt+Enter arrives as Alt+Ctrl+'m' (ESC CR), and the
+// bar is dispatched ahead of handleKey's own fold. It used to type an
+// "m" into the query; it must stay on the hit like the CSI-u spelling.
+func TestFindBar_LegacyAltEnterStaysAndTypesNothing(t *testing.T) {
+	a, tab := seedNeedleFarApp(t)
+	a.openFind()
+	typeFind(a, "needle")
+	hit := tab.Cursor
+	a.handleKey(tcell.NewEventKey(tcell.KeyRune, 'm', tcell.ModAlt|tcell.ModCtrl))
+	if a.findOpen {
+		t.Fatalf("legacy Alt+Enter left the bar open with query %q", a.findField.String())
+	}
+	if tab.Cursor != hit {
+		t.Errorf("cursor %v, want the hit %v", tab.Cursor, hit)
+	}
+	if got := tab.Buffer.LineCount(); got != 121 {
+		t.Errorf("buffer has %d lines after the chord, want the 121 it had", got)
+	}
+}
+
+// TestFindBar_AltEnterOnReplaceRowDoesNotReplace: on the replace row a
+// plain Enter rewrites the hit, so Alt+Enter must be read first — it
+// closes and stays without touching the buffer.
+func TestFindBar_AltEnterOnReplaceRowDoesNotReplace(t *testing.T) {
+	a := seedFindApp(t, "foo bar foo")
+	tab := a.activeTabPtr()
+	a.openReplace()
+	typeFind(a, "foo")
+	a.handleFindKey(keyEv(tcell.KeyTab, 0))
+	typeFind(a, "qux")
+	a.handleFindKey(keyEv(tcell.KeyEnter, 0)) // replace the first, advance
+	hit := tab.Cursor
+	a.handleFindKey(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModAlt))
+	if got := tab.Buffer.String(); got != "qux bar foo" {
+		t.Errorf("buffer = %q, want only the one plain-Enter replace", got)
+	}
+	if a.findOpen || tab.Cursor != hit {
+		t.Errorf("bar open %v, cursor %v; want closed on %v", a.findOpen, tab.Cursor, hit)
+	}
+}
+
+// TestFitHint_ShedsSegmentsFromTheEnd pins the hint's narrowing: the
+// leading segments that fit are kept (so the words never move), the
+// boundary is inclusive, and a room too small for the first gives "".
+func TestFitHint_ShedsSegmentsFromTheEnd(t *testing.T) {
+	segs := []string{"ab", "cd", "ef"}
+	full := " ab · cd · ef "
+	for _, c := range []struct {
+		room int
+		want string
+	}{
+		{100, full},
+		{runeLen(full), full},
+		{runeLen(full) - 1, " ab · cd "},
+		{runeLen(" ab "), " ab "},
+		{runeLen(" ab ") - 1, ""},
+		{0, ""},
+	} {
+		if got := fitHint(segs, c.room); got != c.want {
+			t.Errorf("room %d: %q, want %q", c.room, got, c.want)
+		}
+	}
+}
+
+// TestDrawFindBar_HintNamesTheStayChord: a window wide enough for the
+// whole hint shows the new alt+Enter word on both rows' hints. At 140
+// columns (a 110-cell bar beside the tree) the hint as it was before the
+// word arrived still fits, so the narrowing sheds only the new word
+// rather than the whole hint.
+func TestDrawFindBar_HintNamesTheStayChord(t *testing.T) {
+	a := seedFindApp(t, "foo")
+	a.screen.(tcell.SimulationScreen).SetSize(220, 40)
+	a.width, a.height = 220, 40
+	a.openFind()
+	a.draw()
+	if !screenHasText(t, a, "Esc: back · alt+Enter: stay") {
+		t.Error("the wide query-row hint does not name alt+Enter")
+	}
+	a.findReplaceOpen = true
+	a.draw()
+	if !screenHasText(t, a, "Esc: back · alt+Enter: stay") {
+		t.Error("the wide replace-row hint does not name alt+Enter")
+	}
+
+	a.findReplaceOpen = false
+	a.screen.(tcell.SimulationScreen).SetSize(140, 40)
+	a.width, a.height = 140, 40
+	a.draw()
+	if screenHasText(t, a, "alt+Enter: stay") {
+		t.Fatal("setup: 140 columns fit the whole hint; pick a narrower width")
+	}
+	if !screenHasText(t, a, "Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: back") {
+		t.Error("a 140-column bar should keep the hint up to Esc: back, shedding only the stay word")
+	}
+}
+
 // TestViewMark_RestoreOnlyWhenTheCaretMoved: a mark whose caret never
 // moved restores nothing — not even a scroll the user wheeled to.
 func TestViewMark_RestoreOnlyWhenTheCaretMoved(t *testing.T) {

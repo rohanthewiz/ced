@@ -37,6 +37,29 @@ func TestAltChordRune_OnlyAltRunes(t *testing.T) {
 	}
 }
 
+// TestFoldAltEnter_RewritesOnlyTheLegacySpelling pins the one spelling
+// of Alt+Enter: a legacy terminal's ESC CR (tcell's Alt+Ctrl+'m', or
+// 'j' for LF) becomes KeyEnter+ModAlt, while a real Alt+m, a plain Enter
+// and an already-CSI-u Alt+Enter pass through untouched.
+func TestFoldAltEnter_RewritesOnlyTheLegacySpelling(t *testing.T) {
+	for _, r := range []rune{'m', 'j'} {
+		got := foldAltEnter(tcell.NewEventKey(tcell.KeyRune, r, tcell.ModAlt|tcell.ModCtrl))
+		if got.Key() != tcell.KeyEnter || got.Modifiers() != tcell.ModAlt {
+			t.Errorf("Alt+Ctrl+%c folded to key %v mods %v, want Enter + Alt", r, got.Key(), got.Modifiers())
+		}
+	}
+	for name, ev := range map[string]*tcell.EventKey{
+		"Alt+m":           tcell.NewEventKey(tcell.KeyRune, 'm', tcell.ModAlt),
+		"Alt+Ctrl+k":      tcell.NewEventKey(tcell.KeyRune, 'k', tcell.ModAlt|tcell.ModCtrl),
+		"Enter":           tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone),
+		"CSI-u Alt+Enter": tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModAlt),
+	} {
+		if got := foldAltEnter(ev); got != ev {
+			t.Errorf("%s was rewritten (key %v mods %v), want it untouched", name, got.Key(), got.Modifiers())
+		}
+	}
+}
+
 // TestFireAltChord_FirstMatchWinsAndMissesReport pins the dispatch rules
 // the tables rely on: the first entry for a key runs (so a table's order
 // is its precedence), a nil run still consumes the key, and an unbound

@@ -3483,11 +3483,9 @@ func (a *App) handleKey(ev *tcell.EventKey) {
 	// the buffer behind whatever surface the user was actually typing
 	// into. Downstream, every consumer (the chat composer's newline
 	// chord first among them) then sees one spelling of the gesture.
-	if ev.Key() == tcell.KeyRune &&
-		ev.Modifiers()&tcell.ModAlt != 0 && ev.Modifiers()&tcell.ModCtrl != 0 &&
-		(ev.Rune() == 'm' || ev.Rune() == 'j') {
-		ev = tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModAlt)
-	}
+	// (foldAltEnter, altchords.go, also says why the fold sits here and
+	// not above the modal dispatch.)
+	ev = foldAltEnter(ev)
 	// Esc-leader hotkey: if Esc was pressed within leaderWindow and this
 	// key is bound in the leader table, fire the action and consume the
 	// keystroke. Unbound keys fall through to normal handling so a stray

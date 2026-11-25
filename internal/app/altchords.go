@@ -44,6 +44,12 @@
 // nothing next to the frame the key will draw, and building them fresh
 // means a table can never go stale against state it closes over
 // (prompt extras captured at open, a picker pane switched since).
+//
+// Alt+Enter is the one Alt chord that is NOT a rune, so it has no place
+// in a table: the find bar answers it in its own Enter case ("close the
+// bar and stay on the hit", stayFind) and the chat composer reads it as
+// a line break. Both must see ONE spelling of it whatever the terminal
+// sent, which foldAltEnter below provides.
 
 package app
 
@@ -83,4 +89,34 @@ func fireAltChord(a *App, chords []altChord, r rune) bool {
 		return true
 	}
 	return false
+}
+
+// foldAltEnter rewrites the legacy spelling of Alt+Enter into the one a
+// CSI-u terminal delivers (KeyEnter + ModAlt) and returns every other
+// event unchanged.
+//
+// Alt+Enter never reaches tcell as itself on a legacy terminal (tmux
+// included): the emulator writes ESC CR, and tcell's fold for
+// ESC + control-char reports it as the RUNE 'm' carrying ModAlt|ModCtrl
+// ('j' for the rare emulator that sends LF). Left alone, that spelling
+// reads as Alt+m everywhere: a bound leader rune in handleKey (it fired
+// multicaret on the buffer behind the surface the user was typing into)
+// and a printable 'm' in any textField (it typed an "m" into the find
+// bar's query).
+//
+// Two callers, on purpose not one hoisted to the top of handleKey:
+// handleKey folds it just before its leader branches, and the find bar
+// folds it for itself because it is dispatched ahead of that point. The
+// modals stay outside the fold. Inside tmux a quick "Esc, Enter" arrives
+// as this very ESC CR, and folding it for a dialog would turn "cancel,
+// then a newline" into a SUBMIT of whatever the dialog defaults to; the
+// bar's answer to the same accident is only "close and stay", which
+// loses nothing.
+func foldAltEnter(ev *tcell.EventKey) *tcell.EventKey {
+	if ev.Key() == tcell.KeyRune &&
+		ev.Modifiers()&tcell.ModAlt != 0 && ev.Modifiers()&tcell.ModCtrl != 0 &&
+		(ev.Rune() == 'm' || ev.Rune() == 'j') {
+		return tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModAlt)
+	}
+	return ev
 }

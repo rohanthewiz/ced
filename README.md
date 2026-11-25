@@ -791,10 +791,11 @@ table sees it, so these never fire an `Esc` key, even inside tmux.
 | Recent folders / locations | `alt+f` | `⧉` on the **MFU** heading — copy those folders |
 
 "Find prompts" are the prompts of **Find all in file**, **Find in
-project** and **Find all in folder**. Two `Alt` keys aren't button twins
-and so aren't listed: `alt+↑` / `alt+↓` scroll the cherry-pick and
-Reformat JSON previews, and `alt+Enter` breaks a line in the chat
-composer.
+project** and **Find all in folder**. Three `Alt` keys aren't button
+twins and so aren't listed: `alt+↑` / `alt+↓` scroll the cherry-pick and
+Reformat JSON previews, `alt+Enter` in the find bar closes it and stays
+on the match (where `Esc` goes back), and `alt+Enter` breaks a line in
+the chat composer.
 
 ### The ≡ menu, row by row
 
@@ -1539,7 +1540,7 @@ works the same everywhere with nothing installed. Turn it off or on from
 bar directly under the editor, above the status bar:
 
 ```
- Find▾ foo█        Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: back    3 of 12   Aa  |W|  .*
+ Find▾ foo█   Enter: next · ⇧Enter: prev · ↑: recent · ↓: list all · Esc: back · alt+Enter: stay   3 of 12   Aa  |W|  .*
 ```
 
 - Type to search — results highlight live as you type. Matching is a
@@ -1561,7 +1562,9 @@ bar directly under the editor, above the status bar:
   searches for it straight away.
 - `Esc` closes the bar, clears the highlights and puts the cursor back
   where it was when the bar opened — each `Esc f` is a fresh search. To
-  stay on a match, click its line (then `Esc` leaves the cursor there).
+  stay on a match, press `Alt+Enter` instead (from either row), or click
+  its line (then `Esc` leaves the cursor there). On a narrow window the
+  key hint drops its last words first.
 - `↑` (or a click on the `Find▾` label) drops down your recent searches
   in this project; `Enter` or a click puts one in the box, `Delete` or
   its `×` forgets it. The replace row's `Repl▾` does the same for recent
@@ -1578,8 +1581,8 @@ bar directly under the editor, above the status bar:
 query) opens a second row under the first:
 
 ```
- Find▾ foo         Enter: replace · alt+a: all · ↑: recent · tab: field · Esc: back    3 of 12   Aa  |W|
- Repl▾ bar█                                                                             Replace   All
+ Find▾ foo    Enter: replace · alt+a: all · ↑: recent · tab: field · Esc: back · alt+Enter: stay   3 of 12   Aa  |W|  .*
+ Repl▾ bar█                                                                                                Replace   All
 ```
 
 `Tab` moves between the two boxes. `Enter` in the replace box (or

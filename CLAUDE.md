@@ -698,7 +698,11 @@ author: Spicer Matthews.` New files get a plain maintainer header.
   `selectRow`; in-file only) — flips Esc to accept (`escape`); the open's
   own preview, ⟳ and dismissals don't pick. That pick is the ONE exception
   to **Esc goes back** on the find surfaces: the live prompt and the find
-  bar (`escapeFind` → `findFrom`, a `viewMark`) always go back.
+  bar (`escapeFind` → `findFrom`, a `viewMark`) always go back. The bar's
+  keyboard way to STAY is Alt+Enter (`stayFind`, either row, read before
+  the replace row's Enter); the bar is dispatched ahead of handleKey's
+  ESC-CR fold, so it calls `foldAltEnter` itself — modals deliberately
+  don't (a tmux-folded "Esc, Enter" would SUBMIT them).
   A **click on a line of code** outside the
   unpinned list or live prompt closes it and lands the caret there
   (`settleAt` / `findAllLive.clickAway` via `promptModal.onClickAway`,

@@ -37,7 +37,7 @@ plus the LSP work done in the seeding session itself
   `merged into N-xxx`. Moving among Open, Validate and Roadmap is fine.
 - Open, Validate and Roadmap stay in **ID order**. Never renumber, never delete.
 
-**Next ID: N-152**
+**Next ID: N-153**
 
 ## Open
 
@@ -128,6 +128,18 @@ plus the LSP work done in the seeding session itself
   itself is no longer the problem. **The decision is yours**: keep
   512KB; or raise it (2MB?) together with a slower settle for big files
   (e.g. at most one lex every few seconds), so the churn is bounded.
+
+- **N-152** · raised `2026-1125-1219-n095-find-bar-alt-enter-stay` · value low
+  **Alt+Enter in a dialog types an "m" on tmux / legacy terminals.** The
+  terminal sends ESC CR, tcell reports Alt+Ctrl+'m', and handleKey's
+  `foldAltEnter` runs only AFTER the modal dispatch, so a prompt's
+  `textField` inserts the rune (probed: Go to line prompt → value "m",
+  not submitted). The find bar folds for itself since N-095. NOT a plain
+  hoist of the fold: inside tmux a quick "Esc, Enter" is the same ESC CR,
+  and folding it to Enter would SUBMIT the dialog's default. Likely
+  answer: modals swallow the legacy spelling (consume, do nothing) — or
+  read it as Esc, which is what a fast "Esc, Enter" usually meant.
+  Decide which, then one test per spelling.
 
 ## Validate
 

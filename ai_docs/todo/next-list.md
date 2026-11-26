@@ -53,19 +53,6 @@ plus the LSP work done in the seeding session itself
   npm-only machine already runs basedpyright first. Decide whether to
   swap the order.
 
-- **N-133** · raised `2026-1110-1630-reliability-performance-usability-audit` · value medium
-  **`ced path/to/file.go` roots the editor at the file's folder.**
-  `resolveTarget` (main.go:139) returns the parent dir as the root.
-  Inside a repository that then (a) writes `<subfolder>/.ced/`
-  (history.bytdb, its lock, a .gitignore covering only the database),
-  which `git status` shows as `?? internal/app/.ced/` (seen in a
-  scratch clone); (b) adds the subfolder to Recent folders in
-  state.json; (c) narrows the tree, finder, project search, git and
-  the LSP rootUri to that folder. Fix: root at the nearest ancestor
-  holding `.git` (`projectRootFor` already exists) and reveal + open
-  the file; no repository → the parent dir as today. A change to
-  documented behaviour (README Usage, `helpText`): decide.
-
 - **N-142** · raised `2026-1113-1614-n069-sql-routine-bodies` · value low
   ced's in-process SQL formatter (sqlfmt.go) still does not wrap long
   lines: a long DDL line, call or IN list stays as written. Wrapping
@@ -719,6 +706,27 @@ Wanted, but not next. Parked, not declined.
 
 Newest first. Closures before 2026-09-21 live in the session docs.
 
+- closed 2026-11-25, `2026-1125-2120-n133-cli-file-roots-at-repo` —
+  **N-133** `ced path/to/file` roots at the file's REPOSITORY (nearest
+  `.git` dir or file, `repoRootFor`), so a file deep in a repo no longer
+  narrows the tree / finder / search / git / LSP rootUri to its folder,
+  adds that folder to Recent folders, or writes `<folder>/.ced/` into the
+  work tree. No repository → the parent dir as before (same spelling).
+  Decided on the way: a file INSIDE a git dir (COMMIT_EDITMSG,
+  git-rebase-todo, `.git/worktrees/<n>/…` — the README's
+  `core.editor "ced --wait"` flow when no instance takes the handoff)
+  keeps its parent, or the commit message would get the project's tabs
+  restored around it and be saved into the project's session at quit. A
+  directory argument is unchanged. `App.OpenFile` (the CLI seam) now
+  selects the file's tree row with its folders opened — QUIETLY, unlike
+  RevealPath: no forced sidebar, focus or flash; a not-yet-existing file
+  just opens. helpText, README Usage and CLAUDE.md updated.
+  `TestResolveArgs_FileInARepoRootsTheRepo`,
+  `…_FileInARepoFindsGitFilesAndTheNearestRepo`,
+  `…_RelativeFileInARepoRootsTheRepo`, `TestOpenFile_CLISelectsTheRowQuietly`
+  (all fail before the fix), `…_FileInsideTheGitDirKeepsItsParent`.
+  Known consequence: a file under a home directory that is itself a git
+  repo (dotfiles) roots at `~` — `--root` or `ced <dir>` is the way out.
 - closed 2026-11-25, `2026-1125-1219-n095-find-bar-alt-enter-stay` —
   **N-095** the find bar has a keyboard way to stay on a hit: Alt+Enter
   (`stayFind`) closes it with the caret on the current hit, from either row (checked before the replace row's Enter,

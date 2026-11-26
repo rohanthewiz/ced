@@ -1596,7 +1596,14 @@ author: Spicer Matthews.` New files get a plain maintainer header.
 - **CLI (main.go)**: ONE parser — `parseArgs` runs the real `cli.App`
   into a `cliResult`. `actionDone` default. `helpText` is the help
   template (no backticks). Explicit `--version/-v/-V`; `OnUsageError`
-  returns the message alone; no-op `ExitErrHandler`.
+  returns the message alone; no-op `ExitErrHandler`. A FILE argument
+  roots at its repository (`fileRoot` → `repoRootFor`: nearest `.git`
+  dir or file), else its parent dir spelled as typed; a file INSIDE a
+  git dir (COMMIT_EDITMSG, git-rebase-todo via `ced --wait`) keeps its
+  parent (N-133). A directory argument is never second-guessed;
+  `--root` overrides both. The CLI open (`App.OpenFile`) selects the
+  file's tree row quietly — no forced sidebar, focus or flash
+  (RevealPath is the loud one).
 
 ### cats host integration (internal/cats, app/cats_glue.go)
 - Tier 0 is ced in any other terminal, not a degraded mode. **No feature

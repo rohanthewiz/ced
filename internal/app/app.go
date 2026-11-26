@@ -4967,9 +4967,24 @@ func (a *App) welcomeIfQuiet() {
 // It runs between New and Run, outside both of their recovers, so it
 // carries its own: a panic opening the command-line file must still hand
 // the terminal back.
+//
+// The file's row is also selected in the tree, its folders opened and
+// scrolled to (N-133). A file argument roots the editor at its
+// REPOSITORY now, not its folder, and `ced internal/app/x.go` used to
+// open with x.go's siblings filling the tree; without the reveal the
+// same command would show the repo's top level and leave the user to
+// dig back down. Quieter than RevealPath on purpose — no sidebar forced
+// open over a restored layout, no focus taken from the buffer, no flash
+// over "Restored N tabs" — and a file that doesn't exist yet (the
+// new-file intent) simply has no row to select.
 func (a *App) OpenFile(path string) {
 	defer a.recoverRun()
 	a.openFile(path)
+	if abs, err := filepath.Abs(path); err == nil {
+		if _, ok := a.tree.Reveal(abs); ok {
+			a.ensureTreeSelectionVisible()
+		}
+	}
 }
 
 // openFile opens the file at path in a new tab — or switches to it if it is

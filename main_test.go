@@ -69,8 +69,9 @@ func TestResolveArgs_DirectoryArgUsesAsRoot(t *testing.T) {
 }
 
 // TestResolveArgs_FileArgRootsParent is the regression test for the
-// "ced main.go" bug: a file argument should root the editor at
-// the file's parent and seed an OpenFile so the user's tab is ready.
+// "ced main.go" bug: outside a repository, a file argument roots the
+// editor at the file's parent and seeds an OpenFile so the user's tab is
+// ready. (Inside one it roots at the repository — the next test.)
 func TestResolveArgs_FileArgRootsParent(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "main.go")
@@ -87,6 +88,150 @@ func TestResolveArgs_FileArgRootsParent(t *testing.T) {
 	}
 	if got.OpenFile != target {
 		t.Fatalf("OpenFile: got %q, want %q", got.OpenFile, target)
+	}
+}
+
+// repoWithFile seeds a repository (a .git DIRECTORY at its top) with a
+// file two folders down — the `ced internal/app/x.go` shape N-133 is
+// about. Returns the repository root, the file's folder and the file.
+func repoWithFile(t *testing.T) (root, sub, file string) {
+	t.Helper()
+	root = t.TempDir()
+	sub = filepath.Join(root, "internal", "app")
+	for _, d := range []string{filepath.Join(root, ".git"), sub} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file = filepath.Join(sub, "x.go")
+	if err := os.WriteFile(file, []byte("package app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root, sub, file
+}
+
+// TestResolveArgs_FileInARepoRootsTheRepo is N-133's fix: a file deep in
+// a repository roots the editor at the REPOSITORY, not the file's
+// folder. Rooting at the folder narrowed the tree, finder, search, git
+// and gopls to one directory, put that directory in Recent folders, and
+// wrote <folder>/.ced/ into the work tree. A file that doesn't exist yet
+// is rooted the same way — it is about to be a file there.
+func TestResolveArgs_FileInARepoRootsTheRepo(t *testing.T) {
+	root, sub, file := repoWithFile(t)
+
+	res := resolveArgs([]string{file})
+	if res.Err != nil {
+		t.Fatalf("Err = %v", res.Err)
+	}
+	if res.RootDir != root {
+		t.Fatalf("RootDir = %q, want the repository %q (not the file's folder %q)", res.RootDir, root, sub)
+	}
+	if res.OpenFile != file {
+		t.Fatalf("OpenFile = %q, want %q", res.OpenFile, file)
+	}
+
+	fresh := filepath.Join(sub, "new.go")
+	if res := resolveArgs([]string{fresh}); res.Err != nil || res.RootDir != root || res.OpenFile != fresh {
+		t.Fatalf("missing file: res = %+v, want root %q + file %q", res, root, fresh)
+	}
+
+	// The fallback is only for the no-repository case; a directory
+	// argument is a choice, never second-guessed.
+	if res := resolveArgs([]string{sub}); res.RootDir != sub || res.OpenFile != "" {
+		t.Fatalf("directory arg: res = %+v, want a plain open of %q", res, sub)
+	}
+}
+
+// TestResolveArgs_FileInARepoFindsGitFilesAndTheNearestRepo covers the
+// two other shapes a repository top takes: a linked worktree or
+// submodule has a .git FILE, not a directory, and a repository nested
+// inside another (a submodule checkout) owns its own files — the
+// NEAREST .git wins, not the outermost.
+func TestResolveArgs_FileInARepoFindsGitFilesAndTheNearestRepo(t *testing.T) {
+	outer, _, _ := repoWithFile(t)
+	inner := filepath.Join(outer, "vendor", "lib")
+	deep := filepath.Join(inner, "pkg")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inner, ".git"), []byte("gitdir: ../../.git/modules/lib\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(deep, "lib.go")
+	if err := os.WriteFile(file, []byte("package pkg\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if res := resolveArgs([]string{file}); res.RootDir != inner || res.OpenFile != file {
+		t.Fatalf("res = %+v, want the nearest repository %q (a .git file)", res, inner)
+	}
+}
+
+// TestResolveArgs_RelativeFileInARepoRootsTheRepo is the spelling people
+// actually type: `ced x.go` or `ced internal/app/x.go`, relative to a
+// shell sitting somewhere inside the repository. The root comes back
+// absolute (the walk needs it); the file keeps the user's spelling,
+// which the editor anchors against the same cwd.
+func TestResolveArgs_RelativeFileInARepoRootsTheRepo(t *testing.T) {
+	root, sub, _ := repoWithFile(t)
+	cwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(sub); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	// The temp dir may sit behind a symlink (/var → /private/var on
+	// macOS) and Getwd answers with the resolved form, so compare the
+	// resolved forms.
+	want, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, arg := range []string{"x.go", filepath.Join("..", "app", "x.go")} {
+		res := resolveArgs([]string{arg})
+		got, err := filepath.EvalSymlinks(res.RootDir)
+		if err != nil || got != want {
+			t.Fatalf("%s: RootDir = %q (%v), want the repository %q", arg, res.RootDir, err, want)
+		}
+		if res.OpenFile != arg {
+			t.Fatalf("%s: OpenFile = %q, want the spelling as typed", arg, res.OpenFile)
+		}
+	}
+}
+
+// TestResolveArgs_FileInsideTheGitDirKeepsItsParent pins the one
+// carve-out from rooting at the repository: a file git itself wrote and
+// handed over through `core.editor "ced --wait"` — COMMIT_EDITMSG,
+// git-rebase-todo, a linked worktree's COMMIT_EDITMSG under
+// .git/worktrees/<name>/. Rooting those at the work tree would restore
+// every project tab around a commit message and save the message into
+// the project's session at quit, so they keep the old parent-directory
+// root.
+func TestResolveArgs_FileInsideTheGitDirKeepsItsParent(t *testing.T) {
+	root, _, _ := repoWithFile(t)
+	gitDir := filepath.Join(root, ".git")
+	rebase := filepath.Join(gitDir, "rebase-merge")
+	worktree := filepath.Join(gitDir, "worktrees", "wt")
+	for _, d := range []string{rebase, worktree} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{
+		filepath.Join(gitDir, "COMMIT_EDITMSG"),
+		filepath.Join(rebase, "git-rebase-todo"),
+		filepath.Join(worktree, "COMMIT_EDITMSG"),
+	} {
+		if err := os.WriteFile(file, []byte("msg\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		res := resolveArgs([]string{"--wait", file})
+		if res.Err != nil {
+			t.Fatalf("%s: Err = %v", file, res.Err)
+		}
+		if want := filepath.Dir(file); res.RootDir != want {
+			t.Fatalf("%s: RootDir = %q, want its own folder %q", file, res.RootDir, want)
+		}
 	}
 }
 
@@ -317,8 +462,9 @@ func TestResolveArgs_MissingFileWithWait(t *testing.T) {
 
 // TestResolveArgs_RootOverride pins the flag the cats split depends on
 // (internal/app/catssplit.go): a spawned sibling editor has to open the
-// PROJECT its parent is in, and the file path alone can only ever say
-// which directory the file sits in.
+// PROJECT its parent is in, and the file path alone can only guess it —
+// the repository it sits in, or (as here, with no .git) the directory
+// it sits in.
 func TestResolveArgs_RootOverride(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "internal", "app")
@@ -330,8 +476,9 @@ func TestResolveArgs_RootOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Without it, the nested file roots at its own parent — the right
-	// guess for a human typing it, the wrong one for a program.
+	// Without it, the nested file in a project with no repository roots
+	// at its own parent — the best guess a path allows, and the wrong one
+	// for a program that knows the project.
 	if res := resolveArgs([]string{file}); res.RootDir != sub {
 		t.Fatalf("bare file RootDir = %q, want %q", res.RootDir, sub)
 	}

@@ -265,7 +265,8 @@ on your `$PATH` yourself.
 ```sh
 ced              # opens the current directory
 ced ~/code/app   # opens a specific project root
-ced main.go      # opens a file (project root = its parent dir)
+ced app/main.go  # opens a file; the project root is its git repository
+                 #   (its parent dir outside one; --root <dir> to choose)
 ced new-file.go  # creates the file on first save (vim-style)
 ced --last       # reopen the most recently edited folder
 ced fav plans    # open the project and reveal a named location (see below)

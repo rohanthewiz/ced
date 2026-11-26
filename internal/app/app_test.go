@@ -583,6 +583,69 @@ func TestOpenFile_Basic(t *testing.T) {
 	}
 }
 
+// TestOpenFile_CLISelectsTheRowQuietly pins the exported CLI seam's
+// reveal (N-133): `ced internal/app/x.go` now roots at the repository,
+// so the open must bring x.go's row into the tree — folders on the way
+// opened, the row selected — or the user lands on the repo's top level
+// instead of beside the file. And quietly, unlike RevealPath: the
+// keyboard stays in the buffer, a hidden tree stays hidden, nothing is
+// flashed, and a file that doesn't exist yet still opens.
+func TestOpenFile_CLISelectsTheRowQuietly(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "internal", "app")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(sub, "x.go")
+	if err := os.WriteFile(file, []byte("package app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := newTestApp(t, root)
+	a.OpenFile(file)
+	if tab := a.activeTabPtr(); tab == nil || tab.Path != file {
+		t.Fatalf("active tab = %v, want %s open", tab, file)
+	}
+	if n := a.tree.Selected; n == nil || n.Path != file {
+		t.Fatalf("tree cursor = %+v, want the opened file's row", n)
+	}
+	n := a.tree.Root
+	for _, seg := range []string{"internal", "app"} {
+		var next *filetree.Node
+		for _, c := range n.Children {
+			if c.Name == seg {
+				next = c
+			}
+		}
+		if next == nil || !next.Expanded {
+			t.Fatalf("ancestor %s = %+v, want it loaded and expanded", seg, next)
+		}
+		n = next
+	}
+	if a.treeFocus {
+		t.Fatal("the CLI open took the keyboard from the buffer")
+	}
+	if a.statusMsg != "Opened x.go" {
+		t.Fatalf("statusMsg = %q, want openFile's own flash and nothing from the reveal", a.statusMsg)
+	}
+
+	// A hidden tree stays hidden — the restored layout is the user's.
+	b := newTestApp(t, root)
+	b.sidebarShown = false
+	b.OpenFile(file)
+	if b.sidebarShown {
+		t.Fatal("the CLI open forced the sidebar open")
+	}
+
+	// The new-file intent: no row to select, but the tab still opens.
+	fresh := filepath.Join(sub, "new.go")
+	c := newTestApp(t, root)
+	c.OpenFile(fresh)
+	if tab := c.activeTabPtr(); tab == nil || tab.Path != fresh {
+		t.Fatalf("active tab = %v, want the new file %s open", tab, fresh)
+	}
+}
+
 // outsideRootFixture is a project root holding sub/a.go plus a SEPARATE
 // temp dir standing in for GOROOT / the module cache, with fmt/print.go
 // in it — the file a go-to-definition on fmt.Println lands in.

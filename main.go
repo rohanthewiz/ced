@@ -82,10 +82,12 @@ const helpText = `ced (Cats Editor) — opinionated mouse-first terminal code ed
 Usage:
   ced                     Open the current directory.
   ced <directory>         Open a project directory.
-  ced <file>              Open a file (its parent becomes the project root).
+  ced <file>              Open a file. The project root is the repository
+                          it is in (the nearest folder holding .git), or
+                          its parent directory outside a repository.
   ced --last              Reopen the most recently edited folder.
   ced --root <dir> <file> Open the file with <dir> as the project root,
-                          instead of the file's own parent directory.
+                          instead of the one guessed from its path.
   ced --remote <file>     Open the file in a ced already running on that
                           project, then exit. Starts a normal editor when
                           nothing is running.
@@ -130,9 +132,11 @@ var favSubcommands = []string{"add", "rm", "remove", "list", "ls", "path", "help
 // rest moved onto urfave/cli.
 //
 //   - a directory  → use as the editor's root, no file opened
-//   - a file       → root at its parent dir, open the file in a tab
+//   - a file       → root at the project it belongs to (fileRoot), open
+//     the file in a tab
 //   - a missing path → assume "ced foo.go" means "create foo.go" — the
-//     same intuition as `vim foo.go` on a non-existent file.
+//     same intuition as `vim foo.go` on a non-existent file — rooted the
+//     same way, since it is about to be a file there
 //
 // A real IO error (permissions, EIO) is surfaced rather than swallowed
 // into a "directory not found" several seconds later.
@@ -142,13 +146,67 @@ func resolveTarget(target string) (root, openFile string, err error) {
 	case statErr == nil && info.IsDir():
 		return target, "", nil
 	case statErr == nil, os.IsNotExist(statErr):
-		dir := filepath.Dir(target)
-		if dir == "" {
-			dir = "."
-		}
-		return dir, target, nil
+		return fileRoot(target), target, nil
 	default:
 		return "", "", statErr
+	}
+}
+
+// fileRoot picks the project root for a file named on the command line:
+// the repository it sits in, else its parent directory (N-133).
+//
+// The parent directory used to be the answer everywhere, and inside a
+// repository it is a workspace that describes nothing: `ced
+// internal/app/x.go` rooted at internal/app, so the tree, the finder,
+// project search, git and gopls's rootUri all saw one folder of the
+// project; the folder went into Recent folders; and history.Persists —
+// which walks UP to the .git — wrote internal/app/.ced/ into the work
+// tree for `git status` to report. A directory argument still roots
+// exactly where it is told: `ced internal/app` is a choice, a file's
+// folder is an accident of where the file lives.
+//
+// A file INSIDE a git dir keeps the parent directory. That is git
+// handing ced its own scratch file — COMMIT_EDITMSG, git-rebase-todo —
+// through `core.editor "ced --wait"` when no running editor took the
+// handoff, and rooting it at the work tree would restore every one of
+// the project's tabs around a commit message and then save the message
+// into the project's session at quit, to be reopened by the next plain
+// `ced`. The git dir's own root keeps that churn where it always was.
+func fileRoot(target string) string {
+	dir := filepath.Dir(target)
+	if dir == "" {
+		dir = "."
+	}
+	if inGitDir(dir) {
+		return dir
+	}
+	if root, ok := repoRootFor(dir); ok {
+		return root
+	}
+	// Spelled as given ("." for a bare `ced foo.go`), as it always was:
+	// New makes it absolute, and the CLI tests pin the spelling.
+	return dir
+}
+
+// inGitDir reports whether dir is a repository's git directory or lies
+// under one: any segment of its absolute path named .git. That covers
+// the plain .git/, a linked worktree's .git/worktrees/<name>/ and a
+// submodule's .git/modules/<name>/ — every place git writes the files
+// it opens an editor on.
+func inGitDir(dir string) bool {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	for cur := abs; ; {
+		if filepath.Base(cur) == ".git" {
+			return true
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return false
+		}
+		cur = parent
 	}
 }
 
@@ -241,11 +299,13 @@ func runEdit(c *cli.Context, res *cliResult) error {
 	}
 
 	// --root answers a question a file path cannot: `ced internal/app/x.go`
-	// roots at internal/app, which is the right guess for a human typing
-	// it and the wrong one for a program reproducing a workspace. The
-	// cats split (internal/app/catssplit.go) spawns a sibling editor on
-	// the file you are looking at, and that sibling has to open the
-	// project you are IN, not the directory the file happens to sit in.
+	// roots at the file's repository (fileRoot), which is the right guess
+	// for a human typing it and not always the answer for a program
+	// reproducing a workspace — a project with no .git, or one opened at
+	// a subfolder on purpose. The cats split (internal/app/catssplit.go)
+	// spawns a sibling editor on the file you are looking at, and that
+	// sibling has to open the project you are IN, whatever the file's
+	// path would guess.
 	if override := c.String("root"); override != "" {
 		// Checked rather than trusted: a bad --root would otherwise
 		// surface as a file tree rooted in a directory that isn't there,
@@ -574,27 +634,42 @@ func favRemove(c *cli.Context, out io.Writer) error {
 }
 
 // projectRootFor answers "which project is this directory in?" for the
-// scope of a WRITE, where there is no favorite to resolve and therefore
-// nothing to walk up towards. It looks for the nearest ancestor holding
-// a .git — the same marker every other tool in this workflow uses — and
-// falls back to the directory itself when there is none, since a project
-// without a repository is still a project.
+// scope of a favorites WRITE, where there is no favorite to resolve and
+// therefore nothing to walk up towards. It is repoRootFor, falling back
+// to the directory itself (absolute) when there is no repository, since
+// a project without one is still a project.
 //
 // Deliberately NOT used for reads: `ced fav plans` walks up until the
 // favorite RESOLVES, which is a better answer (it works in a checkout
 // with no .git, and it picks the level that actually owns the folder).
 func projectRootFor(dir string) string {
+	if root, ok := repoRootFor(dir); ok {
+		return root
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
+// repoRootFor finds the nearest ancestor of dir (dir included) holding a
+// .git — a directory, or the FILE a linked worktree or submodule has
+// instead — the same marker every other tool in this workflow uses. The
+// answer is absolute; ok is false when no ancestor has one. Split from
+// projectRootFor because a file on the command line (fileRoot) falls
+// back to its parent spelled as typed, not to an absolute directory.
+func repoRootFor(dir string) (string, bool) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return dir
+		return "", false
 	}
 	for cur := abs; ; {
 		if info, err := os.Stat(filepath.Join(cur, ".git")); err == nil && (info.IsDir() || info.Mode().IsRegular()) {
-			return cur
+			return cur, true
 		}
 		parent := filepath.Dir(cur)
 		if parent == cur {
-			return abs
+			return "", false
 		}
 		cur = parent
 	}
